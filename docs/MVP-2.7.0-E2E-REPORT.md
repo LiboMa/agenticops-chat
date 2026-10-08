@@ -1,9 +1,10 @@
 # MVP-2.7.0 — Joint Live E2E Evidence Report
 
-> **Status: done. The 2.7.0 flows ran on real models in the chaos-lab EKS cluster. Two defects found by the run were fixed and re-verified live. Push, PR and tag wait for the owner.**
+> **Status: E2E done; S7 awaits the owner's acceptance. The 2.7.0 flows ran on real models in the chaos-lab EKS cluster. Two defects found by the run were fixed (one follow-up after the review). Push, PR and tag wait for the owner.**
 > **Date:** 2026-10-08 · **Branch:** `MVP-2.7.0` · **Deployed:**
 > - pod 1 `7b4b2b6`: parts A, B (B1–B5), C, D (D1–D7);
-> - pod 2 `52e1c3f`, the final code: B6–B8 and D8–D10 again after the translation fix.
+> - pod 2 `52e1c3f`: B6–B8 and D8–D10 again after the translation fix;
+> - pod 3 `d820ebc`, the final code after the review's follow-up: a deploy check and B6–B8 once more (see [After the review](#after-the-review)).
 >
 > **Scope:** S7 plan `docs/superpowers/plans/2026-10-08-mvp-2.7.0-s7-release.md`, Tasks 2–8 (release note `docs/MVP-2.7.0-RELEASE.md`).
 >
@@ -75,7 +76,7 @@ At `52e1c3f`, before the docs commit. The final numbers are in the RELEASE «S7 
 | B4 | One send, one run | **Pass.** A second message while the first ran → 409 `session_busy`. A resend with the same `client_message_id` → replayed in 0.7 s, `replayed: true`, 0 tokens, message count unchanged |
 | B5 | The binding, by its effect | **Partial.** With a temporary second account (`other-lab`, deleted after), asked to run a command there, the agent refused on its own («this conversation is bound to account chaos-lab»). It called no tool, so the resolver-level refusal was not reached live (it is covered by the S5 tests) |
 | B6 | A report from a private chat | **Pass.** `visibility: private`. bob → 404 and no list row; admin → 200 |
-| B7 | Real translation | **Failed on pod 1 → fixed → pass on pod 2.** On `7b4b2b6` the zh rendering failed with `protected_values_changed` in 7 s, reproduced on the real model locally. Fix 2. On `52e1c3f` a new real chat report (a table of Deployments, replicas, HPA min / max, commands) → zh `ready` in 7 s, protected values equal |
+| B7 | Real translation | **Failed on pod 1 → fixed.** On `7b4b2b6` the zh rendering failed with `protected_values_changed` in 7 s, reproduced on the real model locally (fix 2). On `52e1c3f` a new real chat report (a table of Deployments, replicas, HPA min / max, commands) → zh `ready` in 7 s. That report has no hyphenated word like `cluster-admin`, and the model kept its values in order, so it would also have passed on `7b4b2b6`: the live pass shows the path works on the final code, not the fix. The real-model evidence for the fix is the local re-run of the failing report (restore + equal), repeated after the review's follow-up. The driver's own hash comparison could not fail (a ready row stores the source's hash), so «equal» in the live rows means `ready` |
 | B8 | Export | **Pass on pod 2.** html in zh and en, one paper each, `AgenticOps_R1_v1_zh.html` / `…_en.html`. On pod 1 zh was a correct 409 (`rendering_not_ready`) |
 
 ### C — a change on a healthy target
@@ -84,7 +85,7 @@ At `52e1c3f`, before the docs commit. The final numbers are in the RELEASE «S7 
 |---|---|---|
 | C#1 | — | Rejected by the operator's driver before any write. The driver's allow-list was wrong (it took only `deployment/x`), and admin was both requester and would-be approver. «Needs your attention» correctly did not list it for admin: the strict policy's `sod-change-approver-not-requester` |
 | C1–C2 | alice requests «scale frontend 3 → 2» with her own step | **Pass.** SRE review (Fable 5.1) in 69 s → `planned`, verdict `approved_for_planning`, L1, `steps_diff` 1 unchanged. The policy said `auto_approve`, but `change_auto_approve_standard=false`, so it waited for a human. Admin's «Needs your attention» lists C#2 (`approval_required`) |
-| C3 | Approve & run | **Pass.** One request approved and ran it. `approved_by = user:admin` (requester `user:alice@example.com`). The run succeeded; 3 post-checks bound `pc-1…pc-3`, all passed; verdict **`passed`** → C#2 `completed`. Cluster: frontend 2/2. The operator then restored 3/3 (`pod-kill.sh restore`) |
+| C3 | Approve & run | **Pass.** One request approved and ran it. `approved_by = user:admin` (requester `user:alice@example.com`). The run succeeded; 5 post-checks bound `pc-1…pc-5`, all passed; verdict **`passed`** → C#2 `completed`. Cluster: frontend 2/2. The operator then restored 3/3 (`pod-kill.sh restore`) |
 
 ### D — the live UI (headless Chromium, 1440 × 900 and 1000 × 800)
 
@@ -118,8 +119,23 @@ At `52e1c3f`, before the docs commit. The final numbers are in the RELEASE «S7 
 
 | # | Defect | Fix |
 |---|---|---|
-| 1 | **The image could not be built from a clean checkout since S2**, which added `home.test.ts`. Two frontend tests read shared fixtures through `node:fs` / `node:path`, and the project never declared `@types/node`. Locally `tsc` found a stray copy in a home-directory `node_modules`, so every gate passed while every clean build failed | `7b4b2b6`: `@types/node ^20` as a dev dependency (the Dockerfile's node:20); `typeRoots` pinned to the project's own `node_modules/@types`, so the local gate sees what a clean build sees. RED: `tsc` with the pinned type roots gave the Docker log's 6 errors. GREEN: `tsc` 0; `npm ci && npm run build` in an empty directory OK |
-| 2 | **A real chat report could not be translated** (`protected_values_changed`, deterministic at temperature 0). (a) The resource-id pattern took the word `cluster-admin` for an id; the opaque placeholder sat in a parenthetical and the model dropped it. (b) The protected-value hash compared values **in order of appearance**, so a translation that writes the date before the time (as zh does) was refused even with every value intact | `52e1c3f`: a resource id must contain a digit (`cluster-admin`, `cluster-wide`, `db-admin`, `nat-gateway` stay prose; `i-0abc…`, `vol-…`, `cluster-7f3k2` stay protected), and the hash compares the values as a multiset (any value changed, dropped, added, duplicated or merged still fails). RED → GREEN: `test_a_hyphenated_word_is_prose_not_a_resource_id` (6), `test_a_translation_may_reorder_the_values`; `test_a_duplicated_or_dropped_value_still_changes_the_hash` guards the other side. The same report then passed on the real model; live on pod 2, B7 passes |
+| 1 | **The image could not be built from a clean checkout since S2**, which added `home.test.ts`. Two frontend tests read shared fixtures through `node:fs` / `node:path`, and the project never declared `@types/node`. Locally `tsc` found a stray copy in a home-directory `node_modules`, so every gate passed while every clean build failed | `7b4b2b6`: `@types/node ^20` as a dev dependency (the Dockerfile's node:20); `typeRoots` pinned to the project's own `node_modules/@types`, so `tsc` no longer takes ambient types from a home-directory `node_modules`. Module resolution still walks up the directories, so an undeclared *import* could still pass locally — the clean `npm ci && npm run build` in an empty directory stays the real check. RED: `tsc` with the pinned type roots gave the Docker log's 6 errors. GREEN: `tsc` 0; `npm ci && npm run build` in an empty directory OK |
+| 2 | **A real chat report could not be translated** (`protected_values_changed`, deterministic at temperature 0). (a) The resource-id pattern took the word `cluster-admin` for an id; the opaque placeholder sat in a parenthetical and the model dropped it. (b) The protected-value hash compared values **in order of appearance**, so a translation that writes the date before the time (as zh does) was refused even with every value intact | `52e1c3f`: a resource id must contain a digit (`cluster-admin`, `cluster-wide`, `db-admin`, `nat-gateway` stay prose; `i-0abc…`, `vol-…`, `cluster-7f3k2` stay protected), and the hash compares the values as a multiset (any value changed, dropped, added, duplicated or merged still fails). RED → GREEN: `test_a_hyphenated_word_is_prose_not_a_resource_id` (6), `test_a_translation_may_reorder_the_values`; `test_a_duplicated_or_dropped_value_still_changes_the_hash` guards the other side. The same report then passed on the real model. **After the review:** with a multiset, the parts of a date split into three numbers could be permuted (`2026-10-08` → `2026-08-10`); `d820ebc` protects an ISO date / datetime as one value (`test_a_date_or_datetime_is_one_value`), and both real reports re-translated (restore + equal). The remaining effect — two values may trade places — is pinned by `test_a_swapped_pair_of_values_passes_by_design` and listed under Observations |
+
+## After the review
+
+- **The review:** one independent reviewer (Opus) went over `0fb94b3..d76f053`. It found 0 Critical, 2 Important and 6 Minor issues. All five Review Focus items were confirmed against the evidence, and it reported the README pair in sync.
+- **Fixed, test-first** (`d820ebc`):
+  - an ISO date / datetime is one protected value, so the multiset cannot accept a date whose parts were permuted;
+  - the remaining swap gap is pinned as a decision (Observation 9).
+- **Corrected in the docs:**
+  - B7's claim;
+  - C#2's post-check count (5, not 3);
+  - the `typeRoots` sentence;
+  - the S7 status («implemented, awaiting acceptance», not «done»).
+- **Pod 3 `d820ebc`, the final code:**
+  - the deploy check passes: the image is `d820ebc`, there is one uvicorn process, the version is 2.7.0, and chaos-lab is healthy;
+  - after a reseed, a real private chat → report → the real cheap model's zh rendering `ready` in 2 s → html export in zh and en, one paper each; bob gets 404, admin 200.
 
 ## Observations (not fixed in this release)
 
@@ -131,6 +147,7 @@ At `52e1c3f`, before the docs commit. The final numbers are in the RELEASE «S7 
 6. **The cluster's OpenTelemetry operator injects auto-instrumentation** into the app pod, which logs failures to reach a `cloudwatch-agent` that is not running. It is cluster configuration, not the app.
 7. **The scan cannot list EFS** (`aws efs describe-file-systems` → error): the IRSA role lacks the permission, as in 2.6.1.
 8. **`pending_acceptance` was not reached live** (both runs were final), and B5 did not reach the resolver's refusal (the agent refused first).
+9. **The protected values are now compared as a multiset (fix 2), so two values may trade places**: `Restart i-0aaa111, keep i-0bbb222` → the two ids swapped, or `from 3 to 2` → `from 2 to 3`, would pass. The S6 rule (in order) refused every real translation that reordered values; this one refuses any value changed, dropped, added, duplicated or merged, and an ISO date moves only whole — but which value goes with which subject is left to the model. **The owner decides whether to keep this** (a per-table-row comparison could narrow it further).
 
 ## Cost
 
@@ -140,18 +157,19 @@ From `GET /api/cost/summary`:
 |---|---|---|
 | Pod 1 | **10.33** | SRE (Fable 5.1, 2 fix plans + 1 change review) 5.35, executor 2.83, RCA 2.04, chat 0.12 |
 | Pod 2 | **0.54** | — |
-| Total | **10.87** | — |
+| Pod 3 | **0.55** | — |
+| Total | **11.42** | — |
 
 Translation and critic calls are not in the cost summary (a known S6 gap).
 
 ## Writes performed
 
 - **chaos-lab cluster:**
-  - the app (`agenticops` Deployment image `fe7e9fd` → `7b4b2b6` → `52e1c3f`, its Secret, env `AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1=false`);
+  - the app (`agenticops` Deployment image `fe7e9fd` → `7b4b2b6` → `52e1c3f` → `d820ebc`, its Secret, env `AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1=false`);
   - the leftover 2.6.1 fault restored at the start (`backend` / `frontend` had been at 0 replicas since the 2.6.1 E2E);
   - the drill's scale-to-zero, plan #1's restore and its rollback, plan #2's restore, C#2's scale to 2, and the operator's restore to 3.
   - End state: `frontend 3/3`, `backend 2/2`, no fault active, the app still deployed (ClusterIP).
 - **AWS account:** no resource created or changed. The one attempted write (`eks:CreateAddon`) was refused; the add-on list is the same before and after.
-- **ECR (us-east-1):** tags `7b4b2b6`, `52e1c3f`.
-- **S3:** `e2e/src-7866994.tar.gz`, `src-7b4b2b6.tar.gz`, `src-52e1c3f.tar.gz`.
+- **ECR (us-east-1):** tags `7b4b2b6`, `52e1c3f`, `d820ebc`.
+- **S3:** `e2e/src-7866994.tar.gz`, `src-7b4b2b6.tar.gz`, `src-52e1c3f.tar.gz`, `src-d820ebc.tar.gz`.
 - **Dev box:** `/tmp/aiops-build-<sha>` directories only. The running service, its database, agent-memory and skills were not touched.
