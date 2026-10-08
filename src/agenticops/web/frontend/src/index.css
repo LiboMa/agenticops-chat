@@ -182,3 +182,15 @@ input:focus, select:focus, textarea:focus {
   background: transparent;
   padding: 0;
 }
+
+/* MVP-2.7.0 S6: printing a report prints its paper only — the language the toggle shows */
+@media print {
+  @page { size: A4; margin: 16mm; }
+  aside, nav, header[class*="sticky"], .report-chrome, .report-toolbar, [role="dialog"], [role="status"] { display: none !important; }
+  body, main { background: #fff !important; padding: 0 !important; }
+  .report-page { max-width: none !important; }
+  .paper { border: 0 !important; box-shadow: none !important; padding: 0 !important; }
+  .paper-state { display: none !important; }
+  .report-content h2 { break-after: avoid; }
+  .report-content tr { break-inside: avoid; }
+}

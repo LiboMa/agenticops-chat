@@ -1038,6 +1038,33 @@ class Report(Base):
     file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     report_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    # MVP-2.7.0 S6 (services/report_content stamps these on every write): the content a rendering is made from,
+    # and who may see it (services/report_access) — private = a report saved from a private chat
+    content_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    content_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    source_language: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)   # zh | en
+    owner_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    visibility: Mapped[str] = mapped_column(String(16), default="workspace", server_default="workspace")
+
+
+class ContentRendering(Base):
+    """One language of one content version (MVP-2.7.0 S6, services/content_rendering): a translation made by the
+    cheap model with every protected value checked. The source language is the source itself and has no row."""
+    __tablename__ = "content_renderings"
+    __table_args__ = (UniqueConstraint("entity_type", "entity_id", "source_version", "language",
+                                       name="uq_content_rendering"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entity_type: Mapped[str] = mapped_column(String(30))          # report (S6)
+    entity_id: Mapped[int] = mapped_column(Integer)
+    source_version: Mapped[int] = mapped_column(Integer)
+    language: Mapped[str] = mapped_column(String(5))               # zh | en
+    source_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16))                # pending | ready | failed
+    body_markdown: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    protected_value_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    error_code: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 # ============================================================================
@@ -1636,6 +1663,9 @@ _ADD_COLUMNS_2_7_0: dict[str, dict[str, Optional[str]]] = {
                       "context_region": None, "context_locked_at": None},
     # S5: one dispatch per user message; NULL on existing rows (= completed)
     "chat_messages": {"client_message_id": None, "dispatch_state": None},
+    # S6: a report's content identity and visibility; existing rows are workspace, hash / language backfilled
+    "reports": {"content_version": "NOT NULL DEFAULT 1", "content_hash": None, "source_language": None,
+                "owner_user_id": None, "visibility": "NOT NULL DEFAULT 'workspace'"},
 }
 _migrated_2_7_0_urls: set[str] = set()
 _migrate_2_7_0_lock = threading.Lock()
@@ -1665,6 +1695,22 @@ def _run_migrate_2_7_0(engine) -> None:
         with engine.begin() as conn:
             for stmt in stmts:
                 conn.execute(text(stmt))
+    _backfill_reports_2_7_0(engine)
+
+
+def _backfill_reports_2_7_0(engine) -> None:
+    """S6: give every older report its content hash and source language (fail-soft, like the 2.6.1 backfills)."""
+    try:
+        from agenticops.services.report_content import content_hash, detect_language
+        if not inspect(engine).has_table("reports"):
+            return
+        with engine.begin() as conn:
+            rows = conn.execute(text("SELECT id, content_markdown FROM reports WHERE content_hash IS NULL")).fetchall()
+            for rid, body in rows:
+                conn.execute(text("UPDATE reports SET content_hash = :h, source_language = :l WHERE id = :i"),
+                             {"h": content_hash(body or ""), "l": detect_language(body or ""), "i": rid})
+    except Exception as exc:
+        logger.warning("MVP-2.7.0 report backfill skipped: %s", exc)
 
 
 def _migrate_2_7_0(engine) -> None:
@@ -2277,3 +2323,9 @@ class SecurityPollCursor(Base):
         DateTime, default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+
+
+# MVP-2.7.0 S6: every Report write stamps its content hash and source language
+from agenticops.services import report_content as _report_content  # noqa: E402
+
+_report_content.register()

@@ -118,7 +118,7 @@ def resolve_target(name: str) -> tuple[str, dict]:
     return "unknown", {}
 
 
-def resolve_content(spec: str) -> tuple[str, str]:
+def resolve_content(spec: str, actor=None) -> tuple[str, str]:
     """Resolve content spec (#R<id>, #D<id>, free text) into (subject, body).
 
     Returns:
@@ -134,7 +134,7 @@ def resolve_content(spec: str) -> tuple[str, str]:
         if m:
             ref_type, ref_id = m.group(1), int(m.group(2))
             if ref_type == "R":
-                subject, body = _resolve_report(ref_id)
+                subject, body = _resolve_report(ref_id, actor)
                 if body:
                     parts.append((subject, body))
                 else:
@@ -169,14 +169,23 @@ def resolve_content(spec: str) -> tuple[str, str]:
     return subject, body
 
 
-def _resolve_report(report_id: int) -> tuple[str, str]:
-    """Resolve a Report reference."""
+def _actor_or_run(actor):
+    """S6: the sender — the given actor, else the current run's (a private report reaches only its owner / admins)."""
+    if actor is not None:
+        return actor
+    from agenticops.services.report_access import run_context_actor
+    return run_context_actor()
+
+
+def _resolve_report(report_id: int, actor=None) -> tuple[str, str]:
+    """Resolve a Report reference the sender may see (a private report is its owner's and admins')."""
     try:
         from agenticops.models import Report, get_db_session
+        from agenticops.services.report_access import can_see
 
         with get_db_session() as db:
             report = db.query(Report).filter_by(id=report_id).first()
-            if not report:
+            if not report or not can_see(report, _actor_or_run(actor)):
                 return "", ""
             subject = f"Report #{report.id}: {report.title}"
             body = report.content_markdown[:2000] if report.content_markdown else report.summary
@@ -252,7 +261,7 @@ def _resolve_issue(issue_id: int) -> tuple[str, str]:
         return "", ""
 
 
-def execute_send_to(command: str) -> SendToResult:
+def execute_send_to(command: str, actor=None) -> SendToResult:
     """Execute a /send_to command synchronously.
 
     Shared by CLI, Web chat, and IM chat interfaces.
@@ -276,14 +285,14 @@ def execute_send_to(command: str) -> SendToResult:
         )
 
     # Resolve content
-    subject, body = resolve_content(content_or_help)
+    subject, body = resolve_content(content_or_help, actor)
     if not body.strip():
         return SendToResult(success=False, message="No content to send.")
 
     # Send
     try:
         if target_type == "channel":
-            return _send_via_channel(target_name, subject, body)
+            return _send_via_channel(target_name, subject, body, actor)
         else:
             return _send_via_im(target_config, subject, body)
     except Exception as e:
@@ -291,7 +300,7 @@ def execute_send_to(command: str) -> SendToResult:
         return SendToResult(success=False, message=f"Send failed: {e}")
 
 
-def _send_via_channel(channel_name: str, subject: str, body: str) -> SendToResult:
+def _send_via_channel(channel_name: str, subject: str, body: str, actor=None) -> SendToResult:
     """Send via NotificationManager to a specific channel.
 
     For sns-report channels with a #R<id> reference, triggers rich report distribution
@@ -306,7 +315,7 @@ def _send_via_channel(channel_name: str, subject: str, body: str) -> SendToResul
     if channel and channel.channel_type == "sns-report":
         report_id = _extract_report_id(body)
         if report_id:
-            return _send_report_via_channel(channel_name, channel.config, report_id)
+            return _send_report_via_channel(channel_name, channel.config, report_id, actor)
 
     # HTML delivery for html-preferred channels (text content)
     if channel and channel.preferred_format == "html":
@@ -354,15 +363,16 @@ def _extract_report_id(body: str) -> Optional[int]:
 
 
 def _send_report_via_channel(
-    channel_name: str, config: dict, report_id: int,
+    channel_name: str, config: dict, report_id: int, actor=None,
 ) -> SendToResult:
-    """Send a formatted report via sns-report channel."""
+    """Send a formatted report via sns-report channel (only one the sender may see — S6)."""
     from agenticops.notify.notifier import SNSReportNotifier
     from agenticops.models import Report, get_db_session
+    from agenticops.services.report_access import can_see
 
     with get_db_session() as db:
         report = db.query(Report).filter_by(id=report_id).first()
-        if not report:
+        if not report or not can_see(report, _actor_or_run(actor)):
             return SendToResult(success=False, message=f"Report #{report_id} not found.")
         title = report.title
         summary = report.summary

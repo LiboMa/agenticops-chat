@@ -2,7 +2,7 @@
 
 > Version: 2.7.0 · Branch: `MVP-2.7.0`（从 `MVP-2.6.1` 的 `1ec53b3` 切出）· 起始日期：2026-10-05 · 主题：先把会「假通过」「串号」「多进程失效」的核心信任问题修掉，再按主人 10-05 交付的蓝白设计包分阶段改造界面
 >
-> **状态：S1（核心信任加固）已于 2026-10-05、S2（蓝白外壳与导航）已于 2026-10-06 由主人验收通过；S3（方案与变更枢纽 +「需要你处理」）与 S4（Cases 与 Resources）已于 2026-10-07 由主人验收通过，作为 `MVP-2.7.0` 分支上的本地提交存在（未 push）。S5（Chat：会话上下文 + 账户绑定 + 幂等发送）已实现，等主人手动验收。S6–S7 尚未开始：每个阶段开工前先交详细计划给主人批准。** **10-06 追加核心能力轨 A1–A4（变更感知的系统模型，spec 已批准），与界面阶段并行推进；A1 详细计划待出、出后交主人批准（见文末「核心能力轨」节）。** 依主人铁律，只有 E2E 通过且当面确认后才 `git push --no-verify` / 打 `v2.7.0` tag。
+> **状态：S1–S7 全部由主人验收通过（S1 10-05、S2 10-06、S3–S5 10-07、S6 与 S7 10-08）。S1–S5 已推 `origin/MVP-2.7.0`（`5d82aec`），S6 已推（`0fb94b3`）。S7（联合验收与发布）已于 2026-10-08 验收：版本串 2.7.0，chaos-lab 集群内用真实模型跑完 2.7.0 各条流程，发现并修复两处缺陷（见文末「S7 联合验收与发布」与 `docs/MVP-2.7.0-E2E-REPORT.md`）；主人 10-08 同意推送、开 PR 到 main、打 `v2.7.0` tag，并重部署开发机。** **核心能力轨 A1–A4 不在 v2.7.0：移至 MVP-2.7.1（主人 10-08）。** 依主人铁律，只有 E2E 通过且当面确认后才 `git push --no-verify` / 打 `v2.7.0` tag。
 >
 > 全链规划（含 S1 详细计划）：`docs/superpowers/plans/2026-10-05-mvp-2.7.0-roadmap.md`
 > 设计输入：`docs/AgenticOps_BlueWhite_Review.zip`、`docs/superpowers/specs/2026-10-05-blue-white-sre-workspace-design.md`、`docs/ui-contracts/2026-10-05/`
@@ -19,13 +19,13 @@
 | **S2 蓝白外壳与导航**（P0+P1） | 配色、字体本地化、分组侧栏、顶栏、首页解析器、登录回跳、`/app/overview`、bootstrap + 偏好接口 | **已验收（2026-10-06）** |
 | **S3 方案枢纽 + 待办**（P4） | `/app/plans` 三标签 + `/app/plans/:id`、`GET /api/ui/attention` + 顶栏「需要你处理」、如实的批准措辞 + 核对勾选、方案状态 CAS、编辑防过期 | **已验收（2026-10-07）** |
 | **S4 Cases 与 Resources**（P3） | 队列 + 阅读区双栏（保留 2.6.1 阶段卡）、HealthIssue 读取、补充说明、顶栏账户范围、询问 Agent、Resources 表格 | **已验收（2026-10-07）** |
-| **S5 Chat**（P2） | 会话上下文与账户绑定、补充说明进上下文、`client_message_id` 幂等、派发状态与中断、流错误分类、草稿、附件规则、蓝白 Chat 页 | **已实现，待主人验收** |
-| S6 报告与双语（P5） | 渲染服务 + 翻译、导出、发布确认 | 未开始 |
-| S7 联合验收与发布（P6） | 文档、live E2E、版本串、`v2.7.0` tag | 未开始 |
-| **A1 账本与分钟级**（核心能力轨） | `change_events` 账本 + 感知度（资源属性）+ Sensing Worker（CloudTrail / K8s events 拉取、增量刷新）+ RCA 接入 + 三端点 / CLI / Settings 感知卡 / 资源与问题页 | **spec 已批准（10-06），详细计划待出** |
-| A2 live 级（核心能力轨） | live 探针、预算降级、`request_sensitivity`、两种端点采集、`VOLATILE_KEYS` 补齐 | 未开始 |
-| A3 覆盖面（核心能力轨） | 锚定缺口重测、九种解析器、ALB → 目标组 | 未开始 |
-| A4 评测门禁（核心能力轨） | 每夜 $0 指标、三个感知场景、`--assert`、再议 `sensing_enabled` 默认值 | 未开始 |
+| **S5 Chat**（P2） | 会话上下文与账户绑定、补充说明进上下文、`client_message_id` 幂等、派发状态与中断、流错误分类、草稿、附件规则、蓝白 Chat 页 | **已验收（2026-10-07）** |
+| **S6 报告与双语**（P5） | 报告版本与归属、中英渲染（保护值 fail-closed）、导出 / 打印、带版本 / 语言 / 幂等键的发布 | **已验收（2026-10-08），已推 `0fb94b3`** |
+| **S7 联合验收与发布**（P6） | 文档、live E2E、版本串、`v2.7.0` tag | **已验收（2026-10-08）**，已推送、开 PR、打 `v2.7.0` tag |
+| **A1 账本与分钟级**（核心能力轨） | `change_events` 账本 + 感知度（资源属性）+ Sensing Worker（CloudTrail / K8s events 拉取、增量刷新）+ RCA 接入 + 三端点 / CLI / Settings 感知卡 / 资源与问题页 | **移至 MVP-2.7.1**（主人 10-08；spec 已批准，计划未出） |
+| A2 live 级（核心能力轨） | live 探针、预算降级、`request_sensitivity`、两种端点采集、`VOLATILE_KEYS` 补齐 | 移至 MVP-2.7.1 |
+| A3 覆盖面（核心能力轨） | 锚定缺口重测、九种解析器、ALB → 目标组 | 移至 MVP-2.7.1 |
+| A4 评测门禁（核心能力轨） | 每夜 $0 指标、三个感知场景、`--assert`、再议 `sensing_enabled` 默认值 | 移至 MVP-2.7.1 |
 
 ---
 
@@ -643,7 +643,263 @@
 
 ---
 
+## S6 报告与双语
+
+设计：`docs/superpowers/specs/2026-10-07-mvp-2.7.0-s6-reports-bilingual-design.md`；实施计划：`docs/superpowers/plans/2026-10-07-mvp-2.7.0-s6-reports-bilingual.md`（主人 10-07 批准，Native 执行）。
+
+主人决定：
+- 只做报告。
+- 新报告自动准备另一种语言，旧报告用按钮准备。
+- 私有 chat 保存的报告保持私有。
+- 详情页用「中文 / English」切换，一次只看一种语言。原定的「当前 / 双语」并排对照已按主人 10-08 的修正去掉：不做对比，只来回切换。
+
+### 改了什么
+
+- **报告的身份与归属**
+  - 每份报告新增 `content_version`、`content_hash`、`source_language`、`owner_user_id`、`visibility`。每次写入都由 `services/report_content` 盖章；迁移时补齐已有报告。
+  - 从私有 chat 保存的报告属于创建者：只有创建者和管理员可见、可渲染、可导出、可发布，其他人得到 404。
+  - 所有报告路由都过 `services/report_access`。旁路也一样：全局搜索、`/send_to`（`#R` 引用和正文里的「Report #N」）、agent 工具 `list_reports` / `distribute_report`（按当前运行的用户判断）。
+- **中英渲染**
+  - 新表 `content_renderings`。源语言的渲染就是源本身。
+  - 读取 `GET /api/content/report/{id}/rendering` 从不调用模型。源变了，旧译文标为 `stale`。
+  - 每份新保存的报告，都在后台用便宜模型（`report_translation_model_id`，空 = cheap，temperature 0）准备另一种语言。按源哈希去重，每种语言一把锁。
+  - 旧报告用「准备翻译」（`POST /api/content/report/{id}/translations`）；失败了可以重试。
+  - 启动时把残留的「准备中」置为失败。工作线程里任何错误都落为失败，从不卡在「准备中」。
+- **保护值**（`services/content_protect`）
+  - 送进模型前，代码块、行内代码、`I#` / `R#` / `C#` / `P#` / `E-…` / `pc-…` 引用、ARN、资源 id（必须含数字，S7 修正）、IP、区域、URL 和所有数字都换成编号占位符，模型看不到这些值。
+  - 译文里每个占位符必须恰好出现一次，还原后的保护值必须与源是同一组值（顺序可以不同，S7 修正）；否则这条渲染失败（`protected_values_changed`），不展示任何部分译文。
+  - 中文紧贴的值（「问题I#12已修复」）也整体保护。
+  - 模型多包的一层代码围栏和开场白会被去掉。
+  - 回复被截断时失败为 `too_long`，不展示半截。
+  - 读超时 300 秒，最多重试一次。
+- **导出**：`GET /api/reports/{id}/export?version&language=zh|en|zh-en&format=html|pdf|docx`。
+  - 以附件下载（`AgenticOps_R{id}_v{n}_{lang}.{ext}`，带 ETag）。`zh-en`（两份纸面分页排列）只留在接口里，页面不提供。
+  - 正文和标题里的原始 HTML 一律转义。
+  - 请求的语言没就绪返回 409，不会换成另一种语言。
+  - html 始终可用，pdf / docx 取决于服务器上的库。
+  - 导出从不发布。
+- **打印**：报告页只打印纸面，即当前显示的那一种语言；A4、16mm 边距。
+- **发布** `POST /api/reports/{id}/publish`
+  - 必须带 `version`、`language` 和 `Idempotency-Key` 请求头。
+  - 只发送这个版本、这个语言的已就绪渲染；摘要也用这个语言。
+  - S3 对象名带 `_v{n}_{lang}`，换一种语言再发布不会覆盖前一次的文件。
+  - 同一个 key 重复发布只发一次，返回第一次的结果；同一个 key 还在发送时再发返回 409。
+- **页面**
+  - 列表：全部本地化，每行是真链接，显示版本、私有标记和每种语言的状态（就绪 / 准备中 / 失败 / 未准备 / 已过期）。
+  - 详情：一份纸面，用「中文 / English」切换，从不并排对照。默认显示界面语言；切换界面语言时，纸面跟着切换。没就绪的语言显示原因，并给出「准备翻译 / 重试 / 以源语言阅读」。「以源语言阅读」会把切换拨到源语言。从不静默换成另一种语言。
+  - 导出对话框：语言即当前显示的语言，服务器不能生成的格式置灰，带认证下载，令牌不进 URL。
+  - 发布对话框：发送前先显示真实目的地（SNS topic 或 SES 收件人），每次打开用一个 key。
+  - 中英文文案齐全。
+
+### 接口与契约补充
+
+- 新接口：
+  - `GET /api/content/report/{id}/rendering?version&language`（契约 `ContentRendering`，`status` ∈ ready / pending / missing / failed / stale）。
+  - `POST /api/content/report/{id}/translations`（`TranslationRequest {source_version, languages}`，返回 202）。
+  - `GET /api/reports/{id}/export`。
+- `ReportResponse` 新增 `content_version`、`content_hash`、`source_language`、`visibility`、`owned_by_me`、`language_status`。
+- `ReportPublishRequest` 新增 `version`、`language`。
+- 错误体是 `UiError {detail, code}`，`code` 包括 `rendering_not_ready`、`format_unavailable`、`idempotency_key_required`、`publish_in_flight`。渲染上的 `error_code` 包括 `protected_values_changed`、`model_failed`、`too_long`、`interrupted`。
+- bootstrap：`features.content_rendering = true`、`features.report_export = true`，新增扩展字段 `report_export_formats`。
+- 新配置 `report_translation_model_id`（`settings.yaml`，空 = `bedrock_model_id_cheap`）。
+
+### S6 六个可达面
+
+- **CLI** — 非目标：报告没有 CLI 视图。`aiops report` 生成的报告照样自动入队翻译。CLI 的 `/send_to` 看不到别人的私有报告。
+- **Web API** — 做：见上节。
+- **Web UI** — 做：报告列表与详情的双语化、导出 / 打印 / 发布对话框。
+- **Agent tool** — 做（间接）：`save_report` 保存后自动入队翻译；`list_reports` / `distribute_report` 按当前运行的用户判断可见性。不新增工具。
+- **Schedule** — 做（间接）：定时报告经同一条保存路径自动入队翻译。
+- **Notification** — 做：发布（SNS / SES）只发送选定的版本和语言，并且幂等。
+
+### 升级注意
+
+1. `POST /api/reports/{id}/publish` 现在必须带 `version`、`language` 和 `Idempotency-Key` 请求头。仓库内的 Web 已更新，外部脚本需要补上。
+2. 启动时执行增量迁移：`reports` 加 5 列并补算哈希和语言，新建 `content_renderings` 表。
+3. 每份新报告会多一次便宜模型调用（准备另一种语言）。
+
+### 已知缺口
+
+- 只保证保护值不变，不评估译文质量；标题不翻译（契约只要求正文）。
+- 翻译用掉的 token 不进成本统计。
+- `~~~` 围栏和缩进代码块不在保护范围内；源里有落单的 `⟦` 或 `⟧` 时永远翻译不了。
+- DOCX 导出里 `<` / `>` 会以转义形式显示。
+- 发布重放：同一个 key 但换了渠道、版本或语言时，仍返回第一次的结果（应为 422）。并发的两个不同 key 记录发布结果时，可能丢一条。
+- 分享在显示的语言没就绪时，正文退回源语言，标题也不写语言。
+- `POST /api/reports/generate` 返回最新的一行报告，可能恰好是别人同时保存的私有报告。
+- 既有的发布格式化（`notify/report_formatter._to_html`）会把报告正文里的原始 HTML 原样放进发出的 HTML（S6 之前就存在；导出已用自己的转义）。
+- 私有报告只覆盖从私有 chat 保存的那一种；CLI / IM / 定时任务看不到任何私有报告。
+
+### S6 验收清单（主人手动）
+
+见设计文档 §5 的九条：
+1. 自动翻译
+2. 旧报告「准备翻译」
+3. 保护值
+4. 中文 / English 切换
+5. 导出
+6. 打印
+7. 发布确认
+8. 私有报告
+9. 中英文
+
+### S6 门禁结果
+
+2026-10-08，在 `MVP-2.7.0` 上（S6 全部提交、含审查修复之后）：
+
+| 门禁 | 结果 | S5 结束时 |
+|---|---|---|
+| 后端全量 `pytest tests/` | **6891 passed / 85 skipped / 3 failed**，三条与之前相同、都与 S6 无关 | 6813 passed / 3 failed |
+| `npx tsc --noEmit` | 0 错误 | 0 |
+| `npm test`（vitest） | **58 个文件 / 709 个测试全过** | 55 / 698 |
+| `npm run build` | 成功 | 成功 |
+
+另做了：
+- **无头浏览器走查**：15 项全过。验收环境里翻译换成桩，不调模型；发布对话框只打开，不确认（验收环境读的是主人真实的 `config/channels.yaml`）。覆盖：
+  - 旧报告准备翻译到就绪；
+  - 1440px 双语并排、1000px 上下排列；
+  - 导出文件名为 `AgenticOps_R1_v1_zh-en.html`，内含两份纸面；
+  - 打印模拟下只剩纸面；
+  - 发布框先写明目的地；
+  - bob 的列表里没有 alice 的私有报告、直接访问 404，alice 能访问；
+  - 中文文案；
+  - 零页面报错、零外部请求。
+- **真实模型**：新保存的两份报告由便宜模型自动翻译，都变为就绪；其中一份 3.1 秒就绪，10 个保护值全在，保护值哈希一致。
+- **独立审查**（`3367b65..e634fe4`）：0 严重 / 4 重要 / 若干次要。重要的全部修复，每条先有失败测试；另有两条次要按实际影响升级后修复：
+  1. 私有报告经全局搜索、`/send_to`、agent 工具泄露（`fbe9692`）。
+  2. 换一种语言再发布会覆盖前一次的文件，摘要也总是源语言（`d776575`）。
+  3. 紧贴中文的值保护不完整，en→zh 会无端失败（`4ea0aef`）。
+  4. 长报告永远翻译不了：60 秒读超时、没有检查截断（`4819911`）。
+  - 升级修复：翻译可能卡在「准备中」，以及模型的开场白会混进正文（`4819911`）。
+  - 其余次要问题见上面的已知缺口。
+- 上面走查的「双语并排 / 上下排列」和 `zh-en` 导出两项已随 10-08 的修正改写，见下一节。
+- 实施中发现：测试里调用真实 `save_report` 会碰到主人配置的 S3 桶（被测试的真实 AWS 拦截挡下）和真实通知渠道（卡住）。被终止的两次测试运行可能向某个渠道发出了「报告已保存」的测试通知。相关测试现已隔离。
+
+### S6 修正：只切换、不对照（主人 10-08）
+
+- 主人：「在双语翻译的同时，请不要成为对比项，只要在两个中文/English中来回切换即可。」
+- 改了什么（只改前端）：
+  - 报告详情去掉「当前 / 双语」和并排布局，改成一份纸面加「中文 / English」切换。
+  - 导出、打印、发布、分享都用切换选中的那种语言。
+  - `lib/reportView` 去掉 `ViewMode` / `papersFor` / `exportLanguage`，改为 `LANGS` + `canExport(lang, …)`。
+  - 去掉不再使用的文案键 `reports.view.current` / `both`、`reports.lang.zh-en`、`reports.readingSource`。
+  - 打印样式去掉两份纸面之间的分页。
+- 后端不变：导出接口仍接受 `zh-en`，只是页面不再提供。
+- 门禁（2026-10-08）：
+  - `npx tsc --noEmit`：0 错误。
+  - vitest：58 个文件 / 708 个测试全过。比上表少 1 个，是删掉的「双语导出」用例。
+  - `npm run build`：成功。
+  - 无头走查：21 项全过。新增的检查项：
+    - 切换只有「中文」「English」两项；
+    - 默认显示界面语言，任何时候只有一份纸面，1000px 下也一样；
+    - 「以源语言阅读」把切换拨到中文；
+    - 选中文时导出 `AgenticOps_R1_v1_zh.html`，只含中文纸面；
+    - 打印只剩这一份纸面；
+    - 切换界面语言时纸面跟着切换。
+  - 后端没有改动，后端测试没有重跑。
+
+---
+
+## S7 联合验收与发布
+
+计划：`docs/superpowers/plans/2026-10-08-mvp-2.7.0-s7-release.md`（主人 10-08 批准，Native 执行）。E2E 报告：`docs/MVP-2.7.0-E2E-REPORT.md`。
+
+主人决定（10-08）：
+- live E2E 在 chaos-lab EKS 集群内跑（与 2.6.1 同一路线）。
+- A1–A4 不在 v2.7.0，移至 MVP-2.7.1。
+- E2E 用真实模型跑 2.7.0 的各条流程，不重跑 13 例定位评测。
+- 版本串统一为 2.7.0。
+
+### 改了什么
+
+- **版本串 2.7.0**
+  - `pyproject.toml`、`agenticops.__version__`、`uv.lock` 统一为 2.7.0；FastAPI 的 `app.version` 改为读 `__version__`，不再自己写一份。
+  - bootstrap、OpenAPI 和侧栏都显示 2.7.0。
+  - `tests/test_version.py` 钉住这几处一致。
+- **live E2E 发现并修复的两处缺陷**
+  1. **镜像无法从干净检出构建**（S2 加入 `home.test.ts` 起）（`7b4b2b6`）
+     - 原因：两个前端测试经 `node:fs` / `node:path` 读共享夹具，项目从没声明 `@types/node`。本机 `tsc` 找到了家目录 `node_modules` 里的一份，所以门禁全过，干净构建却全挂。
+     - 修复：加开发依赖 `@types/node ^20`（与 Dockerfile 的 node:20 一致）；`tsconfig.json` 的 `typeRoots` 只认项目自己的 `node_modules/@types`，`tsc` 不再从家目录的 `node_modules` 拿环境类型。模块解析仍会向上查找目录，所以没声明的 import 在本机仍可能通过——空目录里的 `npm ci && npm run build` 仍是真正的检查。
+  2. **真实 chat 保存的报告翻译不了**（`52e1c3f`）
+     - 现象：便宜模型、temperature 0，每次都 `protected_values_changed`。
+     - 原因一：资源 id 规则把普通词 `cluster-admin` 当成了 id，括号里的不透明占位符被模型丢掉。现在资源 id 必须含数字。
+     - 原因二：保护值哈希按出现顺序比较，译文把日期放到时间前面（中文就是这样写）也被拒。现在按多重集合比较：值被改、丢、增、重复或合并，照样失败；只是顺序可以不同。这改了 S6 设计里「按出现顺序」那一句（S6 设计文档已注明）。
+     - 审查后补充（`d820ebc`）：ISO 日期 / 日期时间作为一个值保护，日期的年月日不会被互换。剩下的代价——两个值可能互换位置——写在下面的已知缺口里；主人 10-08 决定保留，MVP-2.7.1 按表格行收窄。
+
+### live E2E 结果
+
+详见 `docs/MVP-2.7.0-E2E-REPORT.md`。
+
+- **A 真实故障走完整条流程**
+  - 告警成为 I#1。RCA 定位 `valid`（第 1 名 `Deployment chaos-lab/backend`），置信度 0.57，评审 `weak`，被门禁送去复核。
+  - 「需要你处理」列出待批方案。错误哈希 409 且不执行；第一份方案执行失败、回滚、判定 `failed`；问题回到 `root_cause_identified`。
+  - 审阅后的第二份方案：`pc-1` 按 check_id 绑定、`passed`，问题 `resolved`。
+- **B 补充说明、绑定账户的 chat、幂等发送、私有报告**
+  - 补充说明记为会话身份。上下文账户不符 409。
+  - 流事件齐全；运行中再发 409 `session_busy`；同一 `client_message_id` 重放、0 token。
+  - 私有报告 bob 404；按语言导出各一份纸面。修复后的真实翻译 7 秒就绪——但这份报告在旧代码上也会通过，修复的真实模型证据是本机对失败报告的重跑（审查后又重跑一次）。
+- **C 变更（alice 提出、admin 批准）**
+  - SRE 审核 69 秒；「批准并执行」后 5 项检查按 `pc-1…pc-5` 绑定、全部通过，`completed`。
+- **D live 界面走查**
+  - 1440 / 1000px 下 Cases 双栏与全屏返回、计划页、变更页、报告中英切换与导出、bob 看不到私有报告。
+  - 零页面报错、零外部请求。
+- **事故（操作员失误，已控制）**
+  - E2E 驱动脚本没审步骤就批准了第一份方案。其第 4 步 `aws eks create-addon`（集群级、范围外）被 AWS 拒绝（IRSA 角色无此权限），没有创建任何东西。
+  - 产品这边：判定 `failed`、回滚、命令审计都正确。之后每份方案批准前都先审步骤。
+- **成本**：11.42 美元（`/api/cost/summary`，三个 pod 合计；翻译与评审调用不计入）。
+- **审查后**：独立审查（Opus）0 严重 / 2 重要 / 6 次要；修复见上；最终代码 `d820ebc` 部署后复测：部署检查与真实报告翻译、导出都通过。
+
+### S7 六个可达面
+
+- **CLI** — 做（间接）：`aiops version` 读 `__version__`，显示 2.7.0。
+- **Web API** — 做：bootstrap 的 `version` 与 OpenAPI 的 `info.version` 都读 `__version__`。
+- **Web UI** — 做（间接）：侧栏版本行来自 bootstrap，显示 v2.7.0；前端无代码改动（`package.json` 的 `0.1.0` 是内部版本，从不显示）。
+- **Agent tool** — 非目标。
+- **Schedule** — 非目标。
+- **Notification** — 非目标：集群内配置关闭了通知，发布由 S6 的测试和走查覆盖。
+
+### 升级注意
+
+1. 版本号从 `0.9.0-beta` 变为 `2.7.0`（`uv.lock` 同步）。
+2. 前端新增开发依赖 `@types/node`；`tsconfig.json` 只认项目自己的 `node_modules/@types`。
+3. 保护值改按多重集合比较。S6 期间生成的就绪译文（S6 未发布）里，`protected_value_hash` 仍是旧算法的值；没有任何逻辑比较它（过期以源哈希判断）。
+
+### 已知缺口（来自 live E2E，本版不修）
+
+- **保护值按多重集合比较后，两个值可能互换位置**：例如「重启 i-0aaa111、保留 i-0bbb222」被译成两个 id 对调，或「从 3 缩到 2」变成「从 2 缩到 3」，都能通过。值被改、丢、增、重复、合并仍会失败，ISO 日期只能整体移动；但哪个值对应哪个对象，由模型决定。按出现顺序比较会拒绝几乎所有改变语序的真实译文。**是否保留由主人决定**（按表格行比较可以进一步收窄）。由 `test_a_swapped_pair_of_values_passes_by_design` 钉住。**主人 10-08 决定：保留多重集合，MVP-2.7.1 按表格行比较收窄。**
+- SRE 的修复方案会越界：「副本为 0」的问题，两份方案都加了集群级 add-on、HPA 和注解（L2）。策略没有把修复方案限制在问题自己的资源上；这次靠人工审阅和执行角色的 IAM 挡住。
+- 回滚可能把故障带回来：第一份方案「恢复到一半失败」的回滚是「两个都缩回 0」。
+- 命令分级：`kubectl rollout status`（只读）被当成写操作，每次先被拒一次再重试；`aws eks create-addon` 分级为 `unknown`，在已批准方案里被允许尝试。未知分级的写命令应按写处理。
+- RCA 结果的 `model_id` 为空；两次执行的 `duration_ms` 都是 45000，像是上报值而不是实测。
+- 集群的 OpenTelemetry operator 给应用 pod 注入了自动埋点，日志里有连不上 `cloudwatch-agent` 的报错（集群配置，不是应用）。
+- `pending_acceptance` →「接受」这次 live 没有出现（两次判定都是终态），由 S1 / 2.6.1 的测试覆盖；B5 没有走到解析器那一层的拒绝（agent 先拒绝了）。
+
+### S7 门禁结果
+
+2026-10-08，在 `52e1c3f`（S7 代码改动之后、文档提交之前）：
+
+| 门禁 | 结果 | S6 结束时 |
+|---|---|---|
+| 后端全量 `pytest tests/` | **6910 passed / 85 skipped / 2 failed**，两条都是已知的环境失败（`test_defaults_upgraded`、`test_no_cjk_in_base_prompts`）；第三条已知的 `test_web_tools` 这次在本机网络下通过 | 6891 passed / 3 failed |
+| `npx tsc --noEmit` | 0 错误（`typeRoots` 已固定） | 0 |
+| `npm test`（vitest） | 58 个文件 / 708 个测试全过 | 58 / 709（S6 修正删掉 1 个） |
+| `npm run build` | 成功；另在空目录里 `npm ci && npm run build` 成功（与镜像构建同一条路径） | 成功 |
+| 镜像构建 | `7b4b2b6`、`52e1c3f` 在开发机上构建并推到 ECR；`7866994` 构建失败（即缺陷 1） | — |
+| 审查后（`d820ebc`）后端全量 | **6913 passed / 85 skipped / 3 failed**：两条已知环境失败，外加 `test_memory_roundtrip_props` 一次 Hypothesis 超时（`DeadlineExceeded` 282 ms > 200 ms，Hypothesis 自己判为 flaky；单独重跑 4/4 通过，S7 没改记忆代码） | — |
+| 审查后镜像 | `d820ebc` 构建并部署，复测通过（见上「审查后」） | — |
+
+### 发布动作（主人 10-08 全部同意）
+
+1. 推送 `MVP-2.7.0`（S7 的提交）。
+2. 开 PR `MVP-2.7.0 → main`（main 已含 S1–S5，PR #25）。
+3. 在本提交上打带注释的 `v2.7.0` tag 并推送。
+4. （S7 之外）重部署开发机：`iac/deploy-sg/deploy.sh redeploy MVP-2.7.0`，先备份开发机上的 agent-memory / skills 与数据库。
+
+---
+
 ## 核心能力轨：变更感知的系统模型（A1–A4）
+
+> **不在 v2.7.0：移至 MVP-2.7.1（主人 10-08）。** 下面是 10-06 并入时的规划原样，由 MVP-2.7.1 的 RELEASE 接手。
 
 主人 10-06 批准 spec `docs/superpowers/specs/2026-10-06-change-aware-system-model-design.md`（10-05/06 架构讨论的收敛：三分法 A' 系统模型 → B RCA 调查运行时 → C 易用性并入验收），并裁定在 MVP-2.7.0 上实现、并入本发布规划。它与界面阶段并行，不改界面阶段的顺序；阶段编号用 A（= spec §12 的 P1–P4）以避开设计包的 P0–P6 和 S1–S7。路线图：`docs/superpowers/plans/2026-10-05-mvp-2.7.0-roadmap.md`「核心能力轨」节。
 
