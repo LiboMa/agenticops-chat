@@ -2,7 +2,7 @@
 
 > Version: 2.7.0 · Branch: `MVP-2.7.0`（从 `MVP-2.6.1` 的 `1ec53b3` 切出）· 起始日期：2026-10-05 · 主题：先把会「假通过」「串号」「多进程失效」的核心信任问题修掉，再按主人 10-05 交付的蓝白设计包分阶段改造界面
 >
-> **状态：S1（核心信任加固）已于 2026-10-05、S2（蓝白外壳与导航）已于 2026-10-06 由主人验收通过；S3（方案与变更枢纽 +「需要你处理」）、S4（Cases 与 Resources）与 S5（Chat：会话上下文 + 账户绑定 + 幂等发送，含真实模型 E2E）已于 2026-10-07 由主人验收通过；S1–S5 已经主人同意推送到 `origin/MVP-2.7.0`（`5d82aec`）。S6（报告与双语：版本与归属、受保护的中英渲染、导出 / 打印、确认后幂等发布）已实现，等主人手动验收（未 push）。S7 尚未开始。** **10-06 追加核心能力轨 A1–A4（变更感知的系统模型，spec 已批准），与界面阶段并行推进；A1 详细计划待出、出后交主人批准（见文末「核心能力轨」节）。** 依主人铁律，只有 E2E 通过且当面确认后才 `git push --no-verify` / 打 `v2.7.0` tag。
+> **状态：S1–S6 全部由主人验收通过（S1 10-05、S2 10-06、S3–S5 10-07、S6 10-08）。S1–S5 已推 `origin/MVP-2.7.0`（`5d82aec`），S6 已推（`0fb94b3`）。S7（联合验收与发布）已完成：版本串 2.7.0，chaos-lab 集群内用真实模型跑完 2.7.0 各条流程，发现并修复两处缺陷（见文末「S7 联合验收与发布」与 `docs/MVP-2.7.0-E2E-REPORT.md`）；S7 的提交、PR 与 `v2.7.0` tag 等主人确认。** **核心能力轨 A1–A4 不在 v2.7.0：移至 MVP-2.7.1（主人 10-08）。** 依主人铁律，只有 E2E 通过且当面确认后才 `git push --no-verify` / 打 `v2.7.0` tag。
 >
 > 全链规划（含 S1 详细计划）：`docs/superpowers/plans/2026-10-05-mvp-2.7.0-roadmap.md`
 > 设计输入：`docs/AgenticOps_BlueWhite_Review.zip`、`docs/superpowers/specs/2026-10-05-blue-white-sre-workspace-design.md`、`docs/ui-contracts/2026-10-05/`
@@ -20,12 +20,12 @@
 | **S3 方案枢纽 + 待办**（P4） | `/app/plans` 三标签 + `/app/plans/:id`、`GET /api/ui/attention` + 顶栏「需要你处理」、如实的批准措辞 + 核对勾选、方案状态 CAS、编辑防过期 | **已验收（2026-10-07）** |
 | **S4 Cases 与 Resources**（P3） | 队列 + 阅读区双栏（保留 2.6.1 阶段卡）、HealthIssue 读取、补充说明、顶栏账户范围、询问 Agent、Resources 表格 | **已验收（2026-10-07）** |
 | **S5 Chat**（P2） | 会话上下文与账户绑定、补充说明进上下文、`client_message_id` 幂等、派发状态与中断、流错误分类、草稿、附件规则、蓝白 Chat 页 | **已验收（2026-10-07）** |
-| **S6 报告与双语**（P5） | 报告版本与归属、中英渲染（保护值 fail-closed）、导出 / 打印、带版本 / 语言 / 幂等键的发布 | **已实现，待主人验收** |
-| S7 联合验收与发布（P6） | 文档、live E2E、版本串、`v2.7.0` tag | 未开始 |
-| **A1 账本与分钟级**（核心能力轨） | `change_events` 账本 + 感知度（资源属性）+ Sensing Worker（CloudTrail / K8s events 拉取、增量刷新）+ RCA 接入 + 三端点 / CLI / Settings 感知卡 / 资源与问题页 | **spec 已批准（10-06），详细计划待出** |
-| A2 live 级（核心能力轨） | live 探针、预算降级、`request_sensitivity`、两种端点采集、`VOLATILE_KEYS` 补齐 | 未开始 |
-| A3 覆盖面（核心能力轨） | 锚定缺口重测、九种解析器、ALB → 目标组 | 未开始 |
-| A4 评测门禁（核心能力轨） | 每夜 $0 指标、三个感知场景、`--assert`、再议 `sensing_enabled` 默认值 | 未开始 |
+| **S6 报告与双语**（P5） | 报告版本与归属、中英渲染（保护值 fail-closed）、导出 / 打印、带版本 / 语言 / 幂等键的发布 | **已验收（2026-10-08），已推 `0fb94b3`** |
+| **S7 联合验收与发布**（P6） | 文档、live E2E、版本串、`v2.7.0` tag | **已完成（2026-10-08）**；push / PR / tag 待主人确认 |
+| **A1 账本与分钟级**（核心能力轨） | `change_events` 账本 + 感知度（资源属性）+ Sensing Worker（CloudTrail / K8s events 拉取、增量刷新）+ RCA 接入 + 三端点 / CLI / Settings 感知卡 / 资源与问题页 | **移至 MVP-2.7.1**（主人 10-08；spec 已批准，计划未出） |
+| A2 live 级（核心能力轨） | live 探针、预算降级、`request_sensitivity`、两种端点采集、`VOLATILE_KEYS` 补齐 | 移至 MVP-2.7.1 |
+| A3 覆盖面（核心能力轨） | 锚定缺口重测、九种解析器、ALB → 目标组 | 移至 MVP-2.7.1 |
+| A4 评测门禁（核心能力轨） | 每夜 $0 指标、三个感知场景、`--assert`、再议 `sensing_enabled` 默认值 | 移至 MVP-2.7.1 |
 
 ---
 
@@ -666,8 +666,8 @@
   - 旧报告用「准备翻译」（`POST /api/content/report/{id}/translations`）；失败了可以重试。
   - 启动时把残留的「准备中」置为失败。工作线程里任何错误都落为失败，从不卡在「准备中」。
 - **保护值**（`services/content_protect`）
-  - 送进模型前，代码块、行内代码、`I#` / `R#` / `C#` / `P#` / `E-…` / `pc-…` 引用、ARN、资源 id、IP、区域、URL 和所有数字都换成编号占位符，模型看不到这些值。
-  - 译文里每个占位符必须恰好出现一次，还原后的保护值哈希必须与源一致；否则这条渲染失败（`protected_values_changed`），不展示任何部分译文。
+  - 送进模型前，代码块、行内代码、`I#` / `R#` / `C#` / `P#` / `E-…` / `pc-…` 引用、ARN、资源 id（必须含数字，S7 修正）、IP、区域、URL 和所有数字都换成编号占位符，模型看不到这些值。
+  - 译文里每个占位符必须恰好出现一次，还原后的保护值必须与源是同一组值（顺序可以不同，S7 修正）；否则这条渲染失败（`protected_values_changed`），不展示任何部分译文。
   - 中文紧贴的值（「问题I#12已修复」）也整体保护。
   - 模型多包的一层代码围栏和开场白会被去掉。
   - 回复被截断时失败为 `too_long`，不展示半截。
@@ -800,7 +800,101 @@
 
 ---
 
+## S7 联合验收与发布
+
+计划：`docs/superpowers/plans/2026-10-08-mvp-2.7.0-s7-release.md`（主人 10-08 批准，Native 执行）。E2E 报告：`docs/MVP-2.7.0-E2E-REPORT.md`。
+
+主人决定（10-08）：
+- live E2E 在 chaos-lab EKS 集群内跑（与 2.6.1 同一路线）。
+- A1–A4 不在 v2.7.0，移至 MVP-2.7.1。
+- E2E 用真实模型跑 2.7.0 的各条流程，不重跑 13 例定位评测。
+- 版本串统一为 2.7.0。
+
+### 改了什么
+
+- **版本串 2.7.0**
+  - `pyproject.toml`、`agenticops.__version__`、`uv.lock` 统一为 2.7.0；FastAPI 的 `app.version` 改为读 `__version__`，不再自己写一份。
+  - bootstrap、OpenAPI 和侧栏都显示 2.7.0。
+  - `tests/test_version.py` 钉住这几处一致。
+- **live E2E 发现并修复的两处缺陷**
+  1. **镜像无法从干净检出构建**（S2 加入 `home.test.ts` 起）（`7b4b2b6`）
+     - 原因：两个前端测试经 `node:fs` / `node:path` 读共享夹具，项目从没声明 `@types/node`。本机 `tsc` 找到了家目录 `node_modules` 里的一份，所以门禁全过，干净构建却全挂。
+     - 修复：加开发依赖 `@types/node ^20`（与 Dockerfile 的 node:20 一致）；`tsconfig.json` 的 `typeRoots` 只认项目自己的 `node_modules/@types`，本机门禁从此看到的就是干净构建看到的。
+  2. **真实 chat 保存的报告翻译不了**（`52e1c3f`）
+     - 现象：便宜模型、temperature 0，每次都 `protected_values_changed`。
+     - 原因一：资源 id 规则把普通词 `cluster-admin` 当成了 id，括号里的不透明占位符被模型丢掉。现在资源 id 必须含数字。
+     - 原因二：保护值哈希按出现顺序比较，译文把日期放到时间前面（中文就是这样写）也被拒。现在按多重集合比较：值被改、丢、增、重复或合并，照样失败；只是顺序可以不同。这改了 S6 设计里「按出现顺序」那一句（S6 设计文档已注明）。
+
+### live E2E 结果
+
+详见 `docs/MVP-2.7.0-E2E-REPORT.md`。
+
+- **A 真实故障走完整条流程**
+  - 告警成为 I#1。RCA 定位 `valid`（第 1 名 `Deployment chaos-lab/backend`），置信度 0.57，评审 `weak`，被门禁送去复核。
+  - 「需要你处理」列出待批方案。错误哈希 409 且不执行；第一份方案执行失败、回滚、判定 `failed`；问题回到 `root_cause_identified`。
+  - 审阅后的第二份方案：`pc-1` 按 check_id 绑定、`passed`，问题 `resolved`。
+- **B 补充说明、绑定账户的 chat、幂等发送、私有报告**
+  - 补充说明记为会话身份。上下文账户不符 409。
+  - 流事件齐全；运行中再发 409 `session_busy`；同一 `client_message_id` 重放、0 token。
+  - 私有报告 bob 404。修复后真实翻译 7 秒就绪；按语言导出各一份纸面。
+- **C 变更（alice 提出、admin 批准）**
+  - SRE 审核 69 秒；「批准并执行」后 3 项检查按 `pc-1…pc-3` 绑定、全部通过，`completed`。
+- **D live 界面走查**
+  - 1440 / 1000px 下 Cases 双栏与全屏返回、计划页、变更页、报告中英切换与导出、bob 看不到私有报告。
+  - 零页面报错、零外部请求。
+- **事故（操作员失误，已控制）**
+  - E2E 驱动脚本没审步骤就批准了第一份方案。其第 4 步 `aws eks create-addon`（集群级、范围外）被 AWS 拒绝（IRSA 角色无此权限），没有创建任何东西。
+  - 产品这边：判定 `failed`、回滚、命令审计都正确。之后每份方案批准前都先审步骤。
+- **成本**：10.87 美元（`/api/cost/summary`；翻译与评审调用不计入）。
+
+### S7 六个可达面
+
+- **CLI** — 做（间接）：`aiops version` 读 `__version__`，显示 2.7.0。
+- **Web API** — 做：bootstrap 的 `version` 与 OpenAPI 的 `info.version` 都读 `__version__`。
+- **Web UI** — 做（间接）：侧栏版本行来自 bootstrap，显示 v2.7.0；前端无代码改动（`package.json` 的 `0.1.0` 是内部版本，从不显示）。
+- **Agent tool** — 非目标。
+- **Schedule** — 非目标。
+- **Notification** — 非目标：集群内配置关闭了通知，发布由 S6 的测试和走查覆盖。
+
+### 升级注意
+
+1. 版本号从 `0.9.0-beta` 变为 `2.7.0`（`uv.lock` 同步）。
+2. 前端新增开发依赖 `@types/node`；`tsconfig.json` 只认项目自己的 `node_modules/@types`。
+3. 保护值改按多重集合比较。S6 期间生成的就绪译文（S6 未发布）里，`protected_value_hash` 仍是旧算法的值；没有任何逻辑比较它（过期以源哈希判断）。
+
+### 已知缺口（来自 live E2E，本版不修）
+
+- SRE 的修复方案会越界：「副本为 0」的问题，两份方案都加了集群级 add-on、HPA 和注解（L2）。策略没有把修复方案限制在问题自己的资源上；这次靠人工审阅和执行角色的 IAM 挡住。
+- 回滚可能把故障带回来：第一份方案「恢复到一半失败」的回滚是「两个都缩回 0」。
+- 命令分级：`kubectl rollout status`（只读）被当成写操作，每次先被拒一次再重试；`aws eks create-addon` 分级为 `unknown`，在已批准方案里被允许尝试。未知分级的写命令应按写处理。
+- RCA 结果的 `model_id` 为空；两次执行的 `duration_ms` 都是 45000，像是上报值而不是实测。
+- 集群的 OpenTelemetry operator 给应用 pod 注入了自动埋点，日志里有连不上 `cloudwatch-agent` 的报错（集群配置，不是应用）。
+- `pending_acceptance` →「接受」这次 live 没有出现（两次判定都是终态），由 S1 / 2.6.1 的测试覆盖；B5 没有走到解析器那一层的拒绝（agent 先拒绝了）。
+
+### S7 门禁结果
+
+2026-10-08，在 `52e1c3f`（S7 代码改动之后、文档提交之前）：
+
+| 门禁 | 结果 | S6 结束时 |
+|---|---|---|
+| 后端全量 `pytest tests/` | **6910 passed / 85 skipped / 2 failed**，两条都是已知的环境失败（`test_defaults_upgraded`、`test_no_cjk_in_base_prompts`）；第三条已知的 `test_web_tools` 这次在本机网络下通过 | 6891 passed / 3 failed |
+| `npx tsc --noEmit` | 0 错误（`typeRoots` 已固定） | 0 |
+| `npm test`（vitest） | 58 个文件 / 708 个测试全过 | 58 / 709（S6 修正删掉 1 个） |
+| `npm run build` | 成功；另在空目录里 `npm ci && npm run build` 成功（与镜像构建同一条路径） | 成功 |
+| 镜像构建 | `7b4b2b6`、`52e1c3f` 在开发机上构建并推到 ECR；`7866994` 构建失败（即缺陷 1） | — |
+
+### 发布动作（每一项都等主人确认）
+
+1. 推送 `MVP-2.7.0`（S7 的提交）。
+2. 开 PR `MVP-2.7.0 → main`（main 已含 S1–S5，PR #25）。
+3. 在发布提交上打带注释的 `v2.7.0` tag 并推送。
+4. （S7 之外）重部署开发机：`iac/deploy-sg/deploy.sh redeploy MVP-2.7.0`，先备份开发机上的 agent-memory / skills。
+
+---
+
 ## 核心能力轨：变更感知的系统模型（A1–A4）
+
+> **不在 v2.7.0：移至 MVP-2.7.1（主人 10-08）。** 下面是 10-06 并入时的规划原样，由 MVP-2.7.1 的 RELEASE 接手。
 
 主人 10-06 批准 spec `docs/superpowers/specs/2026-10-06-change-aware-system-model-design.md`（10-05/06 架构讨论的收敛：三分法 A' 系统模型 → B RCA 调查运行时 → C 易用性并入验收），并裁定在 MVP-2.7.0 上实现、并入本发布规划。它与界面阶段并行，不改界面阶段的顺序；阶段编号用 A（= spec §12 的 P1–P4）以避开设计包的 P0–P6 和 S1–S7。路线图：`docs/superpowers/plans/2026-10-05-mvp-2.7.0-roadmap.md`「核心能力轨」节。
 
