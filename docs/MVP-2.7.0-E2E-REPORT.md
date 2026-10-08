@@ -1,6 +1,6 @@
 # MVP-2.7.0 — Joint Live E2E Evidence Report
 
-> **Status: E2E done; S7 awaits the owner's acceptance. The 2.7.0 flows ran on real models in the chaos-lab EKS cluster. Two defects found by the run were fixed (one follow-up after the review). Push, PR and tag wait for the owner.**
+> **Status: E2E done; S7 accepted by the owner (2026-10-08).** The 2.7.0 flows ran on real models in the chaos-lab EKS cluster. Two defects found by the run were fixed (one follow-up after the review). The owner approved push, PR, the `v2.7.0` tag and the dev-box redeploy.
 > **Date:** 2026-10-08 · **Branch:** `MVP-2.7.0` · **Deployed:**
 > - pod 1 `7b4b2b6`: parts A, B (B1–B5), C, D (D1–D7);
 > - pod 2 `52e1c3f`: B6–B8 and D8–D10 again after the translation fix;
@@ -147,7 +147,7 @@ At `52e1c3f`, before the docs commit. The final numbers are in the RELEASE «S7 
 6. **The cluster's OpenTelemetry operator injects auto-instrumentation** into the app pod, which logs failures to reach a `cloudwatch-agent` that is not running. It is cluster configuration, not the app.
 7. **The scan cannot list EFS** (`aws efs describe-file-systems` → error): the IRSA role lacks the permission, as in 2.6.1.
 8. **`pending_acceptance` was not reached live** (both runs were final), and B5 did not reach the resolver's refusal (the agent refused first).
-9. **The protected values are now compared as a multiset (fix 2), so two values may trade places**: `Restart i-0aaa111, keep i-0bbb222` → the two ids swapped, or `from 3 to 2` → `from 2 to 3`, would pass. The S6 rule (in order) refused every real translation that reordered values; this one refuses any value changed, dropped, added, duplicated or merged, and an ISO date moves only whole — but which value goes with which subject is left to the model. **The owner decides whether to keep this** (a per-table-row comparison could narrow it further).
+9. **The protected values are now compared as a multiset (fix 2), so two values may trade places**: `Restart i-0aaa111, keep i-0bbb222` → the two ids swapped, or `from 3 to 2` → `from 2 to 3`, would pass. The S6 rule (in order) refused every real translation that reordered values; this one refuses any value changed, dropped, added, duplicated or merged, and an ISO date moves only whole — but which value goes with which subject is left to the model. **Owner, 10-08: keep it; MVP-2.7.1 narrows it with a per-table-row comparison.**
 
 ## Cost
 

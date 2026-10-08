@@ -122,7 +122,7 @@ def test_a_date_or_datetime_is_one_value(text, value):
 
 
 def test_a_swapped_pair_of_values_passes_by_design():
-    # S7 decision (owner yes/no pending): the values are compared as a multiset, so a translation may put them in
+    # S7 decision (owner 10-08: kept; narrowed per table row in MVP-2.7.1): the values are compared as a multiset, so a translation may put them in
     # another order — which also means two values may trade places; which value goes with which subject is the
     # model's (a known gap in the S6 spec correction and the 2.7.0 release notes)
     assert protected_hash("Restart i-0bbb222, keep i-0aaa111 running.") == protected_hash("Restart i-0aaa111, keep i-0bbb222 running.")
