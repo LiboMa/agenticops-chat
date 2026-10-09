@@ -28,6 +28,7 @@ keeps its existing name (`README_CN.md`) — external links depend on it.
 
 | Version | Date | File | Live evidence |
 |---|---|---|---|
+| 2.7.1 | in progress (from `v2.7.0` = `a953e6b`) | [`MVP-2.7.1-RELEASE.md`](MVP-2.7.1-RELEASE.md) | — (not implemented yet). Scope: the change-aware model track A1–A4 (moved from 2.7.0), protected values compared per table row, the 2.7.0 E2E observations |
 | 2.7.0 | 2026-10-08 (staged S1–S7) | [`MVP-2.7.0-RELEASE.md`](MVP-2.7.0-RELEASE.md) | [`MVP-2.7.0-E2E-REPORT.md`](MVP-2.7.0-E2E-REPORT.md) (done — real models on the chaos-lab cluster; two defects fixed during the run). S1–S7 accepted, tag `v2.7.0`; A1–A4 moved to MVP-2.7.1. Release presentation: [`MVP-2.7.0/presentation/`](MVP-2.7.0/presentation/) · *post-release addendum (2026-11-07, on `main`):* read-only accounts + the Strands 1.64 upgrade — [`STRANDS-1.64-UPGRADE-REPORT.md`](STRANDS-1.64-UPGRADE-REPORT.md) |
 | 2.6.1 | 2026-09-29 | [`MVP-2.6.1-RELEASE.md`](MVP-2.6.1-RELEASE.md) | [`MVP-2.6.1-E2E-REPORT.md`](MVP-2.6.1-E2E-REPORT.md) (in progress — owner walkthrough pending) · [`MVP-2.6.1-LOCATION-EVAL-REPORT.md`](MVP-2.6.1-LOCATION-EVAL-REPORT.md) (measured) |
 | 2.6.0 | 2026-09-26 | [`MVP-2.6.0-RELEASE.md`](MVP-2.6.0-RELEASE.md) | [`MVP-2.6.0-E2E-REPORT.md`](MVP-2.6.0-E2E-REPORT.md) |
