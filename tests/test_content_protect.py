@@ -122,7 +122,70 @@ def test_a_date_or_datetime_is_one_value(text, value):
 
 
 def test_a_swapped_pair_of_values_passes_by_design():
-    # S7 decision (owner 10-08: kept; narrowed per table row in MVP-2.7.1): the values are compared as a multiset, so a translation may put them in
-    # another order — which also means two values may trade places; which value goes with which subject is the
-    # model's (a known gap in the S6 spec correction and the 2.7.0 release notes)
+    # S7 decision (owner 10-08: kept for prose; narrowed per table row in MVP-2.7.1 — see the table tests below):
+    # outside a table the values are compared as a multiset, so a translation may put them in another order —
+    # which also means two values may trade places; which value goes with which subject is the model's
     assert protected_hash("Restart i-0bbb222, keep i-0aaa111 running.") == protected_hash("Restart i-0aaa111, keep i-0bbb222 running.")
+
+
+# ── MVP-2.7.1 (owner 10-08): inside a markdown table, the values are compared row by row ──
+
+TABLE = ("| Deployment | Replicas | HPA min / max |\n|---|---|---|\n"
+         "| frontend | 3 | 2 / 6 |\n| backend | 2 | 1 / 4 |\n")
+
+
+def test_a_value_moved_to_another_table_row_changes_the_hash():
+    swapped = TABLE.replace("| frontend | 3 |", "| frontend | 2 |").replace("| backend | 2 |", "| backend | 3 |")
+    assert sorted(protect(swapped)[1]) == sorted(protect(TABLE)[1])  # the same multiset …
+    assert protected_hash(swapped) != protected_hash(TABLE)          # … in other rows
+
+
+def test_a_translated_table_with_its_values_in_their_rows_passes():
+    zh = ("| 部署 | 副本数 | HPA 最小 / 最大 |\n|:---|---:|:---:|\n"
+          "| frontend | 3 | 2 / 6 |\n| backend | 2 | 1 / 4 |\n")
+    assert protected_hash(zh) == protected_hash(TABLE)
+
+
+def test_values_may_still_move_within_their_cell():
+    src = "| alarm | when |\n|---|---|\n| I#1 | 08:42:59 UTC on 2026-10-08 |\n"
+    zh = "| 告警 | 时间 |\n|---|---|\n| I#1 | 2026-10-08 的 08:42:59 UTC |\n"
+    assert protected_hash(zh) == protected_hash(src)
+
+
+def test_two_values_of_one_row_trading_cells_changes_the_hash():
+    # the 2.7.0 swap, tightened for table rows: replicas and max trading columns is a change
+    src = "| app | replicas | max |\n|---|---|---|\n| web | 3 | 6 |\n"
+    assert protected_hash("| app | replicas | max |\n|---|---|---|\n| web | 6 | 3 |\n") != protected_hash(src)
+
+
+def test_two_values_of_one_cell_may_still_trade_places_by_design():
+    # the remaining gap (MVP-2.7.1): within ONE cell the values are a multiset, so «2 / 6» → «6 / 2» passes —
+    # the price of letting zh reorder a date and a time inside a cell
+    src = "| app | min / max |\n|---|---|\n| web | 2 / 6 |\n"
+    assert protected_hash("| app | min / max |\n|---|---|\n| web | 6 / 2 |\n") == protected_hash(src)
+
+
+def test_outer_pipes_and_cell_padding_do_not_matter():
+    src = "| app | n |\n|---|---|\n| web | 3 |\n"
+    assert protected_hash("app | n\n:--- | ---:\nweb   |   3\n") == protected_hash(src)
+
+
+def test_a_table_without_outer_pipes_is_read_too():
+    src = "name | replicas\n--- | ---\nweb | 3\napi | 2\n"
+    assert protected_hash("name | replicas\n--- | ---\nweb | 2\napi | 3\n") != protected_hash(src)
+    assert protected_hash("名称 | 副本数\n--- | ---\nweb | 3\napi | 2\n") == protected_hash(src)
+
+
+def test_a_value_moved_out_of_its_table_into_prose_changes_the_hash():
+    src = "Replicas:\n\n| app | n |\n|---|---|\n| web | 3 |\n"
+    assert protected_hash("副本数：3\n\n| 应用 | 数 |\n|---|---|\n| web |  |\n") != protected_hash(src)
+
+
+def test_merging_or_dropping_a_row_changes_the_hash():
+    merged = TABLE.replace("| frontend | 3 | 2 / 6 |\n| backend | 2 | 1 / 4 |\n", "| frontend, backend | 3, 2 | 2 / 6, 1 / 4 |\n")
+    assert protected_hash(merged) != protected_hash(TABLE)
+
+
+def test_a_pipe_inside_code_or_prose_is_not_a_table():
+    src = "Run `kubectl get pods | grep web` on 3 nodes, then 2 more.\n"
+    assert protected_hash("先在 2 个节点上，再在 3 个节点上运行 `kubectl get pods | grep web`。\n") == protected_hash(src)

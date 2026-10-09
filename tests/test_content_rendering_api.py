@@ -99,6 +99,28 @@ def test_tampered_translation_fails_closed(env):
     assert (body["status"], body["error_code"], body["body_markdown"]) == ("failed", "protected_values_changed", None)
 
 
+TABLE_SRC = ("# Daily report\n\n| Deployment | Replicas |\n|---|---|\n| frontend | 3 |\n| backend | 2 |\n")
+
+
+def test_a_translation_that_moves_a_value_to_another_table_row_fails_closed(env):
+    # MVP-2.7.1 (owner 10-08): the 2.7.0 multiset let two values trade places; inside a table it no longer does
+    client, calls, cr = env
+    rid = _report(TABLE_SRC)
+    calls["reply"] = lambda masked: masked.replace("⟦P0⟧", "⟦TMP⟧").replace("⟦P1⟧", "⟦P0⟧").replace("⟦TMP⟧", "⟦P1⟧")
+    cr.translate_now(rid, 1, "zh")
+    body = _get(client, rid, "zh").json()
+    assert (body["status"], body["error_code"]) == ("failed", "protected_values_changed")
+
+
+def test_a_translated_table_keeping_its_rows_is_ready(env):
+    client, calls, cr = env
+    rid = _report(TABLE_SRC)
+    calls["reply"] = lambda masked: masked.replace("Daily report", "日报").replace("Deployment", "部署").replace("Replicas", "副本数")
+    cr.translate_now(rid, 1, "zh")
+    body = _get(client, rid, "zh").json()
+    assert body["status"] == "ready" and "| frontend | 3 |" in body["body_markdown"]
+
+
 def test_model_error_is_failed(env):
     client, calls, cr = env
     rid = _report()
