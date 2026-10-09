@@ -2,7 +2,7 @@
 
 > Version: 2.7.1（进行中）· Branch: `MVP-2.7.1`（从 `v2.7.0` = `a953e6b` 切出，工作树 `.worktrees/mvp-2.7.1`）· 起始日期：2026-10-09
 >
-> **状态：2.7.0 E2E 观察第 3 条（命令分类与自动批准）已修（10-09，主人批准「修复之后，按计划进行」），见下文「已修」节；A1–A4 尚未开始。** 主人 10-08 把核心能力轨 A1–A4 从 v2.7.0 移到本版本（「complete the A1–A4's implementation within MVP-2.7.1」）。spec 已批准；A1 的详细实施计划待出，写好后交主人批准、选执行方式，批准前不动代码；A2–A4 各自开工前再出计划。依主人铁律，只有 E2E 通过且当面确认后才 `git push --no-verify`。
+> **状态：2.7.0 E2E 观察第 3、4、5 条已修（10-09；主人「修复之后，按计划进行」「先修复 E2E 的故障」），见下文「已修」两节；第 1、2 条设计待主人确认；A1–A4 尚未开始。** 主人 10-08 把核心能力轨 A1–A4 从 v2.7.0 移到本版本（「complete the A1–A4's implementation within MVP-2.7.1」）。spec 已批准；A1 的详细实施计划待出，写好后交主人批准、选执行方式，批准前不动代码；A2–A4 各自开工前再出计划。依主人铁律，只有 E2E 通过且当面确认后才 `git push --no-verify`。
 >
 > 设计输入：`docs/superpowers/specs/2026-10-06-change-aware-system-model-design.md`（A1–A4 = 其 §12 的 P1–P4）；来历：`docs/MVP-2.7.0-RELEASE.md` 与 `docs/superpowers/plans/2026-10-05-mvp-2.7.0-roadmap.md` 的「核心能力轨」节（10-06 并入 2.7.0、10-08 移出，正文已搬到本文件）。
 
@@ -15,7 +15,7 @@
 | A3 覆盖面 | 锚定缺口重测、九种解析器、ALB → 目标组 | 未开始 |
 | A4 评测门禁 | 每夜 $0 指标、三个感知场景、`--assert`、再议 `sensing_enabled` 默认值 | 未开始 |
 | 受保护值按表格行比较 | 主人 10-08 决定（见下文「2.7.0 的跟进项」第 1 条） | 未开始 |
-| 2.7.0 E2E 观察 | 第 3 条（命令分类器 + 自动批准下限）**已修**；第 1、2、4 条修不修待主人定 | 第 3 条已修（10-09）；其余待定 |
+| 2.7.0 E2E 观察 | 第 3 条（命令分类器 + 自动批准下限）、第 4 条（RCA 模型 id）、第 5 条（执行时长）**已修**；第 1、2 条（SRE 越界、回滚复现故障）设计待主人确认 | 3 / 4 / 5 已修（10-09）；1 / 2 待定 |
 
 ---
 
@@ -66,14 +66,15 @@
 
 2.7.0 的报告翻译把受保护值（资源 id、数字、时间等）当**多重集**比较（`services/content_protect.protected_hash`）：任何值被改、丢、增、重复或合并都会被拒，但两个值可以互换位置——`Restart i-0aaa111, keep i-0bbb222` 换成两个 id 对调、`from 3 to 2` 换成 `from 2 to 3` 都能通过（`docs/MVP-2.7.0-E2E-REPORT.md`「Observations」第 9 条）。主人 10-08：2.7.0 保留这个语义，**2.7.1 按 markdown 表格行收窄**——表格每一行内的受保护值单独比较，跨行互换不再通过。届时收紧 `tests/test_content_protect.py::test_a_swapped_pair_of_values_passes_by_design`（表格行内对调应被拒；正文段落的语序自由保留与否随计划定）。
 
-### 2. 2.7.0 E2E 观察（第 3 条已修；第 1、2、4 条修不修待主人定）
+### 2. 2.7.0 E2E 观察（第 3、4、5 条已修；第 1、2 条设计待主人确认）
 
 出自 `docs/MVP-2.7.0-E2E-REPORT.md`「Observations (not fixed in this release)」：
 
 1. **SRE 的修复方案越界**：针对「副本数为 0」的两份修复方案都加了集群级 add-on 安装、HPA 和注解，定为 L2；策略里没有任何东西把修复方案限制在问题本身的资源上。人工审查拦住了，执行角色的 IAM 拒绝了那一次 AWS 写入。
 2. **回滚可能把故障带回来**：方案 #1 针对「恢复失败一半」的回滚是「把两者都缩回 0」。
 3. **命令分类器判错**：`kubectl rollout status`（只读）被判为写操作（每次第一次尝试被拒、再重试）；`aws eks create-addon` 被判为 `unknown` 档，执行器在已批准的方案里被允许尝试它。报告的建议：未知档的写命令应按写处理。**已修（10-09），见下文「已修」节。**
-4. **`RCAResult.model_id` 为空**（API 里那次 RCA 运行）。
+4. **`RCAResult.model_id` 为空**（API 里那次 RCA 运行）。**已修（10-09），见下文「已修：代码知道的事实由代码记录」。**
+5. **两次执行的 `duration_ms` 都是 45000**：像是上报的，不是测的。**已修（同上）。**
 
 ---
 
@@ -101,6 +102,20 @@
 **门禁**（2026-10-09，`.worktrees/mvp-2.7.1`，一次性库 `/tmp/aiops-271-test.db`）：后端全量 **6955 passed / 85 skipped / 1 failed**——失败的是 `test_session_manager_props.py::TestTTLExpirationCleanup::test_active_agents_are_kept`，时序型 Hypothesis 抖动，单独重跑 3 次均通过，且不引用本次改动的任何模块。本 worktree 不带主人未提交的 `settings.yaml` / `reporter_agent.py` 改动，所以主检出上那 2 个环境性失败不出现。前端未改动。
 
 **非目标**：L0 方案里带写命令时不拦（L0 本应只读，E2E 没撞到，待主人定）；观察第 1、2、4 条；推送。
+
+---
+
+## 已修：代码知道的事实由代码记录（2.7.0 E2E 观察第 4、5 条，2026-10-09）
+
+**之前**：`save_rca_result` 的 `model_id` 只是 RCA agent 调工具时自己填的参数，agent 从来不知道自己跑在哪个模型上，于是 `RCAResult.model_id` 为空；`save_execution_result` 的 `duration_ms` 同样是 executor 自报的数（E2E 两次都是 45000），没有任何地方测量；没有排队单的执行（自动执行、chat 里直接调用）新建的记录 `started_at = completed_at = 结束时刻`。
+
+**现在**：`RunContext` 多两个由代码填写的字段——`model_id`（`rca_agent` 用构建 agent 的那个模型 id 包住整次调用）和 `run_started_at`（`executor_agent` 在调用开始时写入）。`save_rca_result` 存 `RunContext.model_id`，agent 的参数只在代码没给时兜底；`save_execution_result` 从 `run_started_at` 量时长，否则用排队单认领时的 `started_at`，两者都没有才保留 agent 上报的数，新建的执行记录 `started_at` 也是真实开始时刻。三条执行路径（自动执行、ExecutorService 排队执行、chat 里直接调用）都经过 `executor_agent`，所以都被测量。
+
+**可达面**：CLI / Web API / Web UI / Schedule / Notification — 非目标（字段与接口形状不变，只是值变真；Issue 页的执行卡与 `GET /api/rca` 照常展示这两个字段）；Agent tool — 做：两个工具的参数仍收，但不再是唯一来源。
+
+**测试**：`tests/test_run_measured_facts.py`（模型 id：代码值、代码值优先于参数、无上下文时用参数、`rca_agent` 在调用期间写入并在结束后复原；时长：从执行开始量、从排队单认领量、都不知道时保留上报值、`executor_agent` 在调用期间写入并复原）。
+
+**门禁**（2026-10-09，`.worktrees/mvp-2.7.1`，一次性库）：后端全量 **6964 passed / 85 skipped / 0 failed**。
 
 ---
 

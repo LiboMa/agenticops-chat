@@ -755,6 +755,7 @@ def save_rca_result(
         if not issue:
             return f"HealthIssue #{health_issue_id} not found."
 
+        from agenticops.run_context import get_run_context
         rca = RCAResult(
             health_issue_id=health_issue_id,
             root_cause=root_cause,
@@ -765,7 +766,8 @@ def save_rca_result(
             fix_risk_level=fix_risk_level,
             sop_used=sop_used or None,
             similar_cases=cases_parsed,
-            model_id=model_id,
+            # the model rca_agent built its agent with; the agent's own argument only when the code named none
+            model_id=get_run_context().model_id or model_id,
             evidence=evidence_parsed,
         )
         from agenticops.services.rca_location import INVALID, validate_location
@@ -1625,6 +1627,15 @@ def save_execution_result(
                                 plan_changed=approval_drift(session, plan) is not None)
 
         now = datetime.now(timezone.utc)
+        # The run's duration is measured (E2E obs. 5: both live runs reported 45000): from when executor_agent
+        # began it, else from the queued ticket's claim; the agent's own figure only when neither is known.
+        began = rc.run_started_at
+        if began is None and rc.execution_id:
+            ticket = session.get(FixExecution, rc.execution_id)
+            began = ticket.started_at if ticket is not None else None
+        if began is not None:
+            began = began if began.tzinfo else began.replace(tzinfo=timezone.utc)  # SQLite hands back naive UTC
+            duration_ms = max(0, int((now - began).total_seconds() * 1000))
         fields = dict(
             status=status,
             completed_at=now,
@@ -1665,7 +1676,7 @@ def save_execution_result(
             execution = FixExecution(
                 fix_plan_id=fix_plan_id,
                 health_issue_id=issue_id,
-                started_at=now,
+                started_at=began or now,
                 executed_by=executed_by,
                 **fields,
             )

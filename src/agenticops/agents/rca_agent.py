@@ -496,7 +496,10 @@ def rca_agent(issue_id: int) -> str:
             if settings.rca_max_iterations > 0:
                 invoke_kwargs["limits"] = {"turns": settings.rca_max_iterations}
             started_at = datetime.now(timezone.utc)
-            with track_agent("rca", "analyze_issue", f"issue_id={issue_id}", parent_agent=infer_parent_agent()) as tracker:
+            from agenticops.run_context import run_context
+            # save_rca_result records the model from here — the agent itself does not know it (E2E obs. 4)
+            with run_context(model_id=model_id), \
+                    track_agent("rca", "analyze_issue", f"issue_id={issue_id}", parent_agent=infer_parent_agent()) as tracker:
                 result = invoke_with_retry(agent, prompt, **invoke_kwargs)
                 tracker.set_result(result)
 

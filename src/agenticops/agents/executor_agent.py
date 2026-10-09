@@ -9,6 +9,7 @@ Exposed as a tool for the Main Agent (agents-as-tools pattern).
 """
 
 import logging
+from datetime import datetime, timezone
 
 from strands import Agent, tool
 from strands.models.bedrock import BedrockModel
@@ -307,9 +308,12 @@ def executor_agent(fix_plan_id: int) -> str:
         )
 
         from agenticops.agents.preamble import invoke_with_retry, infer_parent_agent
+        from agenticops.run_context import run_context
         from agenticops.services.agent_log_service import track_agent
-        with track_agent("executor", "execute_fix", f"fix_plan_id={fix_plan_id}", parent_agent=infer_parent_agent(),
-                         model_id=model_id) as tracker:   # the smart model for L0/L1 — what the run is priced at
+        # save_execution_result measures the run's duration from here — never the agent's own figure (E2E obs. 5)
+        with run_context(run_started_at=datetime.now(timezone.utc)), \
+                track_agent("executor", "execute_fix", f"fix_plan_id={fix_plan_id}", parent_agent=infer_parent_agent(),
+                            model_id=model_id) as tracker:   # the smart model for L0/L1 — what the run is priced at
             result = invoke_with_retry(agent,
                 f"Execute FixPlan #{fix_plan_id}. "
                 f"Follow the 7-step execution protocol exactly. "
