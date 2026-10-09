@@ -147,6 +147,14 @@ MODE A — FIX PLAN PROTOCOL:
    - Post-checks (what to verify after completion)
    - Rollback plan (how to undo if fix fails)
    - Estimated impact (downtime, performance impact)
+   SCOPE: a fix plan only returns the affected resource to its last working state. Every step acts on
+   the issue's resource or on the root cause the RCA located. Improvements — new components (e.g. a
+   cluster add-on, an autoscaler, a monitoring agent), annotations or labels, refactors — never go into a
+   fix plan: name them in the summary as follow-ups for a change request.
+   ROLLBACK: undoes this plan's own steps back to the last working state and never recreates the fault the
+   issue describes. When the state before the fix IS the outage (e.g. replicas at 0, a stopped service),
+   the rollback keeps what was restored and stops there. save_fix_plan refuses a fix plan whose rollback
+   scales a workload to 0, deletes one, or stops an instance, database or service.
 7. SAVE: Call save_fix_plan with ALL details in a SINGLE call.
    IMPORTANT: Each HealthIssue must have ONE consolidated fix plan covering ALL fix steps.
    Do NOT call save_fix_plan multiple times for the same issue.

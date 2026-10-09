@@ -931,6 +931,17 @@ def save_fix_plan(
                                  estimated_impact, pre_parsed, post_parsed)
     if not health_issue_id or not rca_result_id:
         return "health_issue_id and rca_result_id are required for plan_kind='fix'."
+    # 2.7.0 E2E observation 2: undoing a fix must never recreate the fault (a change plan is not checked —
+    # rolling a scale-up from 0 back to 0 is a legitimate undo there)
+    from agenticops.services.change_steps import outage_commands, rollback_steps
+    takes_down = outage_commands(rollback_steps(rollback_parsed))
+    if takes_down:
+        return ("INVALID: the rollback would take the service down — "
+                + "; ".join(c[:200] for c in takes_down[:3])
+                + ". A fix plan's rollback undoes this plan's own steps back to the last working state and never "
+                  "recreates the fault the issue describes: when the state before the fix IS the outage (replicas "
+                  "at 0, a stopped service), the rollback keeps what was restored and stops there. Nothing was "
+                  "saved: call save_fix_plan again with a corrected rollback_plan.")
 
     session = get_session()
     try:

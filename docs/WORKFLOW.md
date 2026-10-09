@@ -361,7 +361,7 @@ flowchart TD
 
 ## Auto-Fix Pipeline (Closed-Loop Remediation)
 
-When alerts arrive via webhook, the entire pipeline runs automatically — no human intervention needed for L0/L1 risk fixes whose every step the command classifier can read (MVP-2.7.1; see «What the classifier knows» above):
+When alerts arrive via webhook, the entire pipeline runs automatically — no human intervention needed for L0/L1 risk fixes whose every step the command classifier can read (MVP-2.7.1; see «What the classifier knows» above). A fix plan only restores the affected resource (improvements go to its summary as follow-ups for a change request), and `save_fix_plan` refuses a fix plan whose rollback would take the service down — scale a workload to 0 or delete it, stop an instance, database or service (MVP-2.7.1):
 
 ```mermaid
 flowchart TD

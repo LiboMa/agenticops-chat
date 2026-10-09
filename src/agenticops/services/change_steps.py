@@ -5,6 +5,7 @@ Steps have the fix_plans.steps shape: an ordered list of {"action": str, "comman
 """
 
 import json
+import re
 from difflib import SequenceMatcher
 from typing import Optional
 
@@ -106,6 +107,37 @@ def unclassified_commands(*step_lists) -> list[str]:
                 label = f"(no command) {action}".strip()
             if label and label not in seen:
                 seen.append(label)
+    return seen
+
+
+# Commands that take a service down (2.7.0 E2E observation 2: «restore failed half-way» was rolled back by
+# scaling both Deployments to 0 — the outage the issue was about). Matched on the lowered, space-collapsed
+# command; `0(?!\d)` so `--replicas=10` is not a zero.
+_ZERO = r"(?:=|\s+)0(?!\d)"
+_OUTAGE_PATTERNS = tuple(re.compile(p) for p in (
+    rf"\bscale\b.*--replicas{_ZERO}",                                               # kubectl scale … --replicas=0
+    r"\bdelete\s+(?:deployments?|deploy|statefulsets?|sts|daemonsets?|ds|services?|svc)(?:[/.\s]|$)",
+    rf"\becs\s+update-service\b.*--desired-count{_ZERO}",
+    rf"\bautoscaling\s+(?:set-desired-capacity|update-auto-scaling-group)\b.*--(?:desired-capacity|max-size){_ZERO}",
+    r"\beks\s+update-nodegroup-config\b.*desiredsize=0(?!\d)",
+    r"\bec2\s+stop-instances\b",
+    r"\brds\s+stop-db-(?:instance|cluster)\b",
+    rf"\blambda\s+put-function-concurrency\b.*--reserved-concurrent-executions{_ZERO}",
+    r"^(?:sudo\s+)?systemctl\s+stop\b",
+    r"^(?:sudo\s+)?service\s+\S+\s+stop\b",
+))
+
+
+def outage_commands(*step_lists) -> list[str]:
+    """Every command, across the given step lists, that takes a service down: a workload scaled to 0 or deleted,
+    an instance / database / service stopped. save_fix_plan refuses a fix plan whose ROLLBACK holds one — undoing
+    a fix must never recreate the fault (2.7.0 E2E observation 2)."""
+    seen: list[str] = []
+    for steps in step_lists:
+        for step in steps or []:
+            command = _command(step)
+            if command and command not in seen and any(p.search(command.lower()) for p in _OUTAGE_PATTERNS):
+                seen.append(command)
     return seen
 
 
