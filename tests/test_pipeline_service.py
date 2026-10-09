@@ -110,6 +110,10 @@ class TestTriggerAutoApprove:
         mock_plan.status = "draft"
         mock_plan.risk_level = "L0"
         mock_plan.health_issue_id = 10
+        # real columns: a step the code can classify (an unclassified one is left for a human — see
+        # tests/test_unclassified_command_floor.py)
+        mock_plan.steps = [{"action": "check", "command": "kubectl get pods -n web"}]
+        mock_plan.rollback_plan = {}
 
         mock_issue = MagicMock()
         mock_issue.trace_id = "trace-abc"

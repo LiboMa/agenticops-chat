@@ -327,6 +327,10 @@ class TestKubectlReadonly:
             "config current-context",
             "events",
             "diff -f manifest.yaml",
+            # 2.7.0 E2E observation 3: rollout's two reads were classified as writes
+            "rollout status deployment/web",
+            "kubectl rollout status deploy/web --timeout=60s",
+            "rollout history deployment/web",
         ],
     )
     def test_readonly(self, cmd: str) -> None:
@@ -352,6 +356,9 @@ class TestKubectlWrite:
             "scale deployment my-dep --replicas=3",
             "autoscale deployment my-dep --min=2 --max=5",
             "rollout restart deployment my-dep",
+            "rollout undo deployment/web",
+            "rollout pause deployment/web",
+            "rollout resume deployment/web",
             "label pod my-pod env=prod",
             "annotate pod my-pod note=hello",
             "taint node my-node key=value:NoSchedule",

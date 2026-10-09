@@ -47,7 +47,8 @@ def _account(db, name="dev"):
     return acct.id
 
 
-def _fix_plan(db, status="pending_approval", *, issue_status="fix_planned", account_id=None, stamp=True):
+def _fix_plan(db, status="pending_approval", *, issue_status="fix_planned", account_id=None, stamp=True,
+              steps=None):
     """A fix plan as save_fix_plan leaves it; an approved/executing one as its approval (or the backfill) left it."""
     issue = HealthIssue(title="t", description="d", severity="low", source="test", status=issue_status,
                         resource_id="i-0abc", account_id=account_id)
@@ -55,7 +56,7 @@ def _fix_plan(db, status="pending_approval", *, issue_status="fix_planned", acco
     rca = RCAResult(health_issue_id=issue.id, root_cause="x", confidence=0.9)
     db.add(rca); db.flush()
     plan = FixPlan(health_issue_id=issue.id, rca_result_id=rca.id, risk_level="L1", title="p", summary="s",
-                   steps=[{"command": "echo a"}], status=status)
+                   steps=steps if steps is not None else [{"command": "echo a"}], status=status)
     db.add(plan); db.flush()
     if stamp:
         pc.stamp_content(db, plan)
@@ -205,7 +206,8 @@ def test_the_auto_approval_records_the_hash(db, monkeypatch):
     for key, value in (("auto_fix_enabled", True), ("executor_auto_approve_l0_l1", True),
                        ("policy_engine_enabled", False)):
         monkeypatch.setattr(settings, key, value)
-    plan = _fix_plan(db, status="draft")
+    # a step the code can classify: auto-approval leaves an unclassified one (`echo a`) for a human
+    plan = _fix_plan(db, status="draft", steps=[{"command": "kubectl get pods -n web"}])
     with patch("agenticops.services.pipeline_service.trigger_auto_execute"):
         trigger_auto_approve(plan.id)
     _assert_bound(plan.id)

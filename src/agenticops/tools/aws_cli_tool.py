@@ -218,6 +218,49 @@ def blocked_pattern_match(command: str, patterns=None) -> Optional[str]:
     return pattern_token_match(command, patterns)
 
 
+# 2.7.0 E2E observation 3: a write the prefix tables do not list (`aws eks create-addon`) was 'unknown'. The
+# execution gates already treat 'unknown' as a write, but auto-approval refuses to vouch for it, so an operation
+# whose verb is a mutation is classified as a write. This only ever raises a tier: a read verb the tables miss
+# stays 'unknown', and blocked patterns are still checked first.
+_AWS_WRITE_VERBS = frozenset({
+    "accept", "add", "allocate", "apply", "assign", "associate", "attach", "authorize", "cancel", "change", "copy",
+    "create", "decrease", "delete", "deploy", "deregister", "detach", "disable", "disassociate", "enable", "execute",
+    "failover", "import", "increase", "invoke", "merge", "modify", "move", "promote", "publish", "purge", "put",
+    "reboot", "register", "reject", "release", "remove", "replace", "reset", "resize", "restart", "restore",
+    "revoke", "rotate", "run", "schedule", "send", "set", "start", "stop", "tag", "terminate", "unassign", "untag",
+    "update", "upload", "write",
+})
+# Global options that take no value; every other `--option` is followed by its value unless written `--opt=value`.
+_AWS_FLAG_OPTIONS = frozenset({
+    "--debug", "--no-verify-ssl", "--no-paginate", "--no-sign-request", "--no-cli-pager", "--cli-auto-prompt",
+    "--no-cli-auto-prompt",
+})
+
+
+def _aws_operation(command: str) -> str:
+    """The operation of `aws [options] <service> [options] <operation> …` — '' when there is none."""
+    tokens = command.lower().split()
+    if not tokens or tokens[0] != "aws":
+        return ""
+    positional, i = [], 1
+    while i < len(tokens):
+        token = tokens[i]
+        if token.startswith("--"):
+            i += 1 if token in _AWS_FLAG_OPTIONS or "=" in token else 2
+            continue
+        positional.append(token)
+        if len(positional) == 2:
+            return token
+        i += 1
+    return ""
+
+
+def _is_write_verb(operation: str) -> bool:
+    parts = operation.split("-")
+    verb = parts[1] if parts[0] == "batch" and len(parts) > 1 else parts[0]  # batch-write-item vs batch-get-item
+    return verb in _AWS_WRITE_VERBS
+
+
 def _classify_command(command: str) -> str:
     """Classify a command as 'blocked', 'write', 'readonly', or 'unknown'."""
     cmd_lower = command.lower().strip()
@@ -233,6 +276,10 @@ def _classify_command(command: str) -> str:
     for prefix in READONLY_PREFIXES:
         if cmd_lower.startswith(prefix.lower()):
             return "readonly"
+
+    operation = _aws_operation(command)
+    if operation and _is_write_verb(operation):
+        return "write"
 
     return "unknown"
 

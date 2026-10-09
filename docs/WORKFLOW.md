@@ -199,6 +199,8 @@ flowchart TD
 
 > **AuthN vs AuthZ separation:** AuthN decides *whose* credentials (provider layer, fail-closed); AuthZ decides *what's permitted* (3-tier classifier + L0–L4 approval gate in the fix pipeline). A read-only command on the right account still runs; a write command on the right account still needs confirmation / approval.
 
+**What the classifier knows, and auto-approval (MVP-2.7.1):** an AWS operation the prefix tables do not list is classified by its verb — `create-` / `delete-` / `update-` / `put-` / `modify-` / `attach-` / `start-` / `stop-` / `tag-` / `invoke` / `publish` / …, and `batch-write-…` (global options and their values are skipped, so `aws --region r eks create-addon` is a write). This only ever raises a tier: a read verb the tables miss stays `unknown`, and blocked patterns are still checked first. `kubectl rollout status` / `rollout history` are reads; `rollout restart` / `undo` / `pause` / `resume` stay writes. The gates above already treat `unknown` like a write, but **auto-approval never covers a step the code cannot classify**: an L0/L1 fix plan or a standard change whose steps or rollback hold an `unknown` command, or a step with no command at all (the executor would choose what to run), waits for a human — one `policy_decision` event on the timeline, rule `unclassified_command`, action `require_human` (a prose-only rollback carries no step and is not counted).
+
 ---
 
 ## Core Workflow: Issue Lifecycle
@@ -359,7 +361,7 @@ flowchart TD
 
 ## Auto-Fix Pipeline (Closed-Loop Remediation)
 
-When alerts arrive via webhook, the entire pipeline runs automatically — no human intervention needed for L0/L1 risk fixes:
+When alerts arrive via webhook, the entire pipeline runs automatically — no human intervention needed for L0/L1 risk fixes whose every step the command classifier can read (MVP-2.7.1; see «What the classifier knows» above):
 
 ```mermaid
 flowchart TD
@@ -471,7 +473,8 @@ flowchart TD
   context is **refused** and the user is pointed at `/change`.
 
 **Invariants:** the CR terminal state is written only by `on_execution_result`; an unprovable target
-yields no plan; auto-approval needs both the yaml rule and the `change_auto_approve_standard` flag.
+yields no plan; auto-approval needs both the yaml rule and the `change_auto_approve_standard` flag, and no step
+the command classifier cannot read (MVP-2.7.1: otherwise rule `unclassified_command` → a normal change).
 A `webhook:*` requester (change intake) never approves or executes, even in shadow mode.
 
 ---

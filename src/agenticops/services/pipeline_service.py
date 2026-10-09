@@ -155,6 +155,21 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
                 )
                 return
 
+            # 2.7.0 E2E observation 3: an approval no person sees never covers a step the code cannot classify —
+            # whatever the plan's own risk label or the policy rule says
+            from agenticops.services.change_steps import plan_steps, rollback_steps, unclassified_commands
+            unclassified = unclassified_commands(plan_steps(plan.steps), rollback_steps(plan.rollback_plan))
+            if unclassified:
+                from agenticops.services.policy_engine import PolicyDecision
+                floor = PolicyDecision(action="require_human", rule_name="unclassified_command",
+                                       reasons=[f"unclassified command: {c[:200]}" for c in unclassified][:5])
+                if decision is not None:
+                    floor.shadow_blast_radius = decision.shadow_blast_radius
+                _log_policy_decision(plan, floor, trace_id)
+                logger.info("Auto-approve: FixPlan #%d (%s) holds %d unclassified step(s) — left for a human",
+                            fix_plan_id, plan.risk_level, len(unclassified))
+                return
+
             # Trust-Kernel ceiling (M-5): the always-enforced agent rule (no-agent-approval-above-l1) holds
             # regardless of policies.yaml — a rule granting auto_approve to L2/L3 cannot make
             # agent:auto-pipeline approve them. The check writes its own authz.denied audit row.

@@ -28,7 +28,7 @@
 整个系统遵循几条刻意为之的规则 —— 它们解释了下文大部分设计决策:
 
 1. **智能体即工具。** Main 智能体是*纯路由*;每个专家(Scan、Detect、RCA、SRE、Executor、Reporter)都以可调用工具的形式暴露。专家之间不直接对话。
-2. **读 / 规划 / 执行相互隔离。** SRE 只*规划*修复,永不触碰基础设施;只有 Executor 执行,且必须先过审批门。风险分级:L0/L1 自动批准,L2/L3 需人工。
+2. **读 / 规划 / 执行相互隔离。** SRE 只*规划*修复,永不触碰基础设施;只有 Executor 执行,且必须先过审批门。风险分级:L0/L1 自动批准(前提是每一步的命令代码都能判出档位),L2/L3 需人工。
 3. **分层模型控成本。** 最需要判断与动手的地方用 Opus 5.5(Main、RCA、SRE、Executor),高吞吐工作用 Sonnet 5.5(Scan、Detect,以及 Executor 的 L0/L1 方案),报告用 GPT-6 Astra(Reporter),Haiku 4.5 作为经济档(Signal Gate、RCA critic、翻译)。Bedrock 上的 OpenAI 模型(gpt-oss、GPT-5.x、GPT-6)同样是一等公民;Anthropic 专属特性——以及 Claude 4.7+ 拒收的 `temperature`——按模型族门控。可按智能体覆盖;扩展思考的 effort 会对高严重级别或重跑的 RCA 自动升档,也可按对话会话固定。Token 与成本按每次调用追踪,配实时看板(Web + `aiops cost` CLI)。
 4. **智能体安全地学习。** 记忆与技能在硬性安全边界内自优化 —— 智能体的写入先落为草稿;发布经安全门禁;人类撰写的知识被固定,永不被自动改动。
 5. **配置单一真源。** `config/settings.yaml` 定义一切;环境变量覆盖它。代码从不硬编码配置值。

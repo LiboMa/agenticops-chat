@@ -218,6 +218,36 @@ class TestClassifyCommand:
     def test_unknown_commands(self, cmd):
         assert _classify_command(cmd) == "unknown"
 
+    # -- 2.7.0 E2E observation 3: a write the prefix tables do not list is still a write --
+
+    @pytest.mark.parametrize("cmd", [
+        "aws eks create-addon --cluster-name lab --addon-name metrics-server",
+        "aws --region us-east-1 eks create-addon --cluster-name lab --addon-name x",
+        "aws --output json --region us-east-1 eks update-nodegroup-config --cluster-name lab --nodegroup-name ng",
+        "aws --debug eks delete-addon --cluster-name lab --addon-name x",
+        "aws --region=us-east-1 elbv2 modify-target-group --target-group-arn arn:x",
+        "aws dynamodb batch-write-item --request-items file://x.json",
+        "aws lambda invoke --function-name f out.json",
+        "aws sns publish --topic-arn arn:x --message hi",
+        "aws ecr put-image-tag-mutability --repository-name r --image-tag-mutability IMMUTABLE",
+    ])
+    def test_unlisted_writes_classify_by_their_verb(self, cmd):
+        assert _classify_command(cmd) == "write"
+
+    @pytest.mark.parametrize("cmd", [
+        "aws dynamodb batch-get-item --request-items file://x.json",
+        "aws eks get-token --cluster-name lab",            # a read the tables do not list stays unknown: never lowered
+        "aws foo describe-x --name create-y",              # the verb is the operation's, never an argument's
+        "aws --region create-1 eks list-clusters",         # nor a global option's value
+        "aws eks",                                         # no operation at all
+    ])
+    def test_the_verb_fallback_only_raises_a_named_write_verb(self, cmd):
+        assert _classify_command(cmd) == "unknown"
+
+    def test_blocked_still_wins_over_the_verb_fallback(self):
+        assert _classify_command("aws --region us-east-1 iam create-user --user-name x") == "blocked"
+        assert _classify_command("aws account delete-alternate-contact --alternate-contact-type BILLING") == "blocked"
+
 
 # ── run_aws_cli_readonly tests ───────────────────────────────────────
 

@@ -4,6 +4,7 @@ difference between what was asked for and what the SRE planned — computed here
 Steps have the fix_plans.steps shape: an ordered list of {"action": str, "command": str}.
 """
 
+import json
 from difflib import SequenceMatcher
 from typing import Optional
 
@@ -58,6 +59,53 @@ def blocked_commands(*step_lists) -> list[str]:
             command = _command(step)
             if command and command not in seen and command_tier(command) == "blocked":
                 seen.append(command)
+    return seen
+
+
+def plan_steps(steps) -> list:
+    """A plan's steps column as a list (legacy rows hold a JSON string)."""
+    from agenticops.services.verification import decode_legacy_json
+    return decode_legacy_json(steps, list)
+
+
+def rollback_steps(rollback_plan) -> list:
+    """The steps a rollback plan carries. Its shape is free-form: {"steps": [...]}, {"commands": [...]}, a bare
+    list, or prose ({"description": "..."}) — prose carries no step, so it adds nothing."""
+    value = rollback_plan
+    for _ in range(3):  # legacy rows hold a JSON string, sometimes encoded more than once
+        if not isinstance(value, str):
+            break
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return []
+    if isinstance(value, list):
+        return value
+    if not isinstance(value, dict):
+        return []
+    out: list = []
+    for key in ("steps", "commands"):
+        if isinstance(value.get(key), list):
+            out += value[key]
+    return out
+
+
+def unclassified_commands(*step_lists) -> list[str]:
+    """Every step, across the given step lists, that no execution tool can classify: its command's tier is
+    'unknown', or it has no command, so the executor would decide what to run (2.7.0 E2E observation 3).
+    Auto-approval sends a plan holding one to a person. A blocked command is not listed — blocked_commands()
+    refuses it outright."""
+    seen: list[str] = []
+    for steps in step_lists:
+        for step in steps or []:
+            command = _command(step)
+            if command:
+                label = command if command_tier(command) == "unknown" else ""
+            else:
+                action = " ".join(str(step.get("action") or "").split()) if isinstance(step, dict) else ""
+                label = f"(no command) {action}".strip()
+            if label and label not in seen:
+                seen.append(label)
     return seen
 
 

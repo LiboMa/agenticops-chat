@@ -32,7 +32,8 @@ from agenticops.services.notification_service import (  # noqa: F401  (pending_a
     notify_execution_pending_acceptance,
 )
 from agenticops.services.verification import FAILED, PASSED, PENDING, as_results, evaluate
-from agenticops.services.change_steps import blocked_commands, diff_steps, normalize_steps
+from agenticops.services.change_steps import (blocked_commands, diff_steps, normalize_steps, plan_steps,
+                                              rollback_steps, unclassified_commands)
 from agenticops.services.pipeline_events import log_event
 from agenticops.services.plan_content import approval_conflict, plan_label, stamp_approval, stamp_content
 
@@ -789,6 +790,8 @@ def evaluate_policy(cr_id: int, risk_level: str, action_type: Optional[str]):
             [t.get("db_id") for t in targets], cr.account_id)
         plan = active_plan_for(s, cr_id)
         blocked = blocked_commands(cr.proposed_steps, plan.steps if plan else None)
+        unclassified = (unclassified_commands(plan_steps(plan.steps), rollback_steps(plan.rollback_plan))
+                        if plan else [])
     first = targets[0]["resource_id"] if targets else None
     if blocked:
         decision = PolicyDecision(action="block", rule_name="blocked_command",
@@ -799,6 +802,11 @@ def evaluate_policy(cr_id: int, risk_level: str, action_type: Optional[str]):
             blast_radius=blast_radius, plan_kind="change",
             emergency=emergency, action_type=action_type,
         )
+        if decision.action == "auto_approve" and unclassified:
+            # 2.7.0 E2E observation 3: a standard change approved by no person never covers a step the code
+            # cannot classify; it becomes a normal change that waits for a human approver
+            decision = PolicyDecision(action="require_human", rule_name="unclassified_command",
+                                      reasons=[f"unclassified command: {c[:200]}" for c in unclassified][:5])
     decision.shadow_blast_radius = shadow_blast_radius
     _event(cr_id, "policy_decision", "approval", decision.action,
            detail={"risk_level": risk_level, "action_type": action_type, "policy_decision": decision.to_dict()},

@@ -2,7 +2,7 @@
 
 > Version: 2.7.1（进行中）· Branch: `MVP-2.7.1`（从 `v2.7.0` = `a953e6b` 切出，工作树 `.worktrees/mvp-2.7.1`）· 起始日期：2026-10-09
 >
-> **状态：尚未开始实现。** 主人 10-08 把核心能力轨 A1–A4 从 v2.7.0 移到本版本（「complete the A1–A4's implementation within MVP-2.7.1」）。spec 已批准；A1 的详细实施计划待出，写好后交主人批准、选执行方式，批准前不动代码；A2–A4 各自开工前再出计划。依主人铁律，只有 E2E 通过且当面确认后才 `git push --no-verify`。
+> **状态：2.7.0 E2E 观察第 3 条（命令分类与自动批准）已修（10-09，主人批准「修复之后，按计划进行」），见下文「已修」节；A1–A4 尚未开始。** 主人 10-08 把核心能力轨 A1–A4 从 v2.7.0 移到本版本（「complete the A1–A4's implementation within MVP-2.7.1」）。spec 已批准；A1 的详细实施计划待出，写好后交主人批准、选执行方式，批准前不动代码；A2–A4 各自开工前再出计划。依主人铁律，只有 E2E 通过且当面确认后才 `git push --no-verify`。
 >
 > 设计输入：`docs/superpowers/specs/2026-10-06-change-aware-system-model-design.md`（A1–A4 = 其 §12 的 P1–P4）；来历：`docs/MVP-2.7.0-RELEASE.md` 与 `docs/superpowers/plans/2026-10-05-mvp-2.7.0-roadmap.md` 的「核心能力轨」节（10-06 并入 2.7.0、10-08 移出，正文已搬到本文件）。
 
@@ -15,7 +15,7 @@
 | A3 覆盖面 | 锚定缺口重测、九种解析器、ALB → 目标组 | 未开始 |
 | A4 评测门禁 | 每夜 $0 指标、三个感知场景、`--assert`、再议 `sensing_enabled` 默认值 | 未开始 |
 | 受保护值按表格行比较 | 主人 10-08 决定（见下文「2.7.0 的跟进项」第 1 条） | 未开始 |
-| 2.7.0 E2E 观察 | 四条未修的观察（见下文第 2 条）；**是否在本版本修、修哪几条，待主人定** | 待定 |
+| 2.7.0 E2E 观察 | 第 3 条（命令分类器 + 自动批准下限）**已修**；第 1、2、4 条修不修待主人定 | 第 3 条已修（10-09）；其余待定 |
 
 ---
 
@@ -66,14 +66,41 @@
 
 2.7.0 的报告翻译把受保护值（资源 id、数字、时间等）当**多重集**比较（`services/content_protect.protected_hash`）：任何值被改、丢、增、重复或合并都会被拒，但两个值可以互换位置——`Restart i-0aaa111, keep i-0bbb222` 换成两个 id 对调、`from 3 to 2` 换成 `from 2 to 3` 都能通过（`docs/MVP-2.7.0-E2E-REPORT.md`「Observations」第 9 条）。主人 10-08：2.7.0 保留这个语义，**2.7.1 按 markdown 表格行收窄**——表格每一行内的受保护值单独比较，跨行互换不再通过。届时收紧 `tests/test_content_protect.py::test_a_swapped_pair_of_values_passes_by_design`（表格行内对调应被拒；正文段落的语序自由保留与否随计划定）。
 
-### 2. 2.7.0 E2E 观察（未修；修不修、修哪几条待主人定）
+### 2. 2.7.0 E2E 观察（第 3 条已修；第 1、2、4 条修不修待主人定）
 
 出自 `docs/MVP-2.7.0-E2E-REPORT.md`「Observations (not fixed in this release)」：
 
 1. **SRE 的修复方案越界**：针对「副本数为 0」的两份修复方案都加了集群级 add-on 安装、HPA 和注解，定为 L2；策略里没有任何东西把修复方案限制在问题本身的资源上。人工审查拦住了，执行角色的 IAM 拒绝了那一次 AWS 写入。
 2. **回滚可能把故障带回来**：方案 #1 针对「恢复失败一半」的回滚是「把两者都缩回 0」。
-3. **命令分类器判错**：`kubectl rollout status`（只读）被判为写操作（每次第一次尝试被拒、再重试）；`aws eks create-addon` 被判为 `unknown` 档，执行器在已批准的方案里被允许尝试它。报告的建议：未知档的写命令应按写处理。**这一条是执行面的安全缺口，建议优先。**
+3. **命令分类器判错**：`kubectl rollout status`（只读）被判为写操作（每次第一次尝试被拒、再重试）；`aws eks create-addon` 被判为 `unknown` 档，执行器在已批准的方案里被允许尝试它。报告的建议：未知档的写命令应按写处理。**已修（10-09），见下文「已修」节。**
 4. **`RCAResult.model_id` 为空**（API 里那次 RCA 运行）。
+
+---
+
+## 已修：命令分类与自动批准下限（2.7.0 E2E 观察第 3 条，2026-10-09）
+
+**之前**：
+- 执行闸门（`run_aws_cli` / `run_on_host` / `run_kubectl` / provider 层 `guarded_run`）本来就把 `unknown` 当写处理：要确认、变更评审期间拒绝、命中 `change_required` 时要已批准的方案、写命令账本。E2E 里 `create-addon` 在已批准方案里被尝试，与一条普通写命令待遇相同。
+- 真正的缺口是**自动批准不看命令**：`policies.yaml` 的 `auto-approve-low-risk` 只看方案自己标的风险等级（L0/L1，由 SRE 给出），一份带着代码判不出的命令、却被标成 L1 的方案，会在没有任何人看过的情况下被批准并执行。E2E 那份方案标的是 L2，所以没撞上。
+- 标签本身也错：`kubectl rollout status` / `rollout history` 是读，却因为整个 `rollout` 被列为写而先被拒一次；AWS 写前缀表只有 25 条、没有一条 EKS，`create-addon` 落到 `unknown`。
+
+**现在**：
+- **kubectl**：`rollout status`、`rollout history` 判为只读（先于写表检查）；`rollout restart` / `undo` / `pause` / `resume` 仍是写。
+- **AWS**：前缀表没命中的命令按操作动词兜底——`create` / `delete` / `update` / `put` / `modify` / `attach` / `detach` / `associate` / `start` / `stop` / `reboot` / `tag` / `untag` / `enable` / `disable` / `invoke` / `publish` / `send` / `run` / … 判为写，`batch-` 看第二个词（`batch-write-item` 写、`batch-get-item` 不变）。取操作名时跳过全局选项及其值（`aws --region r eks create-addon` 是写，`aws --region create-1 eks list-clusters` 不会把选项值当动词）。**只升不降**：表里漏掉的读动词仍是 `unknown`，blocked 规则仍最先判。
+- **自动批准下限**：方案的步骤或回滚里，只要有一步的命令档位是 `unknown`，或者一步根本没写命令（执行器只能临场决定跑什么），就**不自动批准**，交人审，时间线记一条 `policy_decision`（规则 `unclassified_command`、动作 `require_human`，原因列出前 5 条命令）。修复方案在 `pipeline_service.trigger_auto_approve` 里于策略判定之后、Trust-Kernel 上限检查之前生效（策略启用与否都生效）；变更方案在 `change_service.evaluate_policy` 里把 `auto_approve` 改为 `require_human`，于是成为需要人审批的 normal 变更。判定是一个函数 `change_steps.unclassified_commands`（复用 `command_tier`）。
+
+**口径裁定**（实现时定，代价写明）：
+- 回滚方案格式不固定：只读其中实际带着的步骤（`steps` / `commands` 列表或裸列表）；纯文字描述（`{"description": …}`）不是步骤、不计——若也算，几乎所有 L1 方案都会被拦到人审，超出本次修复。
+- 没写命令的步骤计为「判不出」（save_fix_plan 的约定是每步都有 `command`）。代价：仍按旧习惯只写文字步骤的方案会改由人审。
+- `pre_checks` / `post_checks` 不在下限里（它们应是只读检查；本次范围是步骤与回滚）。
+
+**可达面**：CLI — 非目标（`/approve` 本来就是人）；Web API — 非目标（接口形状不变）；Web UI — 非目标、无 UI 改动：没自动批准的原因已经在时间线的 `policy_decision` 事件里（动作 `require_human` 有现成文案），方案照常出现在「需要你处理」与待审批通知里；Agent tool — 做：`run_kubectl rollout status` 不再要求确认，`run_aws_cli` 对兜底判为写的命令照写处理；Schedule — 非目标；Notification — 非目标（沿用现有待审批通知）。
+
+**测试**：`tests/test_unclassified_command_floor.py`（判定函数、回滚读取、修复方案三种路径、变更方案两种路径）；分类器用例补进 `tests/test_skills_security.py`、`tests/test_aws_cli_tool.py`。两处旧夹具改为可判档的命令：`tests/test_pipeline_service.py` 的 mock 方案原本没有真实的 `steps` 列；`tests/test_plan_content.py` 自动批准用例的 `echo a` 现在会被下限拦下（没有把 `echo` 加进只读表——`echo x > file` 是写）。
+
+**门禁**（2026-10-09，`.worktrees/mvp-2.7.1`，一次性库 `/tmp/aiops-271-test.db`）：后端全量 **6955 passed / 85 skipped / 1 failed**——失败的是 `test_session_manager_props.py::TestTTLExpirationCleanup::test_active_agents_are_kept`，时序型 Hypothesis 抖动，单独重跑 3 次均通过，且不引用本次改动的任何模块。本 worktree 不带主人未提交的 `settings.yaml` / `reporter_agent.py` 改动，所以主检出上那 2 个环境性失败不出现。前端未改动。
+
+**非目标**：L0 方案里带写命令时不拦（L0 本应只读，E2E 没撞到，待主人定）；观察第 1、2、4 条；推送。
 
 ---
 

@@ -151,6 +151,9 @@ KUBECTL_READONLY_SUBCOMMANDS = {
     "auth can-i", "api-resources", "api-versions", "version",
     "config view", "config get-contexts", "config current-context",
     "events", "diff",
+    # rollout's two reads (2.7.0 E2E observation 3: `rollout status` was refused as a write, then retried);
+    # checked before KUBECTL_WRITE_SUBCOMMANDS, so `rollout restart/undo/pause/resume` stay writes
+    "rollout status", "rollout history",
 }
 
 KUBECTL_WRITE_SUBCOMMANDS = {
