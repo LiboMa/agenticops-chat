@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgenticOps — 项目、架构与功能分享</title>
+<style>
+  :root {
+    --bg: #F5F4EE;
+    --card: #FFFFFF;
+    --ink: #141413;
+    --muted: #5E5D59;
+    --line: #D9D6CC;
+    --line-strong: #8F8B80;
+    --clay: #D97757;
+    --clay-deep: #B4542F;
+    --clay-soft: #F6E3DA;
+    --ok: #3F7A50;
+    --ok-soft: #E2EFE5;
+    --warn: #9A6412;
+    --warn-soft: #F5EAD3;
+    --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei", "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: #1F1E1C; overflow: hidden; }
+  body { font-family: var(--sans); color: var(--ink); -webkit-font-smoothing: antialiased; }
+
+  /* ---------- stage: fixed 1920x1080 canvas, scaled to fit ---------- */
+  #viewport { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+  #stage { position: relative; width: 1920px; height: 1080px; flex: none; transform-origin: center center; background: var(--bg); overflow: hidden; }
+  .slide { position: absolute; inset: 0; display: none; padding: 60px 96px 84px; flex-direction: column; overflow: hidden; }
+  .slide.active { display: flex; }
+  .notes { display: none; }
+
+  /* ---------- typography ---------- */
+  .kicker { font-family: var(--mono); font-size: 24px; letter-spacing: .08em; color: var(--clay-deep); text-transform: uppercase; display: flex; gap: 16px; align-items: center; }
+  .kicker::before { content: ""; width: 40px; height: 3px; background: var(--clay); }
+  h1 { font-size: 112px; font-weight: 700; letter-spacing: -.02em; line-height: 1.2; padding-bottom: 12px; }
+  h2 { font-size: 50px; font-weight: 700; letter-spacing: -.01em; line-height: 1.25; margin-top: 10px; }
+  h3 { font-size: 28px; font-weight: 700; line-height: 1.3; }
+  p, li, td, th { font-size: 24px; line-height: 1.45; }
+  .lead { font-size: 28px; line-height: 1.5; color: var(--muted); margin-top: 14px; max-width: 1500px; }
+  code, .mono { font-family: var(--mono); font-size: 1em; }
+  .muted { color: var(--muted); }
+  .clay { color: var(--clay-deep); }
+  b, strong { font-weight: 700; }
+  ul.plain { list-style: none; }
+  ul.dash { list-style: none; }
+  ul.dash li { position: relative; padding-left: 26px; margin-top: 6px; }
+  ul.dash li::before { content: ""; position: absolute; left: 0; top: .72em; width: 12px; height: 2px; background: var(--clay); }
+
+  .body { flex: 1; min-height: 0; margin-top: 24px; display: flex; gap: 40px; }
+  .col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+  .card { background: var(--card); border: 1.5px solid var(--line); border-radius: 4px; padding: 18px 24px; }
+  .card.dark { background: var(--ink); color: #F5F4EE; border-color: var(--ink); }
+  .card.dark .muted { color: #BDB9AE; }
+  .tag { display: inline-block; font-family: var(--mono); font-size: 24px; line-height: 1.3; padding: 0 10px; border: 1.5px solid var(--line-strong); border-radius: 3px; color: var(--muted); white-space: nowrap; }
+  .tag.ok { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+  .tag.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+  .tag.clay { color: var(--clay-deep); border-color: var(--clay); background: var(--clay-soft); }
+  .src { font-size: 18px; color: var(--muted); }
+  .src code { font-size: 18px; }
+
+  /* landing-significance strip */
+  .landing { margin-top: 16px; display: flex; align-items: stretch; border: 1.5px solid var(--clay); background: var(--clay-soft); border-radius: 4px; }
+  .landing .lbl { flex: none; background: var(--clay); color: #fff; font-weight: 700; font-size: 24px; padding: 12px 20px; display: flex; align-items: center; }
+  .landing .txt { font-size: 24px; padding: 12px 22px; line-height: 1.45; display: flex; align-items: center; }
+
+  /* ---------- svg diagrams ---------- */
+  svg.diagram { display: block; overflow: visible; }
+  svg.diagram text { font-family: var(--sans); fill: var(--ink); }
+  svg.diagram .t-title { font-size: 28px; font-weight: 700; }
+  svg.diagram .t-sub { font-size: 24px; fill: var(--muted); }
+  svg.diagram .t-mono { font-family: var(--mono); font-size: 24px; }
+  svg.diagram .t-label { font-size: 24px; fill: var(--muted); }
+  svg.diagram .t-clay { fill: var(--clay-deep); }
+  svg.diagram .t-white { fill: #fff; }
+  svg.diagram .box { fill: var(--card); stroke: var(--ink); stroke-width: 1.5; }
+  svg.diagram .box-soft { fill: var(--card); stroke: var(--line-strong); stroke-width: 1.5; }
+  svg.diagram .box-dark { fill: var(--ink); stroke: var(--ink); }
+  svg.diagram .box-clay { fill: var(--clay-soft); stroke: var(--clay); stroke-width: 2; }
+  svg.diagram .box-ok { fill: var(--ok-soft); stroke: var(--ok); stroke-width: 1.5; }
+  svg.diagram .box-warn { fill: var(--warn-soft); stroke: var(--warn); stroke-width: 1.5; }
+  svg.diagram .lane { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 6 6; }
+  svg.diagram .edge { fill: none; stroke: var(--ink); stroke-width: 1.8; }
+  svg.diagram .edge-soft { fill: none; stroke: var(--line-strong); stroke-width: 1.6; }
+  svg.diagram .edge-clay { fill: none; stroke: var(--clay); stroke-width: 2.4; }
+  svg.diagram .edge-dash { fill: none; stroke: var(--line-strong); stroke-width: 1.6; stroke-dasharray: 6 5; }
+  svg.diagram .lifeline { stroke: var(--line-strong); stroke-width: 1.5; stroke-dasharray: 4 6; }
+  svg.diagram .act { fill: var(--clay-soft); stroke: var(--clay); stroke-width: 1.5; }
+
+  /* ---------- animation (entry + emphasis), only on the active slide ---------- */
+  @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes draw { from { stroke-dashoffset: var(--len, 400); } to { stroke-dashoffset: 0; } }
+  @keyframes pulse { 0%, 100% { stroke-width: 2; } 50% { stroke-width: 4.5; } }
+  .slide.active .anim { animation: rise .55s cubic-bezier(.2,.7,.2,1) both; animation-delay: calc(var(--i, 0) * 90ms); }
+  .slide.active svg .fx { animation: fadein .5s ease-out both; animation-delay: calc(var(--i, 0) * 90ms); }
+  .slide.active svg .drawn { stroke-dasharray: var(--len, 400); animation: draw .8s ease-out both; animation-delay: calc(var(--i, 0) * 90ms); }
+  .slide.active svg .emph { animation: fadein .5s ease-out both, pulse 2.4s ease-in-out 1.6s 2; animation-delay: calc(var(--i, 0) * 90ms), 1.8s; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .slide svg .drawn { stroke-dasharray: none !important; }
+  }
+
+  /* ---------- chrome: progress + page number (inside stage, scales with it) ---------- */
+  #progress { position: absolute; left: 0; top: 0; height: 6px; background: var(--clay); width: 0; transition: width .3s ease; z-index: 5; }
+  #pageno { position: absolute; right: 96px; bottom: 26px; font-family: var(--mono); font-size: 24px; color: var(--muted); z-index: 5; }
+  #brand { position: absolute; left: 96px; bottom: 26px; font-family: var(--mono); font-size: 24px; color: var(--muted); z-index: 5; letter-spacing: .04em; }
+  #brand b { color: var(--ink); }
+  .navzone { position: absolute; top: 0; bottom: 0; width: 50%; z-index: 4; cursor: pointer; }
+  #zone-prev { left: 0; cursor: w-resize; }
+  #zone-next { right: 0; cursor: e-resize; }
+  .slide a { position: relative; z-index: 6; }
+
+  /* ---------- speaker notes (N) ---------- */
+  #notes-panel { position: fixed; left: 0; right: 0; bottom: 0; max-height: 40vh; overflow: auto; background: rgba(20,20,19,.96); color: #F5F4EE; padding: 18px 32px 22px; font-size: 20px; line-height: 1.6; z-index: 20; display: none; border-top: 3px solid var(--clay); }
+  #notes-panel.open { display: block; }
+  #notes-panel .hd { font-family: var(--mono); font-size: 18px; color: #E9A88D; margin-bottom: 6px; }
+
+  /* ---------- overview (O / Esc) ---------- */
+  #overview { position: fixed; inset: 0; background: rgba(20,20,19,.97); z-index: 30; display: none; overflow: auto; padding: 40px; }
+  #overview.open { display: block; }
+  #overview .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 24px; }
+  #overview .thumb { cursor: pointer; border: 2px solid #3A3936; border-radius: 4px; overflow: hidden; background: var(--bg); position: relative; aspect-ratio: 16 / 9; }
+  #overview .thumb.current { border-color: var(--clay); }
+  #overview .thumb .inner { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; pointer-events: none; }
+  #overview .thumb .inner .slide { display: flex; }
+  #overview .cap { color: #F5F4EE; font-size: 18px; margin-top: 8px; font-family: var(--mono); }
+  #overview .hint { color: #BDB9AE; font-size: 18px; margin-bottom: 20px; font-family: var(--mono); }
+
+  /* ---------- slide-specific ---------- */
+  .cover { justify-content: space-between; }
+  .cover .sub { font-size: 40px; font-weight: 700; margin-top: 22px; }
+  .cover .line { font-size: 30px; color: var(--muted); margin-top: 18px; }
+  .agenda { counter-reset: ag; border-left: 3px solid var(--ink); padding-left: 36px; }
+  .agenda li { list-style: none; font-size: 30px; padding: 9px 0; display: flex; gap: 20px; align-items: baseline; }
+  .agenda li span.n { font-family: var(--mono); font-size: 24px; color: var(--clay-deep); width: 36px; }
+  .agenda li span.d { font-size: 24px; color: var(--muted); }
+
+  table.grid { width: 100%; border-collapse: collapse; }
+  table.grid th { text-align: left; font-size: 24px; font-family: var(--mono); font-weight: 600; color: var(--muted); border-bottom: 2px solid var(--ink); padding: 8px 12px; text-transform: uppercase; letter-spacing: .04em; }
+  table.grid td { border-bottom: 1px solid var(--line); padding: 7px 12px; vertical-align: top; font-size: 24px; line-height: 1.4; }
+  table.grid td.name { font-weight: 700; white-space: nowrap; }
+  table.grid td.model { font-family: var(--mono); font-size: 24px; white-space: nowrap; }
+
+  .pgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .pgrid .card { padding: 12px 20px; }
+  .pgrid .n { font-family: var(--mono); font-size: 24px; color: var(--clay-deep); font-weight: 700; margin-right: 12px; }
+  .pgrid b { font-size: 28px; }
+  .pgrid p { color: var(--muted); margin-top: 2px; }
+  .pgrid .card.hot { border-color: var(--clay); background: var(--clay-soft); }
+
+  .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; }
+  .summary .card { display: flex; flex-direction: column; gap: 14px; padding: 30px 26px; border-top: 6px solid var(--clay); }
+  .summary .num { font-family: var(--mono); font-size: 24px; color: var(--clay-deep); font-weight: 700; }
+  .summary .claim { font-size: 32px; font-weight: 700; line-height: 1.32; }
+  .summary .lbl { font-family: var(--mono); font-size: 24px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-top: 6px; }
+  .summary p { font-size: 24px; line-height: 1.45; }
+
+  .demo { display: grid; grid-template-columns: repeat(2, 1fr); gap: 22px; }
+  .demo .card { display: grid; grid-template-columns: 72px 1fr; gap: 10px 20px; padding: 34px 32px; }
+  .demo .no { font-family: var(--mono); font-size: 56px; font-weight: 700; color: var(--clay); grid-row: span 4; line-height: 1; }
+  .demo .card p { font-size: 24px; line-height: 1.5; }
+  .demo h3 { font-size: 30px; }
+
+  .feat { display: grid; grid-template-columns: 1fr; gap: 14px; }
+  .feat .card { padding: 16px 22px; }
+  .feat h3 { font-size: 28px; margin-bottom: 4px; }
+  .feat p { font-size: 24px; line-height: 1.45; }
+  .stats { display: flex; gap: 0; border: 1.5px solid var(--ink); border-radius: 4px; background: var(--card); }
+  .stats > div { flex: 1; padding: 12px 16px; border-right: 1px solid var(--line); }
+  .stats > div:last-child { border-right: 0; }
+  .stats .v { font-size: 40px; font-weight: 700; font-family: var(--mono); line-height: 1.4; }
+  .stats .k { font-size: 24px; color: var(--muted); }
+
+  .end { justify-content: center; }
+
+  /* ---------- print: one slide per page ---------- */
+  @page { size: 1920px 1080px; margin: 0; }
+  @media print {
+    html, body { overflow: visible; height: auto; background: var(--bg); }
+    #viewport { position: static; display: block; }
+    #stage { transform: none !important; width: 1920px; height: auto; overflow: visible; background: none; }
+    .slide { display: flex !important; position: relative; inset: auto; width: 1920px; height: 1080px; page-break-after: always; break-after: page; background: var(--bg); }
+    .slide:last-of-type { page-break-after: auto; break-after: auto; }
+    #progress, #pageno, #brand, .navzone, #notes-panel, #overview { display: none !important; }
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+    .slide svg .drawn { stroke-dasharray: none !important; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+<!-- shared SVG defs (arrowheads) — defined once so overview clones do not duplicate ids -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#141413"/></marker>
+    <marker id="ah-soft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8F8B80"/></marker>
+    <marker id="ah-clay" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#D97757"/></marker>
+  </defs>
+</svg>
+
+<div id="viewport">
+<div id="stage">
+  <div id="progress"></div>
+
+<!-- ================= 1. 封面 ================= -->
+<section class="slide cover" data-title="封面">
+  <div>
+    <div class="kicker anim" style="--i:0">架构师团队 · 内部技术分享</div>
+  </div>
+  <div style="display:flex; gap:120px; align-items:flex-end;">
+    <div style="flex:1;">
+      <h1 class="anim" style="--i:1">AgenticOps</h1>
+      <div class="sub anim" style="--i:2">Agent-first 云运维平台 —— 项目、架构与功能</div>
+      <div class="line anim" style="--i:3">从 <b>告警 → 根因 → 修复</b> 的全闭环 on-call 副驾</div>
+      <div class="anim" style="--i:4; margin-top:40px; display:flex; gap:14px; flex-wrap:wrap;">
+        <span class="tag">LiboMa/agenticops-chat</span>
+        <span class="tag">1.0.0（2026-03）→ 2.7.0</span>
+        <span class="tag clay">2.7.0 进行中</span>
+        <span class="tag">约 10–15 分钟 · Demo 可选</span>
+      </div>
+    </div>
+    <ol class="agenda anim" style="--i:5; width:560px;">
+      <li><span class="n">01</span>背景与定位</li>
+      <li><span class="n">02</span>演进过程</li>
+      <li><span class="n">03</span>架构 <span class="d">总体 · 原则 · 关键流程</span></li>
+      <li><span class="n">04</span>功能与部署形态</li>
+      <li><span class="n">05</span>Demo <span class="d">可选</span></li>
+      <li><span class="n">06</span>总结：四个核心观点</li>
+    </ol>
+  </div>
+  <div></div>
+  <aside class="notes">今天用 10 到 15 分钟介绍 AgenticOps：它是什么、怎么一步步演进来的、架构怎样做到既自主又安全，最后用四个观点收尾。Demo 视时间决定，可以跳过。</aside>
+</section>
+
+<!-- ================= 2. 背景与定位 ================= -->
+<section class="slide" data-title="背景与定位">
+  <div class="kicker anim" style="--i:0">01 · 背景与定位</div>
+  <h2 class="anim" style="--i:1">一支 AI 智能体团队，把云运维做成闭环</h2>
+  <div class="body" style="gap:48px;">
+    <div class="col" style="width:780px; flex:none;">
+      <div class="card anim" style="--i:2">
+        <h3>AgenticOps 是什么</h3>
+        <p style="margin-top:6px;"><b>Agent-first 云运维平台</b>：AI 智能体团队扫描 AWS、发现问题、定位根因、规划修复；低风险问题<b>自主修复</b>，每次运维都在<b>学习</b>。</p>
+      </div>
+      <div class="card anim" style="--i:3">
+        <h3>解决谁的问题</h3>
+        <p style="margin-top:6px;"><b>SRE / 平台 / 云运维团队</b>：要「告警 → 根因 → 修复」全闭环的 <b>on-call 副驾</b>，不是又一个看板；有风险的操作留人在环。</p>
+      </div>
+      <div class="card anim" style="--i:4">
+        <h3>三种入口，同一批智能体</h3>
+        <p style="margin-top:6px;">CLI <code>aiops chat</code> · Web 看板 · IM 机器人</p>
+      </div>
+      <p class="src anim" style="--i:5">出处：<code>README_CN.md</code> 开篇、「适合谁」、入口框图</p>
+    </div>
+    <div class="col" style="flex:1; justify-content:center;">
+      <svg class="diagram" viewBox="0 0 900 560" width="900" height="560" aria-label="运维闭环示意">
+        <g class="fx" style="--i:3">
+          <rect class="box" x="0" y="40" width="260" height="100" rx="3"/>
+          <text class="t-title" x="130" y="82" text-anchor="middle">巡检</text>
+          <text class="t-sub" x="130" y="118" text-anchor="middle">Scan · 资源清单</text>
+        </g>
+        <g class="fx" style="--i:4">
+          <rect class="box" x="320" y="40" width="260" height="100" rx="3"/>
+          <text class="t-title" x="450" y="82" text-anchor="middle">发现问题</text>
+          <text class="t-sub" x="450" y="118" text-anchor="middle">Detect · 告警接入</text>
+        </g>
+        <g class="fx" style="--i:5">
+          <rect class="box" x="640" y="40" width="260" height="100" rx="3"/>
+          <text class="t-title" x="770" y="82" text-anchor="middle">定位根因</text>
+          <text class="t-sub" x="770" y="118" text-anchor="middle">RCA · 证据 + 置信度</text>
+        </g>
+        <g class="fx" style="--i:6">
+          <rect class="box" x="640" y="280" width="260" height="100" rx="3"/>
+          <text class="t-title" x="770" y="322" text-anchor="middle">规划修复</text>
+          <text class="t-sub" x="770" y="358" text-anchor="middle">SRE · 分级 L0–L3</text>
+        </g>
+        <g class="fx" style="--i:7">
+          <rect class="box-clay emph" x="320" y="280" width="260" height="100" rx="3" style="--i:7"/>
+          <text class="t-title" x="450" y="322" text-anchor="middle">修复</text>
+          <text class="t-sub" x="450" y="358" text-anchor="middle">低风险自主</text>
+        </g>
+        <g class="fx" style="--i:8">
+          <rect class="box" x="0" y="280" width="260" height="100" rx="3"/>
+          <text class="t-title" x="130" y="322" text-anchor="middle">学习</text>
+          <text class="t-sub" x="130" y="358" text-anchor="middle">记忆 · 技能 · KB</text>
+        </g>
+        <path class="edge drawn" style="--i:4;--len:60" d="M260,90 H312" marker-end="url(#ah)"/>
+        <path class="edge drawn" style="--i:5;--len:60" d="M580,90 H632" marker-end="url(#ah)"/>
+        <path class="edge drawn" style="--i:6;--len:140" d="M770,140 V272" marker-end="url(#ah)"/>
+        <path class="edge drawn" style="--i:7;--len:60" d="M640,330 H588" marker-end="url(#ah)"/>
+        <path class="edge drawn" style="--i:8;--len:60" d="M320,330 H268" marker-end="url(#ah)"/>
+        <path class="edge-clay drawn" style="--i:9;--len:140" d="M130,280 V148" marker-end="url(#ah-clay)"/>
+        <text class="t-label t-clay" x="146" y="222">持续沉淀</text>
+        <g class="fx" style="--i:10">
+          <line x1="0" y1="440" x2="900" y2="440" stroke="#D9D6CC" stroke-width="1.5"/>
+          <text class="t-label" x="0" y="486">传统看板：给出图表，诊断和处置靠人</text>
+          <text class="t-title" x="0" y="530">AgenticOps：给出根因、方案与可审计的执行</text>
+        </g>
+      </svg>
+    </div>
+  </div>
+  <div class="landing anim" style="--i:6"><div class="lbl">落地意义</div><div class="txt">交付诊断结论 + 修复方案 + 执行记录；低风险问题自主闭环，on-call 精力留给要判断的事。（→ 总结 ①）</div></div>
+  <aside class="notes">一句话定位：一支 AI 智能体团队，从巡检到修复把云运维做成闭环，并且越用越好。目标用户是 SRE、平台和云运维团队，他们要的是 on-call 副驾，不是又一个看板。注意「低风险自主、有风险留人在环」这条线，后面架构都围绕它展开。</aside>
+</section>
+
+<!-- ================= 3. 演进过程 ================= -->
+<section class="slide" data-title="演进过程">
+  <div class="kicker anim" style="--i:0">02 · 演进过程</div>
+  <h2 class="anim" style="--i:1">七个月、七个阶段：先闭环，再治理，再信任</h2>
+  <div class="body" style="flex-direction:column; gap:12px;">
+    <svg class="diagram" viewBox="0 0 1728 470" width="1728" height="470" aria-label="版本时间线">
+      <g class="fx" style="--i:2">
+        <rect x="0" y="0" width="474" height="46" fill="#ECEAE2"/><text class="t-label" x="16" y="32">闭环能力</text>
+        <rect x="494" y="0" width="474" height="46" fill="#ECEAE2"/><text class="t-label" x="510" y="32">治理与质量</text>
+        <rect x="988" y="0" width="474" height="46" fill="#ECEAE2"/><text class="t-label" x="1004" y="32">安全与 ITSM</text>
+        <rect x="1482" y="0" width="246" height="46" fill="#F6E3DA"/><text class="t-label t-clay" x="1498" y="32">信任与体验</text>
+      </g>
+      <path class="edge drawn" style="--i:2;--len:1720" d="M0,110 H1716" marker-end="url(#ah)"/>
+      <g class="fx" style="--i:3">
+        <rect x="0" y="100" width="20" height="20" fill="#141413"/>
+        <text class="t-mono" x="0" y="166" style="font-weight:700;font-size:30px">1.0.0</text>
+        <text class="t-label" x="0" y="202">2026-03-10</text>
+        <text x="0" y="248" class="t-title">首个 MVP</text>
+        <text x="0" y="290" class="t-sub">7 智能体</text>
+        <text x="0" y="326" class="t-sub">自动修复流水线</text>
+        <text x="0" y="362" class="t-sub">Web 看板</text>
+        <text x="0" y="398" class="t-sub">实验室 10/10</text>
+      </g>
+      <g class="fx" style="--i:4">
+        <rect x="247" y="100" width="20" height="20" fill="#141413"/>
+        <text class="t-mono" x="247" y="166" style="font-weight:700;font-size:30px">1.1.0</text>
+        <text class="t-label" x="247" y="202">2026-05-31</text>
+        <text x="247" y="248" class="t-title">会学习</text>
+        <text x="247" y="290" class="t-sub">自优化记忆</text>
+        <text x="247" y="326" class="t-sub">自主技能</text>
+        <text x="247" y="362" class="t-sub">安全门禁发布</text>
+      </g>
+      <g class="fx" style="--i:5">
+        <rect x="494" y="100" width="20" height="20" fill="#141413"/>
+        <text class="t-mono" x="494" y="166" style="font-weight:700;font-size:30px">2.0.0</text>
+        <text class="t-label" x="494" y="202">2026-06-19</text>
+        <text x="494" y="248" class="t-title">受治理的自主</text>
+        <text x="494" y="290" class="t-sub">策略引擎</text>
+        <text x="494" y="326" class="t-sub">ITSM 桥接</text>
+        <text x="494" y="362" class="t-sub">多云能力层</text>
+        <text x="494" y="398" class="t-sub">账号寻址凭证</text>
+      </g>
+      <g class="fx" style="--i:6">
+        <rect x="741" y="100" width="20" height="20" fill="#141413"/>
+        <text class="t-mono" x="741" y="166" style="font-weight:700;font-size:30px">2.2</text>
+        <text class="t-label" x="741" y="202">07-21 · 07-27</text>
+        <text x="741" y="248" class="t-title">降噪与质量</text>
+        <text x="741" y="290" class="t-sub">Signal Gate</text>
+        <text x="741" y="326" class="t-sub">RCA 质量五件套</text>
+        <text x="741" y="362" class="t-sub">effort 自动升档</text>
+      </g>
+      <g class="fx" style="--i:7">
+        <rect x="988" y="100" width="20" height="20" fill="#141413"/>
+        <text class="t-mono" x="988" y="166" style="font-weight:700;font-size:30px">2.5.0</text>
+        <text class="t-label" x="988" y="202">2026-08-31</text>
+        <text x="988" y="248" class="t-title">云安全审查</text>
+        <text x="988" y="290" class="t-sub">CIS 评分</text>
+        <text x="988" y="326" class="t-sub">三态可达性</text>
+        <text x="988" y="362" class="t-sub">两账号只读验证</text>
+        <text x="988" y="398" class="t-sub">技能广域加载</text>
+      </g>
+      <g class="fx" style="--i:8">
+        <rect x="1235" y="100" width="20" height="20" fill="#141413"/>
+        <text class="t-mono" x="1235" y="166" style="font-weight:700;font-size:30px">2.6</text>
+        <text class="t-label" x="1235" y="202">09-26 · 09-29</text>
+        <text x="1235" y="248" class="t-title">变更管理</text>
+        <text x="1235" y="290" class="t-sub">ITSM 变更流</text>
+        <text x="1235" y="326" class="t-sub">图事实 + 定位</text>
+        <text x="1235" y="362" class="t-sub">AC@1 0.00→0.77</text>
+      </g>
+      <g class="fx" style="--i:9">
+        <rect class="emph" x="1482" y="98" width="24" height="24" fill="#D97757" stroke="#D97757" style="--i:9"/>
+        <text class="t-mono t-clay" x="1482" y="166" style="font-weight:700;font-size:30px">2.7.0</text>
+        <text class="t-label" x="1482" y="202">2026-10-05 →</text>
+        <text x="1482" y="248" class="t-title t-clay">进行中</text>
+        <text x="1482" y="290" class="t-sub">蓝白工作台</text>
+        <text x="1482" y="326" class="t-sub">核心信任加固</text>
+        <text x="1482" y="362" class="t-sub">S1–S4 已验收</text>
+        <text x="1482" y="398" class="t-sub">S5 待验收</text>
+        <text x="1482" y="434" class="t-sub">S6–S7 未开始</text>
+      </g>
+    </svg>
+    <div class="anim" style="--i:10; border-top:1.5px solid var(--line); padding-top:14px;">
+      <h3>每个版本都有发布说明，关键版本配实地 E2E / 评测报告</h3>
+      <p class="muted" style="margin-top:4px;">2.2：L1 / L2 混沌 E2E（真实 EKS 集群）· 2.5.0：两个真实账号只读 E2E · 2.6.0：dev 上 live E2E 七步通过 · 2.6.1：13 例根因定位评测，图召回率 13/13</p>
+      <p class="src" style="margin-top:6px;">出处：<code>README_CN.md</code> 发布历史表 + <code>docs/MVP-*-RELEASE.md</code> / <code>*-E2E-REPORT.md</code> / <code>MVP-2.6.1-LOCATION-EVAL-REPORT.md</code>；README 顶部写 2.5.0，以发布历史为准</p>
+    </div>
+  </div>
+  <div class="landing anim" style="--i:11"><div class="lbl">落地意义</div><div class="txt">能力按阶段落地、每步有证据：先闭环，再接治理与安全，最后接入 ITSM。（→ 总结 ④）</div></div>
+  <aside class="notes">演进主线是三步：1.x 先把闭环跑通并让系统会学习，2.0 到 2.2 加治理和质量门，2.5 到 2.6 补齐安全审查和 ITSM 变更。2.7.0 还在进行中，前四个阶段已验收，S5 已实现待验收，S6、S7 还没开始。</aside>
+</section>
+
+<!-- ================= 4. 总体架构 ================= -->
+<section class="slide" data-title="总体架构">
+  <div class="kicker anim" style="--i:0">03 · 架构 / 总体架构</div>
+  <h2 class="anim" style="--i:1">三入口 → Main Agent（纯路由）→ 6 个专家 → AWS</h2>
+  <div class="body" style="flex-direction:column; gap:10px;">
+    <svg class="diagram" viewBox="0 0 1728 600" width="1728" height="600" aria-label="总体架构图">
+      <g class="fx" style="--i:2">
+        <text class="t-label" x="0" y="26">入口</text>
+        <text class="t-label" x="300" y="26">编排</text>
+        <text class="t-label" x="660" y="26">专家智能体（agents-as-tools）</text>
+        <text class="t-label" x="1110" y="26">目标云</text>
+      </g>
+      <!-- entries -->
+      <g class="fx" style="--i:2">
+        <rect class="box" x="0" y="60" width="220" height="96" rx="3"/>
+        <text class="t-title" x="110" y="100" text-anchor="middle">CLI</text>
+        <text class="t-mono" x="110" y="134" text-anchor="middle">aiops chat</text>
+        <rect class="box" x="0" y="190" width="220" height="96" rx="3"/>
+        <text class="t-title" x="110" y="230" text-anchor="middle">Web 看板</text>
+        <text class="t-sub" x="110" y="264" text-anchor="middle">React + SSE</text>
+        <rect class="box" x="0" y="320" width="220" height="96" rx="3"/>
+        <text class="t-title" x="110" y="360" text-anchor="middle">IM 机器人</text>
+        <text class="t-sub" x="110" y="394" text-anchor="middle">飞书 · Slack …</text>
+      </g>
+      <path class="edge drawn" style="--i:3;--len:200" d="M220,108 H260 V226 H292" marker-end="url(#ah)"/>
+      <path class="edge drawn" style="--i:3;--len:80" d="M220,238 H292" marker-end="url(#ah)"/>
+      <path class="edge drawn" style="--i:3;--len:200" d="M220,368 H260 V250 H292" marker-end="url(#ah)"/>
+      <!-- main -->
+      <g class="fx" style="--i:4">
+        <rect class="box-dark emph" x="300" y="128" width="260" height="220" rx="3" style="--i:4"/>
+        <text class="t-title t-white" x="430" y="176" text-anchor="middle">Main Agent</text>
+        <text class="t-sub" x="430" y="214" text-anchor="middle" style="fill:#E9A88D">纯路由 · Opus 5</text>
+        <text class="t-sub" x="430" y="256" text-anchor="middle" style="fill:#D9D6CC">分类请求</text>
+        <text class="t-sub" x="430" y="290" text-anchor="middle" style="fill:#D9D6CC">分派给专家</text>
+        <text class="t-sub" x="430" y="324" text-anchor="middle" style="fill:#D9D6CC">组合输出</text>
+      </g>
+      <!-- fan out: specialist centres y = 78,142,206,270,334,398 -->
+      <g class="fx" style="--i:5">
+        <path class="edge" d="M560,238 H610 V78 H652" marker-end="url(#ah)"/>
+        <path class="edge" d="M610,142 H652" marker-end="url(#ah)"/>
+        <path class="edge" d="M610,206 H652" marker-end="url(#ah)"/>
+        <path class="edge" d="M610,270 H652" marker-end="url(#ah)"/>
+        <path class="edge" d="M610,334 H652" marker-end="url(#ah)"/>
+        <path class="edge" d="M610,238 V398 H652" marker-end="url(#ah)"/>
+        <text class="t-label" x="566" y="456">@tool 调用</text>
+      </g>
+      <g class="fx" style="--i:6">
+        <rect class="box" x="660" y="52" width="360" height="52" rx="3"/><text class="t-title" x="680" y="88">Scan</text><text class="t-sub" x="830" y="87">清单发现 · 只读</text>
+        <rect class="box" x="660" y="116" width="360" height="52" rx="3"/><text class="t-title" x="680" y="152">Detect</text><text class="t-sub" x="830" y="151">检测 · 只读</text>
+        <rect class="box" x="660" y="180" width="360" height="52" rx="3"/><text class="t-title" x="680" y="216">RCA</text><text class="t-sub" x="830" y="215">根因 · 只读</text>
+        <rect class="box" x="660" y="244" width="360" height="52" rx="3"/><text class="t-title" x="680" y="280">SRE</text><text class="t-sub" x="830" y="279">只规划，不执行</text>
+        <rect class="box-clay" x="660" y="308" width="360" height="52" rx="3"/><text class="t-title" x="680" y="344">Executor</text><text class="t-sub t-clay" x="830" y="343">唯一执行者</text>
+        <rect class="box" x="660" y="372" width="360" height="52" rx="3"/><text class="t-title" x="680" y="408">Reporter</text><text class="t-sub" x="830" y="407">报告 · KB</text>
+      </g>
+      <g class="fx" style="--i:7">
+        <path class="edge-soft" d="M1020,78 H1102" marker-end="url(#ah-soft)"/>
+        <path class="edge-soft" d="M1020,142 H1102" marker-end="url(#ah-soft)"/>
+        <path class="edge-soft" d="M1020,206 H1102" marker-end="url(#ah-soft)"/>
+        <text class="t-label" x="1050" y="118">读</text>
+      </g>
+      <path class="edge-clay drawn" style="--i:8;--len:90" d="M1020,334 H1102" marker-end="url(#ah-clay)"/>
+      <text class="t-label t-clay fx" style="--i:8" x="1050" y="374">写</text>
+      <g class="fx" style="--i:7">
+        <rect class="box" x="1110" y="52" width="330" height="372" rx="3"/>
+        <text class="t-title" x="1130" y="92">AWS</text>
+        <text class="t-sub" x="1130" y="132">STS AssumeRole</text>
+        <text class="t-sub" x="1130" y="166">账号寻址 · fail-closed</text>
+        <text class="t-sub" x="1130" y="210">CloudWatch · CloudTrail</text>
+        <text class="t-sub" x="1130" y="244">EKS · VPC · ELB · …</text>
+        <text class="t-label" x="1130" y="296">执行后端</text>
+        <text class="t-mono" x="1130" y="330">AWS CLI · SSM→SSH</text>
+        <text class="t-mono" x="1130" y="364">kubectl</text>
+      </g>
+      <!-- design trade-off + legend -->
+      <g class="fx" style="--i:9">
+        <rect class="box-dark" x="1480" y="52" width="248" height="268" rx="3"/>
+        <text class="t-title t-white" x="1500" y="96">取舍</text>
+        <text class="t-sub" x="1500" y="140" style="fill:#D9D6CC">Main 不持运维工具</text>
+        <text class="t-sub" x="1500" y="176" style="fill:#D9D6CC">路由廉价、可审计</text>
+        <text class="t-sub" x="1500" y="212" style="fill:#D9D6CC">权限落在专家身上</text>
+        <text class="t-sub" x="1500" y="248" style="fill:#D9D6CC">专家之间不对话</text>
+        <text class="t-sub" x="1500" y="284" style="fill:#E9A88D">只有 Executor 写</text>
+        <path class="edge" d="M1480,354 H1528"/><text class="t-label" x="1540" y="362">控制流 @tool</text>
+        <path class="edge-dash" d="M1480,394 H1528"/><text class="t-label" x="1540" y="402">数据流 读写</text>
+        <path class="edge-clay" d="M1480,434 H1528"/><text class="t-label" x="1540" y="442">写 · 已审批</text>
+      </g>
+      <!-- shared layer -->
+      <g class="fx" style="--i:10">
+        <path class="edge-dash" d="M430,348 V488" marker-end="url(#ah-soft)"/>
+        <path class="edge-dash" d="M840,424 V488" marker-end="url(#ah-soft)"/>
+        <text class="t-label" x="442" y="430">注入 / 读写</text>
+        <rect x="0" y="480" width="1440" height="120" fill="#ECEAE2" stroke="#8F8B80" stroke-width="1.5" rx="3"/>
+        <rect class="box-soft" x="15" y="496" width="270" height="88" rx="3"/><text class="t-title" x="150" y="532" text-anchor="middle">Agent Memory</text><text class="t-sub" x="150" y="568" text-anchor="middle">自优化 .md</text>
+        <rect class="box-soft" x="300" y="496" width="270" height="88" rx="3"/><text class="t-title" x="435" y="532" text-anchor="middle">Agent Skills</text><text class="t-sub" x="435" y="568" text-anchor="middle">SKILL.md · 门禁</text>
+        <rect class="box-soft" x="585" y="496" width="270" height="88" rx="3"/><text class="t-title" x="720" y="532" text-anchor="middle">Security Engine</text><text class="t-sub" x="720" y="568" text-anchor="middle">快照 · CIS · 可达性</text>
+        <rect class="box-soft" x="870" y="496" width="270" height="88" rx="3"/><text class="t-title" x="1005" y="532" text-anchor="middle">SQLite / PG</text><text class="t-sub" x="1005" y="568" text-anchor="middle">元数据</text>
+        <rect class="box-soft" x="1155" y="496" width="270" height="88" rx="3"/><text class="t-title" x="1290" y="532" text-anchor="middle">MCP Servers</text><text class="t-sub" x="1290" y="568" text-anchor="middle">可选外部工具</text>
+        <text class="t-title" x="1480" y="550">← 共享层</text>
+      </g>
+    </svg>
+    <p class="src anim" style="--i:9">出处：<code>README_CN.md</code> 架构框图、「7 个智能体」表；<code>CLAUDE.md</code> 凭证安全铁律（账号寻址、解析失败即报错、无 ambient 回退）</p>
+  </div>
+  <aside class="notes">控制流从三个入口进来，只经过 Main；Main 不持有运维工具，只决定把请求交给哪个专家。注意右侧箭头：读的专家都是只读，唯一会改基础设施的是 Executor，而且只执行已审批的方案。所有共享层，包括记忆、技能、安全引擎和元数据库，都在下面这一层。</aside>
+</section>
+
+<!-- ================= 5. 设计原则 + 7 智能体 ================= -->
+<section class="slide" data-title="设计原则与 7 个智能体">
+  <div class="kicker anim" style="--i:0">03 · 架构 / 设计原则</div>
+  <h2 class="anim" style="--i:1">六条原则，落成七个权限分明的智能体</h2>
+  <div class="body" style="flex-direction:column; gap:16px;">
+    <div class="pgrid anim" style="--i:2">
+      <div class="card"><span class="n">01</span><b>智能体即工具</b><p>Main 纯路由，专家之间不对话</p></div>
+      <div class="card hot"><span class="n">02</span><b>读 / 规划 / 执行隔离</b><p>L0/L1 自动 · L2/L3 人工审批</p></div>
+      <div class="card"><span class="n">03</span><b>分层模型控成本</b><p>强模型用在判断上，按调用计成本</p></div>
+      <div class="card"><span class="n">04</span><b>智能体安全地学习</b><p>草稿 → 安全门禁 → 发布</p></div>
+      <div class="card"><span class="n">05</span><b>配置单一真源</b><p><code>config/settings.yaml</code></p></div>
+      <div class="card"><span class="n">06</span><b>默认从简</b><p>本地 SQLite + 文件；cloud 才上 PG + S3</p></div>
+    </div>
+    <table class="grid anim" style="--i:3">
+      <thead><tr><th>智能体</th><th>默认模型</th><th>职责</th><th>权限</th></tr></thead>
+      <tbody>
+        <tr><td class="name">Main</td><td class="model">Opus 5</td><td>路由 / 编排，唯一与用户对话</td><td><span class="tag">无运维工具</span></td></tr>
+        <tr><td class="name">Scan</td><td class="model">Sonnet 4.6</td><td>跨账号 / 区域清单发现，20+ 种 AWS 服务类型</td><td><span class="tag">只读</span></td></tr>
+        <tr><td class="name">Detect</td><td class="model">Sonnet 4.6</td><td>CloudWatch + Z-score 异常检测、webhook 接入、主动巡检</td><td><span class="tag">只读</span></td></tr>
+        <tr><td class="name">RCA</td><td class="model">Opus 4.6</td><td>CloudTrail + 拓扑证据 + KB + 技能 → 根因 + 置信度</td><td><span class="tag">只读</span></td></tr>
+        <tr><td class="name">SRE</td><td class="model">Fable 5.1</td><td>RCA → L0–L3 分级方案，含步骤与回滚</td><td><span class="tag clay">只规划</span></td></tr>
+        <tr><td class="name">Executor</td><td class="model">Opus 4.6</td><td>执行已审批方案：AWS CLI · SSM→SSH · kubectl</td><td><span class="tag warn">唯一执行</span></td></tr>
+        <tr><td class="name">Reporter</td><td class="model">Sonnet 4.6</td><td>日报 / 周报 / 事件报告，事件蒸馏为 KB SOP</td><td><span class="tag">只读</span></td></tr>
+      </tbody>
+    </table>
+    <p class="src anim" style="--i:4">出处：<code>README_CN.md</code>「设计原则」「7 个智能体」；模型为 <code>config/settings.yaml</code> 已提交默认值（<code>agent_*_model_id</code>，可按智能体覆盖），Haiku 4.5 为经济档</p>
+  </div>
+  <div class="landing anim" style="--i:5"><div class="lbl">落地意义</div><div class="txt">提方案的动不了基础设施，动基础设施的只执行审批过的方案：敢把运维交给 Agent 的工程前提。（→ 总结 ②）</div></div>
+  <aside class="notes">六条原则里最关键的是第二条：读、规划、执行相互隔离。下面这张表就是它的落地，只有 SRE 出方案，只有 Executor 动手，L2、L3 必须人工审批。模型分层是成本取舍：判断力最重要的路由和规划用 Claude 5 家族，高吞吐的扫描检测用 Sonnet。</aside>
+</section>
+
+<!-- ================= 6. 关键流程 I：自动修复流水线 ================= -->
+<section class="slide" data-title="自动修复流水线与 9 态生命周期">
+  <div class="kicker anim" style="--i:0">03 · 架构 / 关键流程 I</div>
+  <h2 class="anim" style="--i:1">自动修复流水线：每一步都有门，每次执行只有一个结论</h2>
+  <div class="body" style="flex-direction:column; gap:12px;">
+    <svg class="diagram" viewBox="0 0 1728 300" width="1728" height="300" aria-label="自动修复流水线流程图">
+      <!-- 9 nodes, width 172, pitch 194 -->
+      <text class="t-label" x="668" y="28" text-anchor="middle">证据检查 → critic → 置信度</text>
+      <text class="t-label" x="1056" y="28" text-anchor="middle">L0/L1 自动 · L2/L3 人工</text>
+      <g class="fx" style="--i:2">
+        <rect class="box" x="0" y="44" width="172" height="96" rx="3"/><text class="t-title" x="86" y="84" text-anchor="middle">告警 / 信号</text><text class="t-sub" x="86" y="118" text-anchor="middle">Signal Gate</text>
+        <rect class="box" x="194" y="44" width="172" height="96" rx="3"/><text class="t-title" x="280" y="84" text-anchor="middle" style="font-size:26px">HealthIssue</text><text class="t-sub" x="280" y="118" text-anchor="middle">去重后开单</text>
+        <rect class="box" x="388" y="44" width="172" height="96" rx="3"/><text class="t-title" x="474" y="84" text-anchor="middle">RCA</text><text class="t-sub" x="474" y="118" text-anchor="middle">根因+置信度</text>
+      </g>
+      <g class="fx" style="--i:3">
+        <rect class="box-clay" x="582" y="44" width="172" height="96" rx="3"/><text class="t-title" x="668" y="84" text-anchor="middle">质量门</text><text class="t-sub" x="668" y="118" text-anchor="middle">置信度 ≥ 0.6</text>
+        <rect class="box" x="776" y="44" width="172" height="96" rx="3"/><text class="t-title" x="862" y="84" text-anchor="middle">SRE 方案</text><text class="t-sub" x="862" y="118" text-anchor="middle">L0–L3 + 回滚</text>
+      </g>
+      <g class="fx" style="--i:4">
+        <path class="box-clay emph" d="M1056,44 L1142,92 L1056,140 L970,92 Z" style="--i:4"/><text class="t-title" x="1056" y="101" text-anchor="middle">审批</text>
+        <rect class="box" x="1164" y="44" width="172" height="96" rx="3"/><text class="t-title" x="1250" y="84" text-anchor="middle">Executor</text><text class="t-sub" x="1250" y="118" text-anchor="middle">哈希复核</text>
+        <rect class="box" x="1358" y="44" width="172" height="96" rx="3"/><text class="t-title" x="1444" y="84" text-anchor="middle">验证</text><text class="t-sub" x="1444" y="118" text-anchor="middle">一次 verdict</text>
+        <rect class="box-ok" x="1552" y="44" width="172" height="96" rx="3"/><text class="t-title" x="1638" y="84" text-anchor="middle">解决</text><text class="t-mono" x="1638" y="118" text-anchor="middle">resolved</text>
+      </g>
+      <path class="edge drawn" style="--i:2;--len:40" d="M172,92 H186" marker-end="url(#ah)"/>
+      <path class="edge drawn" style="--i:2;--len:40" d="M366,92 H380" marker-end="url(#ah)"/>
+      <path class="edge drawn" style="--i:3;--len:40" d="M560,92 H574" marker-end="url(#ah)"/>
+      <path class="edge drawn" style="--i:3;--len:40" d="M754,92 H768" marker-end="url(#ah)"/>
+      <path class="edge drawn" style="--i:4;--len:40" d="M948,92 H962" marker-end="url(#ah)"/>
+      <path class="edge drawn" style="--i:4;--len:40" d="M1142,92 H1156" marker-end="url(#ah)"/>
+      <path class="edge drawn" style="--i:5;--len:40" d="M1336,92 H1350" marker-end="url(#ah)"/>
+      <path class="edge drawn" style="--i:5;--len:40" d="M1530,92 H1544" marker-end="url(#ah)"/>
+      <g class="fx" style="--i:6">
+        <path class="edge-soft" d="M668,140 V202" marker-end="url(#ah-soft)"/>
+        <rect class="box-warn" x="568" y="210" width="200" height="82" rx="3"/><text class="t-mono" x="668" y="244" text-anchor="middle">needs_review</text><text class="t-sub" x="668" y="278" text-anchor="middle">不自动修复</text>
+        <path class="edge-soft" d="M1444,140 V202" marker-end="url(#ah-soft)"/>
+        <rect class="box-warn" x="1294" y="210" width="300" height="82" rx="3"/><text class="t-mono" x="1444" y="244" text-anchor="middle">pending_acceptance</text><text class="t-sub" x="1444" y="278" text-anchor="middle">等人工验收</text>
+        <path class="edge-dash" d="M1294,262 H862 V148" marker-end="url(#ah-soft)"/>
+        <text class="t-label" x="880" y="250">failed / 验收被拒 → 重新出方案</text>
+      </g>
+    </svg>
+    <div style="display:flex; gap:40px; align-items:flex-start;">
+      <div style="flex:none; width:1260px;">
+        <h3 class="anim" style="--i:7">9 态 HealthIssue 生命周期（状态机强制，非法转换 → 409）</h3>
+        <svg class="diagram" viewBox="0 0 1260 200" width="1260" height="200" aria-label="9 态生命周期" style="margin-top:8px;">
+          <g class="fx" style="--i:7">
+            <rect class="box" x="0" y="10" width="110" height="50" rx="3"/><text class="t-mono" x="55" y="44" text-anchor="middle">open</text>
+            <rect class="box" x="146" y="10" width="220" height="50" rx="3"/><text class="t-mono" x="256" y="44" text-anchor="middle">investigating</text>
+            <rect class="box" x="402" y="10" width="210" height="50" rx="3"/><text class="t-mono" x="507" y="44" text-anchor="middle">acknowledged</text>
+            <rect class="box-clay" x="648" y="10" width="340" height="50" rx="3"/><text class="t-mono" x="818" y="44" text-anchor="middle">root_cause_identified</text>
+            <rect class="box" x="1024" y="10" width="200" height="50" rx="3"/><text class="t-mono" x="1124" y="44" text-anchor="middle">fix_planned</text>
+          </g>
+          <g class="fx" style="--i:8">
+            <rect class="box" x="0" y="140" width="210" height="50" rx="3"/><text class="t-mono" x="105" y="174" text-anchor="middle">fix_approved</text>
+            <rect class="box" x="246" y="140" width="220" height="50" rx="3"/><text class="t-mono" x="356" y="174" text-anchor="middle">fix_executing</text>
+            <rect class="box" x="502" y="140" width="210" height="50" rx="3"/><text class="t-mono" x="607" y="174" text-anchor="middle">fix_executed</text>
+            <rect class="box-ok" x="748" y="140" width="150" height="50" rx="3"/><text class="t-mono" x="823" y="174" text-anchor="middle">resolved</text>
+            <rect class="box-soft" x="1074" y="140" width="150" height="50" rx="3"/><text class="t-mono" x="1149" y="174" text-anchor="middle">dismissed</text>
+          </g>
+          <g class="fx" style="--i:8">
+            <path class="edge" d="M110,35 H138" marker-end="url(#ah)"/>
+            <path class="edge" d="M366,35 H394" marker-end="url(#ah)"/>
+            <path class="edge" d="M612,35 H640" marker-end="url(#ah)"/>
+            <path class="edge" d="M988,35 H1016" marker-end="url(#ah)"/>
+            <path class="edge" d="M1224,35 H1252 V96 H105 V132" marker-end="url(#ah)"/>
+            <path class="edge" d="M210,165 H238" marker-end="url(#ah)"/>
+            <path class="edge" d="M466,165 H494" marker-end="url(#ah)"/>
+            <path class="edge" d="M712,165 H740" marker-end="url(#ah)"/>
+            <path class="edge-clay" d="M356,140 V116 H818 V68" marker-end="url(#ah-clay)"/>
+            <path class="edge-clay" d="M607,140 V116"/>
+            <text class="t-label" x="946" y="174">误报 →</text>
+          </g>
+        </svg>
+        <p class="anim" style="--i:9; margin-top:6px;">三道开关：<code>auto_fix_enabled</code> · <code>executor_auto_approve_l0_l1</code> · <code>executor_enabled</code></p>
+      </div>
+      <div class="col anim" style="--i:9; flex:1; gap:10px;">
+        <div class="card" style="padding:16px 20px;">
+          <ul class="dash">
+            <li style="margin-top:0">唯一写入口 <code>transition_issue</code>，CAS</li>
+            <li>审批绑定内容哈希，执行前重算</li>
+          </ul>
+        </div>
+        <p class="src">出处：<code>README_CN.md</code>「自动修复流水线」；<code>CLAUDE.md</code> 状态机；<code>rca_min_confidence_for_autofix: 0.6</code></p>
+      </div>
+    </div>
+  </div>
+  <div class="landing anim" style="--i:10"><div class="lbl">落地意义</div><div class="txt">低风险问题自主闭环；证据不足的 RCA、证明不了成功的执行都回到人手里。（→ 总结 ①②）</div></div>
+  <aside class="notes">这条流水线有三道门：RCA 后的质量门，置信度低于 0.6 或被 critic 驳回就进 needs_review，不自动修复；审批门按 L0 到 L3 分级；执行后只给一个结论，证明不了成功就等人工验收。下面是 9 态生命周期，所有状态写入只走一个入口，失败会回到 root_cause_identified 重新出方案。</aside>
+</section>
+
+<!-- ================= 7. 关键流程 II：双告警入口 + Signal Gate ================= -->
+<section class="slide" data-title="双告警入口与 Signal Gate">
+  <div class="kicker anim" style="--i:0">03 · 架构 / 关键流程 II</div>
+  <h2 class="anim" style="--i:1">双告警入口 + Signal Gate：所有建单路径过同一道门</h2>
+  <div class="body" style="flex-direction:column; gap:8px;">
+    <svg class="diagram" viewBox="0 0 1728 670" width="1728" height="670" aria-label="Signal Gate 时序图">
+      <!-- lifelines: centres 125, 415, 705, 995, 1285 -->
+      <g class="fx" style="--i:2">
+        <rect class="box" x="0" y="0" width="250" height="80" rx="3"/><text class="t-title" x="125" y="34" text-anchor="middle">外部监控</text><text class="t-sub" x="125" y="66" text-anchor="middle">Prom / CW / Datadog</text>
+        <rect class="box" x="290" y="0" width="250" height="80" rx="3"/><text class="t-title" x="415" y="34" text-anchor="middle">Webhook</text><text class="t-mono" x="415" y="66" text-anchor="middle">alert_processor</text>
+        <rect class="box" x="580" y="0" width="250" height="80" rx="3"/><text class="t-title" x="705" y="34" text-anchor="middle">IM / Main</text><text class="t-sub" x="705" y="66" text-anchor="middle">飞书 · Slack → Main</text>
+        <rect class="box-dark" x="870" y="0" width="250" height="80" rx="3"/><text class="t-title t-white" x="995" y="34" text-anchor="middle">Signal Gate</text><text class="t-mono" x="995" y="66" text-anchor="middle" style="fill:#E9A88D">process_signal</text>
+        <rect class="box" x="1160" y="0" width="250" height="80" rx="3"/><text class="t-title" x="1285" y="34" text-anchor="middle">HealthIssue</text><text class="t-sub" x="1285" y="66" text-anchor="middle">→ RCA 流水线</text>
+      </g>
+      <g class="fx" style="--i:2">
+        <line class="lifeline" x1="125" y1="80" x2="125" y2="670"/>
+        <line class="lifeline" x1="415" y1="80" x2="415" y2="670"/>
+        <line class="lifeline" x1="705" y1="80" x2="705" y2="670"/>
+        <line class="lifeline" x1="995" y1="80" x2="995" y2="670"/>
+        <line class="lifeline" x1="1285" y1="80" x2="1285" y2="670"/>
+      </g>
+      <!-- lane A: webhook -->
+      <g class="fx" style="--i:3">
+        <text class="t-label" x="0" y="116" style="fill:#141413;font-weight:700">A · Webhook（无 LLM 成本）</text>
+        <path class="edge" d="M125,160 H407" marker-end="url(#ah)"/><text class="t-sub" x="140" y="150">① POST 告警</text>
+        <rect class="act" x="407" y="168" width="16" height="44"/>
+        <rect class="box-warn" x="436" y="166" width="554" height="74" rx="3"/>
+        <text class="t-sub" x="452" y="196" style="fill:#141413">② token / HMAC 校验（可选配置）</text>
+        <text class="t-sub" x="452" y="228" style="fill:#141413">仅设 AIOPS_WEBHOOK_SECRET 时；未设不校验</text>
+        <path class="edge" d="M423,276 H987" marker-end="url(#ah)"/><text class="t-sub" x="436" y="266">③ SignalInput（身份提示、源端故障时间）</text>
+      </g>
+      <!-- lane B: IM -->
+      <g class="fx" style="--i:4">
+        <text class="t-label" x="0" y="320" style="fill:#141413;font-weight:700">B · IM Agent（有 LLM 成本）</text>
+        <rect class="act" x="697" y="334" width="16" height="44"/>
+        <text class="t-sub" x="726" y="364">④ Main 先核实</text>
+        <path class="edge" d="M713,414 H987" marker-end="url(#ah)"/><text class="t-sub" x="722" y="404">create_health_issue</text>
+      </g>
+      <!-- gate processing -->
+      <g class="fx" style="--i:5">
+        <rect class="act" x="987" y="424" width="16" height="166"/>
+        <rect class="box-soft" x="1016" y="424" width="424" height="76" rx="3"/>
+        <text class="t-title" x="1034" y="456">⑤ L1 确定性规则</text>
+        <text class="t-sub" x="1034" y="488">fingerprint-v2 · 抖动 · 冷却 · 合并</text>
+        <rect class="box-clay" x="1016" y="510" width="424" height="76" rx="3"/>
+        <text class="t-title" x="1034" y="542">⑥ L2 灰区：廉价 LLM</text>
+        <text class="t-sub" x="1034" y="574">只判合并 / 新建，绝不判噪声</text>
+        <rect class="box-soft" x="436" y="470" width="532" height="90" rx="3"/>
+        <text class="t-sub" x="452" y="504" style="fill:#141413">每个事件一条可审计 Signal 记录</text>
+        <text class="t-sub" x="452" y="540" style="fill:#141413">（alert_events），可人工提升为问题</text>
+        <path class="edge-dash" d="M968,515 H987"/>
+      </g>
+      <g class="fx" style="--i:6">
+        <path class="edge-clay drawn" style="--i:6;--len:280" d="M1003,634 H1277" marker-end="url(#ah-clay)"/>
+        <text class="t-sub" x="1014" y="622">⑦ 新建或合并入既有问题</text>
+        <rect class="act" x="1277" y="640" width="16" height="28"/>
+      </g>
+      <!-- right panel -->
+      <g class="fx" style="--i:7">
+        <rect class="box-soft" x="1480" y="0" width="248" height="300" rx="3"/>
+        <text class="t-title" x="1498" y="40">门里的参数</text>
+        <text class="t-sub" x="1498" y="84" style="fill:#141413">30 分钟同指纹</text>
+        <text class="t-sub" x="1498" y="118" style="fill:#141413">≥ 3 次 → 抖动噪声</text>
+        <text class="t-sub" x="1498" y="160" style="fill:#141413">合并置信度 ≥ 0.7</text>
+        <text class="t-sub" x="1498" y="194" style="fill:#141413">否则新建</text>
+        <text class="t-sub" x="1498" y="236" style="fill:#141413">LLM 出错即放行</text>
+        <text class="t-sub" x="1498" y="270" style="fill:#141413">（fail-open）</text>
+        <rect class="box-dark" x="1480" y="320" width="248" height="180" rx="3"/>
+        <text class="t-title t-white" x="1498" y="362">取舍：只许合并</text>
+        <text class="t-sub" x="1498" y="406" style="fill:#D9D6CC">规则先挡重复</text>
+        <text class="t-sub" x="1498" y="440" style="fill:#D9D6CC">LLM 只看灰区</text>
+        <text class="t-sub" x="1498" y="474" style="fill:#D9D6CC">只合并、不丢弃</text>
+      </g>
+    </svg>
+    <p class="src anim" style="--i:8">出处：<code>README_CN.md</code>「双告警入口」；<code>web/routers/webhooks.py</code> <code>require_webhook_token</code>（空 secret 直接放行，启动时告警）；<code>config/settings.yaml</code></p>
+  </div>
+  <div class="landing anim" style="--i:8"><div class="lbl">落地意义</div><div class="txt">告警风暴不会变成工单风暴：on-call 只看去重后的问题，原始信号仍可审计、可追回。（→ 总结 ①）</div></div>
+  <aside class="notes">两条告警入口：Webhook 直接解析，没有 LLM 成本，token 或 HMAC 校验只在配置了 AIOPS_WEBHOOK_SECRET 后才生效，生产部署要记得设置。IM 里的人话先由 Main 核实再建单。不管从哪来，都过 Signal Gate：先确定性去重，灰区才交给廉价模型，而且模型只能判合并或新建，永远不能把信号判成噪声丢掉。</aside>
+</section>
+
+<!-- ================= 8. 变更管理 + 自学习层 ================= -->
+<section class="slide" data-title="变更管理与自学习层">
+  <div class="kicker anim" style="--i:0">03 · 架构 / 关键流程 III</div>
+  <h2 class="anim" style="--i:1">变更管理（ITSM）与自学习层：同一套门禁思路</h2>
+  <div class="body" style="flex-direction:column; gap:10px;">
+    <h3 class="anim" style="--i:2">变更流：日常变更不需要 HealthIssue <span class="tag" style="margin-left:10px;">12 态状态机</span></h3>
+    <svg class="diagram" viewBox="0 0 1728 300" width="1728" height="300" aria-label="变更管理流程图">
+      <!-- 5 boxes width 320, pitch 352 -->
+      <g class="fx" style="--i:3">
+        <rect class="box" x="0" y="0" width="320" height="128" rx="3"/><text class="t-title" x="160" y="40" text-anchor="middle">申请</text><text class="t-sub" x="160" y="78" text-anchor="middle">人 / Main / ITSM（HMAC）</text><text class="t-sub" x="160" y="112" text-anchor="middle">外部提单人不能审批</text>
+        <rect class="box" x="352" y="0" width="320" height="128" rx="3"/><text class="t-title" x="512" y="40" text-anchor="middle">SRE 合法性审核</text><text class="t-sub" x="512" y="78" text-anchor="middle">Mode C · 只读</text><text class="t-sub" x="512" y="112" text-anchor="middle">校验步骤，拦禁用命令</text>
+        <rect class="box" x="704" y="0" width="320" height="128" rx="3"/><text class="t-title" x="864" y="40" text-anchor="middle">策略</text><text class="t-sub" x="864" y="78" text-anchor="middle">policy 决策 · audit_logs</text><text class="t-sub" x="864" y="112" text-anchor="middle">RBAC 影子模式 + SoD</text>
+      </g>
+      <g class="fx" style="--i:4">
+        <rect class="box-clay emph" x="1056" y="0" width="320" height="128" rx="3" style="--i:4"/><text class="t-title" x="1216" y="40" text-anchor="middle">人工审批</text><text class="t-sub" x="1216" y="78" text-anchor="middle">Web / CLI，从不由 agent</text><text class="t-sub" x="1216" y="112" text-anchor="middle">绑定内容哈希</text>
+        <rect class="box" x="1408" y="0" width="320" height="128" rx="3"/><text class="t-title" x="1568" y="40" text-anchor="middle">Executor</text><text class="t-sub" x="1568" y="78" text-anchor="middle">审批即排队执行</text><text class="t-sub" x="1568" y="112" text-anchor="middle">命令记 command_audits</text>
+      </g>
+      <path class="edge drawn" style="--i:3;--len:40" d="M320,64 H344" marker-end="url(#ah)"/>
+      <path class="edge drawn" style="--i:3;--len:40" d="M672,64 H696" marker-end="url(#ah)"/>
+      <path class="edge drawn" style="--i:4;--len:40" d="M1024,64 H1048" marker-end="url(#ah)"/>
+      <path class="edge drawn" style="--i:4;--len:40" d="M1376,64 H1400" marker-end="url(#ah)"/>
+      <!-- outcome branches: deterministic execution result mapping, including human review -->
+      <g class="fx" style="--i:5">
+        <path class="edge-dash" d="M512,128 V150"/>
+        <text class="t-label" x="526" y="152">needs_clarification / rejected</text>
+        <path class="edge" d="M1568,128 V172 H213 V184" marker-end="url(#ah)"/>
+        <path class="edge" d="M651,172 V184" marker-end="url(#ah)"/>
+        <path class="edge" d="M1089,172 V184" marker-end="url(#ah)"/>
+        <path class="edge" d="M1527,172 V184" marker-end="url(#ah)"/>
+        <text class="t-label" x="1550" y="160" text-anchor="end">执行结果分支（含待人工验收）</text>
+        <rect class="box-ok" x="0" y="192" width="426" height="100" rx="3"/><text class="t-mono" x="20" y="230" style="font-weight:700">completed</text><text class="t-sub" x="20" y="270">verdict passed</text>
+        <rect class="box-warn" x="438" y="192" width="426" height="100" rx="3"/><text class="t-mono" x="458" y="230" style="font-weight:700">needs_review</text><text class="t-sub" x="458" y="270">执行成功，验证未过或待验收</text>
+        <rect class="box-soft" x="876" y="192" width="426" height="100" rx="3"/><text class="t-mono" x="896" y="230" style="font-weight:700">rolled_back</text><text class="t-sub" x="896" y="270">执行已回滚</text>
+        <rect class="box-soft" x="1314" y="192" width="414" height="100" rx="3"/><text class="t-mono" x="1334" y="230" style="font-weight:700">failed</text><text class="t-sub" x="1334" y="270">其余失败 / 中止</text>
+      </g>
+    </svg>
+    <h3 class="anim" style="--i:6; margin-top:6px;">自学习层：写入先落草稿，发布要过门</h3>
+    <svg class="diagram anim" style="--i:7" viewBox="0 0 1728 150" width="1728" height="150" aria-label="自学习层流程">
+      <rect class="box" x="0" y="0" width="280" height="90" rx="3"/><text class="t-title" x="140" y="38" text-anchor="middle">智能体写入</text><text class="t-mono" x="140" y="72" text-anchor="middle">*_manage</text>
+      <rect class="box-warn" x="328" y="0" width="280" height="90" rx="3"/><text class="t-title" x="468" y="38" text-anchor="middle">草稿</text><text class="t-sub" x="468" y="72" text-anchor="middle">不注入、不发布</text>
+      <rect class="box-clay" x="656" y="0" width="280" height="90" rx="3"/><text class="t-title" x="796" y="38" text-anchor="middle">安全门禁</text><text class="t-sub" x="796" y="72" text-anchor="middle">整包扫描 .sh / .py</text>
+      <rect class="box-ok" x="984" y="0" width="280" height="90" rx="3"/><text class="t-title" x="1124" y="38" text-anchor="middle">发布</text><text class="t-sub" x="1124" y="72" text-anchor="middle">有版本、可回滚</text>
+      <path class="edge" d="M280,45 H320" marker-end="url(#ah)"/>
+      <path class="edge" d="M608,45 H648" marker-end="url(#ah)"/>
+      <path class="edge" d="M936,45 H976" marker-end="url(#ah)"/>
+      <rect class="box-dark" x="1312" y="0" width="416" height="90" rx="3"/><text class="t-title t-white" x="1520" y="38" text-anchor="middle">人类撰写 = 固定</text><text class="t-sub" x="1520" y="72" text-anchor="middle" style="fill:#D9D6CC">永不被自动改动</text>
+      <text class="t-sub" x="0" y="134" style="fill:#141413">Curator（零 LLM）：未用条目 active → stale → archived，永不删除、可恢复</text>
+    </svg>
+    <p class="src anim" style="--i:7">出处：<code>README_CN.md</code> 功能表「变更管理」「自学习层」；<code>docs/MVP-2.6.0-RELEASE.md</code>（12 态，executing → completed / failed / rolled_back / needs_review）；<code>services/change_service.py</code> <code>on_execution_result</code></p>
+  </div>
+  <div class="landing anim" style="--i:8"><div class="lbl">落地意义</div><div class="txt">变更有人审、有哈希、有两本账；经验经门禁沉淀成记忆与技能，成为组织资产。（→ 总结 ②③）</div></div>
+  <aside class="notes">变更管理是事件修复的 ITSM 对应物：日常变更不需要先开问题单，走 SRE 审核、人工审批、Executor 执行，审批只能是人，并绑定方案哈希。执行结果按确定性规则落到四种结果状态：验证通过才 completed，执行成功但验证没过或待验收进 needs_review 由人裁定，回滚就是 rolled_back，其余失败是 failed。自学习层是同一个思路：智能体写的先落草稿，过安全门禁才发布，人写的知识永不被自动改。</aside>
+</section>
+
+<!-- ================= 9. 功能全景 + 部署 ================= -->
+<section class="slide" data-title="功能全景与部署形态">
+  <div class="kicker anim" style="--i:0">04 · 功能</div>
+  <h2 class="anim" style="--i:1">功能全景，以及按成熟度如实标注的部署形态</h2>
+  <div class="body" style="gap:40px;">
+    <div class="col" style="width:880px; flex:none; gap:14px;">
+      <div class="feat">
+        <div class="card anim" style="--i:2">
+          <h3>运维闭环</h3>
+          <p>Scan（20+ 种 AWS 服务类型）· Detect · Signal Gate · RCA（质量门 + 根因定位）· 自动修复 · 变更管理</p>
+        </div>
+        <div class="card anim" style="--i:3">
+          <h3>安全与知识</h3>
+          <p>云安全审查（CIS 评分、含 NACL 的三态可达性）· 知识库（蒸馏 SOP）· 报告与定时任务</p>
+        </div>
+        <div class="card anim" style="--i:4">
+          <h3>平台与集成</h3>
+          <p>Web 看板 / CLI / REST API · Messaging（飞书 / Slack / 钉钉 / 企微 …）· MCP · 图引擎 · Galaxy <span class="tag warn">实验性</span></p>
+        </div>
+      </div>
+      <div class="stats anim" style="--i:5">
+        <div><div class="v">227</div><div class="k">HTTP 路由</div></div>
+        <div><div class="v">42</div><div class="k">斜杠命令</div></div>
+        <div><div class="v">29</div><div class="k">数据表</div></div>
+        <div><div class="v">8</div><div class="k">流水线</div></div>
+        <div><div class="v">16</div><div class="k">领域技能</div></div>
+      </div>
+      <p class="src anim" style="--i:5">出处：<code>README_CN.md</code> 功能表（16 个领域技能、20+ 服务类型）；<code>docs/PROJECT-STATS.md</code>（227 路由、42 CLI 斜杠命令、29 表、8 类流水线，2026-09-08 计量）</p>
+    </div>
+    <div class="col" style="flex:1;">
+      <table class="grid anim" style="--i:4">
+        <thead><tr><th>部署形态</th><th>意图</th><th>成熟度</th></tr></thead>
+        <tbody>
+          <tr><td class="name">本地 pip</td><td>开发 / 评估</td><td><span class="tag ok">稳定</span></td></tr>
+          <tr><td class="name">Docker</td><td>单容器自托管</td><td><span class="tag ok">稳定</span></td></tr>
+          <tr><td class="name"><code>deploy-sg</code></td><td>一键 AWS <b>开发沙箱</b>，单机，不跑生产</td><td><span class="tag ok">已跑通</span></td></tr>
+          <tr><td class="name">Terraform<br><code>ec2·ecs·eks</code></td><td>AWS 生产（RDS + S3）</td><td><span class="tag warn">脚手架</span></td></tr>
+        </tbody>
+      </table>
+      <div class="card anim" style="--i:6">
+        <p>Terraform 栈最后验证 2026-05，<b>未端到端测试</b>。每种方式跑同一个应用，<b>单进程</b>运行。</p>
+      </div>
+      <p class="src anim" style="--i:6">出处：<code>README_CN.md</code>「部署」成熟度表与「开发 vs 生产」「单进程」说明（<code>--workers 1</code>）</p>
+    </div>
+  </div>
+  <div class="landing anim" style="--i:7"><div class="lbl">落地意义</div><div class="txt">按客户成熟度逐级交付：本地评估 → Docker → 一键 AWS 沙箱试点；生产栈先在预发账号验证。（→ 总结 ④）</div></div>
+  <aside class="notes">功能分三组：运维闭环、安全与知识、平台与集成，数字都来自仓库的计量文档。部署这边要如实讲：本地、Docker、一键沙箱已经跑通，Terraform 生产栈还是脚手架，最后一次验证是 5 月，没有端到端测过；Galaxy 是实验性的。</aside>
+</section>
+
+<!-- ================= 10. Demo ================= -->
+<section class="slide" data-title="Demo（可选）">
+  <div class="kicker anim" style="--i:0">05 · Demo</div>
+  <h2 class="anim" style="--i:1">四个演示场景 <span class="tag clay" style="vertical-align:middle; margin-left:12px;">可选 · 视时间可跳过</span></h2>
+  <div class="body" style="flex-direction:column;">
+    <div class="demo">
+      <div class="card anim" style="--i:2">
+        <div class="no">1</div>
+        <h3>Chat：巡检账号、提一个问题</h3>
+        <p><code>aiops chat "check health"</code> 或 Web Chat</p>
+        <p class="muted">看点：Main 把请求路由给专家，工具调用在流里逐条可见</p>
+        <p class="src">对应 → 第 4–5 页 总体架构与智能体</p>
+      </div>
+      <div class="card anim" style="--i:3">
+        <div class="no">2</div>
+        <h3>事件闭环：一个 Issue 从诊断到验收</h3>
+        <p>Issue 详情页阶段卡：诊断 · 方案 · 审批并执行 · 验收</p>
+        <p class="muted">看点：置信度对照自动修复门槛、审批绑定内容哈希、人工验收裁定</p>
+        <p class="src">对应 → 第 6 页 自动修复流水线</p>
+      </div>
+      <div class="card anim" style="--i:4">
+        <div class="no">3</div>
+        <h3>变更管理：一张变更单走完全程</h3>
+        <p>申请 · 审核 · 方案 · 审批并执行 · 验收，再看审计页签</p>
+        <p class="muted">看点：SRE 只读审核、人工审批、<code>audit_logs</code> + <code>command_audits</code></p>
+        <p class="src">对应 → 第 8 页 变更管理</p>
+      </div>
+      <div class="card anim" style="--i:5">
+        <div class="no">4</div>
+        <h3>云安全审查 / Galaxy 关系图</h3>
+        <p><code>/app/security</code> 姿态评分、发现、暴露路径；<code>/app/galaxy?focus=</code> <span class="tag warn">实验性</span></p>
+        <p class="muted">看点：三态可达性绝不给假的「安全」；LLM 边经 fail-closed 校验</p>
+        <p class="src">对应 → 第 9 页 功能全景</p>
+      </div>
+    </div>
+  </div>
+  <aside class="notes">Demo 是可选的，时间不够就直接跳到总结。四个场景分别对应前面的架构、修复流水线、变更管理和安全审查，现场挑一两个演示即可。</aside>
+</section>
+
+<!-- ================= 11. 总结 ================= -->
+<section class="slide" data-title="总结：四个核心观点">
+  <div class="kicker anim" style="--i:0">06 · 总结</div>
+  <h2 class="anim" style="--i:1">四个核心观点</h2>
+  <div class="body" style="flex-direction:column;">
+    <div class="summary">
+      <div class="card anim" style="--i:2">
+        <div class="num">01</div>
+        <div class="claim">Agent-first 的运维闭环可行</div>
+        <div class="lbl">技术依据</div>
+        <p>第 6–7 页：Signal Gate → RCA 质量门 → 分级审批 → 一次 verdict。EKS 实验室 10 个故障场景闭环验证：自动修复 <b>10/10</b>（目标 ≥ 7/10）、检测 ~2 分钟、MTTR ~6.3 分钟、每轮 ~$2–3。</p>
+        <div class="lbl">落地价值</div>
+        <p>低风险问题自主闭环，减轻 on-call 负担。</p>
+      </div>
+      <div class="card anim" style="--i:3">
+        <div class="num">02</div>
+        <div class="claim">自主与安全不矛盾</div>
+        <div class="lbl">技术依据</div>
+        <p>第 5 页读 / 规划 / 执行隔离 + L0–L3 分级；第 6 页单一写入口 + 内容哈希；第 8 页人工审批 + 两本审计账；凭证与校验 fail-closed。</p>
+        <div class="lbl">落地价值</div>
+        <p>审批门与审计是企业敢把运维交给 Agent 的前提。</p>
+      </div>
+      <div class="card anim" style="--i:4">
+        <div class="num">03</div>
+        <div class="claim">系统越用越好</div>
+        <div class="lbl">技术依据</div>
+        <p>第 8 页自学习层：记忆、技能先落草稿，经安全门禁发布，人类知识固定、永不删除；第 5 页 Reporter 把已解决事件蒸馏为知识库 SOP。</p>
+        <div class="lbl">落地价值</div>
+        <p>运维经验沉淀为组织资产，不随人员流失。</p>
+      </div>
+      <div class="card anim" style="--i:5">
+        <div class="num">04</div>
+        <div class="claim">落地路径清晰</div>
+        <div class="lbl">技术依据</div>
+        <p>第 9 页部署形态：本地、Docker、一键 AWS 沙箱已跑通；Terraform 生产栈仍为脚手架、待验证。第 3 页每个阶段有发布说明与 E2E 证据。</p>
+        <div class="lbl">落地价值</div>
+        <p>按客户成熟度逐级交付，从评估到试点再到生产。</p>
+      </div>
+    </div>
+    <p class="src anim" style="--i:6; margin-top:18px;">验证数据出处：<code>README_CN.md</code>「验证」表（EKS 实验室 10 个故障场景：OOM、坏镜像、网络策略、磁盘压力、Pod pending、目标不健康、CoreDNS 宕机、PVC pending、HPA 打满、服务被删）</p>
+  </div>
+  <aside class="notes">最后用四句话收尾。第一，闭环可行，EKS 实验室 10 个故障场景自动修复 10 个；第二，自主和安全不矛盾，靠的是隔离、分级审批和 fail-closed；第三，系统越用越好，但所有学习都在门禁之内。第四，落地路径清晰，前三种部署已跑通，生产栈还待验证，可以按客户成熟度逐级交付。</aside>
+</section>
+
+<!-- ================= 12. 收尾 ================= -->
+<section class="slide end" data-title="Q&amp;A">
+  <div class="kicker anim" style="--i:0">Q&amp;A</div>
+  <h1 class="anim" style="--i:1; margin-top:24px;">谢谢 · 欢迎提问</h1>
+  <div class="anim" style="--i:2; margin-top:48px; display:flex; flex-direction:column; gap:16px;">
+    <p style="font-size:30px;">仓库：<a href="https://github.com/LiboMa/agenticops-chat" style="color:var(--clay-deep);">github.com/LiboMa/agenticops-chat</a></p>
+    <p style="font-size:24px;" class="muted">延伸阅读：<code>README_CN.md</code> · <code>docs/WORKFLOW.md</code>（端到端工作流，含 Mermaid 图）· <code>docs/README.md</code>（文档地图）· <code>docs/MVP-2.7.0-RELEASE.md</code>（进行中）</p>
+  </div>
+  <aside class="notes">仓库地址在这里，工作流和文档地图都在 docs 目录下。欢迎提问。</aside>
+</section>
+
+  <div id="zone-prev" class="navzone" aria-hidden="true"></div>
+  <div id="zone-next" class="navzone" aria-hidden="true"></div>
+  <div id="brand"><b>AgenticOps</b> · 架构与功能分享</div>
+  <div id="pageno">01 / 12</div>
+</div>
+</div>
+
+<div id="notes-panel" role="region" aria-label="演讲者备注"><div class="hd"></div><div class="tx"></div></div>
+<div id="overview" role="dialog" aria-label="缩略总览"><div class="hint">缩略总览 · 点击跳转 · O / Esc 关闭</div><div class="grid"></div></div>
+
+<script>
+(function () {
+  "use strict";
+  var stage = document.getElementById("stage");
+  var slides = Array.prototype.slice.call(stage.querySelectorAll(".slide"));
+  var total = slides.length;
+  var progress = document.getElementById("progress");
+  var pageno = document.getElementById("pageno");
+  var notesPanel = document.getElementById("notes-panel");
+  var overview = document.getElementById("overview");
+  var grid = overview.querySelector(".grid");
+  var current = 0;
+
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+
+  function fit() {
+    var s = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+    stage.style.transform = "scale(" + s + ")";
+    if (overview.classList.contains("open")) sizeThumbs();
+  }
+
+  function indexFromHash() {
+    var m = /^#(\d+)$/.exec(window.location.hash);
+    if (!m) return 0;
+    var n = parseInt(m[1], 10);
+    if (n < 1) n = 1;
+    if (n > total) n = total;
+    return n - 1;
+  }
+
+  function show(i, updateHash) {
+    if (i < 0) i = 0;
+    if (i > total - 1) i = total - 1;
+    slides[current].classList.remove("active");
+    current = i;
+    slides[current].classList.add("active");
+    progress.style.width = ((current + 1) / total * 100) + "%";
+    pageno.textContent = pad(current + 1) + " / " + pad(total);
+    var note = slides[current].querySelector(".notes");
+    notesPanel.querySelector(".hd").textContent = "备注 · " + (current + 1) + " / " + total + " · " + (slides[current].getAttribute("data-title") || "");
+    notesPanel.querySelector(".tx").textContent = note ? note.textContent : "";
+    var thumbs = grid.children;
+    for (var k = 0; k < thumbs.length; k++) thumbs[k].firstChild.classList.toggle("current", k === current);
+    if (updateHash !== false && window.location.hash !== "#" + (current + 1)) {
+      window.location.replace("#" + (current + 1));
+    }
+  }
+
+  function next() { show(current + 1); }
+  function prev() { show(current - 1); }
+
+  function buildOverview() {
+    slides.forEach(function (sl, i) {
+      var wrap = document.createElement("div");
+      var thumb = document.createElement("div");
+      thumb.className = "thumb";
+      var inner = document.createElement("div");
+      inner.className = "inner";
+      var clone = sl.cloneNode(true);
+      clone.classList.remove("active");
+      var n = clone.querySelector(".notes");
+      if (n) n.parentNode.removeChild(n);
+      inner.appendChild(clone);
+      thumb.appendChild(inner);
+      var cap = document.createElement("div");
+      cap.className = "cap";
+      cap.textContent = pad(i + 1) + " · " + (sl.getAttribute("data-title") || "");
+      wrap.appendChild(thumb);
+      wrap.appendChild(cap);
+      wrap.addEventListener("click", function () { closeOverview(); show(i); });
+      grid.appendChild(wrap);
+    });
+  }
+  function sizeThumbs() {
+    var thumbs = grid.querySelectorAll(".thumb");
+    for (var k = 0; k < thumbs.length; k++) {
+      var w = thumbs[k].clientWidth;
+      thumbs[k].firstChild.style.transform = "scale(" + (w / 1920) + ")";
+    }
+  }
+  function openOverview() { overview.classList.add("open"); sizeThumbs(); show(current, false); }
+  function closeOverview() { overview.classList.remove("open"); }
+  function toggleOverview() { if (overview.classList.contains("open")) closeOverview(); else openOverview(); }
+
+  function toggleFullscreen() {
+    try {
+      if (!document.fullscreenElement) {
+        var p = document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
+        if (p && p.catch) p.catch(function () {});
+      } else {
+        var q = document.exitFullscreen && document.exitFullscreen();
+        if (q && q.catch) q.catch(function () {});
+      }
+    } catch (e) { /* fullscreen not available */ }
+  }
+
+  document.addEventListener("keydown", function (e) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    var k = e.key;
+    if (overview.classList.contains("open")) {
+      if (k === "Escape" || k === "o" || k === "O") { closeOverview(); e.preventDefault(); }
+      return;
+    }
+    switch (k) {
+      case "ArrowRight": case "ArrowDown": case " ": case "Spacebar": case "PageDown": next(); e.preventDefault(); break;
+      case "ArrowLeft": case "ArrowUp": case "PageUp": prev(); e.preventDefault(); break;
+      case "Home": show(0); e.preventDefault(); break;
+      case "End": show(total - 1); e.preventDefault(); break;
+      case "f": case "F": toggleFullscreen(); e.preventDefault(); break;
+      case "n": case "N": notesPanel.classList.toggle("open"); e.preventDefault(); break;
+      case "o": case "O": case "Escape": openOverview(); e.preventDefault(); break;
+    }
+  });
+
+  document.getElementById("zone-prev").addEventListener("click", prev);
+  document.getElementById("zone-next").addEventListener("click", next);
+  window.addEventListener("hashchange", function () {
+    var i = indexFromHash();
+    if (i !== current) show(i, false);
+  });
+  window.addEventListener("resize", fit);
+
+  buildOverview();
+  slides[0].classList.add("active");
+  show(indexFromHash(), true);
+  fit();
+})();
+</script>
+</body>
+</html>
