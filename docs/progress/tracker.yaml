@@ -1,0 +1,463 @@
+# AgenticOps development progress — the ONE source of truth for docs/progress/dashboard.html.
+# Field reference and how to maintain it: docs/progress/README.md.
+# Every status below cites the doc (or commit) it was read from; what could not be confirmed says so in notes.
+# After editing: python scripts/progress/build_dashboard.py  (then commit tracker.yaml + dashboard.html together).
+schema: 1
+updated: "2026-10-21"
+releases:
+  - id: "1.0.0"
+    title: "MVP 1.0.0 — 多智能体 AI 运维助手"
+    status: released
+    branch: ""
+    tag: ""
+    doc: docs/MVP-1.0.0-RELEASE.md
+    items:
+      - id: "1.0.0/release"
+        title: "v1.0.0 MVP 架构与功能（汇总）"
+        status: done
+        depends_on: []
+        modules: ["agents", "cli", "web"]
+        plan: ""
+        evidence:
+          docs: ["docs/MVP-1.0.0-RELEASE.md"]
+          commits:
+            - {sha: "b9cc7ca", date: "2026-03-10", title: "chore: MVP 1.0.0 cleanup — archive old docs, slim CLAUDE.md, add dev journal & roadmap"}
+        notes: "发布说明头部：版本 1.0.0-MVP，日期 2026-03-10，代号 mvp-0.9.0-beta → 1.0.0。"
+
+  - id: "1.0.1"
+    title: "MCP 集成可靠性 + 动态模型选择 + 安全加固"
+    status: released
+    branch: main
+    tag: ""
+    doc: docs/MVP-1.0.1-RELEASE.md
+    items:
+      - id: "1.0.1/release"
+        title: "v1.0.1 发布（汇总）"
+        status: done
+        depends_on: []
+        modules: ["mcp_manager.py", "scheduler"]
+        plan: ""
+        evidence:
+          docs: ["docs/MVP-1.0.1-RELEASE.md"]
+          commits:
+            - {sha: "5cb8356", date: "2026-05-27", title: "docs: add MVP-1.0.1 release notes, update README and WORKFLOW"}
+        notes: "发布说明头部：Version 1.0.1，Date 2026-05-27，Branch main。"
+
+  - id: "1.1.0"
+    title: "自主记忆 + 自主技能"
+    status: released
+    branch: main
+    tag: ""
+    doc: docs/MVP-1.1.0-RELEASE.md
+    items:
+      - id: "1.1.0/release"
+        title: "Cycle ② 记忆 + Cycle ③ 技能（汇总）"
+        status: done
+        depends_on: []
+        modules: ["memory", "skills"]
+        plan: ""
+        evidence:
+          docs: ["docs/MVP-1.1.0-RELEASE.md"]
+          commits:
+            - {sha: "a4d3b97", date: "2026-05-31", title: "docs: MVP 1.1.0 Release — self-optimizing memory + autonomous skills"}
+        notes: "发布说明头部：日期 2026-05-31，分支 cycle2-memory-quantum + cycle3-skills-autonomy → main。"
+
+  - id: "1.1.1"
+    title: "Web 聊天体验 + 统一 Messaging"
+    status: released
+    branch: cycle3-skills-autonomy
+    tag: ""
+    doc: docs/MVP-1.1.1-RELEASE.md
+    items:
+      - id: "1.1.1/release"
+        title: "并发会话 + 快速打开 + Messaging（汇总）"
+        status: done
+        depends_on: []
+        modules: ["web", "notify"]
+        plan: ""
+        evidence:
+          docs: ["docs/MVP-1.1.1-RELEASE.md"]
+          commits:
+            - {sha: "d9687ad", date: "2026-06-02", title: "docs: add MVP-1.1.1 release notes (concurrent chat sessions + fast open)"}
+        notes: "发布说明头部：日期 2026-06-02，分支 cycle3-skills-autonomy。"
+
+  - id: "2.0.0"
+    title: "治理型自治 + 企业流程 + 预防性运维"
+    status: released
+    branch: MVP-2.0.0-release
+    tag: ""
+    doc: docs/MVP-2.0.0-RELEASE.md
+    items:
+      - id: "2.0.0/release"
+        title: "四大支柱 + 预防三件套 + 凭证硬化（汇总）"
+        status: done
+        depends_on: []
+        modules: ["services/policy_engine", "itsm", "providers", "credentials", "graph"]
+        plan: ""
+        evidence:
+          docs: ["docs/MVP-2.0.0-RELEASE.md"]
+          commits:
+            - {sha: "b22d5a7", date: "2026-06-12", title: "docs(release): MVP-2.0.0 Methos release notes + brand logo assets"}
+        notes: "发布说明头部：日期 2026-06-12（updated 2026-07-03），分支 MVP-2.0.0-release。"
+
+  - id: "2.0.1"
+    title: "前端体验重做 + Strands SDK 现代化"
+    status: released
+    branch: MVP-2.0.1
+    tag: ""
+    doc: docs/MVP-2.0.1-RELEASE.md
+    items:
+      - id: "2.0.1/release"
+        title: "Chat Composer / Rich Chat / Nav / Dashboard 2.0（汇总）"
+        status: done
+        depends_on: []
+        modules: ["web", "agents"]
+        plan: ""
+        evidence:
+          docs: ["docs/MVP-2.0.1-RELEASE.md"]
+          commits:
+            - {sha: "8061864", date: "2026-07-04", title: "refactor(cli): remove /detail command and --detail flag; docs updated"}
+        notes: "发布说明头部：Started 2026-07-03 · Completed 2026-07-04。证据提交是首次加入该发布说明的提交。"
+
+  - id: "2.2.0"
+    title: "Signal Gate 降噪 + RCA 质量五件套"
+    status: released
+    branch: MVP-2.2.0
+    tag: ""
+    doc: docs/MVP-2.2.0-RELEASE.md
+    items:
+      - id: "2.2.0/release"
+        title: "Signal Gate + RCA 质量五件套（汇总）"
+        status: done
+        depends_on: []
+        modules: ["services/signal_gate", "services/rca_quality"]
+        plan: docs/superpowers/plans/2026-07-16-mvp-2.2.0-signal-gate-rca-quality.md
+        evidence:
+          docs: ["docs/MVP-2.2.0-RELEASE.md", "docs/MVP-2.2.0-CHAOS-E2E-REPORT.md"]
+          commits:
+            - {sha: "63e184c", date: "2026-07-21", title: "docs: MVP-2.2.0 release notes (重磅升级) + CLAUDE.md module/config sync"}
+        notes: "发布说明头部：Started 2026-07-10 · Completed 2026-07-21。"
+
+  - id: "2.2.1"
+    title: "Effort（thinking）策略"
+    status: released
+    branch: MVP-2.2.0
+    tag: ""
+    doc: docs/MVP-2.2.1-RELEASE.md
+    items:
+      - id: "2.2.1/release"
+        title: "后端自动升档 + 会话级覆盖（汇总）"
+        status: done
+        depends_on: ["2.2.0/release"]
+        modules: ["agents/preamble"]
+        plan: docs/superpowers/plans/2026-07-27-mvp-2.2.1-effort-policy.md
+        evidence:
+          docs: ["docs/MVP-2.2.1-RELEASE.md", "docs/MVP-2.2.1-CHAOS-L2-E2E-REPORT.md"]
+          commits:
+            - {sha: "8ddfa53", date: "2026-07-27", title: "feat(effort): MVP-2.2.1 thinking policy — RCA auto-escalation + per-session chat override"}
+        notes: "依赖出处：发布说明头部「依赖 MVP-2.2.0」。"
+
+  - id: "2.5.0"
+    title: "云安全审查（Cloud Security Review）"
+    status: released
+    branch: MVP-2.5.0
+    tag: ""
+    doc: docs/MVP-2.5.0-RELEASE.md
+    items:
+      - id: "2.5.0/P1"
+        title: "P1（Stages 0–7）安全态势体检（汇总）"
+        status: done
+        depends_on: []
+        modules: ["security"]
+        plan: docs/superpowers/plans/2026-08-30-mvp-2.5.0-cloud-security-p1-core.md
+        evidence:
+          docs: ["docs/MVP-2.5.0-RELEASE.md", "docs/MVP-2.5.0-E2E-REPORT.md"]
+          commits:
+            - {sha: "6eb1f67", date: "2026-08-31", title: "docs(security): MVP-2.5.0 spec + P1 core plan + release notes + readiness audit"}
+        notes: "发布说明：P1（Stages 0–7）已实现、通过真实账户只读 E2E，2026-08-31 push 到 origin/MVP-2.5.0。P1.5 / P2 / P3 在该文档路线图里，未拆进本 tracker（状态未从文档确认）。"
+
+  - id: "2.6.0"
+    title: "变更管理（Change Management / ITSM）"
+    status: released
+    branch: MVP-2.5.0
+    tag: ""
+    doc: docs/MVP-2.6.0-RELEASE.md
+    notes: "发布说明写于 push 前（「未 push」）；其提交已在 main 的历史里（5f95120 是 main 的祖先）。没有 v2.6.0 tag。"
+    items:
+      - id: "2.6.0/A"
+        title: "Plan A 地基与账本（S0 + S1）"
+        status: done
+        depends_on: []
+        modules: ["models.py", "services/change_service", "services/command_audit", "auth"]
+        plan: docs/superpowers/plans/2026-09-17-change-management-p1-a-foundation.md
+        evidence:
+          docs: ["docs/MVP-2.6.0-RELEASE.md"]
+          commits:
+            - {sha: "0416996", date: "2026-09-18", title: "feat(models): plan + change-request state machines and ChangeRequest table (MVP-2.6.0 S0)"}
+            - {sha: "592349e", date: "2026-09-18", title: "docs(plan): Plan A execution record"}
+            - {sha: "2ecb2bf", date: "2026-09-18", title: "docs(plan): Plan A final review + fix wave record"}
+        notes: "发布说明只直接写了 Plan B 与 Plan C 已实现；Plan A 的完成依据是它的执行记录与终审提交。"
+      - id: "2.6.0/B"
+        title: "Plan B 后端变更闭环（S2 + S3 + 通知 + 统计）"
+        status: done
+        depends_on: []
+        modules: ["services/change_service", "tools/change_tools", "web/routers/changes", "web/routers/plans", "services/plan_stats_service"]
+        plan: docs/superpowers/plans/2026-09-17-change-management-p1-b-backend.md
+        evidence:
+          docs: ["docs/MVP-2.6.0-RELEASE.md"]
+          commits:
+            - {sha: "e1aa3df", date: "2026-09-25", title: "feat(tools): change management agent tools (request/review/execute wrappers over change_service)"}
+            - {sha: "3cbef4b", date: "2026-09-26", title: "test(change): closed-loop pipeline with mocked SRE/Executor; Plan B execution record"}
+        notes: "计划之间的依赖未从文档确认，未填 depends_on。"
+      - id: "2.6.0/C"
+        title: "Plan C 前端 + 文档 + Live E2E（S4 + S5 + S6）"
+        status: done
+        depends_on: []
+        modules: ["web"]
+        plan: docs/superpowers/plans/2026-09-17-change-management-p1-c-frontend-e2e.md
+        evidence:
+          docs: ["docs/MVP-2.6.0-RELEASE.md", "docs/MVP-2.6.0-E2E-REPORT.md"]
+          commits:
+            - {sha: "0e17adf", date: "2026-09-26", title: "feat(web): change-management types and hooks; plan approve/reject hooks match the hardened API"}
+            - {sha: "5f95120", date: "2026-09-26", title: "docs(change-management): integrate MVP-2.6.0 Change Management (ITSM) across tracked docs"}
+            - {sha: "2bc2034", date: "2026-09-27", title: "docs(e2e): MVP-2.6.0 Change Management live E2E report on dev"}
+
+  - id: "2.6.1"
+    title: "图驱动的 RCA 定位闭环 + Issue / Change 逻辑与界面"
+    status: released
+    branch: MVP-2.6.1
+    tag: v2.6.1
+    doc: docs/MVP-2.6.1-RELEASE.md
+    notes: "发布说明：计划 A–E 已全部实现，最终门禁（2026-10-02）全部通过。联合 live E2E 报告头部仍写「in progress，主人 UI 走查待补」。"
+    items:
+      - id: "2.6.1/A"
+        title: "Plan A 图事实层"
+        status: done
+        depends_on: []
+        modules: ["graph/relations", "graph/query_service", "galaxy", "services/identity_resolver"]
+        plan: docs/superpowers/plans/2026-09-28-mvp-2.6.1-plan-a-graph-facts.md
+        evidence:
+          docs: ["docs/MVP-2.6.1-RELEASE.md", "docs/MVP-2.6.1-GRAPH-FACTS-MEASUREMENT.md"]
+          commits:
+            - {sha: "0ea8fdc", date: "2026-09-29", title: "docs(plan): MVP-2.6.1 Plan A — graph facts layer (anchoring, canonical relations, query service, measurement)"}
+      - id: "2.6.1/B"
+        title: "Plan B 拉取式连接器与告警入口鉴权"
+        status: done
+        depends_on: []
+        modules: ["connectors", "credentials/kube", "services/inventory", "web/routers/webhooks"]
+        plan: docs/superpowers/plans/2026-09-28-mvp-2.6.1-plan-b-connectors.md
+        evidence:
+          docs: ["docs/MVP-2.6.1-RELEASE.md"]
+          commits:
+            - {sha: "0680258", date: "2026-09-29", title: "docs(plan): MVP-2.6.1 Plan B — pull connectors (K8s) and webhook intake auth"}
+            - {sha: "a1e7ed0", date: "2026-09-30", title: "docs(connectors): Plan B — pull connectors and webhook intake auth"}
+            - {sha: "fdd5503", date: "2026-10-01", title: "docs(inventory): Plan B — resource presence, AWS absent-marking and known gaps"}
+      - id: "2.6.1/C"
+        title: "Plan C RCA 根因定位闭环与评测"
+        status: done
+        depends_on: []
+        modules: ["services/rca_location", "graph/evidence", "services/policy_engine"]
+        plan: docs/superpowers/plans/2026-09-28-mvp-2.6.1-plan-c-rca-location-loop.md
+        evidence:
+          docs: ["docs/MVP-2.6.1-RELEASE.md", "docs/MVP-2.6.1-LOCATION-EVAL-REPORT.md"]
+          commits:
+            - {sha: "72b9a2a", date: "2026-09-29", title: "docs(plan): MVP-2.6.1 Plan C — RCA root-cause location loop and eval"}
+            - {sha: "ad583aa", date: "2026-10-01", title: "docs(rca): Plan C — topology evidence, root-cause location, policy shadow mode"}
+        notes: "计划之间的依赖未从文档确认，未填 depends_on。"
+      - id: "2.6.1/D"
+        title: "Plan D Issue / Change 逻辑"
+        status: done
+        depends_on: []
+        modules: ["services/issue_state", "services/plan_content", "services/change_steps", "services/verification"]
+        plan: docs/superpowers/plans/2026-09-28-mvp-2.6.1-plan-d-issue-change-logic.md
+        evidence:
+          docs: ["docs/MVP-2.6.1-RELEASE.md"]
+          commits:
+            - {sha: "17820da", date: "2026-09-29", title: "docs(plan): MVP-2.6.1 Plan D — Issue/Change logic (transition_issue, dismissed, plan versioning, change steps and intake, verification and acceptance)"}
+            - {sha: "77e346c", date: "2026-10-01", title: "docs(plan-d): intake auto-approve limit, services key files, final-review behaviour notes"}
+      - id: "2.6.1/E"
+        title: "Plan E 界面、文档与联合 E2E"
+        status: done
+        depends_on: []
+        modules: ["web"]
+        plan: docs/superpowers/plans/2026-09-28-mvp-2.6.1-plan-e-ui-docs-e2e.md
+        evidence:
+          docs: ["docs/MVP-2.6.1-RELEASE.md", "docs/MVP-2.6.1-E2E-REPORT.md"]
+          commits:
+            - {sha: "6c2e546", date: "2026-09-29", title: "docs(plan): MVP-2.6.1 Plan E — UI, docs and joint live E2E (nav split, issue scopes, LocalGraph, IssueDetail/ChangeDetail rework, connectors card)"}
+            - {sha: "6433690", date: "2026-10-02", title: "docs(2.6.1): release note + CLAUDE.md, README pair, docs map, DESIGN §0, WORKFLOW for the graph-facts / RCA location / issue-change UI release"}
+            - {sha: "f4127b3", date: "2026-10-02", title: "docs(2.6.1): record the final gate results and the measured graph facts; park the Plan E final-review residuals"}
+        notes: "docs/MVP-2.6.1-E2E-REPORT.md 头部：in progress — 主人 UI 走查（清单 2、3、6 UI 部分、7）待补。"
+
+  - id: "2.7.0"
+    title: "蓝白工作台 + 核心信任加固"
+    status: released
+    branch: MVP-2.7.0
+    tag: v2.7.0
+    doc: docs/MVP-2.7.0-RELEASE.md
+    notes: "S6、S7 与 A1–A4 的状态依 origin/MVP-2.7.0 的 docs/MVP-2.7.0-RELEASE.md 与路线图（a953e6b = tag v2.7.0）。main 只合入到 5d82aec（PR #25），main 上的该文档仍写 S5 待验收、S6/S7 未开始 —— 见「不一致」面板。"
+    items:
+      - id: "2.7.0/S1"
+        title: "核心信任加固"
+        status: done
+        depends_on: ["2.6.1/A", "2.6.1/B", "2.6.1/C", "2.6.1/D", "2.6.1/E"]
+        modules: ["services/verification", "services/chat_access", "web"]
+        plan: docs/superpowers/plans/2026-10-05-mvp-2.7.0-roadmap.md
+        evidence:
+          docs: ["docs/MVP-2.7.0-RELEASE.md"]
+          commits:
+            - {sha: "33b8946", date: "2026-10-05", title: "docs(2.7.0): S1 core trust hardening — release notes, CLAUDE.md, README pair, WORKFLOW"}
+            - {sha: "b9e9d9a", date: "2026-10-05", title: "docs(2.7.0): S1 gates, review outcome and the narrowed manage rule; attribution test follows the actor key"}
+        notes: "已验收（2026-10-05）。依赖出处：路线图阶段表 S1 的依赖列「2.6.1 代码停手」。S1 详细计划在路线图文件内。"
+      - id: "2.7.0/S2"
+        title: "蓝白外壳与导航（P0+P1）"
+        status: done
+        depends_on: ["2.7.0/S1"]
+        modules: ["services/ui_preferences", "web/routers/ui", "web"]
+        plan: docs/superpowers/plans/2026-10-05-mvp-2.7.0-s2-shell.md
+        evidence:
+          docs: ["docs/MVP-2.7.0-RELEASE.md"]
+          commits:
+            - {sha: "3738f7d", date: "2026-10-05", title: "docs(2.7.0): S2 blue-white shell plan, approved"}
+            - {sha: "0f3aef8", date: "2026-10-05", title: "docs(2.7.0): S2 shell — release notes, CLAUDE.md, README pair, WORKFLOW; S1 marked accepted"}
+            - {sha: "6436c8b", date: "2026-10-05", title: "docs(2.7.0): S2 gates, review outcome and the remaining known gaps"}
+        notes: "已验收（2026-10-06）。依赖出处：路线图依赖列「S1」。"
+      - id: "2.7.0/S3"
+        title: "方案枢纽 + 待办（P4）"
+        status: done
+        depends_on: ["2.7.0/S2"]
+        modules: ["services/attention", "services/ui_actions", "services/work_phases", "web/routers/plans"]
+        plan: docs/superpowers/plans/2026-10-06-mvp-2.7.0-s3-plans-attention.md
+        evidence:
+          docs: ["docs/MVP-2.7.0-RELEASE.md"]
+          commits:
+            - {sha: "bfceab9", date: "2026-10-06", title: "docs(2.7.0): S3 plans hub + Needs your attention — design and implementation plan, approved"}
+            - {sha: "272617f", date: "2026-10-06", title: "docs(2.7.0): S3 plans hub + Needs your attention — release notes, CLAUDE.md, README pair, WORKFLOW; S2 marked accepted"}
+            - {sha: "90ee30e", date: "2026-10-07", title: "docs(2.7.0): S3 and S4 accepted by the owner (2026-10-07)"}
+        notes: "已验收（2026-10-07）。依赖出处：路线图依赖列「S2」。"
+      - id: "2.7.0/S4"
+        title: "Cases 与 Resources（P3）"
+        status: done
+        depends_on: ["2.7.0/S2"]
+        modules: ["services/issue_notes", "graph/query_service", "web"]
+        plan: docs/superpowers/plans/2026-10-07-mvp-2.7.0-s4-cases-resources.md
+        evidence:
+          docs: ["docs/MVP-2.7.0-RELEASE.md"]
+          commits:
+            - {sha: "56bc977", date: "2026-10-07", title: "docs(2.7.0): S4 Cases & Resources — design and implementation plan, approved"}
+            - {sha: "fd038ab", date: "2026-10-07", title: "docs(2.7.0): S4 Cases & Resources — release section, gates, review outcome; roadmap, CLAUDE.md, README pair, WORKFLOW"}
+            - {sha: "90ee30e", date: "2026-10-07", title: "docs(2.7.0): S3 and S4 accepted by the owner (2026-10-07)"}
+        notes: "已验收（2026-10-07）。依赖出处：路线图依赖列「S2」。"
+      - id: "2.7.0/S5"
+        title: "Chat（P2）"
+        status: done
+        depends_on: ["2.7.0/S1", "2.7.0/S2"]
+        modules: ["services/chat_context", "services/chat_dispatch", "chat", "web"]
+        plan: docs/superpowers/plans/2026-10-07-mvp-2.7.0-s5-chat.md
+        evidence:
+          docs: ["docs/MVP-2.7.0-RELEASE.md"]
+          commits:
+            - {sha: "ea8c387", date: "2026-10-07", title: "docs(2.7.0): S5 Chat — release section, gates, review outcome; roadmap, CLAUDE.md, README pair, WORKFLOW"}
+            - {sha: "5d82aec", date: "2026-10-07", title: "docs(2.7.0): S5 real-model E2E — notes read, replay, binding refusal (model and tool layer), withheld ref, interruption"}
+            - {sha: "7e40568", date: "2026-10-07", title: "docs(2.7.0): S5 accepted by the owner; S1–S5 pushed to origin/MVP-2.7.0 (5d82aec)"}
+        notes: "已验收（2026-10-07，依 origin/MVP-2.7.0 文档；main 上的文档仍写「已实现，待主人验收」）。验收提交 7e40568 只在 origin/MVP-2.7.0。依赖出处：路线图依赖列「S1、S2」。"
+      - id: "2.7.0/S6"
+        title: "报告与双语（P5）"
+        status: done
+        depends_on: ["2.7.0/S2"]
+        modules: ["report", "chat/send_to", "tools/report_tools", "web"]
+        plan: ""
+        evidence:
+          docs: ["docs/MVP-2.7.0-RELEASE.md"]
+          commits:
+            - {sha: "3367b65", date: "2026-10-07", title: "docs(2.7.0): S6 reports & bilingual — implementation plan"}
+            - {sha: "75df0bb", date: "2026-10-08", title: "docs(2.7.0): S6 reports & bilingual — release section, gates, review outcome; roadmap, CLAUDE.md, README pair, WORKFLOW"}
+            - {sha: "0fb94b3", date: "2026-10-08", title: "fix(reports): a report reads in one language at a time — a 中文 / English toggle, no side-by-side comparison"}
+        notes: "已验收（2026-10-08），已推 0fb94b3（依 origin/MVP-2.7.0 文档）。计划 docs/superpowers/plans/2026-10-07-mvp-2.7.0-s6-reports-bilingual.md 只在 origin/MVP-2.7.0 上，main 没有，故 plan 留空；S6 新增的 services/content_rendering 等模块也只在该分支，modules 只填 main 上已有、被 S6 改动的路径。依赖出处：路线图依赖列「S2」。"
+      - id: "2.7.0/S7"
+        title: "联合验收与发布（P6）"
+        status: done
+        depends_on: ["2.7.0/S1", "2.7.0/S2", "2.7.0/S3", "2.7.0/S4", "2.7.0/S5", "2.7.0/S6"]
+        modules: ["__init__.py", "web"]
+        plan: ""
+        evidence:
+          docs: ["docs/MVP-2.7.0-RELEASE.md"]
+          commits:
+            - {sha: "ad259ae", date: "2026-10-08", title: "docs(2.7.0): S7 joint acceptance & release — implementation plan (version 2.7.0, chaos-lab live E2E on real models, release docs; A-track moved to the next version)"}
+            - {sha: "7866994", date: "2026-10-08", title: "chore(release): version 2.7.0 — pyproject, the package, the lock and the API read one string"}
+            - {sha: "d76f053", date: "2026-10-08", title: "docs(2.7.0): S7 — release section, live E2E report, roadmap, CLAUDE.md, README pair, doc map"}
+            - {sha: "a953e6b", date: "2026-10-08", title: "docs(2.7.0): S7 accepted by the owner — release, push, PR, tag v2.7.0 and the dev-box redeploy approved"}
+        notes: "已验收（2026-10-08），已推送、开 PR、打 v2.7.0 tag（依 origin/MVP-2.7.0 文档）。计划 2026-10-08-mvp-2.7.0-s7-release.md 与 docs/MVP-2.7.0-E2E-REPORT.md 只在该分支上。依赖出处：路线图依赖列「S1–S6」。"
+      - id: "2.7.0/A1"
+        title: "账本与分钟级（核心能力轨）"
+        status: moved
+        moved_to: "2.7.1/A1"
+        depends_on: []
+        modules: []
+        plan: ""
+        evidence:
+          docs: ["docs/MVP-2.7.0-RELEASE.md", "docs/superpowers/specs/2026-10-06-change-aware-system-model-design.md"]
+          commits:
+            - {sha: "121bb1a", date: "2026-10-06", title: "docs(2.7.0): fold the change-aware system model into the 2.7.0 plan — A-track (A1–A4) rows and sections, spec on MVP-2.7.0"}
+        notes: "移至 MVP-2.7.1（主人 10-08；spec 已批准，计划未出）。"
+      - id: "2.7.0/A2"
+        title: "live 级（核心能力轨）"
+        status: moved
+        moved_to: "2.7.1/A2"
+        depends_on: []
+        modules: []
+        plan: ""
+        notes: "移至 MVP-2.7.1（依 origin/MVP-2.7.0 文档）。"
+      - id: "2.7.0/A3"
+        title: "覆盖面（核心能力轨）"
+        status: moved
+        moved_to: "2.7.1/A3"
+        depends_on: []
+        modules: []
+        plan: ""
+        notes: "移至 MVP-2.7.1（依 origin/MVP-2.7.0 文档）。"
+      - id: "2.7.0/A4"
+        title: "评测门禁（核心能力轨）"
+        status: moved
+        moved_to: "2.7.1/A4"
+        depends_on: []
+        modules: []
+        plan: ""
+        notes: "移至 MVP-2.7.1（依 origin/MVP-2.7.0 文档）。"
+
+  - id: "2.7.1"
+    title: "核心能力轨 A1–A4（变更感知的系统模型）"
+    status: in_progress
+    branch: ""
+    tag: ""
+    doc: ""
+    notes: "只放从 2.7.0 移来的 A1–A4。2.7.1 的其他本地工作尚未推送、本仓库看不到，由主人在本地补；分支、发布说明未从文档确认。"
+    items:
+      - id: "2.7.1/A1"
+        title: "账本与分钟级"
+        status: todo
+        depends_on: []
+        modules: []
+        plan: ""
+        notes: "spec docs/superpowers/specs/2026-10-06-change-aware-system-model-design.md 已批准；详细计划未出（路线图预定路径 docs/superpowers/plans/2026-10-06-change-aware-a1-ledger-minute.md）。将改动的模块（change_events 等）尚不存在，modules 留空。"
+      - id: "2.7.1/A2"
+        title: "live 级"
+        status: todo
+        depends_on: ["2.7.1/A1"]
+        modules: []
+        plan: ""
+        notes: "依赖出处：路线图核心能力轨表 A2 依赖「A1」。"
+      - id: "2.7.1/A3"
+        title: "覆盖面"
+        status: todo
+        depends_on: ["2.7.1/A1"]
+        modules: []
+        plan: ""
+        notes: "依赖出处：路线图核心能力轨表 A3 依赖「A1」。"
+      - id: "2.7.1/A4"
+        title: "评测门禁"
+        status: todo
+        depends_on: ["2.7.1/A1", "2.7.1/A2", "2.7.1/A3"]
+        modules: []
+        plan: ""
+        notes: "依赖出处：路线图核心能力轨表 A4 依赖「A1–A3」。"
