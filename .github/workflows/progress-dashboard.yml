@@ -1,0 +1,41 @@
+name: Progress dashboard
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # --verify looks up every evidence SHA, including commits on other branches / tags
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install (the generator needs only PyYAML)
+        run: pip install pyyaml pytest
+
+      # --noconftest: the root tests/conftest.py imports botocore and agenticops, which this job does not install.
+      - name: Tests
+        run: pytest --noconftest tests/test_progress_dashboard.py -q
+
+      - name: Dashboard is up to date
+        run: python scripts/progress/build_dashboard.py --check
+
+      - name: git consistency (warning only)
+        if: always()
+        run: python scripts/progress/build_dashboard.py --verify | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload dashboard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: progress-dashboard
+          path: docs/progress/dashboard.html
