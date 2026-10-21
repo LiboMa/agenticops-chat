@@ -380,6 +380,14 @@ def test_done_plan_with_all_boxes_ticked_is_clean(bd, repo):
     assert ("9.9.0/S1", "plan_unchecked") not in _kinds(bd.find_inconsistencies(base_tracker(), repo))
 
 
+def test_done_plan_that_never_ticks_a_box_is_not_flagged(bd, repo):
+    """A plan whose boxes are all open does not track progress with them (13 of 23 findings on the real tracker
+    were such plans); only a plan that ticks at least one box and leaves others open is flagged."""
+    write(repo / "docs" / "plans" / "s1.md", "- [ ] one\n- [ ] two\n")
+    assert ("9.9.0/S1", "plan_unchecked") not in _kinds(bd.find_inconsistencies(base_tracker(), repo))
+    assert "一个框都没勾" in bd.render(repo)  # the page says why such a plan is not checked
+
+
 # --------------------------------------------------------------------------------------------- code deps
 
 def _edges(bd, pkg):
@@ -438,6 +446,41 @@ def test_module_labels_run_along_rays_and_fit(bd):
             assert 0 < x < bd.MOD_SIZE and 0 < y < bd.MOD_SIZE
 
 
+def _mod_views(html: str) -> tuple[str, str]:
+    """The module graph's two views: top-level imports only (default) and with the lazy ones."""
+    section = re.search(r'<section id="modgraph">(.*?)</section>', html, re.S).group(1)
+    top, rest = section.split('id="mod-top"', 1)[1].split('id="mod-all"', 1)
+    return top, rest
+
+
+def _drawn(view: str) -> set:
+    return set(re.findall(r'<path class="medge[^"]*" data-from="([^"]+)" data-to="([^"]+)"', view))
+
+
+def test_module_graph_draws_top_level_imports_by_default(bd, repo):
+    html = bd.render(repo)
+    assert re.search(r'<input type="checkbox" id="m-lazy">', html)  # the toggle, off
+    assert re.search(r'<div class="modview two" id="mod-top">', html)
+    assert re.search(r'<div class="modview two" id="mod-all" hidden>', html)
+    top, everything = _mod_views(html)
+    assert ("services", "graph") not in _drawn(top)  # the fake package's one lazy-only import
+    assert ("services", "graph") in _drawn(everything)
+    assert ("services", "models.py") in _drawn(top) and ("services", "models.py") in _drawn(everything)
+    assert ".modview[hidden]{display:none}" in html  # .two's display:grid would otherwise beat [hidden]
+
+
+def test_module_graph_cycles_follow_the_view(bd, repo):
+    """A cycle closed only by a function-body import is no load-time cycle: the default view draws no ring, the
+    lazy view does — nodes, edges and the SCC list alike."""
+    write(repo / "src" / "agenticops" / "web" / "app.py",
+          "def handler():\n    from agenticops.services.a import later\n    return later\n")
+    top, everything = _mod_views(bd.render(repo))
+    assert "<li>无</li>" in top and 'class="medge cyc"' not in top
+    assert 'fill="#DC2626"' not in top
+    assert "services、web" in everything and 'class="medge cyc"' in everything
+    assert re.search(r'<g class="mnode" data-id="web"><title>[^<]*</title><circle [^>]*fill="#DC2626"', everything)
+
+
 def test_module_dependencies_on_the_real_package(bd):
     edges = _edges(bd, REPO / "src" / "agenticops")
     assert ("services", "models.py") in edges
@@ -473,6 +516,7 @@ def test_render_content(bd, repo):
     assert "未从文档确认" in html  # notes are shown
     assert "prefers-reduced-motion" in html
     assert 'http-equiv="refresh"' not in html
+    assert '<link rel="icon" href="data:,">' in html  # no /favicon.ico request when the page is served
 
 
 def test_every_module_node_is_a_filter_option(bd, repo):
