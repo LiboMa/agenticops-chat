@@ -375,3 +375,6 @@ python -m pytest tests/test_fix_plan_consolidation.py -v
    任何点名了 actor 的决定(「人类动作」/「只给 agent」),下一个问题必须是「该 actor 从哪个面到达它」。
    汇报完成前自查一次:新增 `/api/` 端点而 `web/frontend/` 零改动时,要么指出对应 UI 改动,
    要么明确声明「无 UI,理由是 X」,不许沉默通过(提示,非硬闸门——agent/调度专用端点无 UI 是对的)。
+10. **进度 Dashboard 同步**：完成或改变任何任务的状态时，同步更新 `docs/progress/tracker.yaml`
+    （状态、依赖、证据）并运行 `python scripts/progress/build_dashboard.py` 重建，把 `tracker.yaml`
+    与 `docs/progress/dashboard.html` 在同一提交内一起提交。维护说明见 [`docs/progress/README.md`](docs/progress/README.md)。
