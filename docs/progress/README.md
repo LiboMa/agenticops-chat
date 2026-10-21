@@ -66,7 +66,7 @@
 
 | kind | 含义 |
 |---|---|
-| `plan_unchecked` | 条目 done，但它的 `plan` 文档里还有未勾选的 `- [ ]` |
+| `plan_unchecked` | 条目 done，它的 `plan` 文档勾过至少一个框、却还有未勾选的 `- [ ]`（一个框都没勾的计划视为不用勾选框记进度，不报） |
 | `plan_missing` | `plan` 指向的文件不在仓库里 |
 | `release_mismatch` | tracker 状态与版本 `doc` 里阶段表（表头含「阶段」「状态」）的状态文字矛盾。按条目 id 最后一段（`2.7.0/S1` → `S1`）对行；已验收 / 已完成 / 已发布 ≈ done，未开始 ≈ todo，进行中 ≈ in_progress，移至 … ≈ moved |
 | `release_unknown` | 「无法比对」：阶段表的状态文字读不出上面任何一种，不作猜测 |
@@ -104,7 +104,9 @@ releases:
 - 完成率 = done / (总数 − moved − dropped)。
 - 模块依赖图：`ast` 解析 `src/agenticops/**/*.py` 里的 `import agenticops.x`、`from agenticops.x import`、相对导入
   （函数体内的延迟导入单独计数为 lazy），聚合到顶层包与顶层模块（`services`、`graph`、`models.py`、`config.py`…）；
-  边权 = import 语句数，同一模块内部的导入不算边；强连通分量标为环（红色）。节点上的数字 = 挂在该模块上的未完成
+  边权 = import 语句数，同一模块内部的导入不算边；强连通分量标为环（红色）。**默认只画顶层导入**（模块加载时执行的；
+  边权 = 顶层语句数，只有延迟导入的边不画，环只按顶层导入算）；勾选「含函数体内的延迟导入」切到全部导入的视图，
+  环与「最重的 15 条边」随视图重算。节点上的数字 = 挂在该模块上的未完成
   （in_progress / todo / blocked）条目数；点击节点筛出挂在它上面的全部任务（没有就显示 0 条）。`ast` 解析不了的文件
   不计入，并在图旁列出文件名。
 - 「最近完成」取 tracker 证据里的提交，按记录的日期倒序。

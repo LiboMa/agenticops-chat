@@ -350,7 +350,7 @@ def find_inconsistencies(tracker: dict, root: Path) -> list[dict]:
                 found.append({"item": iid, "kind": "plan_missing", "detail": f"{plan} 不在仓库中"})
             elif status == "done":
                 stats = checkbox_stats(text)
-                if stats["unchecked"]:
+                if stats["checked"] and stats["unchecked"]:  # a plan that ticks no box does not track with them
                     found.append({"item": iid, "kind": "plan_unchecked", "plan": str(plan), **stats,
                                   "detail": f"{plan}：已勾选 {stats['checked']}，未勾选 {stats['unchecked']}"})
         doc = rel.get("doc")
@@ -585,6 +585,8 @@ svg text{font-family:inherit}
 .legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;color:var(--muted);margin:8px 0 0}
 .legend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:4px;vertical-align:-1px}
 .two{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:18px}
+.modview[hidden]{display:none}
+.toggle{font-size:13px;cursor:pointer}
 .side{font-size:13px}
 .kind{font-weight:600}
 .kind-release_unknown{color:var(--muted)}.kind-blocked,.kind-release_mismatch{color:var(--blocked)}
@@ -634,21 +636,28 @@ JS = r"""
     n.addEventListener('mouseleave',function(){if(!picked)showW(null);});
     n.addEventListener('click',function(){picked=(picked===id)?null:id;showW(picked);});
   });
-  // module graph: highlight a node's edges; click filters the task list to the items on it
-  var mnodes=[].slice.call(document.querySelectorAll('.mnode')),medges=[].slice.call(document.querySelectorAll('.medge'));
-  function showM(id){
-    medges.forEach(function(e){var on=id&&(e.getAttribute('data-from')===id||e.getAttribute('data-to')===id);
-      e.classList.toggle('on',!!on);e.classList.toggle('dim',!!id&&!on);});
-    mnodes.forEach(function(n){var me=n.getAttribute('data-id');var on=!id||me===id||medges.some(function(e){
-      return e.classList.contains('on')&&(e.getAttribute('data-from')===me||e.getAttribute('data-to')===me);});
-      n.classList.toggle('dim',!on);});
-  }
-  mnodes.forEach(function(n){
-    var id=n.getAttribute('data-id');
-    n.addEventListener('mouseenter',function(){showM(id);});
-    n.addEventListener('mouseleave',function(){showM(null);});
-    n.addEventListener('click',function(){fm.value=id;fr.value='';fs.value='';apply();jump();});
+  // module graph: highlight a node's edges within its view; click filters the task list to the items on it
+  [].slice.call(document.querySelectorAll('.modview')).forEach(function(view){
+    var mnodes=[].slice.call(view.querySelectorAll('.mnode')),medges=[].slice.call(view.querySelectorAll('.medge'));
+    function showM(id){
+      medges.forEach(function(e){var on=id&&(e.getAttribute('data-from')===id||e.getAttribute('data-to')===id);
+        e.classList.toggle('on',!!on);e.classList.toggle('dim',!!id&&!on);});
+      mnodes.forEach(function(n){var me=n.getAttribute('data-id');var on=!id||me===id||medges.some(function(e){
+        return e.classList.contains('on')&&(e.getAttribute('data-from')===me||e.getAttribute('data-to')===me);});
+        n.classList.toggle('dim',!on);});
+    }
+    mnodes.forEach(function(n){
+      var id=n.getAttribute('data-id');
+      n.addEventListener('mouseenter',function(){showM(id);});
+      n.addEventListener('mouseleave',function(){showM(null);});
+      n.addEventListener('click',function(){fm.value=id;fr.value='';fs.value='';apply();jump();});
+    });
   });
+  // the lazy-import toggle picks the view; read on load too, since a reload may restore the checkbox
+  var ml=document.getElementById('m-lazy');
+  function modView(){document.getElementById('mod-top').hidden=ml.checked;document.getElementById('mod-all').hidden=!ml.checked;}
+  ml.addEventListener('change',modView);
+  modView();
   apply();
 })();
 """
@@ -884,22 +893,32 @@ def module_layout(nodes: list[str]) -> tuple[float, dict]:
     return radius, pos
 
 
-def _module_graph(nodes: list[str], edges: list[dict], open_counts: dict, cycles: list[list[str]],
-                  unparsed: list[str] | None = None) -> str:
+def _module_view(view: str, nodes: list[str], edges: list[dict], open_counts: dict, cycles: list[list[str]]) -> str:
+    """One view of the module graph. ``view`` is ``top`` (top-level imports only: an edge weighs ``count - lazy``,
+    one with none is not drawn) or ``all`` (every import: an edge weighs ``count``). Cycles are the view's own."""
+    lazy_view = view == "all"
+    weight = {(e["src"], e["dst"]): e["count"] if lazy_view else e["count"] - e["lazy"] for e in edges}
+    edges = [e for e in edges if weight[(e["src"], e["dst"])]]
     in_cycle = {n: ci for ci, comp in enumerate(cycles) for n in comp}
     size = MOD_SIZE
     cx = cy = size / 2
     _radius, pos = module_layout(nodes)
-    max_count = max((e["count"] for e in edges), default=1)
-    parts = [f'<svg viewBox="0 0 {size} {size}" role="img" aria-label="代码模块依赖图">']
+    max_w = max(weight.values(), default=1) or 1
+    label = "代码模块依赖图：" + ("含延迟导入" if lazy_view else "顶层导入")
+    parts = [f'<svg viewBox="0 0 {size} {size}" role="img" aria-label="{label}">']
     for e in edges:
         x1, y1, _ = pos[e["src"]]
         x2, y2, _ = pos[e["dst"]]
         cyc = e["src"] in in_cycle and in_cycle.get(e["src"]) == in_cycle.get(e["dst"])
-        w = 0.8 + 3.2 * math.sqrt(e["count"] / max_count)
+        n = weight[(e["src"], e["dst"])]
+        w = 0.8 + 3.2 * math.sqrt(n / max_w)
         qx, qy = cx + (x1 + x2 - 2 * cx) * 0.18, cy + (y1 + y2 - 2 * cy) * 0.18
-        tip = f'{e["src"]} → {e["dst"]}：{e["count"]} 条 import' + (f'（其中 {e["lazy"]} 条延迟导入）'
-                                                                   if e["lazy"] else "")
+        if lazy_view:
+            tip = f'{e["src"]} → {e["dst"]}：{e["count"]} 条 import' + (f'（其中 {e["lazy"]} 条延迟导入）'
+                                                                       if e["lazy"] else "")
+        else:
+            tip = f'{e["src"]} → {e["dst"]}：{n} 条顶层 import' + (f'（另有 {e["lazy"]} 条延迟导入未画）'
+                                                                 if e["lazy"] else "")
         parts.append(f'<path class="medge{" cyc" if cyc else ""}" data-from="{esc(e["src"])}" '
                      f'data-to="{esc(e["dst"])}" stroke-width="{w:.2f}" '
                      f'd="M{x1:.1f},{y1:.1f} Q{qx:.1f},{qy:.1f} {x2:.1f},{y2:.1f}"><title>{esc(tip)}</title></path>')
@@ -914,8 +933,8 @@ def _module_graph(nodes: list[str], edges: list[dict], open_counts: dict, cycles
             deg, anchor = deg + 180, "end"
         else:
             anchor = "start"
-        outs = sum(e["count"] for e in edges if e["src"] == n)
-        ins = sum(e["count"] for e in edges if e["dst"] == n)
+        outs = sum(weight[(e["src"], e["dst"])] for e in edges if e["src"] == n)
+        ins = sum(weight[(e["src"], e["dst"])] for e in edges if e["dst"] == n)
         tip = f"{n}：导出依赖 {outs} 条 import，被依赖 {ins} 条；挂在它上面的未完成条目 {cnt} 个"
         if n in in_cycle:
             tip += "；在依赖环里"
@@ -930,28 +949,47 @@ def _module_graph(nodes: list[str], edges: list[dict], open_counts: dict, cycles
         cyc_html = "".join(f"<li>{len(c)} 个节点：{esc('、'.join(c))}</li>" for c in cycles)
     else:
         cyc_html = "<li>无</li>"
-    top_edges = sorted(edges, key=lambda e: (-e["count"], e["src"], e["dst"]))[:15]
+    top_edges = sorted(edges, key=lambda e: (-weight[(e["src"], e["dst"])], e["src"], e["dst"]))[:15]
     rows = "".join(f'<tr><td><code>{esc(e["src"])}</code> → <code>{esc(e["dst"])}</code></td>'
-                   f'<td>{e["count"]}</td><td>{e["lazy"]}</td></tr>' for e in top_edges)
-    lazy_total = sum(e["lazy"] for e in edges)
-    stmt_total = sum(e["count"] for e in edges)
-    side = (f'<div class="side"><p class="muted">{len(nodes)} 个顶层包 / 模块，{len(edges)} 条跨模块依赖边，'
-            f'{stmt_total} 条 import 语句（其中 {lazy_total} 条在函数体内，延迟导入）。'
-            '圆点内数字 = 挂在该模块上的未完成条目数；红色节点与红色边 = 在 import 环里。悬停看边，点击节点筛出它的任务。</p>'
-            + (f'<p class="dep-wait">{len(unparsed)} 个文件 <code>ast</code> 无法解析，未计入：'
-               + "、".join(f"<code>{esc(u)}</code>" for u in unparsed) + "</p>" if unparsed else "")
-            + f'<h3>依赖环（强连通分量）</h3><ul class="plain">{cyc_html}</ul>'
-            '<h3>最重的 15 条边</h3><table><thead><tr><th>边</th><th>import</th><th>延迟</th></tr></thead>'
+                   f'<td>{e["count"] - e["lazy"]}</td><td>{e["lazy"]}</td></tr>' for e in top_edges)
+    total = sum(weight.values())
+    if lazy_view:
+        what = f"全部 {total} 条 import 语句（含函数体内的延迟导入），{len(edges)} 条跨模块依赖边。"
+    else:
+        what = f"模块加载时执行的顶层 import {total} 条，{len(edges)} 条跨模块依赖边。"
+    side = (f'<div class="side"><p class="muted">{len(nodes)} 个顶层包 / 模块；{what}'
+            '圆点内数字 = 挂在该模块上的未完成条目数；红色节点与红色边 = 在本视图的 import 环里。'
+            '悬停看边，点击节点筛出它的任务。</p>'
+            f'<h3>依赖环（强连通分量）</h3><ul class="plain">{cyc_html}</ul>'
+            '<h3>最重的 15 条边</h3><table><thead><tr><th>边</th><th>顶层</th><th>延迟</th></tr></thead>'
             f'<tbody>{rows}</tbody></table></div>')
+    hidden = " hidden" if lazy_view else ""
+    return (f'<div class="modview two" id="mod-{view}"{hidden}>'
+            f'<div class="graph-wrap">{"".join(parts)}</div>{side}</div>')
+
+
+def _module_graph(nodes: list[str], edges: list[dict], open_counts: dict, cycles_top: list[list[str]],
+                  cycles_all: list[list[str]], unparsed: list[str] | None = None) -> str:
+    lazy_total = sum(e["lazy"] for e in edges)
+    note = (f'<p class="dep-wait">{len(unparsed)} 个文件 <code>ast</code> 无法解析，未计入：'
+            + "、".join(f"<code>{esc(u)}</code>" for u in unparsed) + "</p>") if unparsed else ""
     return ('<section id="modgraph"><h2>④ 代码模块依赖图</h2><p class="muted">由 <code>ast</code> 解析 '
             '<code>src/agenticops/**/*.py</code> 的绝对 / 相对 / 函数内导入，聚合到顶层包与顶层模块；'
-            '边粗细 = import 语句数。</p>'
-            f'<div class="two"><div class="graph-wrap">{"".join(parts)}</div>{side}</div></section>')
+            '边粗细 = import 语句数。默认只画模块加载时执行的顶层导入——函数体内的延迟导入要到调用时才执行，'
+            '不构成加载环；勾选下面的开关看全部导入，环与最重的边随视图重算。</p>'
+            f'<p><label class="toggle"><input type="checkbox" id="m-lazy"> 含函数体内的延迟导入'
+            f'（{lazy_total} 条）</label></p>{note}'
+            + _module_view("top", nodes, edges, open_counts, cycles_top)
+            + _module_view("all", nodes, edges, open_counts, cycles_all)
+            + '</section>')
+
+
+PLAN_NOTE = "计划文件一个框都没勾时视为不用勾选框记进度，不报「计划未勾完」。"
 
 
 def _inconsistency_panel(found: list[dict]) -> str:
     if not found:
-        body = '<p class="muted">没有发现不一致。</p>'
+        body = f'<p class="muted">没有发现不一致。{PLAN_NOTE}</p>'
     else:
         tally = {}
         for f in found:
@@ -962,7 +1000,7 @@ def _inconsistency_panel(found: list[dict]) -> str:
                        f'<br><span class="muted"><code>{esc(f["kind"])}</code></span></td>'
                        f'<td>{esc(f.get("detail", ""))}</td></tr>' for f in found)
         body = (f'<p class="muted">共 {len(found)} 项：{esc(summary)}。这些只是列出，生成器不会改写 tracker；'
-                '「无法比对」= RELEASE 文档的状态文字读不出确定含义，不作猜测。</p>'
+                f'「无法比对」= RELEASE 文档的状态文字读不出确定含义，不作猜测。{PLAN_NOTE}</p>'
                 '<table><colgroup><col style="width:14%"><col style="width:18%"><col></colgroup>'
                 '<thead><tr><th>条目</th><th>类型</th><th>详情</th></tr></thead>'
                 f'<tbody>{rows}</tbody></table>')
@@ -999,10 +1037,13 @@ def render(root: Path, live: bool = False) -> str:
     nodes = top_level_nodes(pkg) if pkg.is_dir() else []
     unparsed: list[str] = []
     edges = module_dependencies(pkg, unparsed) if pkg.is_dir() else []
-    graph: dict[str, list[str]] = {}
+    graph_all: dict[str, list[str]] = {}
+    graph_top: dict[str, list[str]] = {}
     for e in edges:
-        graph.setdefault(e["src"], []).append(e["dst"])
-    cycles = find_cycles(graph)
+        graph_all.setdefault(e["src"], []).append(e["dst"])
+        if e["count"] > e["lazy"]:
+            graph_top.setdefault(e["src"], []).append(e["dst"])
+    cycles_top, cycles_all = find_cycles(graph_top), find_cycles(graph_all)
 
     tops: dict[str, str] = {}
     for _r, it in iter_items(tracker):
@@ -1022,6 +1063,7 @@ def render(root: Path, live: bool = False) -> str:
     return (
         "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n<meta charset=\"utf-8\">\n"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+        "<link rel=\"icon\" href=\"data:,\">\n"
         f"{refresh}<title>AgenticOps 开发进度</title>\n<style>{CSS}</style>\n</head>\n<body>\n"
         "<header><h1>AgenticOps 开发进度</h1>"
         f'<span class="meta">tracker 更新于 <b>{esc(tracker["updated"])}</b> · 由 '
@@ -1033,7 +1075,7 @@ def render(root: Path, live: bool = False) -> str:
         + _overview(tracker) + "\n"
         + _tasks(tracker, blocked, tops, nodes) + "\n"
         + _work_graph(tracker, blocked) + "\n"
-        + _module_graph(nodes, edges, open_counts, cycles, unparsed) + "\n"
+        + _module_graph(nodes, edges, open_counts, cycles_top, cycles_all, unparsed) + "\n"
         + _inconsistency_panel(found) + "\n"
         + _recent(tracker) + "\n"
         + f"</main>\n<script>{JS}</script>\n</body>\n</html>\n"
