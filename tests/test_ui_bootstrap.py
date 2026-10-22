@@ -44,7 +44,7 @@ def _prefs(env, headers):
 # ── bootstrap ──────────────────────────────────────────────────────────────
 
 CONTRACT_KEYS = {"contract_version", "deployment_id", "user_id", "locale", "features", "upload_policy", "preferences"}
-EXTENSIONS = {"user", "auth_enabled", "version"}  # documented 2.7.0 additions (the contract allows extra fields)
+EXTENSIONS = {"user", "auth_enabled", "version", "report_export_formats"}  # documented 2.7.0 additions (the contract allows extra fields)
 
 
 def test_bootstrap_needs_a_signed_in_user(env):
@@ -67,8 +67,8 @@ def test_bootstrap_features_say_only_what_is_built(env, monkeypatch):
     headers, _ = env.login("alice@example.com")
     monkeypatch.setattr(env.settings, "change_management_enabled", True)
     features = env.client.get("/api/ui/bootstrap", headers=headers).json()["features"]
-    assert features == {"context_chat": True, "revision_guards": False, "content_rendering": False,
-                        "report_export": False, "attention": True, "change_management": True, "chat_replay": False}
+    assert features == {"context_chat": True, "revision_guards": False, "content_rendering": True,
+                        "report_export": True, "attention": True, "change_management": True, "chat_replay": False}
     monkeypatch.setattr(env.settings, "change_management_enabled", False)
     assert env.client.get("/api/ui/bootstrap", headers=headers).json()["features"]["change_management"] is False
 

@@ -158,6 +158,30 @@ export interface Report {
   file_path: string | null;
   report_metadata: Record<string, unknown>;
   created_at: string;
+  /** MVP-2.7.0 S6: the content a rendering is made from, and who may see it */
+  content_version?: number;
+  content_hash?: string | null;
+  source_language?: "zh" | "en" | null;
+  visibility?: "private" | "workspace";
+  owned_by_me?: boolean;
+  /** each language's rendering status (the list and detail carry it) */
+  language_status?: Partial<Record<"zh" | "en", RenderingStatus>>;
+}
+
+export type RenderingStatus = "ready" | "pending" | "missing" | "failed" | "stale";
+
+/** GET /api/content/report/{id}/rendering — one language of one report version (S6). */
+export interface ContentRendering {
+  entity: { entity_type: "report"; entity_id: number };
+  source_version: number;
+  source_hash: string | null;
+  language: "zh" | "en";
+  status: RenderingStatus;
+  fields: Record<string, string>;
+  body_markdown: string | null;
+  protected_value_hash: string | null;
+  generated_at: string | null;
+  error_code: string | null;
 }
 
 export interface ReportFromSessionRequest {
@@ -796,6 +820,9 @@ export interface PipelineEvent {
 export interface ReportPublishRequest {
   channel_name: string;
   formats?: string[];
+  /** MVP-2.7.0 S6: pinned to one version and language */
+  version: number;
+  language: "zh" | "en";
 }
 
 export interface ReportPublishResponse {

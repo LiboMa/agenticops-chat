@@ -90,9 +90,14 @@ def _auto_learn_dismissed(issue_id: int, resource_id: str, title: str, descripti
         logger.debug("Auto-learn failed for dismissed issue #%d", issue_id, exc_info=True)
 
 
-def _enrich_report(report: Report) -> dict:
-    """Build ReportResponse dict with download_url when S3 is configured."""
+def _enrich_report(report: Report, actor=None, language_status: dict | None = None) -> dict:
+    """Build ReportResponse dict with download_url when S3 is configured; owned_by_me is relative to `actor`."""
     data = ReportResponse.model_validate(report).model_dump()
+    if language_status is not None:
+        data["language_status"] = language_status
+    if actor is not None:
+        from agenticops.services.report_access import owned_by
+        data["owned_by_me"] = owned_by(report, actor)
     if report.file_path and settings.report_storage == "s3" and settings.report_s3_bucket:
         try:
             from agenticops.storage.backend import get_storage_backend

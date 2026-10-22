@@ -931,6 +931,10 @@ class Settings(BaseSettings):
         default="",
         description="Model for the RCA critic (empty = bedrock_model_id_cheap)",
     )
+    report_translation_model_id: str = Field(
+        default="",
+        description="Model that translates reports between zh and en (MVP-2.7.0 S6; empty = bedrock_model_id_cheap)",
+    )
     rca_timeout_seconds: int = Field(
         default=900,
         description="Wall-clock watchdog for an RCA run; on timeout log rca failed + needs_review",

@@ -37,6 +37,7 @@ from agenticops.models import (
     get_db_session,
     init_db,
 )
+from agenticops import __version__
 from agenticops.config import settings
 
 import asyncio
@@ -121,6 +122,13 @@ async def lifespan(app: FastAPI):
         pass
 
     _webhooks_router.warn_if_unauthenticated()
+
+    # MVP-2.7.0 S6: a report translation an earlier process was running was cut off — failed, so it can be retried
+    try:
+        from agenticops.services.content_rendering import interrupt_pending
+        interrupt_pending()
+    except Exception as e:
+        logger.warning("Reports: interrupt_pending failed: %s", e)
 
     # MVP-2.7.0 S5: a chat reply an earlier process was writing was cut off — mark it interrupted, never complete
     try:
@@ -329,7 +337,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AgenticAIOps Dashboard",
     description="Agent-First Cloud Observability Platform",
-    version="0.9.0-beta",
+    version=__version__,
     lifespan=lifespan,
 )
 
@@ -3416,30 +3424,89 @@ async def api_kb_stats():
 
 
 @app.get("/api/reports")
-async def api_list_reports(
+def api_list_reports(
     report_type: Optional[str] = None,
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = 0,
+    actor: Actor = Depends(current_actor),
 ):
-    """List reports with filtering."""
+    """List the reports the caller may see (S6: a private report is its creator's and admins')."""
+    from agenticops.services import report_access
     with get_db_session() as session:
-        query = session.query(Report).order_by(Report.created_at.desc())
+        query = report_access.visible_filter(session.query(Report), actor).order_by(Report.created_at.desc())
 
         if report_type:
             query = query.filter_by(report_type=report_type)
 
         reports = query.offset(offset).limit(limit).all()
-        return [_enrich_report(r) for r in reports]
+        from agenticops.services.content_rendering import language_status
+        status = language_status(session, reports)
+        return [_enrich_report(r, actor, status[r.id]) for r in reports]
 
 
 @app.get("/api/reports/{report_id}")
-async def api_get_report(report_id: int):
-    """Get report by ID."""
+def api_get_report(report_id: int, actor: Actor = Depends(current_actor)):
+    """Get report by ID — 404 when missing or not the caller's to see."""
+    from agenticops.services import report_access
+    from agenticops.services.content_rendering import language_status
     with get_db_session() as session:
-        report = session.query(Report).filter_by(id=report_id).first()
-        if not report:
-            raise HTTPException(status_code=404, detail="Report not found")
-        return _enrich_report(report)
+        report = report_access.get_visible_report(session, report_id, actor)
+        return _enrich_report(report, actor, language_status(session, [report])[report.id])
+
+
+@app.get("/api/content/report/{report_id}/rendering")
+def api_report_rendering(report_id: int, version: int = Query(..., ge=1),
+                         language: Literal["zh", "en"] = Query(...), actor: Actor = Depends(current_actor)):
+    """One language of one report version (MVP-2.7.0 S6) — read only: never calls a model."""
+    from agenticops.services import report_access
+    from agenticops.services.content_rendering import rendering_view
+    with get_db_session() as db:
+        report = report_access.get_visible_report(db, report_id, actor)
+        if version != (report.content_version or 1):
+            raise HTTPException(404, "No such report version")
+        return rendering_view(db, report, version, language)
+
+
+@app.get("/api/reports/{report_id}/export")
+def api_export_report(report_id: int, version: int = Query(..., ge=1),
+                      language: Literal["zh", "en", "zh-en"] = Query(...),
+                      format: Literal["html", "pdf", "docx"] = Query("html"), actor: Actor = Depends(current_actor)):
+    """Download one report version in zh, en or both (MVP-2.7.0 S6). Every language asked for must be ready —
+    never replaced by the other; never publishes."""
+    from fastapi.responses import Response as _Response
+    from agenticops.services import report_access, report_export
+    from agenticops.services.content_rendering import rendering_view
+    with get_db_session() as db:
+        report = report_access.get_visible_report(db, report_id, actor)
+        if version != (report.content_version or 1):
+            raise HTTPException(404, "No such report version")
+        if format not in report_export.available_formats():
+            raise HTTPException(422, detail={"detail": f"{format} export is not available on this server",
+                                             "code": "format_unavailable"})
+        papers = []
+        for lang in (["zh", "en"] if language == "zh-en" else [language]):
+            view = rendering_view(db, report, version, lang)
+            if view["status"] != "ready":
+                raise HTTPException(409, detail={"detail": f"The {lang} rendering is {view['status']}",
+                                                 "code": "rendering_not_ready"})
+            papers.append((lang, view["body_markdown"]))
+        body, content_type, ext = report_export.build_export(report, papers, format)
+        name = report_export.filename(report, language, ext)
+        etag = f'"{report.content_hash or ""}-{language}-{format}"'
+    return _Response(content=body, media_type=content_type,
+                     headers={"Content-Disposition": f'attachment; filename="{name}"', "ETag": etag})
+
+
+@app.post("/api/content/report/{report_id}/translations", status_code=202)
+def api_report_translations(report_id: int, payload: TranslationRequest, actor: Actor = Depends(current_actor)):
+    """Prepare zh / en renderings (MVP-2.7.0 S6): ready ones are returned, missing / failed / stale ones queued."""
+    from agenticops.services import report_access
+    from agenticops.services.content_rendering import request_translations
+    with get_db_session() as db:
+        report = report_access.get_visible_report(db, report_id, actor)
+        if payload.source_version != (report.content_version or 1):
+            raise HTTPException(404, "No such report version")
+    return request_translations(report_id, payload.source_version, list(payload.languages))
 
 
 @app.post("/api/reports/generate", response_model=ReportResponse, status_code=201)
@@ -3484,9 +3551,9 @@ def api_generate_report(request: ReportGenerateRequest):
 
 
 @app.post("/api/reports/from-session", response_model=ReportResponse, status_code=201)
-async def api_report_from_session(request: ReportFromSessionRequest, actor: Actor = Depends(current_actor)):
-    """Create a report from a chat session's messages."""
-    from agenticops.services import chat_access
+def api_report_from_session(request: ReportFromSessionRequest, actor: Actor = Depends(current_actor)):
+    """Create a report from a chat session's messages — private to its creator when the chat was private (S6)."""
+    from agenticops.services import chat_access, report_access
     with get_db_session() as db:
         chat_session = chat_access.get_visible_session(db, request.session_id, actor)
 
@@ -3512,11 +3579,15 @@ async def api_report_from_session(request: ReportFromSessionRequest, actor: Acto
         title = request.title or chat_session.name
         summary = request.summary or markdown_content[:200]
 
+        owner, visibility = report_access.owner_for_new_report(
+            actor, private=(chat_session.visibility or chat_access.WORKSPACE) == chat_access.PRIVATE)
         report = Report(
             report_type="conversation",
             title=title,
             summary=summary,
             content_markdown=markdown_content,
+            owner_user_id=owner,
+            visibility=visibility,
             report_metadata={
                 "source_session_id": request.session_id,
                 "message_count": len(messages),
@@ -3525,7 +3596,11 @@ async def api_report_from_session(request: ReportFromSessionRequest, actor: Acto
         )
         db.add(report)
         db.flush()
-        return ReportResponse.model_validate(report)
+        out = _enrich_report(report, actor)
+    # S6: the other language is prepared in the background (after the commit above, so the worker sees the row)
+    from agenticops.services.content_rendering import enqueue_other_language
+    enqueue_other_language(out["id"])
+    return out
 
 
 # ============================================================================
@@ -3590,9 +3665,66 @@ async def api_share_content(request: ShareContentRequest):
     )
 
 
+# S6: (report id, Idempotency-Key) of publishes still sending — one process (S1), so a concurrent repeat is refused
+_publishing_keys: set[tuple[int, str]] = set()
+
+
 @app.post("/api/reports/{report_id}/publish", response_model=ReportPublishResponse)
-async def api_publish_report(report_id: int, request: ReportPublishRequest):
+async def api_publish_report(report_id: int, request: ReportPublishRequest, http_request: Request,
+                             actor: Actor = Depends(current_actor)):
     """Publish a report to an sns-report or ses channel (converts to PDF/HTML/DOCX, uploads to S3)."""
+    from agenticops.notify.im_config import get_channel
+    from agenticops.notify.notifier import SESNotifier, SNSReportNotifier
+
+    # S6: the Idempotency-Key (16–200 chars) makes a repeat return the first result and send nothing
+    idem_key = (http_request.headers.get("Idempotency-Key") or "").strip()
+    if not 16 <= len(idem_key) <= 200:
+        raise HTTPException(422, detail={"detail": "An Idempotency-Key header of 16–200 characters is required",
+                                         "code": "idempotency_key_required"})
+    # S6: a report the caller may not see is a missing one — checked before anything about the channel is said;
+    # then the version, then every language asked for must be ready (never replaced by the other)
+    from agenticops.services import report_access
+    from agenticops.services.content_rendering import rendering_view
+
+    def _pinned():
+        with get_db_session() as db:
+            rep = report_access.get_visible_report(db, report_id, actor)
+            if request.version != (rep.content_version or 1):
+                raise HTTPException(404, "No such report version")
+            prior = ((rep.report_metadata or {}).get("publications") or {}).get(idem_key)
+            if prior is not None:
+                return None, prior
+            bodies = []
+            for lang in (["zh", "en"] if request.language == "zh-en" else [request.language]):
+                view = rendering_view(db, rep, request.version, lang)
+                if view["status"] != "ready":
+                    raise HTTPException(409, detail={"detail": f"The {lang} rendering is {view['status']}",
+                                                     "code": "rendering_not_ready"})
+                bodies.append(view["body_markdown"])
+            # the summary is in the pinned language (the stored one is the source's); the object key carries the version
+            # and language, so a later publish in another language never overwrites this one's files (S6 review)
+            joined = "\n\n---\n\n".join(bodies)
+            summary = rep.summary if request.language == (rep.source_language or "en") else joined[:500]
+            meta = dict(rep.report_metadata or {})
+            meta["publish_variant"] = f"_v{request.version}_{request.language}"
+            return {"title": f"{rep.title} (v{request.version} · {request.language})", "summary": summary,
+                    "content": joined, "report_type": rep.report_type, "meta": meta}, None
+    if (report_id, idem_key) in _publishing_keys:
+        raise HTTPException(409, detail={"detail": "This publish is still being sent", "code": "publish_in_flight"})
+    pinned, prior = await asyncio.to_thread(_pinned)
+    if prior is not None:
+        return ReportPublishResponse(**prior["result"])
+    if (report_id, idem_key) in _publishing_keys:  # re-checked after the await: another request may have started
+        raise HTTPException(409, detail={"detail": "This publish is still being sent", "code": "publish_in_flight"})
+    _publishing_keys.add((report_id, idem_key))
+    try:
+        return await _publish_pinned(report_id, request, idem_key, pinned)
+    finally:
+        _publishing_keys.discard((report_id, idem_key))
+
+
+async def _publish_pinned(report_id: int, request: ReportPublishRequest, idem_key: str, pinned: dict):
+    """The send itself (S6): the pinned version and language to an sns-report / ses channel; recorded under its key."""
     from agenticops.notify.im_config import get_channel
     from agenticops.notify.notifier import SESNotifier, SNSReportNotifier
 
@@ -3606,16 +3738,8 @@ async def api_publish_report(report_id: int, request: ReportPublishRequest):
             detail=f"Channel '{request.channel_name}' is type '{channel.channel_type}', expected 'sns-report' or 'ses'",
         )
 
-    # Load report
-    with get_db_session() as session:
-        report = session.query(Report).filter_by(id=report_id).first()
-        if not report:
-            raise HTTPException(status_code=404, detail="Report not found")
-        title = report.title
-        summary = report.summary
-        content_md = report.content_markdown
-        report_type = report.report_type
-        report_meta = report.report_metadata or {}
+    title, summary, content_md = pinned["title"], pinned["summary"], pinned["content"]
+    report_type, report_meta = pinned["report_type"], pinned["meta"]
 
     # Route to appropriate notifier
     if channel.channel_type == "ses":
@@ -3639,13 +3763,26 @@ async def api_publish_report(report_id: int, request: ReportPublishRequest):
         logger.error("Report publish failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Publish failed: {e}")
 
-    return ReportPublishResponse(
+    response = ReportPublishResponse(
         report_id=report_id,
         channel_name=request.channel_name,
         formats_generated=result.get("formats", []),
         download_urls=result.get("urls", {}),
         sns_message_id=result.get("message_id"),
     )
+
+    def _record() -> None:  # under its key, so a repeat returns this result and sends nothing
+        with get_db_session() as db:
+            rep = db.get(Report, report_id)
+            meta = dict(rep.report_metadata or {})
+            pubs = dict(meta.get("publications") or {})
+            pubs[idem_key] = {"channel_name": request.channel_name, "version": request.version,
+                              "language": request.language, "formats": request.formats,
+                              "at": datetime.now(timezone.utc).isoformat(), "result": response.model_dump()}
+            meta["publications"] = pubs
+            rep.report_metadata = meta
+    await asyncio.to_thread(_record)
+    return response
 
 
 @app.post("/api/reports/subscriptions", response_model=ReportSubscriptionResponse)
@@ -4326,7 +4463,7 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
     if user_content.strip().lower().startswith(("/send_to ", "/sendto ")):
         from agenticops.chat.send_to import execute_send_to
 
-        send_result = await asyncio.to_thread(execute_send_to, user_content.strip())
+        send_result = await asyncio.to_thread(execute_send_to, user_content.strip(), actor)
 
         # Persist user message + result
         with get_db_session() as db:

@@ -151,8 +151,9 @@ def distribute_report(
 
     session = get_session()
     try:
+        from agenticops.services.report_access import can_see, run_context_actor
         report = session.query(Report).filter_by(id=rid).first()
-        if not report:
+        if not report or not can_see(report, run_context_actor()):  # S6: a private report is its owner's
             return json.dumps({"success": False, "message": f"Report #{rid} not found."})
         title = report.title
         summary = report.summary or ""

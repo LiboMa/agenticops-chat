@@ -17,6 +17,8 @@ export interface UiBootstrap {
   user_id: number;
   locale: "zh" | "en";
   features: Record<string, boolean>;
+  /** S6: the export formats this server can produce (html always) */
+  report_export_formats?: string[];
   upload_policy: {
     max_files: number; image_max_bytes: number; document_max_bytes: number; text_fallback_max_bytes: number;
     image_extensions: string[]; document_extensions: string[]; text_extensions: string[];

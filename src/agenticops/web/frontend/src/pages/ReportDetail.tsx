@@ -1,18 +1,20 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useReport } from "@/hooks/useReport";
-import {
-  useNotificationChannels,
-  usePublishReport,
-} from "@/hooks/useNotifications";
-import { Card, CardBody } from "@/components/ui/Card";
+import { useNotificationChannels } from "@/hooks/useNotifications";
+import { useRendering, useRequestTranslation } from "@/hooks/useRendering";
+import { useLocale } from "@/i18n/LocaleContext";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { formatFullDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
+import { LANGS, canExport, paperState, type Lang } from "@/lib/reportView";
+import { publishableChannels } from "@/lib/publish";
 import ShareDialog from "@/components/ShareDialog";
-import type { ReportPublishResponse } from "@/api/types";
+import { ExportDialog } from "@/components/reportview/ExportDialog";
+import { PublishDialog } from "@/components/reportview/PublishDialog";
+import type { ContentRendering, Report } from "@/api/types";
 
 const TYPE_COLORS: Record<string, string> = {
   daily: "bg-blue-100 text-blue-700",
@@ -22,252 +24,139 @@ const TYPE_COLORS: Record<string, string> = {
   newsletter: "bg-amber-100 text-amber-700",
   conversation: "bg-violet-100 text-violet-700",
   anomaly: "bg-orange-100 text-orange-700",
+  "security-review": "bg-rose-100 text-rose-700",
 };
 
-const AVAILABLE_FORMATS = ["html", "pdf", "docx", "markdown"] as const;
-
+/** A report as its reader needs it (MVP-2.7.0 S6): one paper, bound to the report's version, in the language the
+ *  中文 / English toggle picks (your UI language first) — never the two side by side (owner, 2026-10-08). A language
+ *  that is not ready says so and offers the source language; it is never silently replaced by the other. Export,
+ *  print and publish use exactly what is shown. */
 export default function ReportDetail() {
   const { id } = useParams<{ id: string }>();
   const reportId = Number(id);
+  const { t, locale } = useLocale();
+  const uiLang: Lang = locale === "zh" ? "zh" : "en";
   const { data: report, isLoading, error, refetch } = useReport(reportId);
-
-  // Publish state
-  const [showPublish, setShowPublish] = useState(false);
-  const [selectedChannel, setSelectedChannel] = useState("");
-  const [selectedFormats, setSelectedFormats] = useState<string[]>(["html", "markdown"]);
-  const [publishResult, setPublishResult] = useState<ReportPublishResponse | null>(null);
-
+  const version = report?.content_version ?? 1;
+  const zh = useRendering(reportId, report ? version : undefined, "zh");
+  const en = useRendering(reportId, report ? version : undefined, "en");
+  const renderings: Partial<Record<Lang, ContentRendering>> = { zh: zh.data, en: en.data };
+  const [lang, setLang] = useState<Lang>(uiLang);
+  useEffect(() => setLang(uiLang), [uiLang]);   // switching the interface language moves the paper too
+  const [dialog, setDialog] = useState<"export" | "publish" | "share" | null>(null);
   const { data: channels } = useNotificationChannels();
-  const publishMutation = usePublishReport(reportId);
+  const publishable = publishableChannels(channels);
 
-  const [showShare, setShowShare] = useState(false);
-
-  const publishableChannels = (channels ?? []).filter(
-    (c) => (c.channel_type === "sns-report" || c.channel_type === "ses") && c.is_enabled,
-  );
-
-  // Auto-select first channel when available and none selected
-  if (!selectedChannel && publishableChannels.length > 0) {
-    setSelectedChannel(publishableChannels[0].name);
-  }
-
-  const handlePublish = () => {
-    if (!selectedChannel) return;
-    publishMutation.mutate(
-      {
-        channel_name: selectedChannel,
-        formats: selectedFormats.length > 0 ? selectedFormats : undefined,
-      },
-      {
-        onSuccess: (data) => setPublishResult(data),
-      },
-    );
-  };
-
-  const toggleFormat = (fmt: string) => {
-    setSelectedFormats((prev) =>
-      prev.includes(fmt) ? prev.filter((f) => f !== fmt) : [...prev, fmt],
-    );
-  };
-
-  if (isLoading) return <Spinner label="Loading report..." />;
-  if (error)
-    return <ErrorBanner message={error.message} onRetry={() => refetch()} />;
+  if (isLoading) return <Spinner label={t("common.loading")} />;
+  if (error) return <ErrorBanner message={error.message} onRetry={() => refetch()} actionLabel={t("common.retry")} />;
   if (!report) return null;
 
-  const html = renderMarkdown(report.content_markdown || report.summary);
+  const exportable = canExport(lang, renderings);
+  const source = (report.source_language ?? "en") as Lang;
+  const sessionId = typeof report.report_metadata?.source_session_id === "string" ? report.report_metadata.source_session_id : null;
+  const tool = "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50";
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
-      {/* Back link */}
-      <Link
-        to="/app/reports"
-        className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <svg
-          className="h-4 w-4 mr-1"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M15 19l-7-7 7-7"
-          />
-        </svg>
-        Back to Reports
-      </Link>
+    <div className="mx-auto max-w-[1280px] space-y-4 report-page">
+      <Link to="/app/reports" className="report-chrome text-sm text-muted-foreground hover:text-foreground">← {t("reports.title")}</Link>
 
-      {/* Report Header */}
-      <Card>
-        <CardBody>
-          <div className="flex items-start gap-3 mb-4">
-            <Badge
-              className={
-                TYPE_COLORS[report.report_type] ?? "bg-secondary text-muted-foreground"
-              }
-            >
-              {report.report_type}
-            </Badge>
-            <div className="flex-1 min-w-0">
-              <h1 className="text-2xl font-semibold text-foreground leading-tight">
-                {report.title}
-              </h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Generated {formatFullDate(report.created_at)}
-              </p>
-            </div>
-
-            {/* Publish + Share buttons */}
-            <div className="flex items-center gap-2">
-              {publishableChannels.length > 0 && (
-                <button
-                  onClick={() => setShowPublish(!showPublish)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors"
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                  </svg>
-                  Publish
-                </button>
-              )}
-              <button
-                onClick={() => setShowShare(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-foreground bg-secondary hover:bg-muted rounded-lg transition-colors"
-              >
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-                </svg>
-                Share
-              </button>
-            </div>
-          </div>
-
-          {/* Summary callout */}
-          <div className="rounded-lg bg-secondary border border-border p-4">
-            <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2">
-              Summary
-            </h3>
-            <p className="text-sm text-foreground leading-relaxed whitespace-pre-line">
-              {report.summary}
+      <header className="report-chrome rounded-lg border border-border bg-card p-4">
+        <div className="flex flex-wrap items-start gap-3">
+          <Badge className={TYPE_COLORS[report.report_type] ?? "bg-secondary text-muted-foreground"}>{report.report_type}</Badge>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-2xl font-semibold leading-tight text-foreground">{report.title}</h1>
+            <p className="mt-1 text-xs text-muted-foreground">
+              <span className="font-mono">R#{report.id} · v{version}</span>
+              {" · "}{t("reports.generated").replace("{date}", formatFullDate(report.created_at))}
+              {" · "}{t("reports.sourceLanguage").replace("{language}", t(`reports.lang.${report.source_language ?? "en"}`))}
+              {report.visibility === "private" && <> · {t("reports.private")}</>}
+              {sessionId && <> · <Link className="text-primary hover:underline" to={`/app/chat/${sessionId}`}>{t("reports.fromChat")}</Link></>}
             </p>
           </div>
-        </CardBody>
-      </Card>
+        </div>
 
-      {/* Publish Panel */}
-      {showPublish && (
-        <Card>
-          <CardBody>
-            <h3 className="text-sm font-semibold text-foreground mb-3">
-              Publish to Channel
-            </h3>
+        {/* Toolbar: what is shown is what is exported, printed and published */}
+        <div className="report-toolbar mt-4 flex flex-wrap items-center gap-2">
+          <div role="group" aria-label={t("reports.view.label")} className="flex rounded-md border border-border p-0.5">
+            {LANGS.map((l) => (
+              <button key={l} type="button" lang={l} aria-pressed={lang === l} onClick={() => setLang(l)}
+                      className={`rounded px-2.5 py-1 text-xs ${lang === l ? "bg-selected font-semibold text-primary" : "text-muted-foreground hover:text-foreground"}`}>
+                {t(`reports.view.${l}`)}
+              </button>
+            ))}
+          </div>
+          <span className="flex-1" />
+          <button type="button" className={`${tool} bg-primary text-primary-foreground hover:bg-primary-hover`} disabled={!exportable}
+                  title={exportable ? undefined : t("reports.notReadyHint")} onClick={() => setDialog("export")}>
+            {t("reports.export.button")}
+          </button>
+          <button type="button" className={`${tool} bg-secondary text-foreground hover:bg-muted`} disabled={!exportable}
+                  onClick={() => window.print()}>{t("reports.print")}</button>
+          <button type="button" className={`${tool} bg-secondary text-foreground hover:bg-muted`} onClick={() => setDialog("share")}>
+            {t("reports.share")}</button>
+          {publishable.length > 0 && (
+            <button type="button" className={`${tool} bg-secondary text-foreground hover:bg-muted`} disabled={!exportable}
+                    onClick={() => setDialog("publish")}>{t("reports.publish.button")}</button>
+          )}
+        </div>
+      </header>
 
-            <div className="space-y-4">
-              {/* Channel select */}
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">
-                  Channel
-                </label>
-                <select
-                  value={selectedChannel}
-                  onChange={(e) => setSelectedChannel(e.target.value)}
-                  className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
-                >
-                  <option value="">Select a channel...</option>
-                  {publishableChannels.map((ch) => (
-                    <option key={ch.name} value={ch.name}>
-                      {ch.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+      <Paper key={lang} report={report} lang={lang} source={source} rendering={renderings[lang]} version={version} t={t}
+             onReadSource={() => setLang(source)} />
 
-              {/* Format checkboxes */}
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">
-                  Formats
-                </label>
-                <div className="flex gap-3">
-                  {AVAILABLE_FORMATS.map((fmt) => (
-                    <label key={fmt} className="flex items-center gap-1.5 text-sm text-foreground">
-                      <input
-                        type="checkbox"
-                        checked={selectedFormats.includes(fmt)}
-                        onChange={() => toggleFormat(fmt)}
-                        className="rounded border-border text-primary-600 focus:ring-primary-500"
-                      />
-                      {fmt.toUpperCase()}
-                    </label>
-                  ))}
-                </div>
-              </div>
+      <p className="report-chrome text-xs text-muted-foreground">{t("reports.note")}</p>
 
-              {/* Publish action */}
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={handlePublish}
-                  disabled={!selectedChannel || publishMutation.isPending}
-                  className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
-                >
-                  {publishMutation.isPending ? "Publishing..." : "Publish Report"}
-                </button>
-                {publishMutation.isError && (
-                  <span className="text-sm text-destructive">
-                    {(publishMutation.error as Error).message}
-                  </span>
-                )}
-              </div>
-
-              {/* Result */}
-              {publishResult && (
-                <div className="rounded-lg bg-primary-50 border border-primary-200 p-4">
-                  <h4 className="text-sm font-medium text-primary-800 mb-2">
-                    Published successfully
-                  </h4>
-                  <p className="text-xs text-primary-700 mb-2">
-                    Formats: {publishResult.formats_generated.join(", ")}
-                  </p>
-                  <div className="space-y-1">
-                    {Object.entries(publishResult.download_urls).map(([fmt, url]) => (
-                      <a
-                        key={fmt}
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block text-xs text-primary-600 hover:text-primary-800 underline"
-                      >
-                        Download {fmt.toUpperCase()}
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </CardBody>
-        </Card>
+      <ExportDialog open={dialog === "export"} onOpenChange={(o) => setDialog(o ? "export" : null)}
+                    reportId={report.id} version={version} language={lang} />
+      {publishable.length > 0 && (
+        <PublishDialog open={dialog === "publish"} onOpenChange={(o) => setDialog(o ? "publish" : null)}
+                       reportId={report.id} version={version} language={lang} channels={publishable} />
       )}
-
-      {/* Report Body — rendered markdown */}
-      <Card>
-        <CardBody>
-          <div
-            className="report-content"
-            dangerouslySetInnerHTML={{ __html: html }}
-          />
-        </CardBody>
-      </Card>
-
-      {/* Share Dialog */}
-      {showShare && (
-        <ShareDialog
-          defaultSubject={`Report: ${report.title}`}
-          defaultBody={report.content_markdown || report.summary}
-          onClose={() => setShowShare(false)}
-        />
+      {dialog === "share" && (
+        <ShareDialog defaultSubject={`R#${report.id} v${version} · ${report.title}`}
+                     defaultBody={renderings[lang]?.body_markdown || report.content_markdown}
+                     onClose={() => setDialog(null)} />
       )}
     </div>
+  );
+}
+
+function Paper({ report, lang, source, rendering, version, t, onReadSource }: {
+  report: Report; lang: Lang; source: Lang; rendering: ContentRendering | undefined; version: number;
+  t: (k: string) => string; onReadSource: () => void;
+}) {
+  const state = paperState(rendering);
+  const request = useRequestTranslation(report.id);
+  if (state === "ready") {
+    return (
+      <article className="paper rounded-lg border border-border bg-card p-6" lang={lang}>
+        <div className="mb-3 text-[11px] text-muted-foreground">
+          AgenticOps · R#{report.id} · v{version} · {t(`reports.lang.${lang}`)}
+        </div>
+        <div className="report-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(rendering!.body_markdown ?? "") }} />
+      </article>
+    );
+  }
+  const retry = () => request.mutate({ version, languages: [lang] });
+  return (
+    <section className="paper-state rounded-lg border border-dashed border-border bg-card p-6 text-sm" lang={lang}>
+      <p className="font-medium text-foreground">{t(`reports.lang.${lang}`)} · {t(`reports.state.${state}`)}</p>
+      <p className="mt-1 text-muted-foreground">
+        {state === "failed" && rendering?.error_code ? t(`reports.error.${rendering.error_code}`) : t(`reports.stateHint.${state}`)}
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {(state === "notPrepared" || state === "failed" || state === "stale") && (
+          <button type="button" onClick={retry} disabled={request.isPending}
+                  className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-50">
+            {state === "failed" ? t("reports.retry") : t("reports.prepare")}
+          </button>
+        )}
+        {lang !== source && (
+          <button type="button" onClick={onReadSource} className="rounded-md bg-secondary px-3 py-1.5 text-xs text-foreground hover:bg-muted">
+            {t("reports.readSource").replace("{language}", t(`reports.lang.${source}`))}
+          </button>
+        )}
+      </div>
+    </section>
   );
 }

@@ -177,8 +177,22 @@ class ReportResponse(BaseModel):
     download_url: Optional[str] = None
     report_metadata: dict
     created_at: datetime
+    # MVP-2.7.0 S6: the content a rendering is made from, and who may see it (services/report_access)
+    content_version: int = 1
+    content_hash: Optional[str] = None
+    source_language: Optional[str] = None
+    visibility: str = "workspace"
+    owned_by_me: bool = False
+    language_status: dict = Field(default_factory=dict)   # {zh, en} → rendering status (S6)
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TranslationRequest(BaseModel):
+    """Prepare renderings of one content version (MVP-2.7.0 S6): ready ones are returned, the rest are queued."""
+    model_config = ConfigDict(extra="forbid")
+    source_version: int = Field(..., ge=1)
+    languages: List[Literal["zh", "en"]] = Field(..., min_length=1, max_length=2)
 
 
 class ReportGenerateRequest(BaseModel):
@@ -640,9 +654,12 @@ class ShareContentResponse(BaseModel):
 
 
 class ReportPublishRequest(BaseModel):
-    """Request to publish a report via an sns-report or ses channel."""
+    """Request to publish a report via an sns-report or ses channel. MVP-2.7.0 S6: pinned to one version and
+    language (every language asked for must be ready); the Idempotency-Key header makes a repeat send nothing."""
     channel_name: str
     formats: Optional[List[str]] = None  # None = use channel defaults
+    version: int = Field(..., ge=1)
+    language: Literal["zh", "en", "zh-en"]
 
 
 class ReportPublishResponse(BaseModel):
