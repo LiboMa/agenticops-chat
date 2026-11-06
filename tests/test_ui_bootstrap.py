@@ -58,7 +58,7 @@ def test_bootstrap_has_exactly_the_contract_fields_plus_the_documented_extension
     assert set(body) == CONTRACT_KEYS | EXTENSIONS
     assert body["contract_version"] == "workspace-ui-1"
     assert body["user_id"] == uid and body["user"] == {"id": uid, "email": "alice@example.com", "name": None,
-                                                        "is_admin": False}
+                                                        "is_admin": False, "read_only": False}
     assert body["auth_enabled"] is False
     assert set(body["preferences"]) == {"revision", "locale", "home", "last_route", "nav_groups_open"}
 

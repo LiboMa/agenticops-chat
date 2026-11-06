@@ -29,6 +29,7 @@ import { refLabel, type ContextRef } from "@/lib/contextRef";
 import { activeChangePlan, changeHeadline, isHintResolved, toPipelineEvents } from "@/lib/changeDetail";
 import { planLabel, shortHash } from "@/lib/plans";
 import type { PipelineEvent, FixPlan } from "@/api/types";
+import { useReadOnly } from "@/hooks/useBootstrap";
 
 interface Props {
   subject: ContextRef | null; // an issue or a change request (spec §3.E.5)
@@ -141,6 +142,7 @@ const CHANGE_TABS = [["change", "changes.tab.change"], ["plan", "changes.plan"],
 
 /** Inner body component that always receives a valid issueId */
 function IssueBody({ issueId }: { issueId: number }) {
+  const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const { t } = useLocale();
 
   const anomaly = useAnomaly(issueId);
@@ -238,20 +240,24 @@ function IssueBody({ issueId }: { issueId: number }) {
 
         {/* Action buttons */}
         <div className="flex gap-2 pt-2">
-          <button
-            onClick={triggerRca}
-            disabled={rcaLoading}
-            className="flex-1 px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
-          >
-            {rcaLoading ? "..." : t("issues.runRca")}
-          </button>
-          <button
-            onClick={triggerFixPlan}
-            disabled={fixPlanLoading}
-            className="flex-1 px-3 py-1.5 text-xs font-medium rounded-md bg-secondary text-foreground hover:bg-accent border border-border disabled:opacity-50 transition-colors"
-          >
-            {fixPlanLoading ? "..." : t("issues.createFixPlan")}
-          </button>
+          {!readOnly && (
+            <button
+              onClick={triggerRca}
+              disabled={rcaLoading}
+              className="flex-1 px-3 py-1.5 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            >
+              {rcaLoading ? "..." : t("issues.runRca")}
+            </button>
+          )}
+          {!readOnly && (
+            <button
+              onClick={triggerFixPlan}
+              disabled={fixPlanLoading}
+              className="flex-1 px-3 py-1.5 text-xs font-medium rounded-md bg-secondary text-foreground hover:bg-accent border border-border disabled:opacity-50 transition-colors"
+            >
+              {fixPlanLoading ? "..." : t("issues.createFixPlan")}
+            </button>
+          )}
         </div>
 
         {/* RCA results inline */}
@@ -499,6 +505,7 @@ function FixPlanCard({ fp, issueStatus, actions }: { fp: FixPlan; issueStatus?: 
 /** Only an issue's fix plans get actions (a change plan is approved on its change page), so this is the fix branch. */
 function PlanActionButtons({ fp, issueStatus, approveMut, rejectMut, executeMut }:
   { fp: FixPlan; issueStatus?: string } & PlanActions) {
+  const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const { t } = useLocale();
   const [dialog, setDialog] = useState<"approve" | "reject" | null>(null);
   const [pinnedHash, setPinnedHash] = useState(""); // what the dialog shows is what it approves (final review I6)
@@ -516,7 +523,7 @@ function PlanActionButtons({ fp, issueStatus, approveMut, rejectMut, executeMut 
     <>
       {blocked && <p className="text-[11px] text-muted-foreground">{t(`issues.approvalBlocked.${blocked}`)}</p>}
       <div className="flex gap-2">
-        {canApprove && (
+        {canApprove && !readOnly && (
           <button
             onClick={() => { approveMut.reset(); setPinnedHash(fp.content_hash ?? ""); setDialog("approve"); }}
             disabled={approveMut.isPending}
@@ -525,7 +532,7 @@ function PlanActionButtons({ fp, issueStatus, approveMut, rejectMut, executeMut 
             {t(approveCopy.buttonKey)}
           </button>
         )}
-        {(canApprove || blocked) && (
+        {(canApprove || blocked) && !readOnly && (
           <button
             onClick={() => { rejectMut.reset(); setDialog("reject"); }}
             disabled={rejectMut.isPending}

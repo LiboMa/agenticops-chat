@@ -65,6 +65,7 @@ terraform init
 | VPC | 10.0.0.0/16, 2 AZs, public + private subnets, single NAT GW |
 | EC2 | c5.xlarge, Ubuntu 24.04, public subnet, EBS 30GB gp3 |
 | ALB | Internal, CloudFront-only ingress (managed prefix list) |
+| ALB rule `block_self_register` | 403 for `/api/auth/register` (2026-11-06 stopgap; the endpoint is gone from the code since `feat/viewer-role`, the rule stays as defence in depth) |
 | CloudFront | PriceClass_200, custom domain + ACM wildcard cert |
 | Route53 | A ALIAS record → CloudFront |
 | Security Groups | ALB: port 80 from CF; EC2: port 8000 from ALB + port 22 SSH |

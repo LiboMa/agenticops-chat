@@ -4364,7 +4364,10 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
     # First (MVP-2.7.0): for a session the caller cannot see — or that does not exist — nothing runs:
     # no upload is read, no /channel or /send_to command executes, and the 404 reveals nothing.
     with get_db_session() as db:
-        chat_access.get_visible_session(db, session_id, actor)
+        visible = chat_access.get_visible_session(db, session_id, actor)
+        if actor.read_only and not chat_access.owned_by(visible, actor):  # a viewer writes only into its own chats
+            from agenticops.auth.viewer import read_only_detail
+            raise HTTPException(403, read_only_detail())
 
     content_type = request.headers.get("content-type", "")
     file_contents: list[tuple[str, str]] = []
@@ -4439,6 +4442,11 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
         user_content = payload.content
         scan_focus_req = payload.scan_focus
         client_message_id = payload.client_message_id
+
+    # A viewer's chat runs no /channel (changes channel config, sends tests) and no /send_to (sends content out)
+    if actor.read_only and user_content.strip().lower().startswith(("/channel", "/send_to ", "/sendto ")):
+        from agenticops.auth.viewer import read_only_detail
+        raise HTTPException(403, read_only_detail())
 
     # Intercept /channel command before agent dispatch
     if user_content.strip().lower().startswith(("/channel", "/channels")):
@@ -4557,7 +4565,7 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
         set_run_context(RunContext(actor=_actor.key, actor_user_id=_actor.user_id,
                                    actor_permissions=_actor.permissions, trace_id=_chat_trace_id,
                                    agent_name="main", chat_session_id=session_id,
-                                   bound_account_id=bound_account_id))
+                                   bound_account_id=bound_account_id, read_only=_actor.read_only))
         _chat_start_time = time.monotonic()
         accumulated = ""
         tool_calls = []
@@ -4576,7 +4584,10 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
             await asyncio.to_thread(chat_dispatch.set_state, user_message_id, "running")
             # Building a session's agent (MCP clients included) is slow, blocking work: off the loop — and inside the
             # try, so a build that fails closes the dispatch as failed instead of leaving the chat busy (S5 review)
-            agent = await asyncio.to_thread(_chat_sessions.get_or_create, session_id)
+            if _actor.read_only:  # a viewer's turn runs the read-only agent, never one a full turn cached
+                agent = await asyncio.to_thread(_chat_sessions.get_or_create, session_id, True)
+            else:
+                agent = await asyncio.to_thread(_chat_sessions.get_or_create, session_id)
             async for event in agent.stream_async(enriched_content):
                 if await request.is_disconnected():
                     logger.info("Client disconnected; stopping stream for session %s", session_id)
@@ -4835,7 +4846,7 @@ if _cors_origins:
 # ============================================================================
 
 # Public paths that never require authentication
-_PUBLIC_PATHS = {"/api/health", "/api/auth/login", "/api/auth/register"}
+_PUBLIC_PATHS = {"/api/health", "/api/auth/login"}
 _PUBLIC_PREFIXES = ("/app/", "/static/", "/docs", "/openapi.json", "/redoc")
 
 from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
@@ -4894,6 +4905,11 @@ class APIAuthMiddleware(BaseHTTPMiddleware):
 
         # Attach user to request state for downstream use
         request.state.user = user
+        # A viewer (a user whose own permissions lack "write") changes nothing beyond its own sign-in, preferences
+        # and chats: every other write is refused here, before routing (auth/viewer.py).
+        from agenticops.auth.viewer import is_viewer, read_only_detail, viewer_may
+        if is_viewer(user) and not viewer_may(request.method, path):
+            return JSONResponse(status_code=403, content={"detail": read_only_detail()})
         return await call_next(request)
 
 

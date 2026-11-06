@@ -11,9 +11,11 @@ import { auditTabVisible, hubTab, nextTab, type HubTab } from "@/lib/plans";
 import { tabCounts } from "@/lib/attention";
 import { useAttention } from "@/hooks/useAttention";
 import { useAccountScope } from "@/components/layout/AccountScope";
+import { useReadOnly } from "@/hooks/useBootstrap";
 
 /** Plans & changes (MVP-2.7.0 S3): fix plans, change requests and the audit trail, one tab each (?tab=). */
 export default function PlansAndChanges() {
+  const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const { t } = useLocale();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -40,7 +42,7 @@ export default function PlansAndChanges() {
           <h1 className="text-2xl font-semibold text-foreground">{t("nav.plans")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{t("plans.hub.intro")}</p>
         </div>
-        {tab === "changes" && changesOn && (
+        {tab === "changes" && changesOn && !readOnly && (
           <button onClick={() => setShowNew(true)} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover">
             + {t("plans.newChange")}
           </button>

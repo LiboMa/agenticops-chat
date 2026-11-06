@@ -51,6 +51,8 @@ import { ISSUE_HASHES, legacyIssueTabHash } from "@/lib/workitemRoutes";
 import { toActivity } from "@/lib/activity";
 import { apiFetch } from "@/api/client";
 import type { FixExecution, HealthIssue, IssueStatus, MergedAlert } from "@/api/types";
+import { useReadOnly } from "@/hooks/useBootstrap";
+import { viewerActions } from "@/lib/permissions";
 
 /* ================================================================== */
 /*  Main component                                                     */
@@ -64,6 +66,7 @@ export default function IssueDetail({ embedded = false, back }: {
   const { id } = useParams<{ id: string }>();
   const issueId = Number(id);
   const { t } = useLocale();
+  const readOnly = useReadOnly();  // a viewer account: no write actions
   const { isAuthenticated } = useAuth();
   const { confirm, dialog } = useConfirm();
   const location = useLocation();
@@ -323,8 +326,8 @@ export default function IssueDetail({ embedded = false, back }: {
           tone={m.tone}
           reason={reason}
           waiting={m.waitingKey && t(m.waitingKey)}
-          primary={primary}
-          menu={menu}
+          primary={readOnly ? null : primary}
+          menu={readOnly ? viewerActions(menu) : menu}
           error={actionError ?? fetchError?.message ?? null}
           onDismissError={() => (actionError ? setActionError(null) : fetchError?.retry())}
           errorActionLabel={actionError ? undefined : t("common.retry")}

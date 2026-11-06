@@ -4,6 +4,7 @@ import { RunList } from "@/components/workitem/RunList";
 import { formatFullDate } from "@/lib/formatDate";
 import { fillPlaceholders } from "@/lib/placeholders";
 import { shortHash } from "@/lib/plans";
+import { useReadOnly } from "@/hooks/useBootstrap";
 
 type T = (key: string) => string;
 type Note = { key: string; params?: Record<string, string> };
@@ -45,6 +46,7 @@ export function ChangeRunBody({
   approveNote: string;
   t: T;
 }) {
+  const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const muted = "text-muted-foreground";
   const inFlight = runs.some((ex) => IN_FLIGHT.includes(ex.status));
   const judged = endsHere && !acceptNote && runs[0]?.accepted_by ? runs[0] : null;
@@ -64,7 +66,7 @@ export function ChangeRunBody({
       )}
       <ClosedRecord cr={cr} t={t} />
 
-      {cr.status === "planned" && (
+      {cr.status === "planned" && !readOnly && (
         <div className="space-y-3 rounded-lg border border-border p-4">
           <p className={muted}>{approveNote}</p>
           <div className="flex flex-wrap items-center gap-3">
@@ -79,7 +81,7 @@ export function ChangeRunBody({
           </div>
         </div>
       )}
-      {cr.status === "approved" && (
+      {cr.status === "approved" && !readOnly && (
         <button onClick={onRetry} disabled={busy}
                 className="px-4 py-2 border border-primary/40 text-primary text-sm font-medium rounded-lg hover:bg-primary/10 disabled:opacity-50 transition-colors">
           {t("workitem.primary.retryExecution")}

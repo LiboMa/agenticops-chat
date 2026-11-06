@@ -5,6 +5,7 @@ import { RunList } from "@/components/workitem/RunList";
 import { RunningFor } from "@/components/workitem/RunningFor";
 import { approvalBlockedReason, canApprovePlan } from "@/lib/issueDetail";
 import { formatFullDate } from "@/lib/formatDate";
+import { useReadOnly } from "@/hooks/useBootstrap";
 
 type T = (key: string) => string;
 
@@ -29,6 +30,7 @@ export function RunBody({
   runHint: string;        // what happens once a plan exists (lib/approval.runHintKey)
   t: T;
 }) {
+  const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const approvable = !!plan && canApprovePlan(plan, issueStatus);
   // a plan of a resolved / dismissed issue can still be rejected, not approved
   const blocked = plan ? approvalBlockedReason(plan, issueStatus) : null;
@@ -50,7 +52,7 @@ export function RunBody({
             </div>
           )}
           {blocked && <p className="text-sm text-muted-foreground">{t(`issues.approvalBlocked.${blocked}`)}</p>}
-          <div className="flex items-center gap-3">
+          {!readOnly && <div className="flex items-center gap-3">
             {approvable && (
               <button onClick={onApprove} disabled={approving}
                       className="px-4 py-2 border border-emerald-600/40 text-emerald-600 dark:text-emerald-400 text-sm font-medium rounded-lg hover:bg-emerald-500/10 disabled:opacity-50 transition-colors">
@@ -61,7 +63,7 @@ export function RunBody({
                     className="px-4 py-2 border border-red-500/30 text-red-500 text-sm font-medium rounded-lg hover:bg-red-500/10 disabled:opacity-50 transition-colors">
               {rejecting ? t("issues.rejecting") : t("issues.reject")}
             </button>
-          </div>
+          </div>}
         </div>
       )}
 

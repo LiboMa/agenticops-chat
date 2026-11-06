@@ -435,12 +435,23 @@ class ChatSessionManager:
                         exc_info=True,
                     )
 
-    def get_or_create(self, session_id: str) -> Agent:
+    def _cached(self, session_id: str, read_only: bool) -> Agent | None:
+        """The cached agent when it is the kind this turn needs. Caller holds self._lock. A viewer's turn never runs
+        on a full agent (e.g. one an admin's turn cached in the viewer's session) and vice versa: a mismatch is
+        rebuilt. Only an agent this manager marked read-only counts as one."""
+        agent = self._agents.get(session_id)
+        if agent is None or (getattr(agent, "_aiops_read_only", False) is True) != read_only:
+            return None
+        self._last_activity[session_id] = datetime.now(timezone.utc)
+        return agent
+
+    def get_or_create(self, session_id: str, read_only: bool = False) -> Agent:
+        read_only = bool(read_only)
         # Fast path — agent already cached, no slow work
         with self._lock:
-            if session_id in self._agents:
-                self._last_activity[session_id] = datetime.now(timezone.utc)
-                return self._agents[session_id]
+            agent = self._cached(session_id, read_only)
+            if agent is not None:
+                return agent
             # Slow path needed — get or create a per-session lock
             sess_lock = self._session_locks.setdefault(session_id, threading.Lock())
 
@@ -448,9 +459,9 @@ class ChatSessionManager:
         with sess_lock:
             # Double-check after acquiring per-session lock
             with self._lock:
-                if session_id in self._agents:
-                    self._last_activity[session_id] = datetime.now(timezone.utc)
-                    return self._agents[session_id]
+                agent = self._cached(session_id, read_only)
+                if agent is not None:
+                    return agent
 
             # Expensive work — outside global lock
             logger.info("Creating agent for session %s", session_id)
@@ -465,8 +476,10 @@ class ChatSessionManager:
                         session_effort = row.effort or ""
             except Exception:
                 logger.warning("Could not read session model for %s; using global", session_id, exc_info=True)
+            viewer = {"read_only": True} if read_only else {}  # a writer's build is called exactly as before
             agent = create_main_agent(model_id_override=session_model,
-                                      effort_override=session_effort)
+                                      effort_override=session_effort, **viewer)
+            agent._aiops_read_only = read_only
             history = _load_history_messages(session_id, settings.session_history_depth)
             if history:
                 agent.messages.extend(history)

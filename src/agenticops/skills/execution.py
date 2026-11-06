@@ -427,6 +427,14 @@ def _execute_ssh(
 # ── kubectl Execution ────────────────────────────────────────────────
 
 
+_SECRET_MATERIAL_RE = re.compile(r"(?<![\w-])secrets?(?![\w-])|--raw\b", re.IGNORECASE)
+
+
+def _reveals_secret_material(command: str) -> bool:
+    """kubectl args that name Secrets (`secret`, `secrets`, `secret/x`) or ask for a raw kubeconfig."""
+    return bool(_SECRET_MATERIAL_RE.search(command or ""))
+
+
 @tool
 def run_kubectl(
     cluster_name: str = "",
@@ -484,6 +492,14 @@ def run_kubectl(
                                      account=account, region=region, target=cluster_name)
     if refused is not None:
         return refused
+
+    # A read-only account never reads secret material, even through a readonly verb (`get secret -o yaml`,
+    # `config view --raw`).
+    from agenticops.run_context import get_run_context
+    if get_run_context().read_only and _reveals_secret_material(command):
+        from agenticops.services.command_audit import read_only_refusal
+        return read_only_refusal(tool="run_kubectl", tier=tier, command=ledger_cmd,
+                                 account=account, region=region, target=cluster_name)
 
     if tier in ("write", "unknown") and not require_confirmation:
         record_command(tool="run_kubectl", tier=tier, command=ledger_cmd, outcome="refused", reason="confirmation",

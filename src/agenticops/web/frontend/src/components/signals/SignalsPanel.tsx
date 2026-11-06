@@ -7,6 +7,7 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
 import { formatShortDate } from "@/lib/formatDate";
 import type { Signal } from "@/api/types";
+import { useReadOnly } from "@/hooks/useBootstrap";
 
 const DISPOSITION_STYLES: Record<string, string> = {
   promoted: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
@@ -92,6 +93,7 @@ function SignalRow({
   promoting: boolean;
   t: (key: string) => string;
 }) {
+  const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const disposition = signal.disposition ?? "error";
   const canPromote = disposition === "noise" || disposition === "merged";
   return (
@@ -119,7 +121,7 @@ function SignalRow({
         >
           I#{signal.health_issue_id}
         </button>
-      ) : canPromote ? (
+      ) : canPromote && !readOnly ? (
         <button
           onClick={() => onPromote(signal.id)}
           disabled={promoting}

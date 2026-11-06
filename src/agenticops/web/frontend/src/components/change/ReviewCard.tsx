@@ -4,6 +4,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { LocalGraph } from "@/components/graph/LocalGraph";
 import { policyActionLabel, policySummary, verdictLabel } from "@/lib/changeDetail";
 import { formatFullDate } from "@/lib/formatDate";
+import { useReadOnly } from "@/hooks/useBootstrap";
 
 type T = (key: string) => string;
 
@@ -24,6 +25,7 @@ export function ReviewBody({
   sending: boolean;
   t: T;
 }) {
+  const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const p = policySummary(cr.policy_decision, cr.review_reasons);
   const reasons = [...(quietReasons ? [] : cr.review_reasons), ...p.reasons];
   const rest = reasons.slice(SHOWN_REASONS);
@@ -95,7 +97,7 @@ export function ReviewBody({
       )}
       {/* the note is said once: under the count above when there is one, else on the graph */}
       <ImpactGraph changeRequestId={cr.id} note={typeof shadowImpact === "number" ? undefined : impactNote} t={t} />
-      {cr.status === "needs_clarification" && (
+      {cr.status === "needs_clarification" && !readOnly && (
         <div className="space-y-2 border-t border-border pt-4">
           <label htmlFor="change-clarify" className={`${muted} block`}>{t("changes.clarifyLabel")}</label>
           <textarea

@@ -32,6 +32,8 @@ import { toActivity } from "@/lib/activity";
 import { isBlank, type FactRow } from "@/lib/issueDetail";
 import { planCounts, planLabel, shortHash } from "@/lib/plans";
 import type { Account, ChangeRequestDetail } from "@/api/types";
+import { useReadOnly } from "@/hooks/useBootstrap";
+import { viewerActions } from "@/lib/permissions";
 
 // The dialog-driven actions; `useChanges` exports the discriminated `ChangeActionArgs`, not a `ChangeAction` alias,
 // so `action` is kept to this subset and branched on below to build a well-typed mutate() argument.
@@ -78,6 +80,7 @@ export default function ChangeDetail() {
 
 function ChangeDetailView({ crId }: { crId: number }) {
   const { t } = useLocale();
+  const readOnly = useReadOnly();  // a viewer account: no write actions
   const settings = useSettings();
   const navigate = useNavigate();
   const accounts = useAccounts();
@@ -262,8 +265,8 @@ function ChangeDetailView({ crId }: { crId: number }) {
           tone={m.tone}
           reason={m.reason}
           waiting={m.waitingKey && t(m.waitingKey)}
-          primary={primary}
-          menu={menu}
+          primary={readOnly ? null : primary}
+          menu={readOnly ? viewerActions(menu) : menu}
           error={error}
           onDismissError={() => { setMsg(null); act.reset(); }}
           backTo="/app/plans?tab=changes"

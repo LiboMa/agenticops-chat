@@ -55,3 +55,29 @@ resource "aws_lb_listener" "http" {
 
   tags = local.tags
 }
+
+# Self-registration (2026-11-06): POST /api/auth/register let anyone create a read+write user. It was
+# refused here first, then deleted from the code (feat/viewer-role); the rule stays as defence in depth.
+# Delete this resource to drop it. (ALB path patterns cannot contain "%"; the edge decodes before matching.)
+resource "aws_lb_listener_rule" "block_self_register" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 10
+
+  condition {
+    path_pattern {
+      values = ["/api/auth/register", "/api/auth/register/"]
+    }
+  }
+
+  action {
+    type = "fixed-response"
+
+    fixed_response {
+      content_type = "application/json"
+      message_body = "{\"detail\":\"Registration is disabled\"}"
+      status_code  = "403"
+    }
+  }
+
+  tags = local.tags
+}

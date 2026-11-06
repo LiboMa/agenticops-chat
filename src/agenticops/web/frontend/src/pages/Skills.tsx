@@ -34,6 +34,7 @@ import type {
   SkillImprovementRecord,
   SkillImportSourceResult,
 } from "@/api/types";
+import { useReadOnly } from "@/hooks/useBootstrap";
 
 type Filter = "all" | "published" | "draft";
 
@@ -719,6 +720,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function ImprovementQueue() {
+  const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const [showHistory, setShowHistory] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const pendingQ = useSkillImprovements("pending");
@@ -760,7 +762,7 @@ function ImprovementQueue() {
             )}
           </h3>
           <div className="flex items-center gap-2">
-            {selected.size > 0 && !showHistory && (
+            {selected.size > 0 && !showHistory && !readOnly && (
               <button
                 onClick={handleBatchDismiss}
                 disabled={batchDismiss.isPending}
@@ -835,6 +837,7 @@ function ImprovementQueue() {
 /* -- Main Skills Page ---------------------------------------------- */
 
 export default function Skills() {
+  const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const { t } = useLocale();
   const navigate = useNavigate();
   const { data: skills, isLoading, error } = useSkills();
@@ -871,18 +874,22 @@ export default function Skills() {
           </span>
         </h1>
         <div className="flex gap-2">
-          <button
-            onClick={() => setShowCreate(true)}
-            className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700"
-          >
-            {t("skills.create")}
-          </button>
-          <button
-            onClick={() => setShowImport(true)}
-            className="px-4 py-2 text-sm font-medium text-foreground bg-secondary rounded-lg hover:bg-muted"
-          >
-            {t("skills.import")}
-          </button>
+          {!readOnly && (
+            <button
+              onClick={() => setShowCreate(true)}
+              className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700"
+            >
+              {t("skills.create")}
+            </button>
+          )}
+          {!readOnly && (
+            <button
+              onClick={() => setShowImport(true)}
+              className="px-4 py-2 text-sm font-medium text-foreground bg-secondary rounded-lg hover:bg-muted"
+            >
+              {t("skills.import")}
+            </button>
+          )}
         </div>
       </div>
 

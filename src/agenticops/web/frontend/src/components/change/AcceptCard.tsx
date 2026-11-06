@@ -2,6 +2,7 @@ import type { ChangeStatus, FixExecution } from "@/api/types";
 import { VerificationChip } from "@/components/plans/VerificationChip";
 import { formatFullDate } from "@/lib/formatDate";
 import { isBlank } from "@/lib/issueDetail";
+import { useReadOnly } from "@/hooks/useBootstrap";
 
 type T = (key: string) => string;
 
@@ -18,6 +19,7 @@ export function ChangeAcceptBody({ status, latestRun, quietReason, onCompleted, 
   busy: boolean;
   t: T;
 }) {
+  const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const muted = "text-muted-foreground";
   const reason = latestRun && !quietReason && !isBlank(latestRun.verification_reason) ? latestRun.verification_reason : null;
   const head = latestRun && (
@@ -32,7 +34,7 @@ export function ChangeAcceptBody({ status, latestRun, quietReason, onCompleted, 
         {head}
         {reason && <p className="text-foreground whitespace-pre-wrap break-words">{reason}</p>}
         <p className={muted}>{t("changes.needsReviewNote")}</p>
-        <div className="flex flex-wrap items-center gap-2">
+        {!readOnly && <div className="flex flex-wrap items-center gap-2">
           <button onClick={onCompleted} disabled={busy}
                   className="px-4 py-2 border border-emerald-600/40 text-emerald-600 dark:text-emerald-400 text-sm font-medium rounded-lg hover:bg-emerald-500/10 disabled:opacity-50 transition-colors">
             {t("workitem.primary.markCompleted")}
@@ -41,7 +43,7 @@ export function ChangeAcceptBody({ status, latestRun, quietReason, onCompleted, 
                   className="px-4 py-2 border border-red-500/30 text-red-500 text-sm font-medium rounded-lg hover:bg-red-500/10 disabled:opacity-50 transition-colors">
             {t("changes.markFailed")}
           </button>
-        </div>
+        </div>}
       </div>
     );
   }
