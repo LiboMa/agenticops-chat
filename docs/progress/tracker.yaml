@@ -463,13 +463,20 @@ releases:
         notes: "依赖出处：路线图核心能力轨表 A4 依赖「A1–A3」。"
 
   - id: "accounts-models"
-    title: "账户与模型配置（2026-11 起；版本号待主人定）"
+    title: "账户、模型与运行时（2026-11 起；版本号待主人定）"
     status: in_progress
     branch: feat/viewer-role
     tag: ""
     doc: ""
-    notes: "2026-11-06 开始。顺序按主人 11-06 决定：RBAC 管理 → 模型配置进 DB → OpenAI 兼容 Provider。版本号未定。"
+    notes: "2026-11-06 开始。主人 11-06 晚些时候定的顺序：Strands 1.45→1.64 保持行为升级 → 模型 Provider 层（含模型配置进 DB / Web、OpenAI 兼容）→ 中国区 AgentCore；RBAC 管理可穿插。中国区：内部使用、可用国产厂商 API、一个分区一套部署。研究见 PR #31。版本号未定。"
     items:
+      - id: "platform/strands-1.64"
+        title: "Strands 1.45 → 1.64 保持行为升级"
+        status: todo
+        depends_on: []
+        modules: ["agents", "config.py"]
+        plan: ""
+        notes: "主人 11-06 定为下一步（Plan Mode 起步）。1.56 起 context_manager 会丢弃传入的 conversation_manager（各 agent 滑动窗口静默失效）→ 用 context_manager=False + ContextOffloader 插件保持 1.45 行为；cache_tools 改 CacheConfig(tools_ttl=True)；写真实 Bedrock 冒烟脚本（缓存命中、thinking 形状、流式事件、limits、动态技能注册），重跑定位评测比对准确率和成本，主人验收后推送。研究见 docs/superpowers/specs/2026-11-06-strands-upgrade-study.md（PR #31）。"
       - id: "acct/viewer"
         title: "只读 viewer 账户 + 删除自助注册"
         status: done
@@ -520,12 +527,12 @@ releases:
         plan: ""
         notes: "11-06 已做可行性分析（会话内，未落文档）：Strands 1.45 自带 OpenAIModel（base_url / api_key；限流、上下文超长已映射）；耦合点 4 类 —— 8 处 BedrockModel 构建、preamble.bedrock_model_kwargs 能力门控、约 11 处直调 bedrock-runtime（signal_gate._call_bedrock 等）、Titan embedding；配套：模型列表、价格表币种、窗口表、stream_errors 错误分类。最大风险是模型能力：以 13 例 RCA 定位评测 + chaos E2E 为门槛。依赖 models/db-web（provider 与密钥配置落在 DB）。"
       - id: "deploy/agentcore-cn"
-        title: "部署到 AgentCore 中国区"
-        status: dropped
-        depends_on: []
+        title: "在中国区用 AgentCore 运行（控制面 / Agent 执行面拆分）"
+        status: todo
+        depends_on: ["models/openai-compat"]
         modules: []
         plan: ""
-        notes: "11-06 评估结论：AgentCore 与 Bedrock 都不在北京 / 宁夏（AgentCore 官方区域表、AWS 中国区服务列表）；AgentCore Runtime（每会话一个 microVM、最长 8 h、空闲 15 min 回收、会话间无持久盘）与单进程架构冲突。替代方向：中国区 ECS / EC2 自建 + OpenAI 兼容的国产 / 私有化模型（models/openai-compat）。"
+        notes: "11-06 更正：AgentCore 自 2026-09-27 起已在北京 / 宁夏可用（amazonaws.cn 公告与 docs.amazonaws.cn 功能表），精简版 —— Runtime 只有 microVM、无 Instances / Memory / Harness / Bedrock。早先「不可用、dropped」是只查了全球文档的误判。研究结论见 docs/superpowers/specs/2026-11-06-agentcore-china-region-study.md（分支 docs/agentcore-strands-study，未合入）：推荐控制面留在宁夏 ECS、Agent 运行进 AgentCore Runtime（VPC），前提是模型 Provider 层与多进程加固。"
 
   - id: "backlog"
     title: "已规划、未排期"
