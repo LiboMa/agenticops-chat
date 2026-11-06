@@ -3,7 +3,7 @@
 # Every status below cites the doc (or commit) it was read from; what could not be confirmed says so in notes.
 # After editing: python scripts/progress/build_dashboard.py  (then commit tracker.yaml + dashboard.html together).
 schema: 1
-updated: "2026-10-21"
+updated: "2026-11-06"
 releases:
   - id: "1.0.0"
     title: "MVP 1.0.0 — 多智能体 AI 运维助手"
@@ -431,7 +431,7 @@ releases:
     branch: ""
     tag: ""
     doc: ""
-    notes: "只放从 2.7.0 移来的 A1–A4。2.7.1 的其他本地工作尚未推送、本仓库看不到，由主人在本地补；分支、发布说明未从文档确认。"
+    notes: "只放从 2.7.0 移来的 A1–A4。2.7.1 另有 5 个本地提交未推送（9913f3e 开版 + bb75bb5 / 27e9168 / 0fb090e / 0a25f31 修完 2.7.0 E2E 观察 1–5 与第 9 条，本地全量 7008 passed），未推送前不能作为 evidence；分支 MVP-2.7.1 仅在本地 .worktrees/mvp-2.7.1。A1 详细计划未写。"
     items:
       - id: "2.7.1/A1"
         title: "账本与分钟级"
@@ -461,3 +461,91 @@ releases:
         modules: []
         plan: ""
         notes: "依赖出处：路线图核心能力轨表 A4 依赖「A1–A3」。"
+
+  - id: "accounts-models"
+    title: "账户与模型配置（2026-11 起；版本号待主人定）"
+    status: in_progress
+    branch: feat/viewer-role
+    tag: ""
+    doc: ""
+    notes: "2026-11-06 开始。顺序按主人 11-06 决定：RBAC 管理 → 模型配置进 DB → OpenAI 兼容 Provider。版本号未定。"
+    items:
+      - id: "acct/viewer"
+        title: "只读 viewer 账户 + 删除自助注册"
+        status: done
+        depends_on: []
+        modules: ["auth", "web", "agents", "services", "skills", "cli"]
+        plan: ""
+        evidence:
+          commits:
+            - {sha: "6abcbe6", date: "2026-11-06", title: "feat(auth): read-only viewer accounts + remove self-registration"}
+            - {sha: "93d7fcb", date: "2026-11-06", title: "Merge pull request #28 from LiboMa/feat/viewer-role"}
+        notes: "PR #28 已于 2026-11-06 合入 main。写请求一律 403 read_only（9 条白名单）；只读主 agent（查询工具白名单）；命令层拒写、拒读 K8s Secret；UI 隐藏写操作；/api/auth/register 已删（ALB 规则同时拦截）。dev 已部署、live 检查通过，dev 上账户 viewer。全量 6978 passed / 1 已知 DNS 假失败。"
+      - id: "acct/editor"
+        title: "只读可看 Settings（settings_read，账户 editor）"
+        status: done
+        depends_on: ["acct/viewer"]
+        modules: ["auth", "web", "cli"]
+        plan: ""
+        evidence:
+          commits:
+            - {sha: "ae62cd2", date: "2026-11-06", title: "feat(auth): a read-only account that may view Settings (settings_read)"}
+        notes: "在 feat/viewer-role 上，是 PR #28 合并之后的提交，尚未进 main（需要新 PR）。dev 已部署、live 检查通过（General 0/59 控件可用，写请求 403），dev 上账户 editor。全量 6981 passed / 1 已知 DNS 假失败。"
+      - id: "acct/rbac-admin"
+        title: "管理员在 Web 管理用户与角色"
+        status: todo
+        depends_on: ["acct/editor"]
+        modules: ["auth", "web"]
+        plan: ""
+        notes: "主人 11-06 选定范围：Settings → Users（仅管理员）—— 列账户、按角色（Viewer / Viewer+Settings / Operator / Admin）建号并给一次性密码、改角色、停用 / 启用、重置密码，全部审计。不含编辑 rbac.yaml、不含自定义角色。计划未写（下一步 Plan Mode）。"
+      - id: "models/skill-consistency"
+        title: "技能构建与主 agent 用同一套模型设置"
+        status: todo
+        depends_on: []
+        modules: ["skills", "config.py"]
+        plan: ""
+        notes: "11-06 dev 实测根因：skills/evolution.py（所有技能生成 / 改进路径）用 bedrock_model_id 直调 Bedrock，dev 的 /etc/agenticops.env 把它钉成 opus-4-6-v1（env 优先于 yaml），而主 agent 实际是 opus-5-5；evolution 未设读超时（默认 60 s），当天 6 次技能生成超时失败；evolution 调用不进 agent_logs / 成本。随 models/db-web 一起修。"
+      - id: "models/db-web"
+        title: "全部模型配置进 DB、在 Web 上可配（不留漏网之鱼）"
+        status: todo
+        depends_on: []
+        modules: ["config.py", "web", "services"]
+        plan: ""
+        notes: "11-06 盘点：约 15 个模型设置只能改 yaml / env（三档默认、executor_simple_model_id、signal_gate / critic / 翻译 / security / embedding 模型、model_aliases、custom_models、thinking 预算、价格表）；Web 选的 agent 模型写进 dev 盒子上未提交的 settings.yaml，redeploy 会抹掉；claude-opus-5-5 / sonnet-5-5 / gpt-6-astra 不在价格表里，按 $0 计费；目前没有存运行时设置的表。排在 acct/rbac-admin 之后（主人定的先后，不是技术依赖）。"
+      - id: "models/openai-compat"
+        title: "OpenAI 兼容 Model Provider（多来源 / 私有化模型）"
+        status: todo
+        depends_on: ["models/db-web"]
+        modules: ["agents", "services", "config.py"]
+        plan: ""
+        notes: "11-06 已做可行性分析（会话内，未落文档）：Strands 1.45 自带 OpenAIModel（base_url / api_key；限流、上下文超长已映射）；耦合点 4 类 —— 8 处 BedrockModel 构建、preamble.bedrock_model_kwargs 能力门控、约 11 处直调 bedrock-runtime（signal_gate._call_bedrock 等）、Titan embedding；配套：模型列表、价格表币种、窗口表、stream_errors 错误分类。最大风险是模型能力：以 13 例 RCA 定位评测 + chaos E2E 为门槛。依赖 models/db-web（provider 与密钥配置落在 DB）。"
+      - id: "deploy/agentcore-cn"
+        title: "部署到 AgentCore 中国区"
+        status: dropped
+        depends_on: []
+        modules: []
+        plan: ""
+        notes: "11-06 评估结论：AgentCore 与 Bedrock 都不在北京 / 宁夏（AgentCore 官方区域表、AWS 中国区服务列表）；AgentCore Runtime（每会话一个 microVM、最长 8 h、空闲 15 min 回收、会话间无持久盘）与单进程架构冲突。替代方向：中国区 ECS / EC2 自建 + OpenAI 兼容的国产 / 私有化模型（models/openai-compat）。"
+
+  - id: "backlog"
+    title: "已规划、未排期"
+    status: planned
+    branch: ""
+    tag: ""
+    doc: ""
+    notes: "之前批准或记下、还没排进任何版本的工作。"
+    items:
+      - id: "backlog/harness"
+        title: "Harness Engineering 架构升级（提示词分层 → Trust Kernel → Investigation Runtime → Skills 能力包 → Outcome-weighted Memory）"
+        status: todo
+        depends_on: []
+        modules: ["agents"]
+        plan: docs/superpowers/plans/2026-09-09-harness-engineering-architecture-update.md
+        notes: "主人 2026-09-09 批准，三项决策已定（Trust Kernel 先、feature flag 双跑、Chat 首句默认进 A1）。下一步：主人评审计划附录 A 的 L0 宪法草案，然后阶段 0 第一个 PR。未从文档确认已开始。"
+      - id: "backlog/security-followups"
+        title: "2.5.0 安全审查的遗留项"
+        status: todo
+        depends_on: []
+        modules: ["security"]
+        plan: ""
+        notes: "据开发记录，未从文档确认：① 采集全失败时 findings 为空、评分 100 满分全 pass（CN 账户 live E2E 复现，未修）；② SNS Subject 报错；③ open_findings 用全局计数；④ CloudTrail 首跑慢；⑤ init_db 建表说明。"
