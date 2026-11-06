@@ -1,0 +1,134 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<title>AgenticOps 项目·架构·功能介绍 HTML Presentation · KiroCrew ON 报告</title><base target="_blank"><style>
+body{font:14px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif;color:#1f2328;max-width:62rem;margin:2rem auto;padding:0 1.25rem}
+h1{font-size:1.6rem;margin-bottom:.25rem}h2{margin-top:2rem;border-bottom:1px solid #d0d7de;padding-bottom:.3rem}
+h3{margin-top:1.5rem}table{border-collapse:collapse;width:100%;margin:.5rem 0}
+th,td{border:1px solid #d0d7de;padding:.3rem .5rem;text-align:left;vertical-align:top}th{background:#f6f8fa}
+.meta{color:#59636e}.fail{color:#cf222e}.skip{color:#59636e}code{background:#f6f8fa;padding:0 .25rem;border-radius:4px}
+pre{white-space:pre-wrap;background:#f6f8fa;padding:.75rem;border-radius:6px}
+</style></head><body>
+<h1>AgenticOps 项目·架构·功能介绍 HTML Presentation</h1>
+<p class="meta">会话 <code>run-96fc9ec996f443af971f50b60b12857f</code> · 状态 completed · 创建者 admin · 生成 2026-10-21 06:48 UTC</p>
+<h2>需求</h2>
+<pre>为 Team 内部（架构师团队）技术分享制作一份 AgenticOps 项目、架构与功能介绍的单文件 HTML 演示文稿。内容技术与商业落地并重。源码检出就是被介绍的项目本身（https://github.com/LiboMa/agenticops-chat.git），所有事实以仓库内文档与源码为准。
+
+## 一、页数与结构
+- 目标约 10 页（10–12），硬上限 15 页（含封面与收尾页）。正文 10–15 分钟讲完；Demo 视时间可选、可跳过。
+- 严格按下面「大纲原文」的六部分顺序。建议页面分配（可在 15 页以内微调）：
+  1. 封面
+  2. 背景与定位（大纲第 1 部分）
+  3. 演进过程（大纲第 2 部分）：版本时间线
+  4. 总体架构：三入口 → Main Agent → 6 专家智能体 → AWS，含共享层（大纲第 3 部分）
+  5. 设计原则 + 7 个智能体职责
+  6. 关键流程：自动修复流水线与 9 态生命周期、双告警入口 + Signal Gate（正式流程图/时序图）
+  7. 变更管理（ITSM）与自学习层（记忆 / 技能的安全门禁）
+  8. 功能全景 + 部署形态与成熟度（大纲第 4 部分）
+  9. Demo（大纲第 5 部分）：一页列出四个演示场景，可跳过
+  10. 总结（大纲第 6 部分）：四个核心观点
+  11. 收尾：仓库链接 + Q&amp;A
+
+## 二、大纲原文（主线，以此为准）
+# AgenticOps（agenticops-chat）分享
+我近期要对 AgenticOps 做一个 Team 内部（架构师团队）的分享，介绍项目、架构与功能。以下是大纲，请以此为主线生成 html 的 Presentation，时间约为 10-15 分钟；有时间还可以 Demo。
+仓库：https://github.com/LiboMa/agenticops-chat.git
+
+## 1. 背景与定位
+1. AgenticOps 是什么：Agent-first 云运维平台——一支 AI 智能体团队扫描 AWS 基础设施、发现问题、定位根因、规划修复，低风险问题自主修复，并在每次运维中学习；
+2. 解决谁的问题：SRE / 平台 / 云运维团队，要的是「告警 → 根因 → 修复」全闭环的 on-call 副驾，而不是又一个看板；
+
+## 2. 演进过程
+1.0.0（2026-03）首个 MVP：7 智能体 + 自动修复流水线 + Web 看板 → 1.1 自优化记忆与自主技能 → 2.0 受治理的自主、多云能力层 → 2.2 Signal Gate 降噪与 RCA 质量门 → 2.5 云安全审查 → 2.6 变更管理（ITSM）、图事实 + RCA 定位 → 2.7 蓝白工作台 + 核心信任加固（进行中）
+
+## 3. 架构（直接上干货）
+### 总体架构
+- 三入口（CLI `aiops chat` / Web 看板 / IM 机器人）→ Main Agent（纯路由）→ 6 个专家智能体（Scan、Detect、RCA、SRE、Executor、Reporter）→ AWS
+- 共享层：Agent Memory、Agent Skills、Security Engine、SQLite / PostgreSQL、MCP Servers
+### 设计原则
+- 智能体即工具；读 / 规划 / 执行相互隔离（只有 SRE 规划、只有 Executor 执行；L0/L1 自动批准，L2/L3 人工审批）
+- 分层模型控成本；智能体安全地学习；配置单一真源；默认从简
+### 关键流程
+- 自动修复流水线：告警 → HealthIssue → RCA → SRE → 审批 → Executor → 验证 → 解决（9 态生命周期）
+- 双告警入口（Webhook / IM Agent）+ Signal Gate 去重降噪
+- 变更管理（ITSM）：Main → SRE 合法性审核 → 审批 → Executor，不需要 HealthIssue
+- 自学习层：记忆与技能写入先落草稿，经安全门禁发布，人类撰写的知识被固定
+
+## 4. 功能
+- 运维闭环：Scan、Monitor &amp; Detect、Signal Gate、RCA、自动修复、变更管理
+- 安全与知识：云安全审查（CIS 评分、三态可达性）、知识库、报告与定时任务
+- 平台与集成：Web 看板 / CLI / REST API、Messaging（飞书 / Slack / 钉钉 / 企微…）、MCP、图引擎、Galaxy（实验性）
+- 部署形态：本地 pip / Docker / 一键 AWS 开发沙箱（deploy-sg）/ Terraform 生产栈（ec2 / ecs / eks，仍为脚手架）
+
+## 5. Demo（可选）
+1. Chat：用 `aiops chat` 或 Web Chat 巡检账号、提一个问题；
+2. 事件闭环：一个 Issue 从诊断、方案、审批执行到验收；
+3. 变更管理：一张变更单从申请、审核到执行与审计；
+4. 云安全审查 / Galaxy 关系图；
+
+## 6. 总结一下：
+我想阐述的核心点：
+1. 第一、Agent-first 的运维闭环可行：从告警、根因到修复，低风险问题自主完成，有 EKS 实验室 10 个故障场景的闭环验证做支撑；
+2. 第二、自主与安全不矛盾：读 / 规划 / 执行隔离、风险分级审批、fail-closed 校验，让「敢把运维交给 Agent」有工程保障；
+3. 第三、系统越用越好：记忆、技能、知识库在安全门禁内自优化，运维经验沉淀为组织资产；
+4. 第四、落地路径清晰：本地、Docker、一键 AWS 沙箱已跑通，Terraform 生产栈待验证，可按客户成熟度逐级交付。
+
+## 三、第 6 部分作为全场总结与收尾
+- 用四个核心观点概括整场。每点给出：一句结论 + 技术依据（呼应前面哪一页的架构或流程）+ 落地价值。
+- 总结页之后只留一页收尾（仓库链接 + Q&amp;A）。
+
+## 四、技术与商业落地并重
+- 技术侧：每张架构/流程页讲清组件职责、控制流与数据流，以及关键设计取舍（如为何 Main 只做路由、为何读/规划/执行隔离、为何分层模型）。
+- 商业侧：在相关页用简短的「落地意义」标注，并与总结四点呼应，例如：低风险问题自主闭环减轻 on-call 负担、审批门与审计是企业敢用的前提、知识沉淀为组织资产、部署形态按客户成熟度逐级交付。
+- 商业内容只从仓库文档推导，不编造客户名单、营收、市场规模或仓库中没有的成本/性能数字。
+
+## 五、素材与事实约束
+- 素材来源：README_CN.md、README.md、docs/WORKFLOW.md、docs/MVP-*-RELEASE.md 及对应 E2E/评测报告、docs/DESIGN.md、docs/MVP-2.0.0-ARCHITECTURE.md、src/agenticops/ 目录结构。docs/ 下已有的旧演示文稿（如 AgenticOps-Platform-Presentation.html、*.pptx）只作参考，本次按新大纲重做。
+- 页面上的每个数字（如验证数据、服务类型数、技能数、端点数、版本日期）都必须能在上述文件中找到出处，并写清上下文（例如「EKS 实验室 10 个故障场景闭环验证」）。素材之间不一致时（如 README 顶部版本号与发布历史不一致），以发布历史为准；2.7.0 标注为进行中。
+- 成熟度如实标注：Terraform 生产栈（ec2/ecs/eks）为脚手架、尚未端到端验证；Galaxy 为实验性。
+- 模型只按 README 中写明的模型族名称引用（来自 config/settings.yaml 默认值），不出现仓库中没有的模型 ID。
+
+## 六、制作要求（沿用上一份 KiroCrew ON 分享已确认的约定）
+- 风格：简约、硬朗的 Anthropic 技术风格。
+- 架构图清晰明了，带适度动画（进入与强调动画，尊重 prefers-reduced-motion）；工作流用正式的流程图/时序图表达；架构图、流程图形式统一、对齐规整（内联 SVG 或 HTML/CSS 绘制）。
+- 单文件 index.html 放在检出根目录，自包含、离线可运行；不引用 CDN、外部字体、外部图片，无网络请求。16:9 等比缩放，1920×1080 与 1440×900 下逐页不溢出、不裁切，正文投影字号 ≥18px，系统中文字体栈，技术名词保留英文。
+- 交互：←/→/空格/PageUp/PageDown 翻页，Home/End 首末页，点击左右区翻页；页码+进度条；URL hash 定位（#5）且刷新停在同页；F 全屏；N 演讲者备注；O 或 Esc 缩略总览；@media print 每页一张可导出 PDF。不依赖 localStorage / sessionStorage / IndexedDB / Cookie。
+- 每页 1–3 句演讲者备注，整套正常语速 10–15 分钟讲完（不含 Demo）。
+- 只新增 index.html 与 presentation-tests/static-assert.js；不修改仓库已有的任何文件（业务代码、文档、配置、.gitignore），不安装依赖、不启动项目服务，不推送、不建 PR。
+
+## 验收标准
+1. 总页数 10–15，目标 10–12；页面顺序符合大纲六部分。
+2. 有总结页覆盖四个核心观点，每点含结论、技术依据与落地价值；其后仅一页收尾。
+3. 至少有总体架构图一张、自动修复流水线流程图一张、Signal Gate / 双告警入口或变更管理的流程/时序图一张；部署形态页标注成熟度。
+4. 两种分辨率下逐页无溢出、无裁切；所有交互功能可用；无外部请求，控制台无报错。
+5. 页面事实与仓库文档一致，每个数字都有出处，无编造；技术与商业落地内容均有体现。</pre>
+<h2>计划</h2>
+<table><tr><th>#</th><th>任务</th><th>类别</th><th>工具</th><th>来源</th><th>状态</th><th>执行次数</th></tr>
+<tr><td>1</td><td>素材核实与逐页规划</td><td>—</td><td>kiro</td><td>提交时指定</td><td>accepted</td><td>1</td></tr>
+<tr><td>2</td><td>实现单文件 HTML 演示文稿</td><td>—</td><td>claude</td><td>提交时指定</td><td>accepted</td><td>2</td></tr>
+<tr><td>3</td><td>Node 静态断言(页数/外链/结构/事实约束)</td><td>—</td><td>claude</td><td>提交时指定</td><td>accepted</td><td>2</td></tr>
+<tr><td>4</td><td>Evaluator 逐条核验验收标准</td><td>—</td><td>codex</td><td>提交时指定</td><td>accepted</td><td>2</td></tr>
+</table>
+<h2>任务</h2>
+<h3>1. 素材核实与逐页规划</h3>
+<ul><li>执行 1 次；最终第 1 次：accepted</li><li>请求：kiro / auto；实际：kiro / —</li><li>结论：pass</li><li>候选：—</li></ul>
+<pre>本步为分析与规划（未写 index.html、未改仓库、未装依赖、未起服务）。已只读核实 README_CN.md/README.md、docs/PROJECT-STATS.md、config/settings.yaml、MVP-1.0.0~2.7.0 发布说明、2.5.0/2.6.1 E2E 与定位评测报告、docs/WORKFLOW.md、src/agenticops/models.py 与目录结构，产出：(1) 带出处的事实清单（定位/版本演进/总体架构与7智能体及默认模型族/6设计原则/9态生命周期/Signal Gate/双告警入口/变更管理12态/自学习层/功能全景/部署四形态与成熟度/验证数据10-of-10、~2min、~6.3min、~$2-3、2.6.1定位AC@1 0.77·召回13/13、2.5.0两账号只读、代码与测试计量），并标注三处素材不一致（README顶部2.5.0 vs 发布历史至2.7.0取发布历史且2.7.0标进行中；旧1.0.0模型分层 vs 当前settings.yaml模型族取当前；README正文220+/30+/20页 vs PROJECT-STATS 227/42/15取可计量值并注测量日期）；(2) 11页（可拆12页）逐页规划，严格按大纲六部分顺序，含标题/要点/图示类型/落地意义/备注/所用事实条目，满足至少总体架构图+自动修复流水线图+Signal Gate或变更管理流程图三张及部署成熟度标注；(3) 与instructions一致、不加不放宽的本轮验收标准。结论写入 handoff.md。</pre>
+<table><tr><th>门禁</th><th>结果</th><th>详情</th></tr><tr class="pass"><td>native_completed</td><td>✓</td><td></td></tr><tr class="pass"><td>identity_match</td><td>✓</td><td></td></tr><tr class="pass"><td>handoff_present</td><td>✓</td><td></td></tr><tr class="pass"><td>outcome_valid</td><td>✓</td><td></td></tr><tr class="pass"><td>outcome_pass</td><td>✓</td><td></td></tr></table>
+<h3>2. 实现单文件 HTML 演示文稿</h3>
+<ul><li>执行 2 次；最终第 2 次：accepted</li><li>请求：claude / auto；实际：claude / default</li><li>返工：续接上一轮（保留上下文）</li><li>结论：pass</li><li>候选 3d4814e · 2 个文件 +456 −448</li></ul>
+<pre>返工修复三处缺陷，仍为 12 页。F1：正文画布字号全部 ≥24px（仅 .src 来源标注 18px 豁免），第 2–9 页重新布局以免放大后溢出；浏览器实测投影最小字号 1920×1080 为 24px、1440×900 为 18px，12 页逐页无越界、无溢出。static-assert.js 改为按 0.75 fit 系数 × SVG 缩放比校验投影字号，对上一轮 index.html 运行会 FAIL 并列出 27 条规则。F2：第 7 页 token/HMAC 注明仅在设置 AIOPS_WEBHOOK_SECRET 时校验、未设不校验（对照 webhooks.py require_webhook_token）。F3：第 8 页改为四路结果分支：passed→completed、执行成功但验证未过或待验收→needs_review、回滚→rolled_back、其余→failed（对照 change_service.on_execution_result）。F2/F3 均加了静态断言。node presentation-tests/static-assert.js 退出 0；Playwright 两种分辨率（原字体栈及注入 CJK 字体）退出 0：交互、#5 刷新、N/O/Esc/F、打印 12 页 PDF 均通过，外部请求 0、控制台报错 0。git diff aef032d 仅新增 index.html 与 presentation-tests/static-assert.js。</pre>
+<table><tr><th>门禁</th><th>结果</th><th>详情</th></tr><tr class="pass"><td>native_completed</td><td>✓</td><td></td></tr><tr class="pass"><td>identity_match</td><td>✓</td><td></td></tr><tr class="pass"><td>handoff_present</td><td>✓</td><td></td></tr><tr class="pass"><td>outcome_valid</td><td>✓</td><td></td></tr><tr class="pass"><td>outcome_pass</td><td>✓</td><td></td></tr><tr class="pass"><td>diff_present</td><td>✓</td><td>2 个文件</td></tr><tr class="pass"><td>no_secrets</td><td>✓</td><td></td></tr><tr class="skip"><td>artifacts_locked</td><td>–</td><td>任务未声明可改动路径（paths）</td></tr><tr class="skip"><td>checks_pass</td><td>–</td><td>任务没有检查命令</td></tr></table>
+<h3>3. Node 静态断言(页数/外链/结构/事实约束)</h3>
+<ul><li>执行 2 次；最终第 2 次：accepted</li><li>请求：claude / auto；实际：claude / default</li><li>返工：续接上一轮（保留上下文）</li><li>结论：pass</li><li>候选 3d4814e · 0 个文件 +0 −0</li></ul>
+<pre>Re-ran the static checks on the reworked build (HEAD 3d4814e; compared with aef032d only index.html and presentation-tests/static-assert.js are added; this round changes no code). node presentation-tests/static-assert.js exits 0 (61 ok): page count 12, outline order, Demo as one skippable page, summary with 4 points × conclusion/technical basis/landing value plus one closing page with Q&amp;A and the repo link, four diagrams, deployment-page maturity labels, zero external link/script/img/@import/url(http), keydown/fullscreen/hash/hashchange/print/speaker-note markers, every model name present in README, no fabricated run/session IDs. Last round&#x27;s F1–F3 are confirmed fixed and covered by checks: F1 projected font size at 1440×900 ≥18px (the previous index.html 5548593 fails, rules listed); F2 webhook token/HMAC marked as checked only when AIOPS_WEBHOOK_SECRET is set (matches webhooks.py require_webhook_token); F3 change outcomes are four branches (matches change_service.py:1202-1207). Negative checks all exit 1: empty baseline, previous-round index.html, external link/img, unknown model, fake session_id, maturity label removed, Demo not skippable, keydown removed, F2/F3 regressions. Non-blocking: slide 8&#x27;s speaker note calls needs_review a terminal state, which it is not.</pre>
+<table><tr><th>门禁</th><th>结果</th><th>详情</th></tr><tr class="pass"><td>native_completed</td><td>✓</td><td></td></tr><tr class="pass"><td>identity_match</td><td>✓</td><td></td></tr><tr class="pass"><td>handoff_present</td><td>✓</td><td></td></tr><tr class="pass"><td>outcome_valid</td><td>✓</td><td></td></tr><tr class="pass"><td>outcome_pass</td><td>✓</td><td></td></tr><tr class="skip"><td>diff_present</td><td>–</td><td>没有改动（此类任务不要求）</td></tr><tr class="pass"><td>no_secrets</td><td>✓</td><td></td></tr><tr class="skip"><td>checks_pass</td><td>–</td><td>任务没有检查命令</td></tr></table>
+<h3>4. Evaluator 逐条核验验收标准</h3>
+<ul><li>执行 2 次；最终第 2 次：accepted</li><li>请求：codex / auto；实际：codex / openai.gpt-6-astra[low]</li><li>返工：续接上一轮（保留上下文）</li><li>结论：pass</li><li>候选 814f0ce · 1 个文件 +3 −3</li></ul>
+<pre>在3d4814e候选上独立复验并修正第8页将needs_review称为终态的三行措辞；上轮F1–F3已闭环。最终静态断言、旧候选负例、两分辨率逐页布局/正文24px与18px、全部交互、12页打印通过，0外部请求/控制台错误。结论绑定交接中的最终两文件SHA256；仅允许的两份新增文件有差异。</pre>
+<table><tr><th>门禁</th><th>结果</th><th>详情</th></tr><tr class="pass"><td>native_completed</td><td>✓</td><td></td></tr><tr class="pass"><td>identity_match</td><td>✓</td><td></td></tr><tr class="pass"><td>handoff_present</td><td>✓</td><td></td></tr><tr class="pass"><td>outcome_valid</td><td>✓</td><td></td></tr><tr class="pass"><td>outcome_pass</td><td>✓</td><td></td></tr><tr class="pass"><td>diff_present</td><td>✓</td><td>1 个文件</td></tr><tr class="pass"><td>no_secrets</td><td>✓</td><td></td></tr><tr class="skip"><td>artifacts_locked</td><td>–</td><td>任务未声明可改动路径（paths）</td></tr><tr class="skip"><td>checks_pass</td><td>–</td><td>任务没有检查命令</td></tr></table>
+<h2>用量</h2>
+<table><tr><th>任务</th><th>用量</th></tr><tr><td>素材核实与逐页规划</td><td>4.4117 credits · 3 分 31 秒</td></tr><tr><td>实现单文件 HTML 演示文稿</td><td>输入 108 / 输出 145k token · $7.82 · 26 分 54 秒</td></tr><tr><td>Node 静态断言(页数/外链/结构/事实约束)</td><td>输入 30 / 输出 13.4k token · $1.16 · 2 分 39 秒</td></tr><tr><td>Evaluator 逐条核验验收标准</td><td>输入 8.4k / 输出 2.8k token · 5 分 13 秒</td></tr><tr><th>合计</th><th>4.4117 credits · 输入 8.5k / 输出 161.2k token · $8.98 · 38 分 17 秒</th></tr></table>
+<h2>纠错记录</h2>
+<p>预算（自会话开始）：纠错 1/2 轮 · 自动重试 0/4 次 · 40/720 分钟</p>
+<ul><li>第 1 轮 · eval · rework · eval(codex) 原生执行成功，native_completed / identity_match / handoff_present / outcome_valid 四门通过，仅 outcome_pass 因发现实现缺陷而 fail；failure_type=implementation，evidence.transient_retry_of 不存在，非工具失败，不属于 switch_tool。Evaluator 给出 changes_requested 与三处可核实缺陷，均在 build 任务产出的 index.html 中，需由上游实现者修复：F1(1440×900 下 0.75 …</li></ul>
+<h2>发布</h2>
+<ul><li>已验证候选：814f0ce</li></ul><p>尚未发布</p>
+</body></html>

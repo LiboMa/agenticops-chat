@@ -73,6 +73,8 @@ from agenticops.tools.im_tools import (
 from agenticops.tools.account_tools import (
     list_cloud_accounts, add_cloud_account, update_cloud_account, remove_cloud_account,
 )
+from agenticops.tools.aws_cli_tool import run_aws_cli_readonly
+from agenticops.skills.execution import run_kubectl
 from agenticops.tools.change_tools import request_change, get_change_request, list_change_requests, execute_change
 
 logger = logging.getLogger(__name__)
@@ -252,6 +254,55 @@ def change_management_prompt() -> str:
     return CHANGE_MANAGEMENT_PROMPT if settings.change_management_enabled else ""
 
 
+# A viewer's chat (a read-only account, auth/viewer.py) runs this agent instead: query tools only, and a prompt that
+# names only them — an agent must never see a tool it cannot use. No sub-agents (scan/detect/RCA/SRE can start the
+# auto-fix pipeline), no MCP or enhanced tools (unclassified), no skills XML (its protocol orders activate_skill) and
+# no agent memory (main's memories route to sub-agents).
+READ_ONLY_SYSTEM_PROMPT = """You are AgenticOps, an AI operations assistant. This conversation belongs to a READ-ONLY
+account: you can look things up and explain them, never change anything.
+
+WHAT YOU CAN DO
+- Answer from the platform's records: cloud accounts, the resource inventory, health issues, root-cause analyses,
+  fix plans and implementation plans, runs and their verdicts, change requests, schedules and their history,
+  skills, agent memory, and the infrastructure graph (network anomalies, network segments, single points of
+  failure, capacity risk).
+- Look up live state with read-only commands: run_aws_cli_readonly (describe / list / get) and run_kubectl
+  (get / describe / logs / top / events). Keep output small (a --query filter, -o jsonpath, a label selector,
+  --tail) and name the account when more than one exists.
+
+WHAT YOU CANNOT DO — decline in one sentence, say this account is read-only, and suggest asking an operator
+- No change of any kind: no scan, detection, root-cause analysis or fix-plan generation; no approval, execution or
+  change request; no configuration of accounts, channels, MCP servers, schedules, skills or memory; no
+  notification, sharing or report generation. Never describe a write command as if it had run.
+- Never reveal secret material (secret values, tokens, keys, credentials); the tools refuse it.
+
+OUTPUT FORMATTING:
+- Answer in the user's language, concisely. Reference issues as I#N, resources as R#N and change requests as C#N
+  (auto-linked in the web UI). Name a plan by its label, e.g. "I#12 fix plan v2".
+- End EVERY reply with exactly one line (no text after it):
+  <<SUGGEST>>["<action 1>", "<action 2>", "<action 3>"]
+  containing 2-3 short follow-up questions the user could ask next, in the conversation's language — only
+  things this read-only account can do. This line is machine-parsed and hidden from the user - do not
+  reference it in your prose.
+"""
+
+
+def read_only_main_tools() -> list:
+    """The read-only agent's tools — an explicit allowlist, so a tool added to the full agent is never in it by
+    default. The change reads follow change_management_enabled, like change_management_tools()."""
+    tools = [
+        get_active_account, get_managed_resources, get_health_issue, get_resource_by_id, get_rca_result,
+        get_fix_plan, get_plan, get_execution_result, list_health_issues,
+        detect_network_anomalies, analyze_network_segments, detect_single_points_of_failure, analyze_capacity_risk,
+        list_skills, read_skill_reference, list_monitoring_providers, search_agent_memory,
+        list_schedules, get_schedule_history, list_cloud_accounts,
+        run_aws_cli_readonly, run_kubectl,
+    ]
+    if settings.change_management_enabled:
+        tools += [get_change_request, list_change_requests]
+    return tools
+
+
 def change_management_tools() -> list:
     """Change Management tools for the main agent — absent entirely when the feature is off
     (an agent must never see a tool it cannot use)."""
@@ -260,30 +311,32 @@ def change_management_tools() -> list:
     return [request_change, review_change, get_change_request, list_change_requests, execute_change]
 
 
-def create_main_agent(model_id_override: str = "", effort_override: str = "") -> Agent:
+def create_main_agent(model_id_override: str = "", effort_override: str = "", read_only: bool = False) -> Agent:
     """Create and return the Main Agent (Orchestrator).
 
     Args:
         model_id_override: Per-session model id; empty = use global config.
         effort_override: Per-session effort level (off|standard|deep);
             empty = Auto (follow agent_main_thinking_budget).
+        read_only: A viewer's chat — READ_ONLY_SYSTEM_PROMPT + read_only_main_tools() only, no curator runs.
 
     Returns:
         Configured Strands Agent with sub-agents and metadata tools.
     """
-    # Run memory Curator lifecycle (cheap, file-metadata only; gated by settings)
-    try:
-        from agenticops.memory.curator import maybe_run_curator
-        maybe_run_curator()
-    except Exception:
-        logger.debug("Curator run skipped", exc_info=True)
+    if not read_only:
+        # Run memory Curator lifecycle (cheap, file-metadata only; gated by settings)
+        try:
+            from agenticops.memory.curator import maybe_run_curator
+            maybe_run_curator()
+        except Exception:
+            logger.debug("Curator run skipped", exc_info=True)
 
-    # Run skills Curator lifecycle (agent drafts only; human skills pinned; gated by settings)
-    try:
-        from agenticops.skills.curator import maybe_run_skills_curator
-        maybe_run_skills_curator()
-    except Exception:
-        logger.debug("Skills Curator run skipped", exc_info=True)
+        # Run skills Curator lifecycle (agent drafts only; human skills pinned; gated by settings)
+        try:
+            from agenticops.skills.curator import maybe_run_skills_curator
+            maybe_run_skills_curator()
+        except Exception:
+            logger.debug("Skills Curator run skipped", exc_info=True)
 
     from agenticops.config import get_scan_focus, resolve_scan_services
     from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_manager, get_bedrock_boto_session
@@ -303,6 +356,15 @@ def create_main_agent(model_id_override: str = "", effort_override: str = "") ->
         max_tokens=max_tokens,
         **cache_kwargs,
     )
+
+    if read_only:
+        return Agent(
+            system_prompt=build_system_prompt(READ_ONLY_SYSTEM_PROMPT, include_account=False, include_skills=False),
+            model=model,
+            conversation_manager=get_agent_conversation_manager("main"),
+            context_manager=get_agent_context_manager("main"),
+            tools=read_only_main_tools(),
+        )
 
     focus = get_scan_focus()
     focus_section = ""

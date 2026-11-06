@@ -100,7 +100,8 @@ def approved_plan_in_context() -> Optional[int]:
 def change_context_refusal(
     *, tool: str, tier: str, command: str, account: str = "", region: str = "", target: str = ""
 ) -> Optional[str]:
-    """Refuse (as text) a write command run while the Run Context names a change with no approved plan.
+    """Refuse (as text) a write command run while the Run Context names a change with no approved plan — or at
+    all while it is a read-only account's turn (RunContext.read_only; reason `read_only_account`).
 
     A change review / preflight runs under change_request_id but no fix plan; the change's plan is only
     approved after review. Until then the run is read-only IN CODE: readonly commands are unaffected
@@ -111,6 +112,8 @@ def change_context_refusal(
     if tier == "readonly":
         return None
     from agenticops.run_context import get_run_context
+    if get_run_context().read_only:  # a viewer's chat turn (auth/viewer.py): read-only whatever the tool is told
+        return read_only_refusal(tool=tool, tier=tier, command=command, account=account, region=region, target=target)
     if not get_run_context().change_request_id:
         return None
     if approved_plan_in_context() is not None:
@@ -119,6 +122,15 @@ def change_context_refusal(
                    reason="change_not_approved", account=account, region=region, target=target)
     return ("This change request has no approved plan yet, so its review/preflight is read-only. "
             "Approve the change's plan before running write commands. Command: " + command)
+
+
+def read_only_refusal(*, tool: str, tier: str, command: str, account: str = "", region: str = "",
+                      target: str = "") -> str:
+    """Refuse (as text, with a `read_only_account` ledger row) a command a read-only account may not run."""
+    record_command(tool=tool, tier=tier, command=command, outcome="refused", reason="read_only_account",
+                   account=account, region=region, target=target)
+    return ("This account is read-only: only read-only commands run here, and none that reveals secret material. "
+            "Ask an operator to make the change. Command: " + command)
 
 
 def change_required_refusal(command: str, pattern: str) -> str:

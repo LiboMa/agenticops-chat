@@ -16,6 +16,7 @@ import {
 import { useSkills } from "@/hooks/useSkills";
 import type { Schedule, ScheduleCreate, ScheduleUpdate } from "@/api/types";
 import { CronBuilder } from "@/components/ui/CronBuilder";
+import { useReadOnly } from "@/hooks/useBootstrap";
 
 const PIPELINE_OPTIONS = ["FullScan", "Monitoring", "DailyReport", "HealthPatrol", "AgentChain"] as const;
 const REPORT_TYPES = ["", "daily", "incident", "inventory"] as const;
@@ -486,6 +487,7 @@ type TabFilter = "all" | "recurring" | "one_shot";
 const PAGE_SIZE = 10;
 
 export default function Schedules() {
+  const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const navigate = useNavigate();
   const { data: schedules, isLoading, error } = useSchedules();
   const createMut = useCreateSchedule();
@@ -542,15 +544,17 @@ export default function Schedules() {
               className="px-3 py-1.5 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary-500 w-40"
             />
           </div>
-          <button
-            onClick={() => {
-              setEditing(null);
-              setFormOpen(true);
-            }}
-            className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500"
-          >
-            New Schedule
-          </button>
+          {!readOnly && (
+            <button
+              onClick={() => {
+                setEditing(null);
+                setFormOpen(true);
+              }}
+              className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500"
+            >
+              New Schedule
+            </button>
+          )}
         </CardHeader>
         <DataTable
           columns={[
@@ -565,25 +569,29 @@ export default function Schedules() {
               header: "",
               render: (r) => (
                 <div className="flex gap-2">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditing(r);
-                      setFormOpen(true);
-                    }}
-                    className="text-xs text-primary-600 hover:underline"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDeleting(r);
-                    }}
-                    className="text-xs text-red-600 hover:underline"
-                  >
-                    Delete
-                  </button>
+                  {!readOnly && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditing(r);
+                        setFormOpen(true);
+                      }}
+                      className="text-xs text-primary-600 hover:underline"
+                    >
+                      Edit
+                    </button>
+                  )}
+                  {!readOnly && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleting(r);
+                      }}
+                      className="text-xs text-red-600 hover:underline"
+                    >
+                      Delete
+                    </button>
+                  )}
                 </div>
               ),
             },

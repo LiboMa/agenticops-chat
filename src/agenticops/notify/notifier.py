@@ -458,7 +458,7 @@ class SNSReportNotifier(Notifier):
 
         for fr in formatted:
             date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            s3_key = f"{self.s3_prefix}{report_type}/{date_str}/{report_id}{fr.extension}"
+            s3_key = f"{self.s3_prefix}{report_type}/{date_str}/{report_id}{(report_metadata or {}).get('publish_variant', '')}{fr.extension}"
             url = await loop.run_in_executor(
                 None, self._upload_to_s3, s3_key, fr.content, fr.content_type,
             )
@@ -836,7 +836,7 @@ class SESNotifier(Notifier):
         if self.s3_bucket:
             for fr in formatted:
                 date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                s3_key = f"{self.s3_prefix}{report_type}/{date_str}/{report_id}{fr.extension}"
+                s3_key = f"{self.s3_prefix}{report_type}/{date_str}/{report_id}{(report_metadata or {}).get('publish_variant', '')}{fr.extension}"
                 url = await loop.run_in_executor(
                     None, self._upload_to_s3, s3_key, fr.content, fr.content_type,
                 )

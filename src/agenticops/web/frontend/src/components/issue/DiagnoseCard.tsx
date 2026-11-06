@@ -8,6 +8,7 @@ import { VerdictBlock } from "@/components/issue/VerdictBlock";
 import { formatFullDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { confidenceBreakdown, qualityBadges, unmatchedRefs, type QualityTone } from "@/lib/rcaQuality";
+import { useReadOnly } from "@/hooks/useBootstrap";
 
 type T = (key: string) => string;
 
@@ -33,6 +34,7 @@ export function DiagnoseBody({ issueId, rca, loading, error, onRetryFetch, thres
   onVerdictDone: () => void;
   t: T;
 }) {
+  const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   if (loading) return <Spinner label={t("common.loading")} />;
   if (rca === undefined && error) {
     return <ErrorBanner message={`${t("workitem.sub.rcaUnavailable")}: ${error.message}`} onRetry={onRetryFetch}
@@ -51,7 +53,7 @@ export function DiagnoseBody({ issueId, rca, loading, error, onRetryFetch, thres
       <RcaSection rca={rca} threshold={threshold} timelineEvents={timelineEvents} showVerdict={closed} t={t} />
       <LocationSection rca={rca} t={t} />
       <GraphDetails issueId={issueId} rca={rca} t={t} />
-      {!closed && (
+      {!closed && !readOnly && (
         <div id="verdict" className="scroll-mt-4">
           <VerdictBlock issueId={issueId} rca={rca} onDone={onVerdictDone} />
         </div>

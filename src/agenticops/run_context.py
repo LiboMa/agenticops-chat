@@ -32,6 +32,7 @@ class RunContext:
     chat_session_id: Optional[str] = None
     execution_id: Optional[int] = None        # the queued FixExecution an ExecutorService run is closing
     bound_account_id: Optional[int] = None     # a change run/review may touch ONLY this account id (resolver fails closed on any other)
+    read_only: bool = False                    # a viewer's turn: every CLI tool refuses non-readonly commands (auth/viewer)
 
 
 _run_context_var: contextvars.ContextVar[RunContext] = contextvars.ContextVar(

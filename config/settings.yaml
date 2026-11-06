@@ -179,6 +179,7 @@ signal_retention_days: 30
 rca_min_confidence_for_autofix: 0.6
 rca_critic_enabled: true
 rca_critic_model_id: ''
+report_translation_model_id: ''      # MVP-2.7.0 S6: zh/en report translation; '' = bedrock_model_id_cheap
 rca_timeout_seconds: 900
 rca_incident_memory_enabled: true
 rca_incident_memory_max: 3

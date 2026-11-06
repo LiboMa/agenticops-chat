@@ -117,11 +117,13 @@ export function useShareContent() {
 
 // -- Report Publishing & Subscription hooks --
 
+/** S6: one Idempotency-Key per publish attempt — a repeat with the same key sends nothing new. */
 export function usePublishReport(reportId: number) {
   return useMutation({
-    mutationFn: (data: ReportPublishRequest) =>
+    mutationFn: ({ idempotencyKey, ...data }: ReportPublishRequest & { idempotencyKey: string }) =>
       apiFetch<ReportPublishResponse>(`/reports/${reportId}/publish`, {
         method: "POST",
+        headers: { "Idempotency-Key": idempotencyKey },
         body: JSON.stringify(data),
       }),
   });

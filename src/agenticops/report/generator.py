@@ -627,6 +627,9 @@ class ReportGenerator:
             )
             session.add(report)
             session.commit()
+            # MVP-2.7.0 S6: prepare the report's other language in the background
+            from agenticops.services.content_rendering import enqueue_other_language
+            enqueue_other_language(report.id)
 
             return report
 

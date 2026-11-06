@@ -8,6 +8,7 @@ import { queryClient } from "@/queryClient";
 import { Spinner } from "@/components/ui/Spinner";
 import { getAuthToken } from "@/api/client";
 import { hubRedirect } from "@/lib/plans";
+import { useReadOnly } from "@/hooks/useBootstrap";
 
 const Login = lazy(() => import("@/pages/Login"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
@@ -32,6 +33,11 @@ const SkillDetail = lazy(() => import("@/pages/SkillDetail"));
 const Galaxy = lazy(() => import("@/pages/Galaxy"));
 const Security = lazy(() => import("@/pages/Security"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
+
+/** A viewer (read-only account) gets the not-found page where a page is all configuration (Settings). */
+function WriterOnly({ children }: { children: React.ReactNode }) {
+  return useReadOnly() ? <NotFound /> : <>{children}</>;
+}
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const location = useLocation();
@@ -140,7 +146,7 @@ export default function App() {
               path="settings"
               element={
                 <Suspense fallback={<Spinner />}>
-                  <Settings />
+                  <WriterOnly><Settings /></WriterOnly>
                 </Suspense>
               }
             />

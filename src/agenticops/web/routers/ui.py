@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from agenticops.auth.actor import Actor
+from agenticops.auth.viewer import is_viewer
 from agenticops.config import get_trace_id, settings
 from agenticops.services import ui_preferences as prefs
 from agenticops.web.deps import current_actor, require_authenticated_user
@@ -47,13 +48,19 @@ def _upload_policy() -> dict:
     }
 
 
+def _report_export_formats() -> list[str]:
+    """S6: the export formats this server can produce — html always, pdf / docx when their libraries are installed."""
+    from agenticops.services.report_export import available_formats
+    return available_formats()
+
+
 def _features() -> dict:
     """Only what is built and switched on. Later stages turn their flags on as they ship."""
     return {
         "context_chat": True,         # S5: chats carry a server-checked context (services/chat_context)
         "revision_guards": False,     # approvals are guarded by content_hash + 409 today, not If-Match
-        "content_rendering": False,
-        "report_export": False,
+        "content_rendering": True,    # S6: zh / en report renderings (services/content_rendering)
+        "report_export": True,        # S6: GET /api/reports/{id}/export (formats in report_export_formats)
         "attention": True,
         "change_management": bool(settings.change_management_enabled),
         "chat_replay": False,
@@ -74,10 +81,12 @@ async def api_ui_bootstrap(user=Depends(signed_in_user)) -> dict:
         "locale": preferences["locale"],
         "features": _features(),
         "upload_policy": _upload_policy(),
+        "report_export_formats": _report_export_formats(),
         "preferences": preferences,
         # 2.7.0 additions to the contract (it allows extra fields): the avatar menu, auth-dependent controls,
         # the sidebar footer
-        "user": {"id": user.id, "email": user.email, "name": user.name, "is_admin": bool(user.is_admin)},
+        "user": {"id": user.id, "email": user.email, "name": user.name, "is_admin": bool(user.is_admin),
+                 "read_only": is_viewer(user)},  # a viewer account: the UI offers no write controls
         "auth_enabled": bool(settings.api_auth_enabled),
         "version": __version__,
     }
