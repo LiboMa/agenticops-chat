@@ -71,5 +71,6 @@ are **not** updated when the code moves on; read them with their date in mind.
   `DESIGN.md` and the 2.5.0 release note are Chinese. New documents pick one and stay in it.
 - Numbers (endpoint counts, test counts, skill counts, page counts) are measured, not estimated —
   the measuring commands live in `PROJECT-STATS.md`.
-- Protected files (never delete, move or modify): `RAW-Idea-latest-v3.md`, `RAW-Creative-Idea.md`,
-  `docs/use-cases/*`, `docs/MVP-1.0.0-RELEASE.md`.
+- Protected files (never delete, move or modify): `RAW-Idea-latest-v3.md`, `RAW-Creative-Idea.md`
+  (both local only — not in git since 2026-11-06, listed in `.gitignore`), `docs/use-cases/*`,
+  `docs/MVP-1.0.0-RELEASE.md`.
