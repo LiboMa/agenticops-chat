@@ -13,6 +13,7 @@ import type { GalaxyGraphNode } from "@/api/types";
 import { GalaxyNodePanel } from "@/components/galaxy/GalaxyNodePanel";
 import { healthCounts, isHot, normalizeHealth } from "@/lib/galaxyHealth";
 import { focusNodeId } from "@/lib/galaxy";
+import { useReadOnly } from "@/hooks/useBootstrap";
 
 // ── palette (Nebula Violet — the single Galaxy theme, validated via dataviz) ──
 interface Palette {
@@ -43,6 +44,7 @@ function shortGrp(s: string) { return s.length > 18 ? s.slice(0, 18) + "…" : s
 const FOCUS_SCALE = 1.6; // camera zoom on a ?focus= deep link
 
 export default function Galaxy() {
+  const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const { t } = useLocale();
   const status = useGalaxyStatus();
   const graph = useGalaxyGraph();
@@ -342,11 +344,13 @@ export default function Galaxy() {
           </button>
         )}
         {rebuild.isError && <span className="text-red-400">{String(rebuild.error)}</span>}
-        <button className="px-2 py-1 rounded bg-violet-400/20 text-violet-200 hover:bg-violet-400/30 disabled:opacity-50"
-                disabled={rebuild.isPending || b?.status === "running"}
-                onClick={() => rebuild.mutate(true)}>
-          {rebuild.isPending || b?.status === "running" ? t("galaxy.building") : t("galaxy.rebuild")}
-        </button>
+        {!readOnly && (
+          <button className="px-2 py-1 rounded bg-violet-400/20 text-violet-200 hover:bg-violet-400/30 disabled:opacity-50"
+                  disabled={rebuild.isPending || b?.status === "running"}
+                  onClick={() => rebuild.mutate(true)}>
+            {rebuild.isPending || b?.status === "running" ? t("galaxy.building") : t("galaxy.rebuild")}
+          </button>
+        )}
       </div>
 
       {/* canvas */}

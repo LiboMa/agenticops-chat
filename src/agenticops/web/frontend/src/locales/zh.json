@@ -1125,5 +1125,7 @@
   "reports.error.interrupted": "翻译被服务重启打断。",
   "reports.error.publish_in_flight": "这次发布还在发送中。",
   "reports.error.idempotency_key_required": "发布未能发送；请重新打开对话框再试。",
-  "reports.error.too_long": "这份报告太长，无法一次翻译完。"
+  "reports.error.too_long": "这份报告太长，无法一次翻译完。",
+  "readOnly.badge": "只读账户",
+  "readOnly.hint": "此账户可以浏览和对话，但不能做任何变更。"
 }

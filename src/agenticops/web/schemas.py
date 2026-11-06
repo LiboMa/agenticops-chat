@@ -871,13 +871,6 @@ class LoginResponse(BaseModel):
     expires_at: datetime
 
 
-class RegisterRequest(BaseModel):
-    """Schema for user registration."""
-    email: str
-    password: str
-    name: Optional[str] = None
-
-
 class UserResponse(BaseModel):
     """Schema for user response."""
     id: int

@@ -92,6 +92,7 @@ class AuthService:
         password: str,
         name: Optional[str] = None,
         is_admin: bool = False,
+        permissions: Optional[list] = None,
     ) -> User:
         """Create a new user.
 
@@ -100,6 +101,7 @@ class AuthService:
             password: Plain text password
             name: Optional display name
             is_admin: Whether user has admin privileges
+            permissions: Explicit permission flags (e.g. ["read"] for a viewer); None = the default for is_admin
 
         Returns:
             Created User instance
@@ -117,12 +119,12 @@ class AuthService:
                 password_hash=hash_password(password),
                 name=name,
                 is_admin=is_admin,
-                permissions=["read", "write"] if not is_admin else ["read", "write", "admin"],
+                permissions=(list(permissions) if permissions is not None
+                             else ["read", "write"] if not is_admin else ["read", "write", "admin"]),
             )
             session.add(user)
             session.flush()
-            # Detached before the commit expires it: /api/auth/register reads it after the session closes
-            # (it answered every registration with a DetachedInstanceError until MVP-2.7.0).
+            # Detached before the commit expires it: callers read it after the session closes.
             session.expunge(user)
             return user
 

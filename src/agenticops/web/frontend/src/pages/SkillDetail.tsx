@@ -14,6 +14,7 @@ import {
   usePromoteSkill,
   useImproveSkill,
 } from "@/hooks/useSkills";
+import { useReadOnly } from "@/hooks/useBootstrap";
 
 /* -- Tab type ----------------------------------------------------- */
 
@@ -178,6 +179,7 @@ function computeLineDiff(oldText: string, newText: string): DiffLine[] {
 /* -- Main Page ---------------------------------------------------- */
 
 export default function SkillDetail() {
+  const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const { t } = useLocale();
   const { name } = useParams<{ name: string }>();
   const navigate = useNavigate();
@@ -307,13 +309,15 @@ export default function SkillDetail() {
               )}
             </div>
             <div className="flex gap-2">
-              <button
-                onClick={() => setShowImprove(true)}
-                className="px-3 py-1.5 text-sm font-medium text-foreground bg-secondary rounded-lg hover:bg-muted"
-              >
-                Improve
-              </button>
-              {skill.is_draft && (
+              {!readOnly && (
+                <button
+                  onClick={() => setShowImprove(true)}
+                  className="px-3 py-1.5 text-sm font-medium text-foreground bg-secondary rounded-lg hover:bg-muted"
+                >
+                  Improve
+                </button>
+              )}
+              {skill.is_draft && !readOnly && (
                 <>
                   <button
                     onClick={handleReview}
@@ -383,7 +387,7 @@ export default function SkillDetail() {
         <button className={tabClass("view")} onClick={() => setTab("view")}>
           View
         </button>
-        {skill.is_draft && (
+        {skill.is_draft && !readOnly && (
           <button className={tabClass("edit")} onClick={handleStartEdit}>
             Edit
           </button>
@@ -474,7 +478,7 @@ export default function SkillDetail() {
                 ))}
               </pre>
             </div>
-            {skill.is_draft && (
+            {skill.is_draft && !readOnly && (
               <div className="flex justify-end gap-2 mt-4">
                 <button
                   onClick={handlePromote}
@@ -490,7 +494,7 @@ export default function SkillDetail() {
       )}
 
       {/* Delete (draft only) */}
-      {skill.is_draft && (
+      {skill.is_draft && !readOnly && (
         <div className="flex justify-end">
           <button
             onClick={() => setShowDelete(true)}

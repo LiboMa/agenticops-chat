@@ -17,6 +17,7 @@ class Actor:
     id: str
     user_id: Optional[int] = None
     permissions: tuple[str, ...] = ()
+    read_only: bool = False   # a viewer (auth/viewer.is_viewer): its own row lacks "write" — never set by an API key
 
     @property
     def key(self) -> str:
@@ -31,8 +32,10 @@ def web_anonymous_actor() -> Actor:
 
 
 def actor_from_user(user: Any) -> Actor:
+    from agenticops.auth.viewer import is_viewer
     perms = tuple(getattr(user, "permissions", None) or ())
-    return Actor("user", str(getattr(user, "email", "") or getattr(user, "id", "")), getattr(user, "id", None), perms)
+    return Actor("user", str(getattr(user, "email", "") or getattr(user, "id", "")), getattr(user, "id", None), perms,
+                 read_only=is_viewer(user))
 
 
 def actor_from_request(request: Any) -> Actor:
@@ -83,4 +86,5 @@ def actor_from_run_context(ctx: Any) -> Actor:
     """Rebuild the acting identity from a RunContext (agent tools, executor worker). The permission
     flags travel with it — without them a user: actor would fail the rbac matrix on every check."""
     base = parse_actor(ctx.actor)
-    return Actor(base.kind, base.id, ctx.actor_user_id, tuple(ctx.actor_permissions or ()))
+    return Actor(base.kind, base.id, ctx.actor_user_id, tuple(ctx.actor_permissions or ()),
+                 read_only=bool(getattr(ctx, "read_only", False)))

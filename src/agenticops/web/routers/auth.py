@@ -13,27 +13,10 @@ from agenticops.web.schemas import (
     LoginRequest,
     LoginResponse,
     PasswordChangeRequest,
-    RegisterRequest,
     UserResponse,
 )
 
 router = APIRouter()
-
-
-@router.post("/api/auth/register", response_model=UserResponse, status_code=201)
-async def api_register(request_data: RegisterRequest):
-    """Register a new user."""
-    from agenticops.auth import AuthService
-
-    try:
-        user = AuthService.create_user(
-            email=request_data.email,
-            password=request_data.password,
-            name=request_data.name,
-        )
-        return UserResponse.model_validate(user)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/api/auth/login", response_model=LoginResponse)

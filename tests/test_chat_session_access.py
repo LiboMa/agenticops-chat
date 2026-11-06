@@ -262,17 +262,17 @@ def test_the_2_7_0_migration_ddl_on_postgresql():
     ]
 
 
-def test_registration_answers_with_the_new_user(tmp_path, monkeypatch):
-    """create_user returned a User expired by its session's commit: POST /api/auth/register answered every
-    registration with a DetachedInstanceError (as a 400) — the owner could not create the users S1 needs."""
+def test_a_created_user_is_readable_after_its_session_closes(tmp_path, monkeypatch):
+    """create_user returned a User expired by its session's commit, so every caller that read it after the session
+    closed failed with a DetachedInstanceError. (Self-registration, its first caller, no longer exists — accounts
+    are created with `aiops users create`.)"""
     import agenticops.models as models_mod
+    from agenticops.auth.service import AuthService
     from agenticops.config import settings
-    from agenticops.web.app import app
     monkeypatch.setattr(models_mod, "_engine", None)
     monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path}/reg.db")
-    r = TestClient(app).post("/api/auth/register", json={"email": "dave@example.com", "password": "pw-123456"})
-    assert r.status_code == 201, r.text
-    assert r.json()["email"] == "dave@example.com"
+    user = AuthService.create_user(email="dave@example.com", password="pw-123456")
+    assert (user.email, user.permissions) == ("dave@example.com", ["read", "write"])
 
 
 def test_a_private_chat_turn_is_logged_with_its_actor_and_without_its_text(env):

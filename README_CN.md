@@ -289,7 +289,7 @@ terraform apply -auto-approve
 各栈细节:[`iac/ec2/README.md`](iac/ec2/README.md) · [`iac/ecs/README.md`](iac/ecs/README.md) · [`iac/eks/README.md`](iac/eks/README.md)。
 
 ### 认证(所有 AWS 部署)
-首次启动会用 **`AIOPS_ADMIN_PASSWORD`** 里的密码播种一个 `admin` 用户 —— 在暴露应用前**务必设置它**(不设时会回退到一个众所周知的默认值;任何可达部署都绝不要依赖它)。经 `POST /api/auth/login` 登录;24 小时会话令牌;长期访问用 API key;除 `/api/health` 与 `/api/auth/login` 外所有 `/api/*` 均受保护。告警 webhook 入口(`POST /api/webhooks/alert*`)改用共享的 `AIOPS_WEBHOOK_SECRET` token 或 HMAC 签名 —— Alertmanager、SNS 这类发送方无法登录;不设时入口不校验,启动时会告警。变更入口(`POST /api/changes/intake`)只认 `AIOPS_CHANGE_INTAKE_SECRET` 的 HMAC 签名,未设置时为 404;提单人是 `webhook:<system>`,永远不能审批或执行。
+首次启动会用 **`AIOPS_ADMIN_PASSWORD`** 里的密码播种一个 `admin` 用户 —— 在暴露应用前**务必设置它**(不设时会回退到一个众所周知的默认值;任何可达部署都绝不要依赖它)。经 `POST /api/auth/login` 登录;24 小时会话令牌;长期访问用 API key;除 `/api/health` 与 `/api/auth/login` 外所有 `/api/*` 均受保护。告警 webhook 入口(`POST /api/webhooks/alert*`)改用共享的 `AIOPS_WEBHOOK_SECRET` token 或 HMAC 签名 —— Alertmanager、SNS 这类发送方无法登录;不设时入口不校验,启动时会告警。变更入口(`POST /api/changes/intake`)只认 `AIOPS_CHANGE_INTAKE_SECRET` 的 HMAC 签名,未设置时为 404;提单人是 `webhook:<system>`,永远不能审批或执行。没有自助注册:账户由运维用 `aiops users create <name>` 创建(随机密码,只显示一次),`aiops users list` 列出,`aiops users disable <name>` 停用(其会话和 API key 立即失效)。加 `--viewer` 创建**只读账户**,用于演示和旁观:可以登录、浏览、对话,可以改自己的密码和界面偏好,除此之外什么都改不了 —— 其他写请求一律 403 `read_only`;它的对话跑一个只能查询的 agent(没有子 agent、审批、变更或配置;CLI 工具拒绝写命令和读取 Kubernetes Secret);界面显示「只读账户」标记,不提供任何写操作(隐藏 Settings)。它的对话仍能读到所有只读用户能看到的内容,并按主 agent 的模型消耗 token。
 
 更多:[`docs/WORKFLOW.md#deployment`](docs/WORKFLOW.md)。
 

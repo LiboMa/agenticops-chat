@@ -10,7 +10,7 @@ import { HomePrefsDialog, MobileNav } from "./Sidebar";
 import { AttentionDialog } from "./AttentionDialog";
 import { AccountScopeSelect, useAccountScope } from "./AccountScope";
 import { useAccounts } from "@/hooks/useAccounts";
-import { useBootstrap } from "@/hooks/useBootstrap";
+import { useBootstrap, useReadOnly } from "@/hooks/useBootstrap";
 import { useAttention } from "@/hooks/useAttention";
 import { countLabel } from "@/lib/attention";
 
@@ -29,6 +29,7 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
   const { pathname } = useLocation();
   const crumb = breadcrumbFor(pathname);
   const boot = useBootstrap();
+  const readOnly = useReadOnly();
   const scope = useAccountScope();
   const attention = useAttention(scope.accountId);
   const [attentionOpen, setAttentionOpen] = useState(false);
@@ -67,6 +68,12 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
               {attention.isLoading ? "…" : countLabel(attention.data?.total ?? 0)}
             </b>
           </button>
+        )}
+        {readOnly && (
+          <span title={t("readOnly.hint")}
+                className="rounded-[5px] border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+            {t("readOnly.badge")}
+          </span>
         )}
         <AccountScopeSelect className="max-[600px]:hidden" />
         <button type="button" onClick={onSearch} aria-label={t("topbar.search")}

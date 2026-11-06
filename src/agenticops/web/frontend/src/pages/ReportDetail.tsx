@@ -15,6 +15,7 @@ import ShareDialog from "@/components/ShareDialog";
 import { ExportDialog } from "@/components/reportview/ExportDialog";
 import { PublishDialog } from "@/components/reportview/PublishDialog";
 import type { ContentRendering, Report } from "@/api/types";
+import { useReadOnly } from "@/hooks/useBootstrap";
 
 const TYPE_COLORS: Record<string, string> = {
   daily: "bg-blue-100 text-blue-700",
@@ -32,6 +33,7 @@ const TYPE_COLORS: Record<string, string> = {
  *  that is not ready says so and offers the source language; it is never silently replaced by the other. Export,
  *  print and publish use exactly what is shown. */
 export default function ReportDetail() {
+  const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const { id } = useParams<{ id: string }>();
   const reportId = Number(id);
   const { t, locale } = useLocale();
@@ -92,9 +94,11 @@ export default function ReportDetail() {
           </button>
           <button type="button" className={`${tool} bg-secondary text-foreground hover:bg-muted`} disabled={!exportable}
                   onClick={() => window.print()}>{t("reports.print")}</button>
-          <button type="button" className={`${tool} bg-secondary text-foreground hover:bg-muted`} onClick={() => setDialog("share")}>
-            {t("reports.share")}</button>
-          {publishable.length > 0 && (
+          {!readOnly && (
+            <button type="button" className={`${tool} bg-secondary text-foreground hover:bg-muted`} onClick={() => setDialog("share")}>
+              {t("reports.share")}</button>
+          )}
+          {publishable.length > 0 && !readOnly && (
             <button type="button" className={`${tool} bg-secondary text-foreground hover:bg-muted`} disabled={!exportable}
                     onClick={() => setDialog("publish")}>{t("reports.publish.button")}</button>
           )}
@@ -125,6 +129,7 @@ function Paper({ report, lang, source, rendering, version, t, onReadSource }: {
   report: Report; lang: Lang; source: Lang; rendering: ContentRendering | undefined; version: number;
   t: (k: string) => string; onReadSource: () => void;
 }) {
+  const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const state = paperState(rendering);
   const request = useRequestTranslation(report.id);
   if (state === "ready") {
@@ -145,7 +150,7 @@ function Paper({ report, lang, source, rendering, version, t, onReadSource }: {
         {state === "failed" && rendering?.error_code ? t(`reports.error.${rendering.error_code}`) : t(`reports.stateHint.${state}`)}
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
-        {(state === "notPrepared" || state === "failed" || state === "stale") && (
+        {(state === "notPrepared" || state === "failed" || state === "stale") && !readOnly && (
           <button type="button" onClick={retry} disabled={request.isPending}
                   className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-50">
             {state === "failed" ? t("reports.retry") : t("reports.prepare")}

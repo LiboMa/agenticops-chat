@@ -4,6 +4,7 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { VerificationChip } from "@/components/plans/VerificationChip";
 import { formatFullDate } from "@/lib/formatDate";
 import { isBlank } from "@/lib/issueDetail";
+import { useReadOnly } from "@/hooks/useBootstrap";
 
 type T = (key: string) => string;
 
@@ -20,6 +21,7 @@ export function AcceptBody({ runs, loading, error, onRetryFetch, pendingRun, qui
   onReject: () => void;
   t: T;
 }) {
+  const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   if (loading) return <Spinner label={t("common.loading")} />;
   // a failed fetch must not read as "not executed"
   if (error) return <ErrorBanner message={error.message} onRetry={onRetryFetch} actionLabel={t("common.retry")} />;
@@ -36,7 +38,7 @@ export function AcceptBody({ runs, loading, error, onRetryFetch, pendingRun, qui
       <div className="flex flex-wrap items-center gap-3">
         <h3 className="font-semibold text-foreground">{t("issues.executionN").replace("{n}", String(latest.id))}</h3>
         <VerificationChip status={latest.verification_status} />
-        {pendingRun?.id === latest.id && (
+        {pendingRun?.id === latest.id && !readOnly && (
           <div className="ml-auto flex items-center gap-2">
             <button onClick={onAccept}
                     className="px-3 py-1.5 border border-emerald-600/40 text-emerald-600 dark:text-emerald-400 text-xs font-medium rounded-lg hover:bg-emerald-500/10 transition-colors">

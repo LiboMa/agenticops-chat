@@ -23,7 +23,7 @@ async def current_actor(request: Request) -> Actor:
     """
     actor = actor_from_request(request)
     update_run_context(actor=actor.key, actor_user_id=actor.user_id, actor_permissions=actor.permissions,
-                       trace_id=get_trace_id())
+                       read_only=actor.read_only, trace_id=get_trace_id())
     return actor
 
 

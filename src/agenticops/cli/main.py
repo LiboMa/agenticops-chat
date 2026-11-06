@@ -237,6 +237,7 @@ logs_app = typer.Typer(help="View logs and audit trail")
 service_app = typer.Typer(help="Manage background services (web dashboard + IM WebSocket)")
 skills_app = typer.Typer(help="Manage Agent Skills (import from URL / git repo / zip)")
 connectors_app = typer.Typer(help="Pull connectors (K8s discovery): recent runs, run now")
+users_app = typer.Typer(help="Web sign-in accounts: create (incl. read-only viewers), list, disable")
 
 app.add_typer(get_app, name="get")
 app.add_typer(describe_app, name="describe")
@@ -248,6 +249,7 @@ app.add_typer(logs_app, name="logs")
 app.add_typer(service_app, name="service")
 app.add_typer(skills_app, name="skills")
 app.add_typer(connectors_app, name="connectors")
+app.add_typer(users_app, name="users")
 
 
 # ============================================================================
@@ -5307,6 +5309,77 @@ def test_account(name: str = typer.Argument(..., help="Account name to test")):
     except Exception as e:
         console.print(f"[red]Credential test failed: {e}[/red]")
         raise typer.Exit(1)
+
+
+# ============================================================================
+# Users — web sign-in accounts (self-registration does not exist; an operator creates accounts here)
+# ============================================================================
+
+
+def _user_role(user) -> str:
+    perms = set(user.permissions or ())
+    if user.is_admin or "admin" in perms:
+        return "admin"
+    return "writer" if "write" in perms else "viewer"
+
+
+@users_app.command("create")
+def users_create(
+    name: str = typer.Argument(..., help="Sign-in name (the login form's email field; e.g. viewer)"),
+    viewer: bool = typer.Option(False, "--viewer", help="Read-only account: browse and chat, change nothing"),
+    admin: bool = typer.Option(False, "--admin", help="Administrator (read, write, admin)"),
+    display_name: str = typer.Option("", "--display-name", help="Name shown in the UI"),
+):
+    """Create a web account with a random password, printed once — store it now."""
+    import secrets
+
+    from agenticops.auth import AuthService
+
+    if viewer and admin:
+        console.print("[red]--viewer and --admin exclude each other[/red]")
+        raise typer.Exit(2)
+    password = secrets.token_urlsafe(12)
+    try:
+        user = AuthService.create_user(email=name, password=password, name=display_name or None, is_admin=admin,
+                                       permissions=["read"] if viewer else None)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+    console.print(f"[green]Created[/green] {user.email} ({_user_role(user)})")
+    console.print(f"Password (shown once): [bold]{password}[/bold]")
+
+
+@users_app.command("list")
+def users_list():
+    """List web accounts and their role."""
+    from agenticops.auth.models import User
+    from agenticops.models import get_db_session, init_db
+
+    init_db()
+    table = Table(box=SIMPLE)
+    for col in ("ID", "Name", "Display name", "Role", "Active", "Last sign-in"):
+        table.add_column(col)
+    with get_db_session() as db:
+        for u in db.query(User).order_by(User.id).all():
+            table.add_row(str(u.id), u.email, u.name or "", _user_role(u), "yes" if u.is_active else "no",
+                          u.last_login_at.strftime("%Y-%m-%d %H:%M") if u.last_login_at else "")
+    console.print(table)
+
+
+@users_app.command("disable")
+def users_disable(name: str = typer.Argument(..., help="Sign-in name")):
+    """Disable an account: its sessions and API keys stop working at once (the row is kept)."""
+    from agenticops.auth.models import User
+    from agenticops.models import get_db_session, init_db
+
+    init_db()
+    with get_db_session() as db:
+        user = db.query(User).filter_by(email=name).first()
+        if user is None:
+            console.print(f"[red]No account named {name}[/red]")
+            raise typer.Exit(1)
+        user.is_active = False
+    console.print(f"[yellow]Disabled[/yellow] {name}")
 
 
 # ============================================================================

@@ -20,6 +20,8 @@ def _policy():
 
 
 def route_allows(actor, permission: str, subject: Any) -> tuple[bool, Optional[str]]:
+    if getattr(actor, "read_only", False):  # a viewer: APIAuthMiddleware refuses every one of these routes
+        return False, "read_only"
     allowed, _reason, _rule, always = _policy().decide(actor, permission, subject)
     if allowed:
         return True, None
