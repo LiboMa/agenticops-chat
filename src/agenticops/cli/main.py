@@ -5320,7 +5320,9 @@ def _user_role(user) -> str:
     perms = set(user.permissions or ())
     if user.is_admin or "admin" in perms:
         return "admin"
-    return "writer" if "write" in perms else "viewer"
+    if "write" in perms:
+        return "writer"
+    return "viewer+settings" if "settings_read" in perms else "viewer"
 
 
 @users_app.command("create")
@@ -5328,6 +5330,8 @@ def users_create(
     name: str = typer.Argument(..., help="Sign-in name (the login form's email field; e.g. viewer)"),
     viewer: bool = typer.Option(False, "--viewer", help="Read-only account: browse and chat, change nothing"),
     admin: bool = typer.Option(False, "--admin", help="Administrator (read, write, admin)"),
+    settings_view: bool = typer.Option(False, "--settings",
+                                       help="With --viewer: may also view the Settings page (read-only)"),
     display_name: str = typer.Option("", "--display-name", help="Name shown in the UI"),
 ):
     """Create a web account with a random password, printed once — store it now."""
@@ -5338,10 +5342,14 @@ def users_create(
     if viewer and admin:
         console.print("[red]--viewer and --admin exclude each other[/red]")
         raise typer.Exit(2)
+    if settings_view and not viewer:
+        console.print("[red]--settings only applies to a --viewer (writers and admins see Settings anyway)[/red]")
+        raise typer.Exit(2)
     password = secrets.token_urlsafe(12)
+    permissions = (["read", "settings_read"] if settings_view else ["read"]) if viewer else None
     try:
         user = AuthService.create_user(email=name, password=password, name=display_name or None, is_admin=admin,
-                                       permissions=["read"] if viewer else None)
+                                       permissions=permissions)
     except ValueError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1)
