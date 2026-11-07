@@ -341,6 +341,8 @@ def create_main_agent(model_id_override: str = "", effort_override: str = "", re
     from agenticops.config import get_scan_focus, resolve_scan_services
     from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_bedrock_boto_session
 
+    from agenticops.chat.attachments.budget_hook import AttachmentBudgetHook
+
     model_id, max_tokens = get_agent_model_config("main")
     if model_id_override:
         model_id = model_id_override
@@ -363,6 +365,7 @@ def create_main_agent(model_id_override: str = "", effort_override: str = "", re
             model=model,
             conversation_manager=get_agent_conversation_manager("main"),
             plugins=get_agent_context_plugins("main"),
+            hooks=[AttachmentBudgetHook()],
             tools=read_only_main_tools(),
         )
 
@@ -389,6 +392,7 @@ If the user explicitly requests a different scope, honor their request over this
             model=model,
             conversation_manager=get_agent_conversation_manager("main"),
             plugins=get_agent_context_plugins("main"),
+            hooks=[AttachmentBudgetHook()],   # chat attachments: history media within one request's limits
             tools=[
                 # Sub-agents as tools
                 scan_agent,
