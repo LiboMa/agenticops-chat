@@ -29,7 +29,9 @@ function isSafeHref(href: string): boolean {
   return /^(https?:|\/|#)/.test(h);
 }
 
-export function renderMarkdown(md: string): string {
+/** `copyButtons` (chat only, 2026-11-07): each fenced block gets a copy button — the chat page handles its click. */
+export function renderMarkdown(md: string, opts: { copyButtons?: boolean; copyLabel?: string } = {}): string {
+  const copyLabel = escapeHtml(opts.copyLabel ?? "Copy");
   const lines = md.split("\n");
   const out: string[] = [];
   let inCodeBlock = false;
@@ -93,7 +95,7 @@ export function renderMarkdown(md: string): string {
     // Code blocks
     if (raw.trimStart().startsWith("```")) {
       if (inCodeBlock) {
-        out.push("</code></pre>");
+        out.push(opts.copyButtons ? "</code></pre></div>" : "</code></pre>");
         inCodeBlock = false;
         codeLang = "";
       } else {
@@ -102,7 +104,9 @@ export function renderMarkdown(md: string): string {
         inCodeBlock = true;
         codeLang = raw.trimStart().slice(3).trim().toLowerCase();
         const langAttr = codeLang ? ` data-lang="${escapeHtml(codeLang)}"` : "";
-        out.push(`<pre class="md-pre"${langAttr}><code>`);
+        out.push((opts.copyButtons
+          ? `<div class="md-pre-wrap"><button type="button" class="md-copy" data-md-copy aria-label="${copyLabel}">${copyLabel}</button>`
+          : "") + `<pre class="md-pre"${langAttr}><code>`);
       }
       continue;
     }
@@ -201,7 +205,7 @@ export function renderMarkdown(md: string): string {
 
   closeList();
   closeTable();
-  if (inCodeBlock) out.push("</code></pre>");
+  if (inCodeBlock) out.push(opts.copyButtons ? "</code></pre></div>" : "</code></pre>");
 
   return out.join("\n");
 }
