@@ -1,0 +1,72 @@
+"""Where chat attachment files live (2026-11-07).
+
+    <root>/_staging/<attachment id>/      an upload not sent yet
+    <root>/<chat session uuid>/<attachment id>/   after the send that bound it
+
+Each attachment directory holds `original` (the uploaded bytes, never under the user's file name) and the
+extraction artifacts. A session's directory is named by its UUID, never by its integer key, which SQLite may reuse.
+"""
+import os
+import shutil
+from pathlib import Path
+
+from agenticops.chat.attachments.limits import MIN_FREE_DISK_BYTES
+from agenticops.config import settings
+
+STAGING = "_staging"
+
+
+def root() -> Path:
+    base = Path(settings.chat_attachments_dir) if settings.chat_attachments_dir else settings.data_dir / "chat_attachments"
+    (base / STAGING).mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def staging_dir(att_id: str) -> Path:
+    return root() / STAGING / att_id
+
+
+def session_root(session_uuid: str) -> Path:
+    return root() / session_uuid
+
+
+def attachment_dir(att, session_uuid: str | None) -> Path:
+    """The directory holding this attachment's files: the session's when it is there, else staging (a send whose
+    move has not happened yet, or failed)."""
+    if session_uuid and att.session_id is not None:
+        bound = session_root(session_uuid) / att.id
+        if bound.is_dir():
+            return bound
+    return staging_dir(att.id)
+
+
+def disk_free_ok() -> bool:
+    return shutil.disk_usage(root()).free >= MIN_FREE_DISK_BYTES
+
+
+def move_into_session(att_ids: list[str], session_uuid: str) -> None:
+    """Move staged directories under the session's (created without parents: a root that vanished is not rebuilt)."""
+    target = session_root(session_uuid)
+    target.mkdir(parents=False, exist_ok=True)
+    for att_id in att_ids:
+        src = staging_dir(att_id)
+        if src.is_dir():
+            os.replace(src, target / att_id)
+
+
+def remove_session(session_uuid: str) -> None:
+    if session_uuid and session_uuid != STAGING:
+        shutil.rmtree(session_root(session_uuid), ignore_errors=True)
+
+
+def remove_staged(att_id: str) -> None:
+    if att_id:
+        shutil.rmtree(staging_dir(att_id), ignore_errors=True)
+
+
+def staged_ids() -> set[str]:
+    return {p.name for p in (root() / STAGING).iterdir() if p.is_dir()}
+
+
+def session_dirs() -> set[str]:
+    return {p.name for p in root().iterdir() if p.is_dir() and p.name != STAGING}

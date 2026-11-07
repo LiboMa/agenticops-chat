@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Generator
 
-from sqlalchemy import JSON, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint, create_engine, inspect, text
+from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint, create_engine, inspect, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker, Session
 from sqlalchemy.pool import NullPool, StaticPool
@@ -1235,6 +1235,28 @@ class SessionSummary(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+
+
+class ChatAttachment(Base):
+    """A file attached to a chat message (2026-11-07). Staged (session_id NULL) until a send binds it; the files
+    live on disk under settings.chat_attachments_dir (chat/attachments/store) — originals and extracted text are
+    NOT passed through the DB secret redaction, and stay until their session is deleted."""
+    __tablename__ = "chat_attachments"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)          # uuid4 hex
+    owner_key: Mapped[str] = mapped_column(String(200), index=True)        # the uploader's actor key
+    session_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=True, index=True)
+    message_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True)
+    filename: Mapped[str] = mapped_column(String(255))
+    ext: Mapped[str] = mapped_column(String(16))
+    kind: Mapped[str] = mapped_column(String(16))                          # image|pdf|office|text
+    size: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(16), default="processing")  # processing|ready|failed
+    reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    meta: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 class RuntimeSetting(Base):
     """A setting changed at runtime and kept across restarts (2026-11-07; first user: `chat_upload`).
