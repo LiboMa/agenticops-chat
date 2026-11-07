@@ -245,6 +245,20 @@ command_audit_enabled: true
 session_ttl_minutes: 30
 event_loop_executor_threads: 64   # AgenticOps runs as ONE process; this pool serves to_thread + every agent stream
 session_history_depth: 20
+chat_upload:                  # chat attachment limits; admins override fields at runtime (Settings → Chat attachments)
+  max_files: 20               # attachments per message
+  max_file_mb: 50             # one attachment, MiB
+  max_total_mb: 200           # one message's attachments, MiB
+  allowed_extensions: null    # null = every supported type
+  text_max_chars: 100000      # extracted text kept per file
+  turn_text_max_chars: 200000 # attachment text given to the model in one turn
+  history_text_max_chars: 20000  # text kept per attachment in earlier turns
+  history_images_max: 6       # images kept from earlier turns
+  image_max_edge_px: 1568     # long edge of the image the model gets
+  pdf_render_pages_max: 5     # pages of a scanned PDF rendered as images
+  native_media_max_mb: 16     # native image/document bytes per request, MiB
+  staged_ttl_hours: 24        # hours an unsent upload is kept
+chat_attachments_dir: ''      # empty = <data_dir>/chat_attachments
 default_regions:
   aws:
   - us-east-1

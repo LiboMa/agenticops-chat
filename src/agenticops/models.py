@@ -1235,6 +1235,18 @@ class SessionSummary(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+
+class RuntimeSetting(Base):
+    """A setting changed at runtime and kept across restarts (2026-11-07; first user: `chat_upload`).
+
+    Generic key → JSON value; the code that owns a key validates it on read (services/runtime_settings)."""
+    __tablename__ = "runtime_settings"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_by: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
 # DEPRECATED (frozen cycle② 2026-05-31): kept for existing data/endpoints; no new writes.
 class AgentMemoryFact(Base):
     """跨会话结构化事实记忆（key-value 形式）。"""
