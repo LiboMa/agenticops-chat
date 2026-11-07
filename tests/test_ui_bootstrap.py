@@ -74,16 +74,19 @@ def test_bootstrap_features_say_only_what_is_built(env, monkeypatch):
     assert env.client.get("/api/ui/bootstrap", headers=headers).json()["features"]["change_management"] is False
 
 
-def test_bootstrap_upload_policy_follows_the_servers_dispatch(env):
-    from agenticops.chat import file_reader as fr
+def test_bootstrap_upload_policy_is_the_effective_upload_config(env):
+    from agenticops.chat import upload_config
+    from agenticops.services import runtime_settings
+    runtime_settings.reset_cache()
     headers, _ = env.login("alice@example.com")
     up = env.client.get("/api/ui/bootstrap", headers=headers).json()["upload_policy"]
-    assert (up["max_files"], up["image_max_bytes"], up["document_max_bytes"], up["text_fallback_max_bytes"]) == (
-        fr.MAX_UPLOAD_FILES, fr.MAX_IMAGE_SIZE, fr.MAX_DOCUMENT_SIZE, fr.MAX_FILE_SIZE)
-    assert ".png" in up["image_extensions"] and ".bmp" not in up["image_extensions"]  # .bmp is not an image upload
-    assert ".pdf" in up["document_extensions"] and ".md" in up["document_extensions"]
-    assert ".log" in up["text_extensions"] and ".md" not in up["text_extensions"]  # a .md is sent as a document
-    assert not set(up["document_extensions"]) & set(up["text_extensions"])
+    assert (up["max_files"], up["max_file_bytes"], up["max_total_bytes"]) == (20, 50 * 1024**2, 200 * 1024**2)
+    assert {".pdf", ".docx", ".xlsx", ".heic", ".bmp", ".pptx", ".tsv", ""} <= set(up["extensions"])
+    assert up["kinds"][".heic"] == "image" and up["kinds"][".md"] == "text"
+    upload_config.save_patch({"max_files": 3, "allowed_extensions": [".pdf", ".png"]}, "user:admin")
+    up = env.client.get("/api/ui/bootstrap", headers=headers).json()["upload_policy"]   # no restart
+    assert up["max_files"] == 3 and up["extensions"] == [".pdf", ".png"]
+    runtime_settings.reset_cache()
 
 
 def test_bootstrap_carries_no_secret(env, monkeypatch):

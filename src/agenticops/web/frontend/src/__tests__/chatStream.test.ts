@@ -166,6 +166,53 @@ describe("chatStream — S5 stream client", () => {
   });
 });
 
+describe("chatStream — attachments (2026-11-07)", () => {
+  it("sends attachment_ids as JSON", async () => {
+    const sent: { body: any; headers: any }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_u: string, init: RequestInit) => {
+      sent.push({ body: JSON.parse(String(init.body)), headers: init.headers });
+      return sseResponse(['event: accepted\ndata: {}\n\n', 'event: done\ndata: {}\n\n']);
+    }));
+    await chatStream.send("att-1", "read these", ["a1", "b2"]);
+    expect(sent[0].body.attachment_ids).toEqual(["a1", "b2"]);
+    expect(sent[0].body.content).toBe("read these");
+    expect((sent[0].headers as Record<string, string>)["Content-Type"]).toBe("application/json");
+    await chatStream.send("att-1", "no files");
+    expect(sent[1].body.attachment_ids).toEqual([]);
+  });
+
+  it("onAccepted fires at the accepted frame, never for a refused send", async () => {
+    const order: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([
+      'event: accepted\ndata: {}\n\n', 'event: text\ndata: {"token":"hi"}\n\n', 'event: done\ndata: {}\n\n'])));
+    const ok = await chatStream.send("att-3", "x", [], undefined, () => order.push("accepted"));
+    expect(ok).toBe(true);
+    expect(order).toEqual(["accepted"]);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ detail: { code: "session_busy",
+      detail: "busy" } }), { status: 409 })));
+    const refused = await chatStream.send("att-4", "x", ["a1"], undefined, () => order.push("wrong"));
+    expect(refused).toBe(false);
+    expect(order).toEqual(["accepted"]);
+  });
+
+  it("attachments event stored on state", async () => {
+    let seen: unknown = null;
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([
+      'event: accepted\ndata: {"user_message_id": 7}\n\n',
+      'event: attachments\ndata: {"user_message_id": 7, "items": [{"id": "a1", "filename": "r.pdf", "delivery": "native_document", "reason": null}]}\n\n',
+      'event: done\ndata: {}\n\n',
+    ])));
+    const unsub = chatStream.subscribe("att-2", () => {
+      const s = chatStream.getSnapshot("att-2");
+      if (s.attachmentDeliveries.length) seen = s.attachmentDeliveries;
+    });
+    await chatStream.send("att-2", "x", ["a1"]);
+    unsub();
+    expect(seen).toEqual([{ id: "a1", filename: "r.pdf", delivery: "native_document", reason: null }]);
+  });
+});
+
+
 describe("chatStream.send says whether the server took the message (S5 review I6)", () => {
   it("true once the accepted frame arrives", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => sseResponse([

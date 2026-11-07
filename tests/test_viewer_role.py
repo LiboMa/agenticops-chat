@@ -129,6 +129,8 @@ def test_the_walk_covers_the_app_and_every_allowlist_entry_is_a_real_route():
         ("POST", "/api/chat/sessions"), ("PATCH", "/api/chat/sessions/x1"), ("DELETE", "/api/chat/sessions/x1"),
         ("POST", "/api/chat/sessions/x1/messages"), ("POST", "/api/graph/vpc/x1/dependency-chain"),
         ("POST", "/api/graph/vpc/x1/change-simulation"),
+        # 2026-11-07: a viewer attaches files to its own chats (the service touches only its own uploads)
+        ("POST", "/api/chat/attachments"), ("DELETE", "/api/chat/attachments/x1"),
     }
 
 

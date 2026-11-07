@@ -44,6 +44,7 @@ import asyncio
 import json
 import logging
 import re
+import threading
 import time
 import urllib.request
 import uuid
@@ -105,6 +106,17 @@ def _size_default_executor(loop) -> None:
                                                  thread_name_prefix="aiops-loop"))
 
 
+async def _sweep_chat_attachments_at_startup() -> None:
+    """Unsent uploads past their TTL, and files a previous process left without a row or a session (2026-11-07)."""
+    try:
+        from agenticops.chat.attachments import service as attachment_service
+        removed = await asyncio.to_thread(attachment_service.sweep_staged)
+        if removed:
+            logger.info("Chat attachments: removed %d stale uploads / orphan directories", removed)
+    except Exception as e:
+        logger.warning("Chat attachments: startup sweep failed: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown in a single async context manager."""
@@ -138,6 +150,7 @@ async def lifespan(app: FastAPI):
             logger.warning("Chat: %d reply dispatch(es) left open by an earlier process marked interrupted", _n)
     except Exception as e:
         logger.warning("Chat: interrupt_stale failed: %s", e)
+    await _sweep_chat_attachments_at_startup()
 
     # Seed default admin user if auth is enabled and no users exist
     if settings.api_auth_enabled:
@@ -377,6 +390,10 @@ from agenticops.web.routers import connectors as _connectors_router
 app.include_router(_connectors_router.router)
 from agenticops.web.routers import ui as _ui_router  # MVP-2.7.0: workspace bootstrap + preferences
 app.include_router(_ui_router.router)
+from agenticops.web.routers import chat_attachments as _chat_attachments_router  # 2026-11-07: chat attachments
+app.include_router(_chat_attachments_router.router)
+from agenticops.web.routers import upload_settings as _upload_settings_router  # 2026-11-07: chat upload limits
+app.include_router(_upload_settings_router.router)
 
 # Chat session manager
 _chat_sessions = ChatSessionManager()
@@ -4319,6 +4336,8 @@ def _generate_session_title(user_msg: str, assistant_msg: str) -> str | None:
 
 @app.delete("/api/chat/sessions/{session_id}", status_code=204)
 async def api_delete_chat_session(session_id: str, actor: Actor = Depends(current_actor)):
+    from agenticops.chat.attachments import service as attachment_service
+    from agenticops.chat.attachments import store as attachment_store
     from agenticops.models import SessionSummary
     from agenticops.services import chat_access
     with get_db_session() as db:
@@ -4328,8 +4347,12 @@ async def api_delete_chat_session(session_id: str, actor: Actor = Depends(curren
         # FK cascades are not enforced on SQLite: a summary left behind could be injected into a later
         # session that reuses this primary key.
         db.query(SessionSummary).filter(SessionSummary.session_id == row.id).delete()
+        attachment_service.delete_for_session(db, row.id)
         db.delete(row)
     _chat_sessions.remove(session_id)
+    # the files go after the commit, off the request (a large chat holds many)
+    threading.Thread(target=attachment_store.remove_session, args=(session_id,), daemon=True,
+                     name="chat-attachments-delete").start()
 
 
 # ============================================================================
@@ -4350,16 +4373,16 @@ async def api_delete_chat_session(session_id: str, actor: Actor = Depends(curren
 
 @app.post("/api/chat/sessions/{session_id}/messages")
 async def api_send_chat_message(session_id: str, request: Request, actor: Actor = Depends(current_actor)):
-    """Send a message, optionally with a file attachment.
+    """Send a message, optionally with attachments.
 
     Accepts:
-    - application/json: {"content": "message text"}
-    - multipart/form-data: content (text field) + file (optional, repeatable for multiple attachments)
+    - application/json: {"content", "client_message_id", "attachment_ids"} — ids of files uploaded first through
+      POST /api/chat/attachments (2026-11-07)
+    - multipart/form-data: content + client_message_id + `file` (repeatable): each file is staged and processed in
+      this request, then sent as above; files this send does not bind are removed again
     """
-    from agenticops.chat.preprocessor import preprocess_message
-    from agenticops.chat.stream_errors import MESSAGES as STREAM_ERROR_MESSAGES
-    from agenticops.chat.stream_errors import classify as classify_stream_error, tool_outcome
-    from agenticops.services import chat_access, chat_dispatch
+    from agenticops.chat.attachments import service as attachment_service
+    from agenticops.services import chat_access
 
     # First (MVP-2.7.0): for a session the caller cannot see — or that does not exist — nothing runs:
     # no upload is read, no /channel or /send_to command executes, and the 404 reveals nothing.
@@ -4370,78 +4393,97 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
             raise HTTPException(403, read_only_detail())
 
     content_type = request.headers.get("content-type", "")
-    file_contents: list[tuple[str, str]] = []
-    file_images: list[tuple[str, bytes, str]] = []
-    file_documents: list[tuple[str, bytes, str, str]] = []
-    attachments: list[dict] | None = None
-
-    scan_focus_req: Optional[str] = None
-
     if "multipart/form-data" in content_type or "application/x-www-form-urlencoded" in content_type:
-        form = await request.form()
+        user_content, client_message_id, scan_focus_req, attachment_ids = await _stage_multipart_send(request, actor)
+        try:
+            return await _dispatch_chat_message(session_id, request, actor, user_content, client_message_id,
+                                                scan_focus_req, attachment_ids)
+        finally:  # a send that did not bind its uploads (replayed, busy, refused) leaves none behind
+            await asyncio.to_thread(attachment_service.discard_unbound, attachment_ids)
+    try:
+        payload = ChatMessageCreate(**(await request.json()))
+    except ValidationError as e:  # raised in the body, so FastAPI would answer 500, not 422
+        raise HTTPException(422, json.loads(e.json()))
+    except (ValueError, TypeError):  # not JSON, or not an object
+        raise HTTPException(422, "Expected a JSON object with content and client_message_id")
+    return await _dispatch_chat_message(session_id, request, actor, payload.content, payload.client_message_id,
+                                        payload.scan_focus, payload.attachment_ids)
+
+
+def _attachment_http_error(e) -> HTTPException:
+    return HTTPException(e.status, detail={"detail": e.detail, "code": e.code, "trace_id": None})
+
+
+async def _stage_multipart_send(request: Request, actor: Actor) -> tuple[str, str, Optional[str], list[str]]:
+    """The old one-request send (curl docs): each `file` is checked, staged and processed like an upload."""
+    from agenticops.chat import upload_config
+    from agenticops.chat.attachments import service as attachment_service
+    from agenticops.services import chat_dispatch
+    from agenticops.web.routers import chat_attachments as att_api
+    from agenticops.chat.attachments import store as attachment_store
+    cfg = await asyncio.to_thread(upload_config.effective)
+    length = request.headers.get("content-length")
+    if length is None or not length.isdigit():   # a chunked body would be spooled to disk without bound
+        raise HTTPException(411, detail={"detail": "Send the files with a Content-Length", "code": "length_required",
+                                         "trace_id": None})
+    if int(length) > cfg.max_total_mb * 1024 * 1024 + 64 * 1024:
+        raise HTTPException(413, detail={"detail": f"The attachments of one message may total at most "
+                                                   f"{cfg.max_total_mb} MB", "code": "attachments_too_large",
+                                         "trace_id": None})
+    if not await asyncio.to_thread(attachment_store.disk_free_ok):
+        raise HTTPException(507, detail={"detail": "The server is low on disk space", "code": "insufficient_storage",
+                                         "trace_id": None})
+    form = await request.form(max_files=cfg.max_files, max_fields=8)
+    staged: list[str] = []
+    try:
         text_content = str(form.get("content", "")).strip()
         scan_focus_req = str(form.get("scan_focus", "")).strip() or None
         client_message_id = str(form.get("client_message_id", "")).strip()
         if not re.fullmatch(chat_dispatch.UUID_RE, client_message_id):
             raise HTTPException(422, "client_message_id (a UUID) is required")
-        uploads = form.getlist("file")
-        valid_uploads = [u for u in uploads if hasattr(u, "filename") and u.filename]
+        for upload in [u for u in form.getlist("file") if hasattr(u, "filename") and u.filename]:
+            head = await upload.read(8192)
+            await upload.seek(0)
+            size = att_api._upload_size(upload)
+            ft, refused = att_api.precheck(upload.filename, head, size, cfg)
+            if refused is not None:
+                raise HTTPException(refused.status_code, detail=json.loads(refused.body))
+            body = await asyncio.to_thread(att_api.stage_file, upload.file, upload.filename, ft, size, actor.key)
+            staged.append(body["id"])
+        for att_id in staged:
+            await asyncio.to_thread(attachment_service.process_now, att_id)
+    except BaseException:
+        await asyncio.to_thread(attachment_service.discard_unbound, staged)
+        raise
+    finally:
+        await form.close()
+    return text_content, client_message_id, scan_focus_req, staged
 
-        # Server-side cap (defense-in-depth): client enforces 5, but client
-        # validation is bypassable (curl/Postman). Each file is read fully into
-        # memory below, so bound the batch independent of the client.
-        from agenticops.chat.file_reader import MAX_UPLOAD_FILES
-        if len(valid_uploads) > MAX_UPLOAD_FILES:
-            raise HTTPException(400, f"Too many files ({len(valid_uploads)}); max {MAX_UPLOAD_FILES}")
 
-        if valid_uploads:
-            from agenticops.chat.file_reader import (
-                is_image_file, is_document_file,
-                read_upload_image_bytes, read_upload_document_bytes,
-                read_upload_bytes,
-            )
-            attachments = []
-            for upload in valid_uploads:
-                raw = await upload.read()
-                if is_image_file(upload.filename):
-                    img_bytes, fmt, error = read_upload_image_bytes(upload.filename, raw)
-                    if error:
-                        raise HTTPException(400, error)
-                    if img_bytes and fmt:
-                        file_images.append((upload.filename, img_bytes, fmt))
-                        attachments.append({"filename": upload.filename, "size": len(raw), "type": "image"})
-                elif is_document_file(upload.filename):
-                    doc_bytes, fmt, name, error = read_upload_document_bytes(upload.filename, raw)
-                    if error:
-                        raise HTTPException(400, error)
-                    if doc_bytes and fmt and name:
-                        file_documents.append((upload.filename, doc_bytes, fmt, name))
-                        attachments.append({"filename": upload.filename, "size": len(raw), "type": "document"})
-                else:
-                    file_text, error = read_upload_bytes(upload.filename, raw)
-                    if error:
-                        raise HTTPException(400, error)
-                    if file_text:
-                        file_contents.append((upload.filename, file_text))
-                        attachments.append({"filename": upload.filename, "size": len(raw), "type": "text"})
+async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor, user_content: str,
+                                 client_message_id: str, scan_focus_req: Optional[str],
+                                 attachment_ids: list[str]):
+    """One user message = one dispatch: slash commands, the claim, binding its attachments, the agent stream."""
+    from agenticops.chat import upload_config
+    from agenticops.chat.attachments import service as attachment_service
+    from agenticops.chat.attachments.delivery import agent_model_id, build_turn
+    from agenticops.chat.attachments.service import AttachmentError
+    from agenticops.chat.preprocessor import preprocess_message
+    from agenticops.chat.stream_errors import MESSAGES as STREAM_ERROR_MESSAGES
+    from agenticops.chat.stream_errors import classify as classify_stream_error, tool_outcome
+    from agenticops.services import chat_access, chat_dispatch
 
-        has_file = file_contents or file_images or file_documents
-        if not text_content and not has_file:
-            raise HTTPException(400, "Message content or file required")
-        if not text_content:
-            _names = ", ".join(a["filename"] for a in (attachments or []))
-            text_content = f"Please analyze the attached file(s): {_names}"
-        user_content = text_content
-    else:
-        try:
-            payload = ChatMessageCreate(**(await request.json()))
-        except ValidationError as e:  # raised in the body, so FastAPI would answer 500, not 422
-            raise HTTPException(422, json.loads(e.json()))
-        except (ValueError, TypeError):  # not JSON, or not an object
-            raise HTTPException(422, "Expected a JSON object with content and client_message_id")
-        user_content = payload.content
-        scan_focus_req = payload.scan_focus
-        client_message_id = payload.client_message_id
+    upload_cfg = await asyncio.to_thread(upload_config.effective)
+    prepared_list: list = []
+    _slash = user_content.strip().lower().startswith(("/channel", "/send_to ", "/sendto "))
+    if attachment_ids and _slash:
+        raise HTTPException(422, detail={"detail": "Commands take no attachments",
+                                         "code": "attachments_not_allowed", "trace_id": None})
+    if not user_content.strip():
+        if not attachment_ids:
+            raise HTTPException(422, "Message content or attachments required")
+        _names = await asyncio.to_thread(attachment_service.filenames, attachment_ids, actor)
+        user_content = f"Please analyze the attached file(s): {', '.join(_names)}"
 
     # A viewer's chat runs no /channel (changes channel config, sends tests) and no /send_to (sends content out)
     if actor.read_only and user_content.strip().lower().startswith(("/channel", "/send_to ", "/sendto ")):
@@ -4494,7 +4536,16 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
     with get_db_session() as db:
         row = chat_access.get_visible_session(db, session_id, actor)
         _private_session = (row.visibility or chat_access.WORKSPACE) == chat_access.PRIVATE
-        claimed = chat_dispatch.claim(db, row, client_message_id, user_content, attachments,
+        # Attachments are checked BEFORE the claim (a refusal must leave no message: on SQLite the claim's savepoint
+        # commits at once) — unless this client id was sent before, which is a replay or a duplicate, never a bind
+        _atts = []
+        if attachment_ids and db.query(ChatMessage.id).filter_by(
+                session_id=row.id, client_message_id=client_message_id).first() is None:
+            try:
+                _atts = attachment_service.check_for_send(db, attachment_ids, actor, upload_cfg)
+            except AttachmentError as e:
+                raise _attachment_http_error(e)
+        claimed = chat_dispatch.claim(db, row, client_message_id, user_content, None,
                                       busy=_chat_dispatch_live(session_id))
         if claimed.kind == "busy":
             raise HTTPException(409, detail={"detail": "This chat already has a reply running",
@@ -4511,6 +4562,16 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
                       "state": (_prior.dispatch_state if _prior else None) or "completed",
                       "trace_id": claimed.reply.trace_id if claimed.reply else None}
         else:
+            # a new dispatch takes its attachments (checked above; bound only if still unsent — a concurrent send of
+            # the same uploads loses here, and its accepted message is closed as interrupted by the next claim)
+            if _atts:
+                try:
+                    attachment_service.bind(db, _atts, row, claimed.user_message_id)
+                except AttachmentError as e:
+                    raise _attachment_http_error(e)
+                db.get(ChatMessage, claimed.user_message_id).attachments = [
+                    {"id": a.id, "filename": a.filename, "size": a.size, "kind": a.kind} for a in _atts]
+                prepared_list = [attachment_service.prepared(a, session_id) for a in _atts]
             _claimed_dispatches[session_id] = time.monotonic()
             chat_context.lock(row)
             row.last_activity_at = datetime.now(timezone.utc)
@@ -4518,6 +4579,8 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
             context_block = build_context_block(db, row)
             user_message_id = claimed.user_message_id
         db_session_pk = row.id
+    if prepared_list:
+        await asyncio.to_thread(attachment_service.move_bound, attachment_ids, session_id)
 
     if claimed.kind == "replay":
         async def _replay_stream():
@@ -4532,19 +4595,6 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
                 "user_message_id": replay["user_message_id"],
                 "assistant_message_id": replay["assistant_message_id"]})}
         return EventSourceResponse(_replay_stream())
-
-    # Preprocess: file injection + reference resolution (returns str or list[ContentBlock]); refs outside the
-    # chat's bound account are withheld, and a linked / bound chat's turn starts with its context block (S5)
-    enriched_content, _ = preprocess_message(
-        user_content, file_contents=file_contents,
-        file_images=file_images, file_documents=file_documents,
-        bound_account_id=bound_account_id,
-    )
-    if context_block:
-        if isinstance(enriched_content, str):
-            enriched_content = context_block + "\n\n" + enriched_content
-        else:
-            enriched_content = [{"text": context_block}, *enriched_content]
 
     async def _generate():
         # Set scan focus for this request if provided
@@ -4588,6 +4638,22 @@ async def api_send_chat_message(session_id: str, request: Request, actor: Actor 
                 agent = await asyncio.to_thread(_chat_sessions.get_or_create, session_id, True)
             else:
                 agent = await asyncio.to_thread(_chat_sessions.get_or_create, session_id)
+            # Attachments are delivered for the model this agent actually runs on (2026-11-07); references resolve
+            # from the typed text only, outside the chat's bound account they are withheld; a linked / bound chat's
+            # turn starts with its context block (S5)
+            turn = (await asyncio.to_thread(build_turn, prepared_list, agent_model_id(agent), upload_cfg)
+                    if prepared_list else None)
+            enriched_content, _ = await asyncio.to_thread(
+                lambda: preprocess_message(user_content, attachment_turn=turn, bound_account_id=bound_account_id))
+            if context_block:
+                if isinstance(enriched_content, str):
+                    enriched_content = context_block + "\n\n" + enriched_content
+                else:
+                    enriched_content = [{"text": context_block}, *enriched_content]
+            if turn is not None:
+                yield {"event": "attachments", "data": json.dumps({"user_message_id": user_message_id,
+                                                                   "items": turn.deliveries})}
+                await asyncio.to_thread(attachment_service.record_deliveries, user_message_id, turn.deliveries)
             async for event in agent.stream_async(enriched_content):
                 if await request.is_disconnected():
                     logger.info("Client disconnected; stopping stream for session %s", session_id)

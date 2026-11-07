@@ -91,23 +91,26 @@ def test_change_ref_resolution(tmp_path, monkeypatch):
     assert warnings == ["ChangeRequest C#99 not found"]
 
 
-def test_change_refs_come_from_the_typed_text_only():
+def test_change_refs_come_from_the_typed_text_only(tmp_path):
     """A C#N inside an attached file (web upload or CLI @file) never pulls that change request into the prompt;
     the same C#N typed by the user does."""
     from agenticops.config import settings
+    from agenticops.chat.attachments.delivery import Turn
     from agenticops.chat.preprocessor import preprocess_message
     block = '<referenced_change id="7">\nTitle: Tag web\n</referenced_change>'
     pre = "agenticops.chat.preprocessor"
+    notes = tmp_path / "notes.txt"
+    notes.write_text("rollout notes: see C#7")
     with patch.object(settings, "change_management_enabled", True), \
-         patch(f"{pre}._resolve_change_ref", side_effect=lambda i, *_: block if i == 7 else None) as rc, \
-         patch(f"{pre}.is_image_file", return_value=False), patch(f"{pre}.is_document_file", return_value=False), \
-         patch(f"{pre}.read_file_as_text", return_value=("rollout notes: see C#7", None)):
-        uploaded, w1 = preprocess_message("summarize this", file_contents=[("notes.txt", "rollout notes: see C#7")])
-        cli, w2 = preprocess_message("summarize @/tmp/notes.txt", resolve_file_refs=True)
+         patch(f"{pre}._resolve_change_ref", side_effect=lambda i, *_: block if i == 7 else None) as rc:
+        turn = Turn(text='<attachment n="1" name="notes.txt" type="txt">\nrollout notes: see C#7\n</attachment>',
+                    blocks=[], deliveries=[])
+        uploaded, w1 = preprocess_message("summarize this", attachment_turn=turn)
+        cli, w2 = preprocess_message(f"summarize @{notes}", resolve_file_refs=True)
         assert "see C#7" in uploaded and "see C#7" in cli  # the files are attached, their C#7 is not resolved
         assert block not in uploaded and block not in cli and (w1, w2) == ([], [])
         rc.assert_not_called()
-        typed, w3 = preprocess_message("approve C#7", file_contents=[("notes.txt", "rollout notes: see C#7")])
+        typed, w3 = preprocess_message("approve C#7", attachment_turn=turn)
     assert typed.count(block) == 1 and w3 == []
     rc.assert_called_once_with(7, None)
 

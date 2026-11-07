@@ -4,22 +4,19 @@ Handles:
 - I#N reference resolution (HealthIssue by ID)
 - R#N reference resolution (CloudResource by ID)
 - C#N reference resolution (ChangeRequest by ID; only when change_management_enabled)
-- @file/path extraction and content injection (CLI)
-- Pre-read file content injection (Web upload)
+- @file/path attachments (CLI): processed like a Web upload (chat/attachments) and delivered for the CLI's model
+- Web attachments: a prepared `attachment_turn` (chat/attachments/delivery.build_turn)
+
+References resolve only from the text the user typed, never from an attached file's content.
 """
 
 import re
 import json
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-from agenticops.chat.file_reader import (
-    read_file_as_text,
-    is_image_file,
-    is_document_file,
-    read_file_as_image_bytes,
-    read_file_as_document_bytes,
-)
+if TYPE_CHECKING:
+    from agenticops.chat.attachments.delivery import Turn
 
 logger = logging.getLogger(__name__)
 
@@ -157,20 +154,19 @@ def _extract_file_refs(text: str) -> tuple[str, list[str]]:
 
 def preprocess_message(
     text: str,
-    file_contents: Optional[list[tuple[str, str]]] = None,
-    file_images: Optional[list[tuple[str, bytes, str]]] = None,
-    file_documents: Optional[list[tuple[str, bytes, str, str]]] = None,
+    attachment_turn: "Turn | None" = None,
     resolve_file_refs: bool = False,
+    model_id: str = "",
     bound_account_id: int | None = None,
 ) -> tuple[str | list[dict], list[str]]:
-    """Full preprocessing pipeline: file injection + reference resolution.
+    """Full preprocessing pipeline: attachments + reference resolution.
 
     Args:
         text: Raw user message.
-        file_contents: Optional list of (filename, content) tuples — text extracts (web uploads).
-        file_images: Optional list of (filename, bytes, format) tuples — native image blocks.
-        file_documents: Optional list of (filename, bytes, format, name) tuples — native document blocks.
-        resolve_file_refs: If True, extract @file/path from text and read them (CLI).
+        attachment_turn: the Web attachments, already delivered for the answering model (delivery.build_turn).
+        resolve_file_refs: If True, extract @file/path from text and attach those files (CLI).
+        model_id: the model that will answer (CLI @path delivery); empty = Main's configured model.
+        bound_account_id: refs outside this account are withheld (S5).
 
     Returns:
         (enriched_message_or_content_blocks, warnings).
@@ -178,60 +174,49 @@ def preprocess_message(
     """
     text_parts: list[str] = []
     warnings: list[str] = []
-    image_blocks: list[dict] = []
-    document_blocks: list[dict] = []
+    media_blocks: list[dict] = []
 
-    # Collect pre-supplied media blocks (from web uploads)
-    if file_images:
-        for filename, raw, fmt in file_images:
-            image_blocks.append({"image": {"format": fmt, "source": {"bytes": raw}}})
-    if file_documents:
-        for filename, raw, fmt, name in file_documents:
-            document_blocks.append({"document": {"format": fmt, "name": name, "source": {"bytes": raw}}})
+    if attachment_turn is not None and attachment_turn.text:
+        text_parts.append(attachment_turn.text)
+        media_blocks.extend(attachment_turn.blocks)
 
-    # 1. Extract @file references from text (CLI mode)
+    # @file references (CLI): processed and delivered exactly like a Web upload
     if resolve_file_refs:
         cleaned_text, file_paths = _extract_file_refs(text)
-        for fpath in file_paths:
-            if is_image_file(fpath):
-                raw, fmt, error = read_file_as_image_bytes(fpath)
-                if error:
-                    warnings.append(error)
-                elif raw and fmt:
-                    image_blocks.append({"image": {"format": fmt, "source": {"bytes": raw}}})
-            elif is_document_file(fpath):
-                raw, fmt, name, error = read_file_as_document_bytes(fpath)
-                if error:
-                    warnings.append(error)
-                elif raw and fmt and name:
-                    document_blocks.append({"document": {"format": fmt, "name": name, "source": {"bytes": raw}}})
-            else:
-                content, error = read_file_as_text(fpath)
-                if error:
-                    warnings.append(error)
-                elif content:
-                    text_parts.append(f'<attached_file path="{fpath}">\n{content}\n</attached_file>')
+        if file_paths:
+            cli_turn, cli_warnings = _attach_local_files(file_paths, model_id)
+            warnings.extend(cli_warnings)
+            if cli_turn.text:
+                text_parts.append(cli_turn.text)
+            media_blocks.extend(cli_turn.blocks)
         text = cleaned_text if cleaned_text else text
 
-    # 2. Prepend any pre-read text file contents (web upload mode)
-    if file_contents:
-        for filename, content in file_contents:
-            text_parts.append(f'<attached_file path="{filename}">\n{content}\n</attached_file>')
-
-    # 3. Append the user message
-    text_parts.append(text)
-    combined = "\n\n".join(text_parts)
-
-    # 4. Resolve I#/R#/C# references (C# only from what the user typed, never from an attached file)
-    enriched_text, ref_warnings = resolve_references(combined, change_ref_text=text, bound_account_id=bound_account_id)
+    # I#/R#/C# references resolve from what the user typed — never from an attached file
+    enriched_text, ref_warnings = resolve_references(text, change_ref_text=text, bound_account_id=bound_account_id)
     warnings.extend(ref_warnings)
+    combined = "\n\n".join([*text_parts, enriched_text])
 
-    # 5. If no media blocks, return plain string (100% backward compatible)
-    if not image_blocks and not document_blocks:
-        return enriched_text, warnings
+    if not media_blocks:
+        return combined, warnings
+    return [{"text": combined}, *media_blocks], warnings
 
-    # 6. Build list[ContentBlock] with text + media
-    content_blocks: list[dict] = [{"text": enriched_text}]
-    content_blocks.extend(image_blocks)
-    content_blocks.extend(document_blocks)
-    return content_blocks, warnings
+
+def _attach_local_files(paths: list[str], model_id: str) -> tuple["Turn", list[str]]:
+    """CLI `@path` files → one delivered Turn (the worker runs in a temp dir that is gone afterwards)."""
+    import tempfile
+    from pathlib import Path
+
+    from agenticops.chat import upload_config
+    from agenticops.chat.attachments.delivery import build_turn, prepare_local, reason_text
+    if not model_id:
+        from agenticops.config import get_agent_model_config
+        model_id = get_agent_model_config("main")[0]
+    cfg = upload_config.effective()
+    with tempfile.TemporaryDirectory(prefix="aiops-cli-att-") as workdir:
+        items = [prepare_local(Path(p), cfg, Path(workdir)) for p in paths]
+        warnings = [f"{p}: {reason_text(it.reason)}" for p, it in zip(paths, items) if it.status != "ready"]
+        turn = build_turn(items, model_id, cfg)
+    for d in turn.deliveries:
+        if d["delivery"] == "notice":
+            warnings.append(f"{d['filename']}: not given to the model — {reason_text(d['reason'])}")
+    return turn, warnings

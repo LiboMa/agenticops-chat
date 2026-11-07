@@ -1,21 +1,26 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   FALLBACK_POLICY,
   attachmentErrorText,
   attachmentRules,
   filesFromPaste,
   filesFromDrop,
+  normalizePastedName,
   validateFiles,
 } from "@/lib/attachments";
-import { useBootstrap } from "@/hooks/useBootstrap";
+import { UploadQueue, type UploadItem } from "@/lib/attachmentUpload";
+import { bootstrapKey, useBootstrap } from "@/hooks/useBootstrap";
 import { useLocale } from "@/i18n/LocaleContext";
-import { draftKey, loadDraft, saveDraft, sessionFiles } from "@/lib/chatDrafts";
+import { draftKey, loadDraft, saveDraft, sessionQueues } from "@/lib/chatDrafts";
 import { currentUserId } from "@/lib/home";
 import { ModelSelector } from "./ModelSelector";
+import { AttachmentTray } from "./AttachmentTray";
+import { attachmentBlobUrl } from "@/hooks/useAttachmentBlob";
 
 interface Props {
-  /** → whether the message was taken (S5): false gives the text and files back to the composer */
-  onSend: (message: string, files: File[]) => void | Promise<boolean>;
+  /** → whether the message was taken (S5): false gives the text and the attachments back to the composer */
+  onSend: (message: string, attachmentIds: string[], attachments: UploadItem[]) => void | Promise<boolean>;
   onCancel?: () => void;
   disabled?: boolean;
   streaming?: boolean;
@@ -24,23 +29,12 @@ interface Props {
   prefill?: { text: string; nonce: number } | null;
 }
 
-// Attachment carries a stable id so removal + React keys never use the array index
-// (open-webui bug G: index-based removal races with concurrent adds).
-interface Attachment {
-  id: string;
-  file: File;
-}
-
-let _attachSeq = 0;
-function nextAttachId(): string {
-  // No Math.random/Date.now needed — a module counter is stable + unique per session.
-  _attachSeq += 1;
-  return `att-${_attachSeq}`;
-}
+let pasteSeq = 0;
 
 export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, prefill }: Props) {
   const { t } = useLocale();
-  // S5: what the server accepts (bootstrap upload_policy), so the composer and the server agree
+  const qc = useQueryClient();
+  // what the server accepts (bootstrap upload_policy — the upload limits in force), so composer and server agree
   const boot = useBootstrap();
   const policy = boot.data?.upload_policy ?? FALLBACK_POLICY;
   const rules = useMemo(() => attachmentRules(policy), [policy]);
@@ -48,23 +42,39 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
   const filesKey = sessionId ?? "new";
   const key = draftKey(boot.data?.deployment_id, currentUserId(), filesKey);
   const [input, setInput] = useState(() => loadDraft(localStorage, key).text);
-  const [attachments, setAttachments] = useState<Attachment[]>(
-    () => sessionFiles.get(filesKey).map((f) => ({ id: nextAttachId(), file: f })));
-  const [reselect, setReselect] = useState<string[]>([]);  // names of files a refresh dropped
+  // 2026-11-07: attachments upload the moment they are attached; each chat keeps its queue in memory
+  const queue = useMemo(() => sessionQueues.get(filesKey, () => new UploadQueue({
+    onLimitError: () => { void qc.invalidateQueries({ queryKey: bootstrapKey() }); },
+  })), [filesKey, qc]);
+  const [items, setItems] = useState<UploadItem[]>(() => queue.items());
+  useEffect(() => {
+    setItems(queue.items());
+    return queue.listen(setItems);
+  }, [queue]);
   const [attachError, setAttachError] = useState<string | null>(null);
+  // the server's thumbnail when this browser cannot show the file itself: an upload restored after a refresh (no
+  // local file), or a HEIC / TIFF picture
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  useEffect(() => {
+    for (const i of items) {
+      const local = i.file && /^image\/(png|jpeg|gif|webp|bmp)$/.test(i.file.type);
+      if (i.serverId && !local && i.kind === "image" && i.state === "ready" && !thumbs[i.serverId]) {
+        const id = i.serverId;
+        attachmentBlobUrl(id, "thumb").then((url) => setThumbs((cur) => ({ ...cur, [id]: url })), () => {});
+      }
+    }
+  }, [items, thumbs]);
   const loadedKey = useRef<string | null>(null);
 
-  // Switching chats (or the bootstrap arriving with the installation id) loads that chat's draft and files
+  // Switching chats (or the bootstrap arriving with the installation id) loads that chat's draft; its uploads come
+  // back from the server when this tab no longer has them (a refresh)
   useEffect(() => {
     if (loadedKey.current === key) return;
     loadedKey.current = key;
     const d = loadDraft(localStorage, key);
-    const kept = sessionFiles.get(filesKey);
     setInput(d.text);
-    setAttachments(kept.map((f) => ({ id: nextAttachId(), file: f })));
-    const keptNames = new Set(kept.map((f) => f.name));
-    setReselect(d.unsentFiles.filter((n) => !keptNames.has(n)));
-  }, [key, filesKey]);
+    if (queue.items().length === 0 && d.attachmentIds.length > 0) void queue.restore(d.attachmentIds);
+  }, [key, queue]);
 
   useEffect(() => {
     if (!prefill) return;
@@ -72,28 +82,24 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
     textareaRef.current?.focus();
   }, [prefill]);
 
-  // Every edit is kept: the text (and the names of attached files) in localStorage, the files in memory
+  // Every edit is kept: the text and the server ids of the uploads
   useEffect(() => {
     if (loadedKey.current !== key) return;
-    const files = attachments.map((a) => a.file);
-    sessionFiles.set(filesKey, files);
-    saveDraft(localStorage, key, { text: input, unsentFiles: [...files.map((f) => f.name), ...reselect] });
-  }, [input, attachments, reselect, key, filesKey]);
+    saveDraft(localStorage, key, { text: input, attachmentIds: items.filter((i) => i.serverId).map((i) => i.serverId!) });
+  }, [input, items, key]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const addFiles = useCallback((incoming: File[]) => {
+  const addFiles = useCallback((incoming: File[], pasted = false) => {
     if (incoming.length === 0) return;
-    setAttachments((prev) => {
-      const existing = prev.map((a) => a.file);
-      const { accepted, errors } = validateFiles(existing, incoming, rules);
-      setAttachError(errors.length > 0 ? errors.map((e) => attachmentErrorText(e, t)).join("; ") : null);
-      if (accepted.length === 0) return prev;
-      return [...prev, ...accepted.map((f) => ({ id: nextAttachId(), file: f }))];
-    });
-  }, [rules, t]);
+    // a pasted screenshot is "image.png" every time: give it a dated name BEFORE the duplicate check
+    const files = pasted ? incoming.map((f) => normalizePastedName(f, new Date(), ++pasteSeq)) : incoming;
+    const { accepted, errors } = validateFiles(queue.items(), files, rules);
+    setAttachError(errors.length > 0 ? errors.map((e) => attachmentErrorText(e, t)).join("; ") : null);
+    if (accepted.length > 0) queue.add(accepted);
+  }, [queue, rules, t]);
 
   // Auto-grow the textarea up to its max height (open-webui-style), then scroll.
   useEffect(() => {
@@ -103,24 +109,24 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
     el.style.height = `${el.scrollHeight}px`;
   }, [input]);
 
+  const uploading = items.some((i) => i.state === "queued" || i.state === "uploading" || i.state === "processing");
   const handleSend = () => {
     const trimmed = input.trim();
-    if ((!trimmed && attachments.length === 0) || disabled) return;
-    const fallback = attachments.length > 0 ? "Please analyze the attached file(s)" : "";
-    const sentText = input, sentAttachments = attachments;
-    const result = onSend(trimmed || fallback, attachments.map((a) => a.file));
+    const ids = queue.readyIds();
+    if ((!trimmed && ids.length === 0) || disabled || uploading) return;
+    const sentText = input;
+    const taken = queue.take();
+    const content = trimmed || `Please analyze the attached file(s): ${taken.map((i) => i.name).join(", ")}`;
+    const result = onSend(content, ids, taken);
     setInput("");
-    setAttachments([]);
-    setReselect([]);
     setAttachError(null);
-    sessionFiles.clear(filesKey);
-    saveDraft(localStorage, key, { text: "", unsentFiles: [] });
+    saveDraft(localStorage, key, { text: "", attachmentIds: [] });
     // S5: the draft is gone only once the server took the message — a refused send gives it back
     if (result instanceof Promise) {
       void result.then((ok) => {
-        if (ok || loadedKey.current !== key) return;
-        setInput((cur) => cur || sentText);
-        setAttachments((cur) => (cur.length ? cur : sentAttachments));
+        if (ok) return;
+        queue.putBack(taken);
+        if (loadedKey.current === key) setInput((cur) => cur || sentText);
       });
     }
   };
@@ -130,19 +136,15 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
     e.target.value = ""; // allow re-selecting the same file
   };
 
-  // Paste: pull image/* items as files; only preventDefault when we actually
-  // consume a file, so normal text paste still works (open-webui pattern #5/#6).
+  // Paste: every pasted file (any type); only preventDefault when we take a file, so a text paste still works
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const imgs = filesFromPaste(e.clipboardData);
-    if (imgs.length > 0) {
+    const files = filesFromPaste(e.clipboardData);
+    if (files.length > 0) {
       e.preventDefault();
-      addFiles(imgs);
+      addFiles(files, true);
     }
   };
 
-  const removeAttachment = (id: string) => {
-    setAttachments((prev) => prev.filter((a) => a.id !== id));
-  };
 
   // Drag-drop wired imperatively on the container in CAPTURE phase, with airtight
   // cleanup (open-webui memory-leak bug #21968). dragover re-asserts true every
@@ -192,35 +194,9 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
       ref={containerRef}
       className={`border-t border-border p-4 bg-secondary ${isDragging ? "ring-2 ring-primary-500 ring-inset" : ""}`}
     >
-      {/* Attachment badges (keyed by stable id, removable by id) */}
-      {attachments.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 mb-2 max-w-[760px] mx-auto">
-          {attachments.map((a) => (
-            <span key={a.id} className="inline-flex items-center gap-1.5 text-xs bg-primary-50 text-primary-700 px-2.5 py-1 rounded-lg border border-primary-200">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-              </svg>
-              {a.file.name}
-              <span className="text-primary-400">({(a.file.size / 1024).toFixed(1)} KB)</span>
-              <button
-                onClick={() => removeAttachment(a.id)}
-                className="ml-0.5 text-muted-foreground hover:text-red-500 transition-colors"
-                title="Remove"
-              >
-                ✕
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
+      <AttachmentTray items={items} rules={rules} onRemove={(id) => queue.remove(id)} onRetry={(id) => queue.retry(id)}
+                      thumbFor={(i) => (i.serverId && i.kind === "image" && i.state === "ready" ? thumbs[i.serverId] : undefined)} />
 
-      {/* Validation error */}
-      {reselect.length > 0 && (
-        <div role="status" className="max-w-[760px] mx-auto mb-2 flex items-start justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-700 dark:text-amber-300">
-          <span>{t("chat.draft.reselect").replace("{n}", String(reselect.length)).replace("{names}", reselect.join(", "))}</span>
-          <button type="button" onClick={() => setReselect([])} className="shrink-0 underline">{t("home.dismiss")}</button>
-        </div>
-      )}
       {attachError && (
         <div className="max-w-[760px] mx-auto mb-2 text-xs text-red-500">{attachError}</div>
       )}
@@ -233,7 +209,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
             type="file"
             multiple
             className="hidden"
-            accept={rules.accept}
+            accept={rules.accept || undefined}
             onChange={handleFileSelect}
           />
 
@@ -279,7 +255,8 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
           ) : (
             <button
               onClick={handleSend}
-              disabled={(!input.trim() && attachments.length === 0) || disabled}
+              disabled={(!input.trim() && !items.some((i) => i.serverId && (i.state === "ready" || i.state === "failed")))
+                        || disabled || uploading}
               className="self-center w-9 h-9 flex items-center justify-center bg-primary-600 hover:bg-primary-700 disabled:bg-muted disabled:text-muted-foreground/40 text-white rounded-full transition-colors flex-shrink-0"
               title={t("chat.send")} aria-label={t("chat.send")}
             >

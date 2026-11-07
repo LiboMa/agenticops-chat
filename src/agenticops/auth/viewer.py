@@ -28,6 +28,9 @@ _ALLOWED: tuple[tuple[str, re.Pattern], ...] = tuple(
         ("PATCH", rf"/api/chat/sessions/{_SEG}"),
         ("DELETE", rf"/api/chat/sessions/{_SEG}"),
         ("POST", rf"/api/chat/sessions/{_SEG}/messages"),
+        # a viewer attaches files to its own chats; the service lets it touch only its own uploads
+        ("POST", r"/api/chat/attachments"),
+        ("DELETE", rf"/api/chat/attachments/{_SEG}"),
         # in-memory analysis over read-only describes — nothing is written or changed
         ("POST", rf"/api/graph/vpc/{_SEG}/dependency-chain"),
         ("POST", rf"/api/graph/vpc/{_SEG}/change-simulation"),

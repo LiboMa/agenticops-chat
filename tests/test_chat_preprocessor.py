@@ -123,6 +123,9 @@ class TestResolveReferences:
 
 # ── preprocess_message ──────────────────────────────────────────
 
+CLAUDE = "global.anthropic.claude-opus-5-5"
+
+
 class TestPreprocessMessage:
     @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
     def test_plain_text(self, _mock):
@@ -132,128 +135,86 @@ class TestPreprocessMessage:
         assert warnings == []
 
     @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
-    def test_file_contents_web_upload(self, _mock):
-        result, warnings = preprocess_message(
-            "summarize this",
-            file_contents=[("report.txt", "revenue up 10%")],
-        )
-        assert isinstance(result, str)
-        assert '<attached_file path="report.txt">' in result
-        assert "revenue up 10%" in result
-        assert "summarize this" in result
+    def test_cli_file_ref_text(self, _resolve, tmp_path):
+        log = tmp_path / "log.txt"
+        log.write_text("file content LOG-77")
+        result, warnings = preprocess_message(f"analyze @{log}", resolve_file_refs=True, model_id=CLAUDE)
+        assert isinstance(result, str) and warnings == []
+        assert '<attachment n="1" name="log.txt" type="txt">' in result and "file content LOG-77" in result
+        assert result.rstrip().endswith("analyze")
 
     @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
-    def test_image_blocks_returns_list(self, _mock):
-        result, warnings = preprocess_message(
-            "what is this?",
-            file_images=[("photo.png", b"\x89PNG", "png")],
-        )
-        assert isinstance(result, list)
-        assert result[0]["text"] == "what is this?"
-        assert result[1]["image"]["format"] == "png"
-
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
-    def test_document_blocks_returns_list(self, _mock):
-        result, warnings = preprocess_message(
-            "review doc",
-            file_documents=[("spec.pdf", b"%PDF", "pdf", "spec")],
-        )
-        assert isinstance(result, list)
-        assert result[1]["document"]["format"] == "pdf"
-        assert result[1]["document"]["name"] == "spec"
-
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
-    def test_mixed_media(self, _mock):
-        result, warnings = preprocess_message(
-            "analyze",
-            file_images=[("a.png", b"\x89PNG", "png")],
-            file_documents=[("b.pdf", b"%PDF", "pdf", "b")],
-        )
-        assert isinstance(result, list)
-        assert len(result) == 3  # text + image + doc
-
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
-    @patch("agenticops.chat.preprocessor.is_image_file", return_value=False)
-    @patch("agenticops.chat.preprocessor.is_document_file", return_value=False)
-    @patch("agenticops.chat.preprocessor.read_file_as_text", return_value=("file content", None))
-    def test_cli_file_ref_text(self, mock_read, _doc, _img, _resolve):
-        result, warnings = preprocess_message(
-            "analyze @/tmp/log.txt",
-            resolve_file_refs=True,
-        )
-        assert isinstance(result, str)
-        assert "file content" in result
-        mock_read.assert_called_once_with("/tmp/log.txt")
-
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
-    @patch("agenticops.chat.preprocessor.is_image_file", return_value=True)
-    @patch("agenticops.chat.preprocessor.read_file_as_image_bytes", return_value=(b"\x89PNG", "png", None))
-    def test_cli_file_ref_image(self, mock_read, _img, _resolve):
-        result, warnings = preprocess_message(
-            "show @/tmp/pic.png",
-            resolve_file_refs=True,
-        )
-        assert isinstance(result, list)
+    def test_cli_file_ref_image(self, _resolve, tmp_path):
+        from tests.fixtures.attachments import make
+        pic = make("png", tmp_path)
+        result, warnings = preprocess_message(f"show @{pic}", resolve_file_refs=True, model_id=CLAUDE)
+        assert isinstance(result, list) and warnings == []
         assert any("image" in block for block in result)
 
     @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
-    @patch("agenticops.chat.preprocessor.is_image_file", return_value=False)
-    @patch("agenticops.chat.preprocessor.is_document_file", return_value=True)
-    @patch("agenticops.chat.preprocessor.read_file_as_document_bytes", return_value=(b"%PDF", "pdf", "doc", None))
-    def test_cli_file_ref_document(self, mock_read, _doc, _img, _resolve):
-        result, warnings = preprocess_message(
-            "read @/tmp/spec.pdf",
-            resolve_file_refs=True,
-        )
+    def test_cli_file_ref_document(self, _resolve, tmp_path):
+        from tests.fixtures.attachments import make
+        pdf = make("pdf", tmp_path)
+        result, warnings = preprocess_message(f"read @{pdf}", resolve_file_refs=True, model_id=CLAUDE)
         assert isinstance(result, list)
-        assert any("document" in block for block in result)
+        doc = next(block["document"] for block in result if "document" in block)
+        assert doc["name"].startswith("att-") and doc["format"] == "pdf"
 
     @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
-    @patch("agenticops.chat.preprocessor.is_image_file", return_value=False)
-    @patch("agenticops.chat.preprocessor.is_document_file", return_value=False)
-    @patch("agenticops.chat.preprocessor.read_file_as_text", return_value=(None, "File not found: /tmp/nope.txt"))
-    def test_cli_file_ref_error(self, _read, _doc, _img, _resolve):
-        result, warnings = preprocess_message(
-            "check @/tmp/nope.txt",
-            resolve_file_refs=True,
-        )
-        assert any("File not found" in w for w in warnings)
+    def test_cli_file_ref_error(self, _resolve, tmp_path):
+        result, warnings = preprocess_message(f"check @{tmp_path}/nope.txt", resolve_file_refs=True, model_id=CLAUDE)
+        assert any("file not found" in w for w in warnings)
+        assert isinstance(result, str)
 
     @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
-    @patch("agenticops.chat.preprocessor.is_image_file", return_value=True)
-    @patch("agenticops.chat.preprocessor.read_file_as_image_bytes", return_value=(None, None, "Cannot read image"))
-    def test_cli_image_read_error(self, _read, _img, _resolve):
-        result, warnings = preprocess_message(
-            "show @/tmp/bad.png",
-            resolve_file_refs=True,
-        )
-        assert any("Cannot read" in w for w in warnings)
+    def test_cli_image_read_error(self, _resolve, tmp_path):
+        bad = tmp_path / "bad.png"
+        bad.write_bytes(b"\x89PNG\r\n\x1a\n" + b"garbage")
+        result, warnings = preprocess_message(f"show @{bad}", resolve_file_refs=True, model_id=CLAUDE)
+        assert any("damaged" in w for w in warnings)
+        assert isinstance(result, str)
 
     @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
-    @patch("agenticops.chat.preprocessor.is_image_file", return_value=False)
-    @patch("agenticops.chat.preprocessor.is_document_file", return_value=True)
-    @patch("agenticops.chat.preprocessor.read_file_as_document_bytes", return_value=(None, None, None, "Bad doc"))
-    def test_cli_document_read_error(self, _read, _doc, _img, _resolve):
-        result, warnings = preprocess_message(
-            "read @/tmp/bad.pdf",
-            resolve_file_refs=True,
-        )
-        assert any("Bad doc" in w for w in warnings)
+    def test_cli_document_read_error(self, _resolve, tmp_path):
+        from tests.fixtures.attachments import make
+        locked = make("encrypted_pdf", tmp_path)
+        result, warnings = preprocess_message(f"read @{locked}", resolve_file_refs=True, model_id=CLAUDE)
+        assert any("password-protected" in w for w in warnings)
+
+    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
+    def test_cli_at_path_uses_model_capabilities(self, _resolve, tmp_path):
+        from tests.fixtures.attachments import make
+        pic = make("png", tmp_path)
+        result, warnings = preprocess_message(f"show @{pic}", resolve_file_refs=True,
+                                              model_id="openai.gpt-oss-120b-1:0")
+        assert isinstance(result, str)   # a text-only model gets no image block
+        assert any("cannot see images" in w for w in warnings)
+
+    def test_refs_not_resolved_from_attachment_text(self):
+        from agenticops.chat.attachments.delivery import Turn
+        seen = []
+
+        def fake_resolve(text, **kw):
+            seen.append((text, kw.get("change_ref_text")))
+            return text, []
+        turn = Turn(text="<attachment n=\"1\">see I#5 and R#9</attachment>", blocks=[], deliveries=[])
+        with patch("agenticops.chat.preprocessor.resolve_references", side_effect=fake_resolve):
+            result, _ = preprocess_message("summarize", attachment_turn=turn)
+        assert seen == [("summarize", "summarize")]
+        assert result.startswith("<attachment") and result.endswith("summarize")
+
+    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
+    def test_attachment_turn_blocks_follow_text(self, _resolve):
+        from agenticops.chat.attachments.delivery import Turn
+        img = {"image": {"format": "png", "source": {"bytes": b"x"}}}
+        result, _ = preprocess_message("look", attachment_turn=Turn("manifest", [img], []))
+        assert result == [{"text": "manifest\n\nlook"}, img]
 
     @patch("agenticops.chat.preprocessor.resolve_references")
     def test_ref_warnings_propagated(self, mock_resolve):
         mock_resolve.return_value = ("text", ["Issue I#99 not found"])
         result, warnings = preprocess_message("I#99")
         assert "I#99 not found" in warnings[0]
-
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
-    def test_multiple_file_contents(self, _mock):
-        result, warnings = preprocess_message(
-            "compare",
-            file_contents=[("a.txt", "AAA"), ("b.txt", "BBB")],
-        )
-        assert "AAA" in result
-        assert "BBB" in result
 
 
 # ── shared reference resolver ───────────────────────────────────
@@ -309,3 +270,11 @@ class TestBoundAccountRefs:
         self._fake(monkeypatch, 2)
         out, _ = preprocess_message("look at I#7", bound_account_id=1)
         assert "SECRET-TITLE" not in out
+
+
+def test_cli_reads_the_agents_actual_model_id():
+    from types import SimpleNamespace
+    from agenticops.cli.main import _agent_model_id
+    assert _agent_model_id(SimpleNamespace(model=SimpleNamespace(config={"model_id": CLAUDE}))) == CLAUDE
+    assert _agent_model_id(SimpleNamespace(model=SimpleNamespace(config={}))) == ""
+    assert _agent_model_id(object()) == ""

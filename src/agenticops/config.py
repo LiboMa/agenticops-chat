@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Optional, Tuple, Type
 
 import yaml
-from pydantic import Field
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
 # Project root directory — env var takes priority, then auto-detect from source tree
@@ -28,6 +28,28 @@ _YAML_CONFIG_PATH = Path(__import__("os").environ.get(
     "AIOPS_CONFIG_FILE",
     str(PROJECT_ROOT / "config" / "settings.yaml"),
 ))
+
+
+class ChatUploadSettings(BaseModel):
+    """Chat attachment limits (2026-11-07). The values live in settings.yaml `chat_upload:`; these defaults only let
+    the app start without that block. Admins override fields at runtime (DB `runtime_settings`, key `chat_upload`,
+    through `chat/upload_config` and `/api/settings/chat-upload`); Bedrock's own media limits are constants in
+    `chat/attachments/limits` and are not settings."""
+    max_files: int = Field(default=20, ge=1, le=50, description="Attachments per message")
+    max_file_mb: int = Field(default=50, ge=1, le=200, description="Size of one attachment, MiB")
+    max_total_mb: int = Field(default=200, ge=1, le=1000, description="Size of one message's attachments, MiB")
+    allowed_extensions: Optional[list[str]] = Field(
+        default=None, description="Accepted extensions (lowercase, with the dot; \"\" = none); null = every supported type")
+    text_max_chars: int = Field(default=100_000, ge=1_000, le=1_000_000, description="Extracted text kept per file")
+    turn_text_max_chars: int = Field(default=200_000, ge=10_000, le=2_000_000,
+                                     description="Attachment text given to the model in one turn")
+    history_text_max_chars: int = Field(default=20_000, ge=0, le=200_000,
+                                        description="Text kept per attachment in earlier turns")
+    history_images_max: int = Field(default=6, ge=0, le=20, description="Images kept from earlier turns")
+    image_max_edge_px: int = Field(default=1568, ge=512, le=8000, description="Long edge of the image the model gets")
+    pdf_render_pages_max: int = Field(default=5, ge=0, le=20, description="Pages of a scanned PDF rendered as images")
+    native_media_max_mb: int = Field(default=16, ge=1, le=30, description="Native image/document bytes per request, MiB")
+    staged_ttl_hours: int = Field(default=24, ge=1, le=168, description="Hours an unsent upload is kept")
 
 
 class YamlSettingsSource(PydanticBaseSettingsSource):
@@ -1089,6 +1111,13 @@ class Settings(BaseSettings):
     session_history_depth: int = Field(
         default=20,
         description="Number of recent message turns to restore when recreating a chat session agent",
+    )
+
+    # Chat attachments (2026-11-07): limits (runtime-overridable by admins) and where the files live (yaml only)
+    chat_upload: ChatUploadSettings = Field(default_factory=ChatUploadSettings)
+    chat_attachments_dir: str = Field(
+        default="",
+        description="Directory for chat attachment files; empty = <data_dir>/chat_attachments. Not changeable at runtime",
     )
 
     # Token cost rates per 1M tokens by model family

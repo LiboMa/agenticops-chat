@@ -18,6 +18,15 @@ export interface StreamState {
   toolCalls: ToolCall[];
   tokenMetrics: { input: number; output: number } | null;
   error: { code: StreamErrorCode; message: string } | null;
+  /** how each attachment of the message being answered reached the model (the `attachments` frame, 2026-11-07) */
+  attachmentDeliveries: AttachmentDelivery[];
+}
+
+export interface AttachmentDelivery {
+  id: string;
+  filename: string;
+  delivery: "native_document" | "native_image" | "page_images" | "text" | "notice" | "failed";
+  reason: string | null;
 }
 
 const SERVER_CODES = new Set<string>(["throttled", "model_unavailable", "context_too_long", "internal",
@@ -45,6 +54,7 @@ const EMPTY: StreamState = {
   toolCalls: [],
   tokenMetrics: null,
   error: null,
+  attachmentDeliveries: [],
 };
 
 const TOKEN_FLUSH_MS = 60;
@@ -106,11 +116,13 @@ class ChatStreamStore {
 
   /** → whether the server accepted the message (its `accepted` frame arrived): false = nothing was stored, so the
    *  composer gives the text and files back (S5). */
-  async send(sessionId: string, content: string, files?: File[], clientMessageId: string = crypto.randomUUID()): Promise<boolean> {
+  async send(sessionId: string, content: string, attachmentIds: string[] = [],
+             clientMessageId: string = crypto.randomUUID(), onAccepted?: () => void): Promise<boolean> {
     if (this.isStreaming(sessionId)) return false;
     let accepted = false;
 
-    this.set(sessionId, { streaming: true, content: "", toolCalls: [], tokenMetrics: null, error: null });
+    this.set(sessionId, { streaming: true, content: "", toolCalls: [], tokenMetrics: null, error: null,
+                          attachmentDeliveries: [] });
 
     const controller = new AbortController();
     this.controllers.set(sessionId, controller);
@@ -138,24 +150,14 @@ class ChatStreamStore {
       const token = getAuthToken();
       if (token) authHeaders["Authorization"] = `Bearer ${token}`;
 
-      let res: Response;
-      if (files && files.length > 0) {
-        const formData = new FormData();
-        formData.append("content", content);
-        formData.append("client_message_id", clientMessageId);
-        files.forEach((f) => formData.append("file", f));
-        res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
-          method: "POST", headers: authHeaders, body: formData, signal: controller.signal,
-        });
-      } else {
-        const body: Record<string, string> = { content, client_message_id: clientMessageId };
-        res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders },
-          body: JSON.stringify(body),
-          signal: controller.signal,
-        });
-      }
+      // 2026-11-07: attachments were uploaded already (POST /api/chat/attachments); the message names them
+      const body = { content, client_message_id: clientMessageId, attachment_ids: attachmentIds };
+      const res = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
 
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({ detail: res.statusText }));
@@ -178,6 +180,10 @@ class ChatStreamStore {
             switch (frame.event) {
               case "accepted":
                 accepted = true;
+                onAccepted?.();
+                break;
+              case "attachments":
+                if (Array.isArray(data.items)) this.set(sessionId, { attachmentDeliveries: data.items });
                 break;
               case "text":
                 if (data.token) {
