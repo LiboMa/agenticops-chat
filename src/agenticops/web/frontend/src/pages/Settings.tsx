@@ -15,6 +15,7 @@ import { AuditTab } from "@/components/settings/AuditTab";
 import { KBTab } from "@/components/settings/KBTab";
 import { SkillsTab } from "@/components/settings/SkillsTab";
 import { ConnectorsCard } from "@/components/settings/ConnectorsCard";
+import { ChatUploadCard } from "@/components/settings/ChatUploadCard";
 import {
   useAccounts,
   useCreateAccount,
@@ -1366,6 +1367,9 @@ export default function Settings() {
 
       {/* ── Galaxy Build Model ───────────────────────────────── */}
       <GalaxyModelCard />
+
+      {/* ── Chat attachments (2026-11-07) ────────────────────── */}
+      <ChatUploadCard />
 
       {/* ── Pull connectors (k8s discovery) ──────────────────── */}
       <ConnectorsCard />
