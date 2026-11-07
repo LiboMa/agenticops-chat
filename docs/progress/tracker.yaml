@@ -3,7 +3,7 @@
 # Every status below cites the doc (or commit) it was read from; what could not be confirmed says so in notes.
 # After editing: python scripts/progress/build_dashboard.py  (then commit tracker.yaml + dashboard.html together).
 schema: 1
-updated: "2026-11-06"
+updated: "2026-11-07"
 releases:
   - id: "1.0.0"
     title: "MVP 1.0.0 — 多智能体 AI 运维助手"
@@ -472,11 +472,15 @@ releases:
     items:
       - id: "platform/strands-1.64"
         title: "Strands 1.45 → 1.64 保持行为升级"
-        status: todo
+        status: done
         depends_on: []
         modules: ["agents", "config.py"]
         plan: ""
-        notes: "主人 11-06 定为下一步（Plan Mode 起步）。1.56 起 context_manager 会丢弃传入的 conversation_manager（各 agent 滑动窗口静默失效）→ 用 context_manager=False + ContextOffloader 插件保持 1.45 行为；cache_tools 改 CacheConfig(tools_ttl=True)；写真实 Bedrock 冒烟脚本（缓存命中、thinking 形状、流式事件、limits、动态技能注册），重跑定位评测比对准确率和成本，主人验收后推送。研究见 docs/superpowers/specs/2026-11-06-strands-upgrade-study.md（PR #31）。"
+        evidence:
+          commits:
+            - {sha: "3eb8883", date: "2026-11-07", title: "feat(platform): Strands 1.45 → 1.64, behaviour-preserving"}
+            - {sha: "18d587a", date: "2026-11-07", title: "docs(study): Strands 1.64 feature feasibility report + upgrade progress"}
+        notes: "分支 feat/strands-1.64，PR #32 待主人合并（未进 main）。不传 context_manager，ContextOffloader 作插件（1500 / 750）并覆盖 _slice_preview 保留 1.45 的只取头预览（1.64 的头 + 尾预览让 RCA 拓扑证据的边全部落在预览外）；CacheConfig(tools_ttl=True, system_prompt_ttl=False)。验收：全量除已知 DNS 假失败外通过；真实 Bedrock 冒烟 PASS；本地 chat 三轮 E2E PASS；chaos-lab 3 例定位评测 3/3 valid、AC@1 1.0。dev 11-07 已部署 deploy/dev-strands-1.64（= 本分支 + ae62cd2，免得 editor 的 Settings 只读视图回退），strands-agents 1.64.0，live chat 正常；部署前备份 /opt/agenticops-backups/pre-strands-164-20261107T030437Z。下个版本候选与主人选择（组合 A）见 feat/strands-1.64 上的 docs/superpowers/specs/2026-11-06-strands-164-feature-feasibility.md。"
       - id: "acct/viewer"
         title: "只读 viewer 账户 + 删除自助注册"
         status: done
@@ -526,6 +530,48 @@ releases:
         modules: ["agents", "services", "config.py"]
         plan: ""
         notes: "11-06 已做可行性分析（会话内，未落文档）：Strands 1.45 自带 OpenAIModel（base_url / api_key；限流、上下文超长已映射）；耦合点 4 类 —— 8 处 BedrockModel 构建、preamble.bedrock_model_kwargs 能力门控、约 11 处直调 bedrock-runtime（signal_gate._call_bedrock 等）、Titan embedding；配套：模型列表、价格表币种、窗口表、stream_errors 错误分类。最大风险是模型能力：以 13 例 RCA 定位评测 + chaos E2E 为门槛。依赖 models/db-web（provider 与密钥配置落在 DB）。"
+      - id: "next/cost-accounting"
+        title: "成本记账修正：main 的缓存 token 写进 AgentLog；chat 回合显示整棵 agent 树的用量（X2）"
+        status: todo
+        depends_on: ["platform/strands-1.64"]
+        modules: ["web", "services", "agents"]
+        plan: ""
+        notes: "主人 11-07 选组合 A 的第 1 项。11-06 本地 1.64 实测：chat 路径 log_agent_call(main) 不传缓存 token，/api/cost/summary 里 main chat 少记约 93%（3 轮 $0.15 对 $2.00）；chat 消息上的成本不含子 agent（sre $0.51 未算）。升级前就有的缺陷。"
+      - id: "next/subagent-context"
+        title: "子 agent 包装透传 invocation_context 与 cancel_signal（S1 + S2）"
+        status: todo
+        depends_on: ["platform/strands-1.64"]
+        modules: ["agents", "web"]
+        plan: ""
+        notes: "组合 A 第 2 项：整棵 agent 树共享用量 / limits / 取消，保住按调用升级 effort 与 RunContext 账户绑定；不换成 Agent.as_tool。"
+      - id: "next/topology-evidence-fit"
+        title: "RCA 拓扑证据适配上下文：候选自带 path_to_anchor + 默认紧凑包（X1）"
+        status: todo
+        depends_on: ["platform/strands-1.64"]
+        modules: ["graph", "agents"]
+        plan: ""
+        notes: "组合 A 第 3 项。实测：证据包约 2.0–2.3 万 token（184 边 / 152 邻居，只有 4 个有异常），每次都被卸载成 3000 字符预览，模型据预览猜路径 → partial。解法：代码 BFS 给每个候选算好路径、默认只给异常邻居和路径边（模拟约 1.1–1.5 千 token）、记录工具名序列；以 13 例定位评测验收。"
+      - id: "next/memory-retrieval"
+        title: "Agent 记忆：分词检索、命中才算用过、写入记录归属（M1–M3）"
+        status: todo
+        depends_on: []
+        modules: ["memory", "tools"]
+        plan: ""
+        notes: "组合 A 第 4 项。读码：search_memories 整串子串匹配；注入即 touch_last_used（老化退化成按置信度排名，每次构建改写记忆文件）；adjust_confidence 无调用方；记忆无 owner，私有会话写的记忆会注入给所有用户。"
+      - id: "next/embedding-provider"
+        title: "嵌入 Provider 化：OpenAI 兼容嵌入、向量记录模型 id + 维度、Titan 走 get_bedrock_session、降级明示（K1）"
+        status: todo
+        depends_on: ["models/openai-compat"]
+        modules: ["kb"]
+        plan: ""
+        notes: "组合 A 第 5 项，并入模型 Provider 层。读码：kb/embeddings.py 用裸 boto3.client(bedrock-runtime)；Bedrock 不可达时静默退回 NullEmbeddingClient（中国区 KB 会悄悄变成纯关键词检索）。S3 Vectors 按现规模（677 向量）不做。"
+      - id: "next/strands-evals"
+        title: "Strands Evals 试点：13 例定位评测可复现 + 红队（X4）"
+        status: todo
+        depends_on: []
+        modules: []
+        plan: ""
+        notes: "组合 A，与上面各项并行，作为衡量它们的尺子；独立 venv（需 rich 15）；用录制的真实工具输出，不用 ToolSimulator 评 RCA。"
       - id: "deploy/agentcore-cn"
         title: "在中国区用 AgentCore 运行（控制面 / Agent 执行面拆分）"
         status: todo
@@ -549,6 +595,13 @@ releases:
         modules: ["agents"]
         plan: docs/superpowers/plans/2026-09-09-harness-engineering-architecture-update.md
         notes: "主人 2026-09-09 批准，三项决策已定（Trust Kernel 先、feature flag 双跑、Chat 首句默认进 A1）。下一步：主人评审计划附录 A 的 L0 宪法草案，然后阶段 0 第一个 PR。未从文档确认已开始。"
+      - id: "backlog/list-accounts-detached"
+        title: "list_cloud_accounts 工具报 DetachedInstanceError"
+        status: todo
+        depends_on: []
+        modules: ["tools"]
+        plan: ""
+        notes: "11-07 dev live chat 发现：tools/account_tools.py 在 with get_db_session() 关闭后才读 CloudAccount 属性，提交时属性已过期 → DetachedInstanceError，agent 只能退回 get_active_account（只列启用账户）。升级前就有（该文件自 2610058 未改）。"
       - id: "backlog/security-followups"
         title: "2.5.0 安全审查的遗留项"
         status: todo
