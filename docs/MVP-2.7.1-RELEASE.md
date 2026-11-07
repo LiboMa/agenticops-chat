@@ -18,6 +18,7 @@
 | A4 评测门禁 | 每夜 $0 指标、三个感知场景、`--assert`、再议 `sensing_enabled` 默认值 | 未开始 |
 | 受保护值按表格行比较 | 主人 10-08 决定（见下文「2.7.0 的跟进项」第 1 条） | **已做（10-09）**：逐行、行内逐单元格 |
 | 2.7.0 E2E 观察 | 第 1 条（SRE 越界）、第 2 条（回滚复现故障）、第 3 条（命令分类器 + 自动批准下限）、第 4 条（RCA 模型 id）、第 5 条（执行时长）**已修** | 已修（10-09） |
+| ChatGPT 风格的 Web Chat | 工作过程块（步骤、耗时、结果、过程话）+ 回答里的图表 / 流程图 + 输入框内附件 + 移动端（见下文「ChatGPT 风格的 Web Chat」） | **已做（11-07），E2E 通过，待主人验收** |
 | v2.7.0 之后 main 上的交付 | 只读账户、Strands 1.64、模型配置一致性、聊天附件、开发机 Node 22 等（PR #28–#37，见「随 rebase 带入的 main 交付」） | **已在 main，11-07 随 rebase 带入** |
 
 ---
@@ -166,6 +167,75 @@
 **门禁**（2026-10-09，`.worktrees/mvp-2.7.1`，一次性库）：后端全量 **7008 passed / 85 skipped / 0 failed**。
 
 ---
+
+## ChatGPT 风格的 Web Chat（2026-11-07）
+
+设计：`docs/superpowers/specs/2026-11-07-chatgpt-style-chat-design.md`（主人在浏览器草图上确认）· 计划：`docs/superpowers/plans/2026-11-07-chatgpt-style-chat.md` · E2E：[`MVP-2.7.1-CHAT-E2E-REPORT.md`](MVP-2.7.1-CHAT-E2E-REPORT.md)
+
+### 做了什么
+
+- **页面**：
+  - Chat 页上，全局导航收成 56 px 的图标栏，「展开导航」后以浮层显示完整侧栏。
+  - 对话列表默认展开（标题单独一行），手机上是抽屉。
+  - 居中单栏：用户消息是右侧的灰色气泡，回答平铺显示。
+  - 空对话时输入框居中。
+- **工作过程**：每个回答上方有一个 Codex 式的步骤块。
+  - 运行中实时追加步骤，完成后收成一行「已处理 N 步 · T」。
+  - 每一步显示：工具（常用的显示中文名）、输入摘要（已脱敏）、耗时、可展开的结果预览（已脱敏）。
+  - 模型在步骤之间写的话放进块里，正文不再以「我先查一下……」开头。
+  - 子 agent 和 `enhanced_task` 各算一步。
+- **回答渲染**：
+  - 统计用 ```` ```chart ```` JSON 块（recharts：柱状图、折线图、面积图、饼图，放大后附数据表）。
+  - 流程用 ```` ```mermaid ```` 块。mermaid 只在出现流程图时才加载，用 `strict` 模式，并去掉 `%%{init}%%`。
+  - 代码块可以复制。
+  - 回答下面：复制、重新生成（只在最后一条；原问题带附件时不可用）、⋯（存为报告、复制为纯文本）、token 用量、「下一步」建议。
+- **输入框**：
+  - 附件在框里面：图片是方形缩略图带圆形进度；文档是按类型着色的卡片；被拒的文件是红色卡片并写明原因；有计数。
+  - 「＋」菜单：上传文件、上传图片；触屏上还有拍照。
+  - 按键：Enter 发送，Shift+Enter 换行；输入法候选期间不发送；触屏上 Enter 换行。
+  - 整个对话区都能拖入文件，只给一层淡色提示。
+- **滚动**：只有用户自己翻动才会停止吸底（行高测量引起的位置变化不算）；有「↓ 回到底部」。
+- **手机**：`100dvh`、safe-area；主要按钮的点击区域 44 px；大图预览左右滑动切换。
+
+### 后端
+
+- **SSE 帧**：
+  - `tool_start` 增加 `text_offset`；
+  - 新帧 `tool_input {call_id, summary}`：模型写完这次调用的输入后才发；
+  - `tool_end` 增加 `duration_ms`、`result_preview`、`text_end`、`started_ms`。
+- **持久化**：上面这些都写进 `chat_messages.tool_calls`。旧消息没有偏移量，整段当正文，步骤照常列出。
+- **计时**：一步的耗时从它开始执行时算起（输入完整的那一刻），不是从模型开始写这次调用算起；总计是实际时间跨度（E2E 中发现并修复，见报告）。
+- **`chat/tool_steps.py`**：
+  - 摘要：优先取 `command`，否则取唯一的文本字段，否则拼 `k=v`；单行，最长 160 字。
+  - 结果预览：最长 200 字，先截到 4000 字再跑正则。
+  - 显示层脱敏：先过 `redact_secrets`，再盖掉 `--password` 一类参数的值、`aws_secret_access_key <值>`、`Bearer` token、URL 的 `user:pass@`；ARN 不受影响。
+  - 共用的 `redact_secrets` 不变。
+- **提示词**：`create_main_agent(rich_output=True)` 只由 `web/session_manager` 传入，完整版和只读版都有。它会追加 `RICH_OUTPUT_PROMPT`（英文、云中立：统计用 chart，流程用 mermaid，不画 ASCII）。CLI、IM、定时任务、报告都不变。
+- **`enhanced_task`**：内部的工具事件不再算步骤；它输出的文字照常流式显示，并归到这一步下面。
+
+### 可达面
+
+| 面 | 本次 |
+|---|---|
+| CLI | 非目标：CLI 的主 agent 不加输出规则，回答照旧（E2E 已确认没有 chart / mermaid 块） |
+| Web API | 做：SSE 新增 `tool_input` 帧；`tool_start` / `tool_end` 新增字段；`tool_calls` 持久化这些字段。不新增端点 |
+| Web UI | 做：Chat 页骨架、工作过程、富渲染、操作栏、「下一步」、输入框、吸底、移动端（见上） |
+| Agent tool | 非目标：没有新工具；只有 Web Chat 的主 agent 提示词增加输出规则 |
+| Schedule | 非目标 |
+| Notification | 非目标 |
+
+### 升级注意
+
+- **前端新增依赖 `mermaid@^11`。** 需要 `npm ci`，然后重新构建前端（`npm run build`）。
+- **需要重启服务**，后端的 SSE 帧和提示词才会生效。
+- **CLI、IM、报告不受影响。**
+
+### 闸门
+
+- 后端全量：7360 passed · 99 skipped · 4 failed（4 个都与本改动无关：2 个是本机未提交的 `settings.yaml`，1 个是本机未提交的 `reporter_agent.py` 中文行，1 个是 DNS 误报；前 3 个在干净的 HEAD 上通过）。
+- 前端：vitest 70 个文件 / 769 个测试；`tsc` 0。
+- 在 `/tmp` 空目录里 `npm ci && npm run build && vitest`：通过。
+- 真实模型 E2E：桌面、移动、性能、纯文本渠道全部通过，见报告。
 
 ## 随 rebase 带入的 main 交付（2026-11-07）
 

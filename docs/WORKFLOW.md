@@ -751,6 +751,48 @@ existing value; a `****`-masked value is never persisted). The old `/api/notific
 
 ---
 
+## Reading a Chat Answer (ChatGPT-style chat, 2.7.1)
+
+Every Web chat answer has three parts: the **work log** (what the agent did), the **answer**, and what you can do next.
+
+```mermaid
+flowchart LR
+    SSE["SSE frames<br/>text · tool_start (text_offset)<br/>tool_input (summary) · tool_end (duration, result, text_end)"] --> STORE["chatStream store<br/>+ chat_messages.tool_calls"]
+    STORE --> SPLIT["splitWork<br/>cut the reply at each step's offsets"]
+    SPLIT --> LOG["Work log<br/>steps + narration between them<br/>«Worked through N steps · T»"]
+    SPLIT --> ANS["Answer<br/>the text after the last step's result"]
+    ANS --> RICH["splitRichBlocks"]
+    RICH --> MD["markdown<br/>tables, code (copy), I#/R#/C# links"]
+    RICH --> CH["```chart → recharts<br/>bar · line · area · pie"]
+    RICH --> MM["```mermaid → flowchart<br/>(loaded on demand, strict)"]
+    ANS --> ACT["copy · regenerate · ⋯ save as report<br/>«Next steps» chips (click = send)"]
+```
+
+How to read it:
+
+1. **The work log.**
+   - While the agent works, it is open: each step appears as it starts, with what it ran (credentials masked) and how long it took. Click a step to see the start of its result.
+   - When the answer is done it folds to one line: «Worked through N steps · T». Click it to open the log again; it reads the same after a reload.
+   - The model's own remarks between steps («let me check …») are in the log, not in the answer.
+2. **The answer.**
+   - Statistics come as charts. Hover for values; ⤢ enlarges the chart and shows its data as a table.
+   - Flows come as flowcharts. Click to enlarge and zoom; ESC closes.
+   - Code blocks have a copy button.
+3. **Next.**
+   - Copy takes the answer as markdown; ⋯ copies it as plain text or saves the chat as a report.
+   - Regenerate (last answer only) asks the same question again and the new answer comes below. It is off when the question carried attachments, because attachments go with one message; attach them again instead.
+   - «Next steps» are what you would likely ask next; a click sends one.
+4. **Attaching.**
+   - Drop files anywhere on the chat, paste a screenshot, or use ＋.
+   - Files sit inside the input box: images as thumbnails with an upload ring, documents as coloured cards, refused files in red with the reason.
+   - Send waits until every upload is processed.
+5. **On a phone.**
+   - The chat list is a drawer (☰), and the input box stays at the bottom.
+   - Enter makes a new line; the arrow sends.
+   - Swipe left or right in the image viewer.
+
+Only the Web chat draws charts and flowcharts. The CLI, IM bots and scheduled runs keep plain text answers.
+
 ## Concurrent Chat Sessions & Fast Session Open
 
 The Web chat supports **multiple simultaneously-streaming conversations** in one browser tab and opens any session **instantly**, regardless of history size.
