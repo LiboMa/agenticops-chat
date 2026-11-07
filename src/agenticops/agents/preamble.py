@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from agenticops.config import settings
 
@@ -225,6 +225,24 @@ def is_anthropic_model(model_id: str) -> bool:
     """
     mid = (model_id or "").lower()
     return "anthropic." in mid or "claude" in mid
+
+
+class MediaCaps(NamedTuple):
+    """What a model reads natively in a Converse user message."""
+    images: bool
+    documents: bool
+
+
+def media_capabilities(model_id: str) -> MediaCaps:
+    """Native media per model family (measured on Bedrock 2026-11-07): Claude reads images and documents (a
+    scanned PDF too); GPT-6 reads images only; gpt-oss neither. Every other id — gpt-5.6, a custom endpoint, an
+    unknown family — is treated as text-only: sending media a model refuses fails the whole request."""
+    mid = (model_id or "").lower()
+    if is_anthropic_model(mid):
+        return MediaCaps(images=True, documents=True)
+    if "openai.gpt-6" in mid:
+        return MediaCaps(images=True, documents=False)
+    return MediaCaps(images=False, documents=False)
 
 
 # Extended thinking has two incompatible request shapes on Bedrock. Claude 4.6

@@ -224,3 +224,17 @@ def test_text_truncated_at_limit(tmp_path):
 def test_meta_is_json_serialisable(tmp_path):
     meta, _ = _run(make("xlsx", tmp_path / "in"), tmp_path)
     json.dumps(meta)
+
+
+@pytest.mark.parametrize("kind", ["xlsx", "xlsm", "docx", "pptx", "pdf", "heic", "tsv"])
+def test_stored_original_without_suffix_is_read(tmp_path, kind):
+    """Uploads are stored as `<dir>/original` — no extension; every parser must take the type from `ext`."""
+    import shutil
+    src = make(kind, tmp_path / "in")
+    stored = tmp_path / "stored" / "original"
+    stored.parent.mkdir()
+    shutil.copyfile(src, stored)
+    meta, out = _run(stored, tmp_path, ext=src.suffix.lower())
+    assert meta["sha256"]
+    if kind not in ("heic",):
+        assert TOKENS[kind] in _text(out)

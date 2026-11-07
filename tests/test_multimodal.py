@@ -424,8 +424,9 @@ class TestPreprocessorCLIFileRefs:
         assert isinstance(result, list)
         assert any("document" in b for b in result)
 
-    def test_at_txt_ref_becomes_document_block(self, tmp_path):
-        """`.txt` is in DOCUMENT_FORMAT_MAP, so it becomes a native document block."""
+    def test_at_txt_ref_is_text_not_a_document(self, tmp_path):
+        """Plain-text formats are given as text even to Claude (2026-11-07): the same content, and no use of the
+        five-documents-per-request quota."""
         from agenticops.chat.preprocessor import preprocess_message
 
         txt = tmp_path / "log.txt"
@@ -435,11 +436,8 @@ class TestPreprocessorCLIFileRefs:
             f"check @{txt}",
             resolve_file_refs=True,
         )
-        assert isinstance(result, list)
-        assert any("document" in b for b in result)
-        doc_block = next(b for b in result if "document" in b)
-        assert doc_block["document"]["format"] == "txt"
-        assert doc_block["document"]["source"]["bytes"] == b"some error log content"
+        assert isinstance(result, str)
+        assert "some error log content" in result
 
     def test_at_json_ref_stays_string(self, tmp_path):
         """`.json` is NOT in DOCUMENT_FORMAT_MAP, so it stays as text extraction."""

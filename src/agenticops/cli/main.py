@@ -4194,7 +4194,7 @@ def _run_headless(query: str, account: Optional[str] = None):
     from agenticops.chat.preprocessor import preprocess_message
 
     agent = create_main_agent()
-    enriched, warnings = preprocess_message(query, resolve_file_refs=True)
+    enriched, warnings = preprocess_message(query, resolve_file_refs=True, model_id=_agent_model_id(agent))
 
     from agenticops.services.agent_log_service import track_agent
     # Trace id + Run Context for this headless turn (audit attribution: cli:<os user>)
@@ -4250,6 +4250,14 @@ def _run_headless(query: str, account: Optional[str] = None):
             print(f"Error: {e}", file=sys.stderr)
             raise typer.Exit(1)
         print(str(result))
+
+
+def _agent_model_id(agent) -> str:
+    """The model an agent actually runs on (attachments are delivered for it); empty when unknown."""
+    try:
+        return str((agent.model.config or {}).get("model_id") or "")
+    except AttributeError:
+        return ""
 
 
 def _cli_persist_message(
@@ -4614,7 +4622,7 @@ def chat(
             # Preprocess message: resolve I#/R# references, @file/path attachments
             from agenticops.chat.preprocessor import preprocess_message
             enriched_input, preprocess_warnings = preprocess_message(
-                user_input, resolve_file_refs=True,
+                user_input, resolve_file_refs=True, model_id=_agent_model_id(ctx.agent or agent),
             )
             for w in preprocess_warnings:
                 console.print(f"[yellow]Warning: {w}[/yellow]")

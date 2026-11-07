@@ -287,7 +287,10 @@ def _docx(src: Path, out_dir: Path, lim: ExtractLimits, meta: dict) -> None:
 
 def _xlsx(src: Path, out_dir: Path, lim: ExtractLimits, meta: dict) -> None:
     import openpyxl
-    wb = openpyxl.load_workbook(str(src), read_only=True, data_only=True)
+    # a file object, not the path: openpyxl refuses a path without an .xlsx/.xlsm suffix, and uploads are stored
+    # as `original`
+    fh = open(src, "rb")
+    wb = openpyxl.load_workbook(fh, read_only=True, data_only=True)
     try:
         blocks, sheets, size = [], [], 0
         for ws in wb.worksheets:
@@ -314,6 +317,7 @@ def _xlsx(src: Path, out_dir: Path, lim: ExtractLimits, meta: dict) -> None:
         _write_text(out_dir, "\n\n".join(blocks), lim, meta)
     finally:
         wb.close()
+        fh.close()
 
 
 def _pptx(src: Path, out_dir: Path, lim: ExtractLimits, meta: dict) -> None:

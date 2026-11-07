@@ -33,19 +33,10 @@ def _ui_error(status: int, code: str, detail: str) -> JSONResponse:
 
 
 def _upload_policy() -> dict:
-    """What the chat send handler accepts, in its own dispatch order: an image, then a native document,
-    then the text fallback (chat/file_reader)."""
-    from agenticops.chat import file_reader as fr
-    documents = set(fr.DOCUMENT_FORMAT_MAP)
-    return {
-        "max_files": fr.MAX_UPLOAD_FILES,
-        "image_max_bytes": fr.MAX_IMAGE_SIZE,
-        "document_max_bytes": fr.MAX_DOCUMENT_SIZE,
-        "text_fallback_max_bytes": fr.MAX_FILE_SIZE,
-        "image_extensions": sorted(fr.IMAGE_FORMAT_MAP),
-        "document_extensions": sorted(documents),
-        "text_extensions": sorted(fr.TEXT_EXTENSIONS - documents),
-    }
+    """What the chat composer may attach: the upload limits in force (chat/upload_config — yaml defaults + the
+    admins' overrides), read on every bootstrap so a change applies without a restart."""
+    from agenticops.chat import upload_config
+    return upload_config.upload_policy()
 
 
 def _report_export_formats() -> list[str]:
