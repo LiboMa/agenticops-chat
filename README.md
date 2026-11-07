@@ -50,7 +50,7 @@ The whole system follows a few deliberate rules — they explain most of the des
 | **Self-Optimizing Memory** | File-based agent memory that learns from each operation; agent self-curation, never-delete archival, prompt-cache-safe injection |
 | **Autonomous Skills** | 16 domain skills the agents can create, improve, and merge — published only through a security-gated, human-auditable workflow. **Wide loading**: import skill packages from a URL, a git repo or a zip/tar.gz — via CLI, API, or the Skills page's «URL / Git repo» importer with a per-package result manifest and an *Imported* badge. Everything lands as a draft; the whole bundle (`.sh`/`.py` included) is scanned before promotion; packaged scripts run only in a restricted **sandbox** (no credentials, no network; off by default) |
 | **Concurrent Chat** | Multiple conversations stream at once; sessions open instantly via cursor-paginated, virtualized history |
-| **Chat Attachments** | Paste images (Cmd+V), drag-drop, and multi-file upload (up to 5) in the web composer; per-type size validation |
+| **Chat Attachments** | Attach any common file as evidence — txt / md / html / pdf (scanned too) / Word / Excel / PowerPoint / csv / tsv / json / log / jpg / png / gif / webp / bmp / tiff / heic: paste (any file type), drag-drop or pick; each file uploads at once with progress, and the message shows thumbnails, a full-size viewer and downloads. Claude reads PDF / Word / Excel natively; other models get extracted text or page images, and a model that cannot read a file is told why. Up to 20 files / 50 MB each / 200 MB per message by default, changed by admins at runtime |
 | **Knowledge Base** | Hybrid vector + keyword search; distills resolved cases into reusable SOPs |
 | **Reports & Schedules** | Daily/weekly/incident/inventory reports; cron pipelines (FullScan, Monitoring, HealthPatrol, …) |
 | **Messaging** | Unified Settings → Messaging tab: bot apps (Feishu/Slack/DingTalk/WeCom credentials), channels (Slack/Email/SES/SNS/Feishu/DingTalk/WeCom/Webhook), and delivery logs — schema-driven config with masked secrets, via `/api/messaging/*` |
@@ -219,6 +219,8 @@ The **Chat** page streams multiple concurrent sessions (background streaming, in
 | `AIOPS_CHANGE_INTAKE_SECRET` | *(empty)* | HMAC secret for external change intake `POST /api/changes/intake` (`X-AIOps-Signature` over timestamp + body, else 401). Empty = the endpoint is 404. Never put it in `settings.yaml` |
 | `AIOPS_POLICY_GRAPH_IMPACT_ENFORCE` | `false` | Policy blast radius from the published graph: `false` = shadow (recorded on the decision as `shadow_blast_radius`, rules never see it); `true` = it feeds `blast-radius-escalation` |
 | `AIOPS_DEPLOYMENT_PROFILE` | `local` | `local` (SQLite/files) or `cloud` (Postgres/S3) |
+
+Chat attachment limits (files per message, sizes, accepted types, how much text / how many images each model turn gets, how long an unsent upload is kept) default from `chat_upload:` in `settings.yaml`; admins change them at runtime in **Settings → Chat attachments** or with `PATCH /api/settings/chat-upload` (kept in the database, every change audited). Files live under `chat_attachments_dir` (default `data/chat_attachments`) and are deleted with their chat.
 
 ---
 

@@ -913,6 +913,39 @@ All under `src/agenticops/web/frontend/src/`. Check with `npx tsc --noEmit`, `np
 | Notification | Non-goal. |
 | IM | Non-goal: IM file messages are still dropped; that is a separate project. |
 
-## Evidence
+## Evidence (2026-11-07)
 
-(Filled in by Task 16.)
+- **Live models** (`tests/integration/test_chat_attachments_live.py`, real API + real Main, us-east-1): **5/5 in 101 s**.
+  - Opus 5.5 read all 23 types and returned every planted code word: txt, md, html, htm, csv (text); pdf, scanned
+    pdf, docx, xlsx, doc, xls (native documents; .doc / .xls made by LibreOffice); json, log, xlsm, GBK tsv, pptx
+    (text); jpg, png, gif, webp, bmp, tiff, heic (native images).
+  - GPT-6 Astra: png native, txt / pdf / docx as text (`model_no_documents`), the scanned PDF as page images — all
+    answered; .doc → `notice` / `claude_only_format` (the model said the content was not provided).
+  - gpt-oss-120b: txt and csv answered, png → `notice` / `model_no_images`.
+  - One Opus 5.5 session, 4 turns × (3 PDFs + 2 images): no error on any turn (before: the second turn failed).
+  - Agent cache cleared after a turn with a PDF and an xlsx: the next turn (no attachments) answered both code words
+    from the rebuilt history (the model noted the spreadsheet text was cut at `history_text_max_chars`, by design).
+- **Browser E2E** (Playwright, uvicorn from the worktree, temp DB, `api_auth_enabled=true`, admin + writer; screenshots
+  in `/tmp/chat-att-e2e/screens/`, not committed):
+  - A PDF, an xlsx and a screenshot named `image.png` pasted through a synthetic `ClipboardEvent` → three cards, the
+    image renamed `pasted-20261107-170857-3.png` with its thumbnail, «3/20 · 15 KB / 200 MB».
+  - Reload before sending → the tray came back from the draft's ids (server thumbnail).
+  - A 391 KB paste under CDP upload throttling → «Uploading 33%», Send disabled; removed mid-upload → gone, nothing
+    staged on the server.
+  - Send from the welcome composer → moved to the new chat after `accepted`; the message shows the thumbnail and PDF /
+    XLSX cards with «read natively»; Opus 5.5 answered all three code words; the stored message carries each
+    delivery.
+  - Reload → thumbnail / preview fetched from `/api/chat/attachments/{id}/content`; lightbox opens with
+    `slideInRight`, ESC closes, «Download» saves the original under its name; a PDF card downloads the PDF.
+  - **Found and fixed:** the lightbox was fixed to its virtualized row (the row's `transform`), header cut off →
+    `createPortal(document.body)` (2cef703); re-verified: overlay = the viewport.
+  - Settings → Chat attachments as admin: max files 7 and `.tiff` off saved → bootstrap `upload_policy` changed at
+    once, one `audit_logs` row; 99 → the field shows «less than or equal to 50» (422, no audit row).
+  - As writer: «Only admins can change these», inputs disabled, `PATCH` → 403; the writer's composer refuses a pasted
+    `.tiff` («this file type cannot be attached»).
+  - Deleting the chat → its 3 rows and its directory are gone.
+- **Full backend suite** (worktree venv, throwaway DB): **7236 passed / 99 skipped / 1 failed** — the one known DNS false
+  failure `test_web_tools.py::TestWebFetchErrors::test_invalid_headers_json` (after Task 9: 7218 / 94 / the same 1).
+  After the final store fix (8c0da62) the chat / session / upload / attachment / viewer suites: 568 passed.
+- **Frontend**: `tsc --noEmit` 0 errors; vitest 61 files / 724 tests; clean `/tmp` copy `npm ci && tsc && npm run build`
+  OK (Task 15).

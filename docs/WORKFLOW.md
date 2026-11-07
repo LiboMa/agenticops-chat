@@ -690,34 +690,41 @@ User: "disable awslabs.aws-api-mcp-server" → toggle_mcp_server
 
 ```mermaid
 flowchart LR
-    INPUT["User Message<br/>'analyze @/tmp/error.log I#42'"]
-
-    INPUT --> FILE["@file extraction<br/>CLI: read from disk<br/>Web: multipart upload"]
-    INPUT --> REFS["I#/R# resolution<br/>Query DB for context"]
-
-    FILE -->|"Image (.png/.jpeg)"| IMG["Image ContentBlock<br/>(native Strands SDK)"]
-    FILE -->|"Document (.pdf/.docx)"| DOC["Document ContentBlock<br/>(native Strands SDK)"]
-    FILE -->|"Text (.json/.yaml/.py)"| TXT["<attached_file> XML"]
-
-    REFS --> CTX["<referenced_issue><br/><referenced_resource>"]
-
-    TXT --> ASSEMBLY["Assemble enriched input"]
-    CTX --> ASSEMBLY
-    IMG --> ASSEMBLY
-    DOC --> ASSEMBLY
-
-    ASSEMBLY -->|"Text only"| STR["str<br/>(backward compatible)"]
-    ASSEMBLY -->|"Has media"| BLOCKS["list[ContentBlock]<br/>(text + image + document)"]
-
-    STR --> AGENT["Agent.__call__()"]
-    BLOCKS --> AGENT
+    PICK["Paste / drop / pick<br/>(any file type)"] --> UP["POST /api/chat/attachments<br/>one file, XHR ×3, progress"]
+    UP --> WORKER["subprocess worker<br/>text · preview · thumb · page images · meta"]
+    WORKER --> READY["ready / failed (reason)"]
+    READY --> SEND["POST …/messages<br/>attachment_ids"]
+    CLI["CLI @/path"] --> WORKER
+    SEND --> CLAIM["dispatch claim = new<br/>bind to session + message"]
+    CLAIM --> DELIVER{"build_turn for the<br/>agent's actual model"}
+    DELIVER -->|"Claude"| NATIVE["image + PDF/Word/Excel blocks<br/>(≤ 5 docs, ≤ 20 images)"]
+    DELIVER -->|"GPT-6"| IMGONLY["images · text · scanned PDF → page images"]
+    DELIVER -->|"gpt-oss / unknown"| TEXT["extracted text · notice"]
+    NATIVE --> HOOK["AttachmentBudgetHook<br/>(BeforeModelCallEvent):<br/>history within one request"]
+    IMGONLY --> HOOK
+    TEXT --> HOOK
+    REFS["I#/R#/C# from the typed text only"] --> HOOK
+    HOOK --> AGENT["Main agent"]
 ```
 
-**Web composer input (v1.1.x):** the chat composer accepts pasted images (`Cmd+V`),
-drag-dropped files, and the file picker — up to 5 attachments per message (accepted types
-only; per-type size caps mirror `file_reader.py`: 512 KB text / 5 MB image / 5 MB document).
-All attachments post as one multipart request (`file` repeated); the backend reads
-`form.getlist("file")` and builds Strands ContentBlocks per file (server caps at 5).
+**Chat attachments (2026-11-07):** attach any common file — txt / md / html / htm / pdf (scanned
+too) / docx / doc / xlsx / xlsm / xls / pptx / csv / tsv / json / log / yaml / code files / files
+without an extension / jpg / png / gif / webp / bmp / tiff / heic — by pasting (any file the
+clipboard holds; a screenshot's generated name becomes `pasted-YYYYMMDD-HHmmss-N.png`, so two
+pastes are two files), dropping or picking. Each file uploads at once (three at a time, with
+progress), the server checks it (extension allowed, content matches it) and processes it in
+an isolated subprocess; the composer's tray shows thumbnails / type badges, size, state and a
+`3/20 · 12.4 MB / 200 MB` counter, and the send button waits for uploads in progress. The sent
+message shows image thumbnails (click → full-size viewer: ESC closes, ←/→ step, download the
+original) and file cards (click → download) with how each reached the model: «read
+natively», «text extracted», «page images», or «not readable by this model: …». A draft
+keeps its uploads across a refresh (an unsent upload is kept `staged_ttl_hours`, default 24).
+What each model gets: Claude reads images and PDF / Word / Excel natively; GPT-6 images
+(documents as text, a scanned PDF as page images); gpt-oss text only. Within one request at
+most 5 documents and 20 images (Bedrock's limits) — earlier turns' documents become text and
+only the newest `history_images_max` images stay, so a long chat never outgrows a request.
+Limits: Settings → General → **Chat attachments** (admins edit, viewers with `settings_read`
+see) or `/api/settings/chat-upload`.
 
 **Chat UI (v1.1.x):** open-webui-style blue/white minimal look — sessions grouped by time
 (Pinned / Starred / Today / Yesterday / Previous 7 days / Previous 30 days / Older) via a
@@ -990,7 +997,7 @@ Open `http://localhost:8000/app/` and sign in. **The workspace shell (MVP-2.7.0)
 
 > **Note:** Settings consolidates account management, messaging channels, MCP servers, and the optional Enhanced Backend selector. The standalone Network topology page was removed (the graph engine remains as agent tools — see Tutorial 7).
 
-**Web chat supports file uploads** — click the paperclip icon to attach screenshots (PNG/JPEG) for visual analysis or PDFs/docs for document analysis.
+**Web chat takes any common file** — paste, drop or click the paperclip: screenshots and photos (incl. HEIC / TIFF), PDFs (scanned too), Word / Excel / PowerPoint, csv / tsv / json / logs / code. Each uploads at once; the message shows how each reached the model (see «Chat attachments» above).
 
 ---
 
@@ -1404,10 +1411,24 @@ curl -X PATCH $BASE/chat/sessions/{id} \
   -H 'Content-Type: application/json' \
   -d '{"model_id": "global.anthropic.claude-opus-5"}'
 
-# Upload image for analysis
+# Attach files (2026-11-07): upload each, wait until processed, send their ids with the message
+curl -X POST $BASE/chat/attachments -F "file=@/tmp/dashboard.png"     # → 201 {"id": "…", "status": "processing"}
+curl $BASE/chat/attachments/{attachment_id}                            # → "status": "ready" | "failed" (+ reason)
 curl -X POST $BASE/chat/sessions/{id}/messages \
-  -F "content=analyze this screenshot" \
+  -H 'Content-Type: application/json' \
+  -d '{"content": "what changed on this dashboard?", "client_message_id": "<uuid>", "attachment_ids": ["…"]}'
+curl "$BASE/chat/attachments/{attachment_id}/content?variant=thumb"    # original | preview | thumb | page-N
+
+# One-request form (still works): the files are staged and processed inside the request
+curl -X POST $BASE/chat/sessions/{id}/messages \
+  -F "content=analyze this screenshot" -F "client_message_id=<uuid>" \
   -F "file=@/tmp/dashboard.png"
+
+# Chat upload limits (admin when auth is on; every change audited)
+curl $BASE/settings/chat-upload
+curl -X PATCH $BASE/settings/chat-upload -H 'Content-Type: application/json' \
+  -d '{"max_files": 10, "allowed_extensions": [".pdf", ".png", ".xlsx"]}'
+curl -X DELETE $BASE/settings/chat-upload                              # back to settings.yaml defaults
 
 # Approve fix plan
 curl -X PUT $BASE/fix-plans/{id}/approve

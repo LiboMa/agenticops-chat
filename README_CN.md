@@ -50,7 +50,7 @@
 | **自优化记忆** | 基于文件的智能体记忆,每次运维中学习;智能体自策展、永不删除的归档、prompt-cache 安全的注入 |
 | **自主技能** | 16 个领域技能,智能体可创建/改进/合并 —— 仅经安全门禁、人类可审计的流程发布。**广域加载**:从 URL、Git 仓库或 zip/tar.gz 导入技能包 —— 经 CLI、API,或 Skills 页的「URL / Git 仓库」导入器(逐包结果清单 + *已导入* 徽标)。一切先落为草稿;发布前扫描**整包**(含 `.sh`/`.py`);包内脚本只在受限**沙箱**里运行(无凭证、无网络;默认关闭) |
 | **并发对话** | 多会话同时流式输出;通过游标分页 + 虚拟化历史实现秒开 |
-| **对话附件** | Web 编辑器支持粘贴图片(Cmd+V)、拖拽、多文件上传(最多 5 个);按类型校验大小 |
+| **对话附件** | 可以附加任何常见文件作为证据 —— txt / md / html / pdf(含扫描件)/ Word / Excel / PowerPoint / csv / tsv / json / log / jpg / png / gif / webp / bmp / tiff / heic:粘贴(任意文件类型)、拖拽或选择;每个文件附上就开始上传并显示进度,消息里有缩略图、大图预览和下载。Claude 原生读 PDF / Word / Excel;其它模型拿到提取的文本或页面图片,读不了的文件会告诉模型原因。默认每条消息最多 20 个文件、单个 50 MB、合计 200 MB,管理员可在运行时修改 |
 | **知识库** | 向量 + 关键词混合检索;把已解决案例蒸馏为可复用 SOP |
 | **报告与定时任务** | 日报/周报/事件/清单报告;cron 流水线(FullScan、Monitoring、HealthPatrol 等) |
 | **消息 (Messaging)** | 统一的 Settings → Messaging 页:机器人应用(飞书/Slack/钉钉/企微 凭据)、通道(Slack/Email/SES/SNS/飞书/钉钉/企微/Webhook)、投递日志 —— schema 驱动、密钥脱敏,经 `/api/messaging/*` |
@@ -219,6 +219,8 @@ React 18 + TypeScript + Tailwind + TanStack Query,由 FastAPI 在 `http://localh
 | `AIOPS_CHANGE_INTAKE_SECRET` | *(空)* | 外部变更入口 `POST /api/changes/intake` 的 HMAC 密钥(`X-AIOps-Signature` 覆盖时间戳 + 请求体,否则 401)。为空 = 该端点 404。不要写进 `settings.yaml` |
 | `AIOPS_POLICY_GRAPH_IMPACT_ENFORCE` | `false` | 基于已发布关系图的策略爆炸半径:`false` = 影子模式(只作为 `shadow_blast_radius` 记在决策上,规则看不到);`true` = 喂给 `blast-radius-escalation` |
 | `AIOPS_DEPLOYMENT_PROFILE` | `local` | `local`(SQLite/文件)或 `cloud`(Postgres/S3) |
+
+对话附件的限额(每条消息的文件数、大小、接受的类型、每轮给模型多少文本和图片、未发送的上传保留多久)默认取 `settings.yaml` 的 `chat_upload:`;管理员可在运行时通过 **Settings → 聊天附件** 或 `PATCH /api/settings/chat-upload` 修改(存在数据库里,每次修改都写审计)。文件存放在 `chat_attachments_dir`(默认 `data/chat_attachments`),随会话一起删除。
 
 ---
 
