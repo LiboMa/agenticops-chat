@@ -215,7 +215,8 @@ class ChatStreamStore {
                       same(t) ? { ...t, status: "done" as const, outcome: data.outcome ?? t.outcome,
                                   ...(typeof data.duration_ms === "number" ? { duration_ms: data.duration_ms } : {}),
                                   ...(typeof data.result_preview === "string" ? { result_preview: data.result_preview } : {}),
-                                  ...(typeof data.text_end === "number" ? { text_end: data.text_end } : {}) } : t),
+                                  ...(typeof data.text_end === "number" ? { text_end: data.text_end } : {}),
+                                  ...(typeof data.started_ms === "number" ? { started_ms: data.started_ms } : {}) } : t),
                   });
                 }
                 break;

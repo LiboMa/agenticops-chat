@@ -55,6 +55,10 @@ describe("workTotals", () => {
     expect(workTotals([T({ duration_ms: 1200 }), T({ duration_ms: 800 })])).toEqual({ count: 2, ms: 2000 });
     expect(workTotals([T({})])).toEqual({ count: 1, ms: null });
   });
+  it("is the span on the turn's clock when every step knows when it started (parallel steps overlap)", () => {
+    expect(workTotals([T({ started_ms: 0, duration_ms: 1000 }), T({ started_ms: 200, duration_ms: 1000 })]))
+      .toEqual({ count: 2, ms: 1200 });
+  });
 });
 
 import { formatDuration } from "@/lib/workSteps";

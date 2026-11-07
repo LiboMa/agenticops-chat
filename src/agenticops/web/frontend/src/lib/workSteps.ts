@@ -55,10 +55,18 @@ export function splitWork(content: string, tools: ToolStep[], opts: { live?: boo
   return { timeline, answer };
 }
 
-/** How many steps and how long they took in all (null when no step has a duration: an older row). */
+/** How many steps and how long they took: the span on the turn's clock when every step knows when it started
+ *  (steps run in parallel — a sum would count the overlap), else the sum of the known durations (older rows), else
+ *  null (no duration known). */
 export function workTotals(tools: ToolStep[]): { count: number; ms: number | null } {
   const known = tools.filter((t) => typeof t.duration_ms === "number");
-  return { count: tools.length, ms: known.length ? known.reduce((sum, t) => sum + (t.duration_ms ?? 0), 0) : null };
+  if (known.length === 0) return { count: tools.length, ms: null };
+  if (known.length === tools.length && tools.every((t) => typeof t.started_ms === "number")) {
+    const start = Math.min(...tools.map((t) => t.started_ms!));
+    const end = Math.max(...tools.map((t) => t.started_ms! + t.duration_ms!));
+    return { count: tools.length, ms: end - start };
+  }
+  return { count: tools.length, ms: known.reduce((sum, t) => sum + (t.duration_ms ?? 0), 0) };
 }
 
 /** "0.9 s" under ten seconds, "52 s" under a minute, "2 min 5 s" above — in the user's language. */

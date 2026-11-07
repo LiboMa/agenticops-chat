@@ -208,39 +208,43 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose }: Props) {
                             className="text-xs font-medium bg-background border border-border rounded px-1 py-0.5 w-full focus:outline-none focus:ring-1 focus:ring-primary"
                           />
                         ) : (
-                          <div className="flex items-center gap-1.5 pr-4">
-                            {activeStreaming.includes(s.session_id) && (
-                              <span
-                                title="Streaming…"
-                                className="inline-block w-1.5 h-1.5 rounded-full bg-primary-500 animate-pulse flex-shrink-0"
-                              />
-                            )}
-                            {s.pinned && <span className="text-[10px] flex-shrink-0" title={t("chat.pinned")}>📌</span>}
-                            {s.starred && <span className="text-[10px] flex-shrink-0" title={t("chat.starred")}>⭐</span>}
-                            {(() => {
-                              const tag = visibilityTag(s, isAuthenticated);
-                              return tag && (
-                                <span className="flex-shrink-0 rounded border border-border px-1 text-[10px] text-muted-foreground">
-                                  {t(`chat.visibility.${tag}`)}
-                                </span>
-                              );
-                            })()}
-                            <p
-                              onDoubleClick={(e) => {
-                                e.stopPropagation();
-                                if (!canManage(s)) return;
-                                setRenamingId(s.session_id);
-                                setRenameValue(s.name);
-                              }}
-                              className={`text-[13px] truncate ${isActive ? "font-semibold text-foreground" : "text-foreground/90"}`}
-                            >
-                              {s.name}
-                            </p>
+                          // 2026-11-07: the title on its own line (a 260px list stays readable); what the chat is about
+                          // and who sees it on a quiet second line
+                          <div className="min-w-0 pr-4">
+                            <div className="flex items-center gap-1.5">
+                              {activeStreaming.includes(s.session_id) && (
+                                <span title="Streaming…"
+                                      className="inline-block w-1.5 h-1.5 rounded-full bg-primary-500 animate-pulse flex-shrink-0" />
+                              )}
+                              {s.pinned && <span className="text-[10px] flex-shrink-0" title={t("chat.pinned")}>📌</span>}
+                              {s.starred && <span className="text-[10px] flex-shrink-0" title={t("chat.starred")}>⭐</span>}
+                              <p
+                                onDoubleClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!canManage(s)) return;
+                                  setRenamingId(s.session_id);
+                                  setRenameValue(s.name);
+                                }}
+                                className={`min-w-0 truncate text-[13px] ${isActive ? "font-semibold text-foreground" : "text-foreground/90"}`}
+                              >
+                                {s.name}
+                              </p>
+                            </div>
                             {/* S5: what the chat is about — its linked object, or an independent request */}
-                            {(() => { const l = sessionRowLabel(s); return (
-                              <p className="truncate text-[11px] text-muted-foreground">
-                                {l.text ? <span className="font-mono">{l.text}</span> : t(l.key!)}
-                              </p>); })()}
+                            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+                              {(() => {
+                                const tag = visibilityTag(s, isAuthenticated);
+                                return tag && (
+                                  <span className="flex-shrink-0 rounded border border-border px-1 text-[10px]">
+                                    {t(`chat.visibility.${tag}`)}
+                                  </span>
+                                );
+                              })()}
+                              {(() => { const l = sessionRowLabel(s); return (
+                                <span className="truncate">
+                                  {l.text ? <span className="font-mono">{l.text}</span> : t(l.key!)}
+                                </span>); })()}
+                            </div>
                           </div>
                         )}
 

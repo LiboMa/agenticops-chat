@@ -165,7 +165,7 @@ export default function Chat() {
   const [splitRatio, setSplitRatio] = usePersistedState("aiops-chat-split", 0.55);
 
   // Flyout resizable width (px), persisted
-  const [flyoutWidth, setFlyoutWidth] = usePersistedState("aiops-flyout-width", 220);
+  const [flyoutWidth, setFlyoutWidth] = usePersistedState("aiops-flyout-width", 260);
   const [flyoutDragging, setFlyoutDragging] = useState(false);
   const flyoutDraggingRef = useRef(false);
   const flyoutContainerRef = useRef<HTMLDivElement>(null);

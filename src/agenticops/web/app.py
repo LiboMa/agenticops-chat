@@ -4626,6 +4626,9 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
             t0 = _tool_t0.get(call_id)
             return int((time.monotonic() - t0) * 1000) if t0 is not None else 0
 
+        def _turn_ms() -> int:   # where on the turn's clock a step starts (the work log's total is a span, not a sum)
+            return int((time.monotonic() - _chat_start_time) * 1000)
+
         input_tokens = 0
         output_tokens = 0
         cache_read_tokens = 0
@@ -4689,7 +4692,7 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
                     if tool_name and call_id not in [t.get("call_id") for t in tool_calls]:
                         # 2026-11-07 work log: where in the reply text this step began, and when (its duration)
                         tool_calls.append({"name": tool_name, "status": "running", "call_id": call_id,
-                                           "text_offset": len(accumulated)})
+                                           "text_offset": len(accumulated), "started_ms": _turn_ms()})
                         _tool_t0[call_id] = time.monotonic()
                         yield {"event": "tool_start", "data": json.dumps(
                             {"name": tool_name, "call_id": call_id, "text_offset": len(accumulated)})}
@@ -4703,6 +4706,10 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
                             for t in tool_calls:
                                 if t.get("call_id") == _use.get("toolUseId") and "summary" not in t:
                                     t["summary"] = summarize_input(_use.get("input"))
+                                    # its input is complete: the step runs from here — a batch of calls the model
+                                    # wrote one after another must not count the writing as running time
+                                    _tool_t0[t["call_id"]] = time.monotonic()
+                                    t["started_ms"] = _turn_ms()
                                     yield {"event": "tool_input", "data": json.dumps(
                                         {"call_id": t["call_id"], "summary": t["summary"]})}
                         _res = _block.get("toolResult") if isinstance(_block, dict) else None
@@ -4719,7 +4726,7 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
                                 yield {"event": "tool_end", "data": json.dumps(
                                     {"name": t["name"], "call_id": t["call_id"], "outcome": t["outcome"],
                                      "duration_ms": t["duration_ms"], "result_preview": t["result_preview"],
-                                     "text_end": t["text_end"]})}
+                                     "text_end": t["text_end"], "started_ms": t.get("started_ms")})}
                 # Completion with result
                 if "result" in ev:
                     res = ev["result"]
@@ -4746,7 +4753,8 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
                 t["text_end"] = t.get("text_offset", len(accumulated))
                 yield {"event": "tool_end", "data": json.dumps(
                     {"name": t["name"], "call_id": t.get("call_id"), "outcome": "unknown",
-                     "duration_ms": t["duration_ms"], "result_preview": "", "text_end": t["text_end"]})}
+                     "duration_ms": t["duration_ms"], "result_preview": "", "text_end": t["text_end"],
+                     "started_ms": t.get("started_ms")})}
 
             # Persist assistant message (re-verify session still exists to avoid
             # FK violation / orphan if it was deleted mid-stream)

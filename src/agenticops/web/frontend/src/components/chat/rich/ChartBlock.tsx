@@ -38,7 +38,10 @@ function Plot({ spec, height }: { spec: ChartSpec; height: number }) {
              contentStyle={{ background: SURFACE, border: `1px solid ${GRID}`, borderRadius: 8, fontSize: 12 }}
              labelStyle={{ color: "hsl(var(--foreground))" }} itemStyle={{ color: "hsl(var(--foreground))" }} />
   );
-  const legend = spec.series.length > 1 ? <Legend wrapperStyle={{ fontSize: 12, color: INK }} iconType="circle" /> : null;
+  // legend text wears the text colour, never the series colour (the coloured dot carries identity)
+  const legendText = (v: unknown) => <span style={{ color: "hsl(var(--foreground))" }}>{String(v)}</span>;
+  const legend = spec.series.length > 1
+    ? <Legend wrapperStyle={{ fontSize: 12 }} iconType="circle" formatter={legendText} /> : null;
   const axes = (
     <>
       <CartesianGrid vertical={false} stroke={GRID} strokeDasharray="3 3" />
@@ -57,7 +60,7 @@ function Plot({ spec, height }: { spec: ChartSpec; height: number }) {
           {slices.map((_, i) => <Cell key={i} fill={color(i)} />)}
         </Pie>
         {tooltip}
-        <Legend wrapperStyle={{ fontSize: 12, color: INK }} iconType="circle" />
+        <Legend wrapperStyle={{ fontSize: 12 }} iconType="circle" formatter={legendText} />
       </PieChart>
     );
   } else if (spec.type === "bar") {

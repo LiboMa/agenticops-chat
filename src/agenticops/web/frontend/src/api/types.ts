@@ -772,6 +772,8 @@ export interface ToolStep {
   result_preview?: string;
   text_offset?: number;
   text_end?: number;
+  /** ms since the turn began when the step started running (its input complete) — the work log's total is a span */
+  started_ms?: number;
 }
 
 export interface ChatMessage {
