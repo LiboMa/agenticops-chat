@@ -1216,6 +1216,30 @@ audited path, not a bug.
 
 ---
 
+## User Accounts & Read-only Roles
+
+With `AIOPS_API_AUTH_ENABLED=true` everyone signs in, and there is **no self-registration**: an operator creates accounts on
+the server (the random password is printed once).
+
+```bash
+aiops users create alice                         # writer (read + write)
+aiops users create bob --admin                   # administrator
+aiops users create demo --viewer                 # read-only: browse and chat, change nothing
+aiops users create auditor --viewer --settings   # read-only, and may open Settings with every control disabled
+aiops users list                                 # name, role (admin / writer / viewer / viewer+settings), last sign-in
+aiops users disable demo                         # its sessions and API keys stop at once
+```
+
+| | Writer / admin | Viewer | Viewer + `--settings` |
+|---|---|---|---|
+| Browse pages, chat | yes | yes — in its own chats, with a query-only main agent | yes |
+| Own password, UI preferences | yes | yes | yes |
+| Any other write (approve, change, run, settings, …) | yes (RBAC rules apply) | 403 `read_only` | 403 `read_only` |
+| Settings page | yes | hidden | read-only |
+
+A viewer's chat has no sub-agents, approvals, changes or configuration; CLI tools refuse write commands and Kubernetes secret
+reads. It still reads everything a reader sees, and its turns spend tokens on the main agent's model.
+
 ## Token & Cost Observability
 
 Every agent call is logged with token counts and cost (computed from `config.token_cost_table` at write time). Attribution tracks who triggered the spend: `user`, `cli`, `system`, or `schedule`.
@@ -1536,6 +1560,11 @@ export AIOPS_AUTO_RCA_ENABLED=true              # Auto-trigger RCA on new issue 
 export AIOPS_AUTO_FIX_ENABLED=true              # Auto-fix pipeline master switch (default: true)
 export AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1=true   # Auto-approve low-risk plans (default: true)
 export AIOPS_NOTIFICATIONS_ENABLED=true         # Auto-notify on pipeline events (default: true)
+
+# Agent runtime (Strands 1.64)
+export AIOPS_STRANDS_CONTEXT_MANAGER_AUTO=true      # Offload oversized tool results, keep a preview (default: true)
+export AIOPS_CONTEXT_OFFLOAD_MAX_RESULT_TOKENS=1500 # Results above this are offloaded (retrieve_offloaded_content)
+export AIOPS_CONTEXT_OFFLOAD_PREVIEW_TOKENS=750     # Head of the result kept in context
 
 # Features
 export AIOPS_SKILLS_ENABLED=true       # Enable agent skills (default: true)

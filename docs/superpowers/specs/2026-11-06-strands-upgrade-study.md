@@ -1,6 +1,6 @@
 # 研究报告：Strands Agents 升级点与收益（1.45 → 1.64 / Strands harness / Strands Evals）
 
-日期：2026-11-06 · 状态：**研究结论，待主人决策**（不是实施计划）· 只读研究，未改代码、未安装（新包只下载 wheel 当文本读）
+日期：2026-11-06 · 状态：**研究结论；§5 第 1–2 步已完成并于 2026-11-07 合入 main**（升级报告 `docs/STRANDS-1.64-UPGRADE-REPORT.md`）· 只读研究，未改代码、未安装（新包只下载 wheel 当文本读）
 姊妹篇：[`2026-11-06-agentcore-china-region-study.md`](2026-11-06-agentcore-china-region-study.md)（中国区 AgentCore，独立成文）
 
 出处约定：`docs:` = https://strandsagents.com/docs/user-guide/ ；changelog = https://strandsagents.com/changelog/ ；
@@ -135,7 +135,7 @@ typer / CLI 在 rich 15 下是否正常：未确认 → 先在独立 venv 里试
    preview_tokens=750)]`；`CacheConfig(strategy="auto", tools_ttl=True)`；加强 `test_strands_context_manager.py`，并把
    「ignoring co-provided conversation_manager」warning 当错误。全量测试（临时 DB）→ chaos-lab 真实运行（13 例定位评测或子集），
    与 2.6.1 的准确率和成本对比 → 主人验收后再推送。
-   **进度（2026-11-07）**：已完成，分支 `feat/strands-1.64`。保持行为的做法：不传 `context_manager`，`ContextOffloader`
+   **进度（2026-11-07）**：已完成，`3eb8883`（分支 `feat/strands-1.64`，PR #32）经 PR #33 合入 main（`603046d`），开发机已部署。保持行为的做法：不传 `context_manager`，`ContextOffloader`
    作为插件传入，并覆盖 `_slice_preview` 保留 1.45 的「只取头」预览（1.64 改成头 60% + 尾 40%，RCA 拓扑证据的边因此
    全部落在预览之外）；`CacheConfig(strategy="auto", tools_ttl=True, system_prompt_ttl=False)`。验收：全量测试除已知 DNS
    假失败外全部通过；真实 Bedrock 冒烟 PASS；本地 chat 三轮 E2E PASS；3 例定位评测 3/3 valid、AC@1 = 1.0，每例 13.5–16.7 万
@@ -148,7 +148,7 @@ typer / CLI 在 rich 15 下是否正常：未确认 → 先在独立 venv 里试
 
 ## 6. 需要主人决定
 
-1. ~~是否按 §5 先做「1.45 → 1.64 保持行为升级」~~ —— **主人 2026-11-06 已定：先做**（Plan Mode 起步）。
+1. ~~是否按 §5 先做「1.45 → 1.64 保持行为升级」~~ —— **主人 2026-11-06 已定：先做**；2026-11-07 已完成并合入 main。
 2. Strands Evals 试点是否与升级并行？用哪批用例（现有 13 例 + 录制的工具输出）？
 3. Harness 计划阶段 0 的哪些零件先做（结构化 RCA、ContextInjector、OTEL、critic 记账）？
 4. 是否接受 rich 升到 15（Evals 依赖），还是 Evals 一直放独立 venv？
