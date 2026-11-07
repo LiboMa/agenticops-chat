@@ -949,3 +949,12 @@ All under `src/agenticops/web/frontend/src/`. Check with `npx tsc --noEmit`, `np
   After the final store fix (8c0da62) the chat / session / upload / attachment / viewer suites: 568 passed.
 - **Frontend**: `tsc --noEmit` 0 errors; vitest 61 files / 724 tests; clean `/tmp` copy `npm ci && tsc && npm run build`
   OK (Task 15).
+- **Final review** (fresh reviewer, Opus): «merge with fixes», no Critical. Fixed, each with a test that failed
+  first: huge spreadsheets (worksheet XML streamed past the entry cap, honest sheet headers; a 300k-row xlsx in
+  0.3 s), documents too long to read whole go as text (`document_too_long`), text-less history documents stay native
+  within the budget, a request-wide history text budget, a 12-hex document name (no cross-chat registry key), the
+  worker child limits its own memory (no `preexec_fn`; the Linux limit itself is not exercised on darwin), a deleted
+  chat's staged files removed at once, a sweep that cannot take a new chat, the multipart send needs a
+  Content-Length and free disk, refused uploads stay in the tray on send. Ten minors deferred (listed in the
+  report). After the fixes: full suite **7247 passed / 99 skipped / 1 failed** (the same DNS false failure); vitest
+  61 files / 725; `tsc` 0; clean `/tmp` build OK; live E2E **5/5** again (91 s).
