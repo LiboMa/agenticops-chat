@@ -917,6 +917,11 @@ v2.7.0 之后直接在 main 上交付的工作。版本串仍是 2.7.0，它们�
 | RAW 想法文档只留本地 | `f02769b`（PR #30，11-06） | `RAW-Idea-latest-v3.md`、`RAW-Creative-Idea.md` 不再进 git（已在 `.gitignore`），本地副本保留 |
 | 两份研究 | `c7db5f6`（PR #31，11-06） | `superpowers/specs/2026-11-06-agentcore-china-region-study.md`、`superpowers/specs/2026-11-06-strands-upgrade-study.md` |
 | Strands 1.45 → 1.64 保持行为升级 + 下个版本可行性报告 | `3eb8883` + `18d587a`（PR #32；与 #29 一起经 PR #33 合入，合并提交 `603046d`，11-07） | 详见 [`STRANDS-1.64-UPGRADE-REPORT.md`](STRANDS-1.64-UPGRADE-REPORT.md)；可行性报告 `superpowers/specs/2026-11-06-strands-164-feature-feasibility.md`（主人 11-07 选组合 A） |
+| 模型配置一致性 | PR #35，合并提交 `f115743`（11-07） | 所有直连模型调用走 `preamble.converse_text`（只对接受的模型发 `temperature`、跳过推理块、空回答报错）；技能生成 / 案例提炼 / SOP / 旧 RCAEngine 跟随 Main；`agent_logs` 记实际运行的模型；价格表取自 AWS Price List；提交的默认模型 = 开发机在用的。详见 `superpowers/plans/2026-11-07-model-config-fixes.md` |
+| 聊天附件 | PR #36，合并提交 `7893547`（11-07） | 对话可附加任何常见文件（粘贴 / 拖入 / 选择即传），按模型交付并守 Bedrock 上限，历史附件预算钩子，上传配置存数据库并由管理员修改。详见 `superpowers/plans/2026-11-07-chat-attachments.md` |
+| 开发机 Node 22 | PR #37，合并提交 `bb01e5f`（11-07） | deploy-sg 装 Node 22：ACP Claude Code 适配器 0.50+ 需要 Node ≥ 22 |
+
+> 2026-11-07：`MVP-2.7.1` 已 rebase 到 main（`bb01e5f`），上表各项都已进入 2.7.1，见 `MVP-2.7.1-RELEASE.md`「随 rebase 带入的 main 交付」。
 
 ### 只读账户的六个可达面
 

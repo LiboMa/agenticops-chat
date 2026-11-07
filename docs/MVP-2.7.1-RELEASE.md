@@ -1,8 +1,10 @@
 # MVP-2.7.1 Release Notes — 变更感知的系统模型（核心能力轨 A1–A4）+ 2.7.0 的跟进项
 
-> Version: 2.7.1（进行中）· Branch: `MVP-2.7.1`（从 `v2.7.0` = `a953e6b` 切出，工作树 `.worktrees/mvp-2.7.1`）· 起始日期：2026-10-09
+> Version: 2.7.1（进行中）· Branch: `MVP-2.7.1`（10-09 从 `v2.7.0` = `a953e6b` 切出；**11-07 rebase 到 `main` = `bb01e5f`**，原工作树 `.worktrees/mvp-2.7.1` 已删，主检出就在本分支上；尚未推送）· 起始日期：2026-10-09
 >
 > **状态：2.7.0 E2E 观察第 1–5 条已修、受保护值按表格行比较已做（10-09；主人「修复之后，按计划进行」「先修复 E2E 的故障」，第 1、2 条的设计主人 10-09 确认：都做、回滚闸门拒绝保存），见下文三节「已修」；A1–A4 尚未开始。** 主人 10-08 把核心能力轨 A1–A4 从 v2.7.0 移到本版本（「complete the A1–A4's implementation within MVP-2.7.1」）。spec 已批准；A1 的详细实施计划待出，写好后交主人批准、选执行方式，批准前不动代码；A2–A4 各自开工前再出计划。依主人铁律，只有 E2E 通过且当面确认后才 `git push --no-verify`。
+>
+> **11-07：rebase 到最新 main**（主人「切换到 2.7.1 且 rebase 最新的 main branch」）。v2.7.0 之后在 main 上交付的工作随之进入 2.7.1，见下文「随 rebase 带入的 main 交付」。本版本自己的 5 个提交改写为 `9bc5249`（开版本）· `9d582e7`（命令分类与自动批准下限）· `76157c6`（代码记录的事实）· `d15fae5`（修复方案只恢复 + 回滚闸门）· `cd4f0d2`（表格逐行比较）；10-09 记录里的旧 SHA（`bb75bb5` / `27e9168` / `0fb090e` / `0a25f31`）已不存在。A1–A4 仍未开始。
 >
 > 设计输入：`docs/superpowers/specs/2026-10-06-change-aware-system-model-design.md`（A1–A4 = 其 §12 的 P1–P4）；来历：`docs/MVP-2.7.0-RELEASE.md` 与 `docs/superpowers/plans/2026-10-05-mvp-2.7.0-roadmap.md` 的「核心能力轨」节（10-06 并入 2.7.0、10-08 移出，正文已搬到本文件）。
 
@@ -16,6 +18,7 @@
 | A4 评测门禁 | 每夜 $0 指标、三个感知场景、`--assert`、再议 `sensing_enabled` 默认值 | 未开始 |
 | 受保护值按表格行比较 | 主人 10-08 决定（见下文「2.7.0 的跟进项」第 1 条） | **已做（10-09）**：逐行、行内逐单元格 |
 | 2.7.0 E2E 观察 | 第 1 条（SRE 越界）、第 2 条（回滚复现故障）、第 3 条（命令分类器 + 自动批准下限）、第 4 条（RCA 模型 id）、第 5 条（执行时长）**已修** | 已修（10-09） |
+| v2.7.0 之后 main 上的交付 | 只读账户、Strands 1.64、模型配置一致性、聊天附件、开发机 Node 22 等（PR #28–#37，见「随 rebase 带入的 main 交付」） | **已在 main，11-07 随 rebase 带入** |
 
 ---
 
@@ -164,6 +167,43 @@
 
 ---
 
+## 随 rebase 带入的 main 交付（2026-11-07）
+
+11-07 本分支 rebase 到 `main` = `bb01e5f`。v2.7.0（`a953e6b`）之后直接在 main 上交付的工作因此都在 2.7.1 里，版本串仍是 2.7.0。它们各自的设计、可达面与证据在下表所指的文档里，这里不重复。
+
+| 交付 | PR / 合并提交 | 一句话 | 文档 |
+|---|---|---|---|
+| 只读 viewer / editor 账户，删除自助注册 | PR #28 `93d7fcb`；PR #29（`ae62cd2`，经 PR #33 合入） | 自身权限不含 write 的用户只能浏览、对话、改自己的密码和偏好，其余写请求 403 `read_only`；对话跑只读主 agent；`settings_read` 可只读看 Settings；账户只能由 `aiops users create` 建立 | `MVP-2.7.0-RELEASE.md`「发布后追加」 |
+| RAW 想法文档只留本地 | PR #30 `4dfd0c5` | `RAW-Idea-latest-v3.md`、`RAW-Creative-Idea.md` 不再进 git（在 `.gitignore`），本地副本保留 | 同上 |
+| 两份研究 | PR #31 `e257321` | AgentCore 中国区、Strands 升级 | `superpowers/specs/2026-11-06-*-study.md` |
+| Strands 1.45 → 1.64 保持行为升级 + 可行性报告 | PR #33 `603046d`；报告 PR #34 `9119cfb` | 不传 `context_manager`（1.56 起它会丢弃各 agent 的 `conversation_manager`）；`ContextOffloader` 作插件并保留 1.45 只取头的预览 | `STRANDS-1.64-UPGRADE-REPORT.md` |
+| 模型配置一致性 | PR #35 `f115743` | 所有直连模型调用走 `preamble.converse_text`（只对接受的模型发 `temperature`，跳过推理块，空回答报错）；技能生成 / 案例提炼 / SOP / 旧 RCAEngine 跟随 Main；`agent_logs` 记实际运行的模型；价格表来自 AWS Price List；提交的默认模型 = 开发机实际在用的（Opus 5.5 / Sonnet 5.5 / GPT-6 Astra） | `superpowers/plans/2026-11-07-model-config-fixes.md` |
+| 聊天附件 | PR #36 `7893547` | 对话里粘贴 / 拖入 / 选择任何常见文件，立即上传；按模型交付（Claude 原生读图片与 PDF / Word / Excel，GPT-6 只看图，gpt-oss 只读文本），每次请求守 Bedrock 上限；历史附件预算钩子；上传配置存数据库，管理员在 Settings 或 `/api/settings/chat-upload` 修改并留审计 | `superpowers/plans/2026-11-07-chat-attachments.md`（含证据） |
+| 开发机 Node 22 | PR #37 `bb01e5f` | deploy-sg 装 Node 22：ACP Claude Code 适配器 0.50+ 需要 Node ≥ 22，Node 20 上只能装到不认识 Opus 5.5 的 0.49 | `iac/deploy-sg/` |
+
+### 从 v2.7.0 升到本分支的注意
+
+1. **依赖要重装**：`requirements.txt` 钉 `strands-agents==1.64.0`，并新增 openpyxl、python-pptx、pillow-heif、defusedxml（`files` 扩展）。`uv pip install -r requirements.txt && uv pip install -e ".[im,files,reports]" --no-deps`。
+2. **前端要重建**：`cd src/agenticops/web/frontend && npm install && npm run build`。11-07 本地实测：没重建时服务端用的是 10-08 的旧前端包，它发消息不带 `client_message_id`，每次发送都是 422「client_message_id (a UUID) is required」。git 跟踪的 `dist/` 已经很旧，不能当作当前前端。
+3. **先停服务再切换代码**：运行中的旧进程会在切换后懒加载磁盘上的新模块（Strands 版本不一致时报 `ImportError: StorageError`）；切换、装依赖、重建之后再启动。
+4. **`settings.yaml` 新键**：`chat_upload:`（上传限额，管理员可在运行时覆盖）、`chat_attachments_dir`、价格表的 Claude 5.5 / GPT-6 行；提交的默认模型改了（见 PR #35）。本地或机器上有自己的 `settings.yaml` 时，三方合并：自己选过的值保留，其它取新版本。
+5. **新表**：`chat_attachments`、`runtime_settings`，启动时 `create_all` 自动建。
+6. **不要在环境变量里钉模型**：`AIOPS_*` 压过 `settings.yaml`；开发机的 `AIOPS_BEDROCK_MODEL_ID` 已删。
+7. **ACP 需要 Node ≥ 22**（PR #37）。
+
+### rebase 的冲突处理
+
+| 文件 | 处理 |
+|---|---|
+| `CLAUDE.md`、`docs/README.md`、`docs/MVP-2.7.0-RELEASE.md` | 两边都保留：main 的「发布后追加」与 2.7.1 的版本行 / 指引并存 |
+| `README.md` / `README_CN.md` 设计原则 | 第 2 条取 2.7.1（自动批准以命令可判档为前提），第 3 条取 main（模型分层改为 5.5） |
+| `run_context.py` | 并集：main 的 `read_only` + 2.7.1 的 `model_id` / `run_started_at` |
+| `agents/executor_agent.py` | 并集：2.7.1 的 `run_context(run_started_at=…)` 包裹 + main 的 `track_agent(model_id=…)`（按实际运行的模型计价） |
+
+**门禁**（2026-11-07，rebase 后的 `MVP-2.7.1` = `cd4f0d2`，一次性库）：后端全量 **7339 passed / 99 skipped / 1 failed**——失败的是已知的 DNS 误报 `test_web_tools.py::TestWebFetchErrors::test_invalid_headers_json`（本机 DNS 把 example.com 解析到私网段，SSRF 守卫先触发）；前端 vitest 61 个文件 / 725 条，`tsc --noEmit` 0 错误。本地主检出切到本分支后重启服务，发送一条消息得到 `accepted` → 回复 → `done`。
+
+---
+
 ## 六个可达面（本版本合计）
 
-A1 的逐行见上文；A2–A4 与跟进项的可达面在各自计划里逐行列出（CLI / Web API / Web UI / Agent tool / Schedule / Notification，Web API 与 Web UI 两行）。
+A1 的逐行见上文；A2–A4 与跟进项的可达面在各自计划里逐行列出（CLI / Web API / Web UI / Agent tool / Schedule / Notification，Web API 与 Web UI 两行）。随 rebase 带入的 main 交付，可达面在各自文档里（见上表「文档」列）。
