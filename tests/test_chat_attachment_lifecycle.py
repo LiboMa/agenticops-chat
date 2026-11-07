@@ -209,6 +209,38 @@ def test_move_bound_skips_deleted_session(env):
         db.query(ChatSession).filter(ChatSession.id == pk).delete()
     service.move_bound([att_id], sid)
     assert not store.session_root(sid).exists()
+    assert not store.staging_dir(att_id).exists()   # the deleted chat's file is not left behind in staging
+
+
+def test_sweep_keeps_a_chat_created_while_it_lists(env, monkeypatch):
+    """The sweep must not take a chat whose first send moves files in while it runs for an orphan."""
+    from agenticops.chat.attachments import service, store
+    real_dirs = store.session_dirs
+    made = {}
+
+    def dirs_while_a_chat_is_created():
+        pk, sid = _session()
+        store.session_root(sid).mkdir(parents=True)
+        (store.session_root(sid) / ("a" * 32)).mkdir()
+        made["sid"] = sid
+        return real_dirs()
+    monkeypatch.setattr(store, "session_dirs", dirs_while_a_chat_is_created)
+    service.sweep_staged()
+    assert (store.session_root(made["sid"]) / ("a" * 32)).is_dir()
+
+
+def test_move_tolerates_a_source_moved_meanwhile(env, monkeypatch):
+    import os as _os
+    from agenticops.chat.attachments import store
+    att_id = _stage(tmp=env)
+    pk, sid = _session()
+    real = _os.replace
+
+    def raced(src, dst):
+        real(src, dst)
+        raise FileNotFoundError(src)    # the other mover got there first
+    monkeypatch.setattr(store.os, "replace", raced)
+    store.move_into_session([att_id], sid)   # no exception
 
 
 def test_attachment_dir_falls_back_to_staging(env):

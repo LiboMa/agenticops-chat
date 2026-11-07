@@ -253,3 +253,22 @@ def test_other_users_attachment_cannot_be_sent(env):
         db.query(ChatAttachment).filter_by(id=att_id).update({"status": "ready"})
     r = _send(env, sid, [att_id])
     assert r.status_code == 422 and r.json()["detail"]["code"] == "attachment_unavailable"
+
+
+def test_multipart_send_needs_a_length_and_disk(env, monkeypatch):
+    from agenticops.chat.attachments import store
+    sid, pk = _session()
+
+    def body():
+        yield (b"--x\r\nContent-Disposition: form-data; name=\"client_message_id\"\r\n\r\n" +
+               str(uuid.uuid4()).encode() + b"\r\n--x\r\nContent-Disposition: form-data; name=\"file\"; "
+               b"filename=\"a.txt\"\r\n\r\nhi\r\n--x--\r\n")
+    r = env.client.post(f"/api/chat/sessions/{sid}/messages",
+                        headers={"Content-Type": "multipart/form-data; boundary=x"}, content=body())
+    assert r.status_code == 411 and r.json()["detail"]["code"] == "length_required"
+    monkeypatch.setattr(store, "disk_free_ok", lambda: False)
+    r = env.client.post(f"/api/chat/sessions/{sid}/messages",
+                        data={"content": "x", "client_message_id": str(uuid.uuid4())},
+                        files=[("file", ("a.txt", b"hi", "text/plain"))])
+    assert r.status_code == 507 and r.json()["detail"]["code"] == "insufficient_storage"
+    assert _user_messages(pk) == [] and _rows() == []

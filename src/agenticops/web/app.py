@@ -4420,11 +4420,18 @@ async def _stage_multipart_send(request: Request, actor: Actor) -> tuple[str, st
     from agenticops.chat.attachments import service as attachment_service
     from agenticops.services import chat_dispatch
     from agenticops.web.routers import chat_attachments as att_api
+    from agenticops.chat.attachments import store as attachment_store
     cfg = await asyncio.to_thread(upload_config.effective)
     length = request.headers.get("content-length")
-    if length and length.isdigit() and int(length) > cfg.max_total_mb * 1024 * 1024 + 64 * 1024:
+    if length is None or not length.isdigit():   # a chunked body would be spooled to disk without bound
+        raise HTTPException(411, detail={"detail": "Send the files with a Content-Length", "code": "length_required",
+                                         "trace_id": None})
+    if int(length) > cfg.max_total_mb * 1024 * 1024 + 64 * 1024:
         raise HTTPException(413, detail={"detail": f"The attachments of one message may total at most "
                                                    f"{cfg.max_total_mb} MB", "code": "attachments_too_large",
+                                         "trace_id": None})
+    if not await asyncio.to_thread(attachment_store.disk_free_ok):
+        raise HTTPException(507, detail={"detail": "The server is low on disk space", "code": "insufficient_storage",
                                          "trace_id": None})
     form = await request.form(max_files=cfg.max_files, max_fields=8)
     staged: list[str] = []

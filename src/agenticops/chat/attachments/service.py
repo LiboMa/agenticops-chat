@@ -156,7 +156,9 @@ def move_bound(att_ids: list[str], session_uuid: str) -> None:
     def _exists() -> bool:
         with get_db_session() as db:
             return db.query(ChatSession.id).filter(ChatSession.session_id == session_uuid).first() is not None
-    if not _exists():
+    if not _exists():   # deleted before its files moved: they go now, not at the next sweep
+        for att_id in att_ids:
+            store.remove_staged(att_id)
         return
     store.move_into_session(att_ids, session_uuid)
     if not _exists():   # deleted while the files moved: its cleanup may already have run — finish it here
@@ -192,12 +194,15 @@ def sweep_staged(now: Optional[datetime] = None) -> int:
     cutoff = (now - timedelta(hours=upload_config.effective().staged_ttl_hours)).replace(tzinfo=None)
     removed = 0
     rehome: dict[str, list[str]] = {}
+    # the disk is listed BEFORE the rows are read: a chat whose first send moves files in meanwhile is then never
+    # taken for an orphan
+    staged_on_disk = store.staged_ids()
+    on_disk_sessions = store.session_dirs()
     with get_db_session() as db:
         expired = [a.id for a in db.query(ChatAttachment).filter(ChatAttachment.session_id.is_(None),
                                                                   ChatAttachment.created_at < cutoff).all()]
         if expired:
             db.query(ChatAttachment).filter(ChatAttachment.id.in_(expired)).delete(synchronize_session=False)
-        staged_on_disk = store.staged_ids()
         rows = {a.id: a for a in db.query(ChatAttachment).filter(ChatAttachment.id.in_(staged_on_disk)).all()} \
             if staged_on_disk else {}
         sessions = {s.id: s.session_id for s in db.query(ChatSession.id, ChatSession.session_id).all()}
@@ -213,7 +218,7 @@ def sweep_staged(now: Optional[datetime] = None) -> int:
     removed += len([a for a in expired if a not in staged_on_disk])
     for session_uuid, ids in rehome.items():
         store.move_into_session(ids, session_uuid)
-    for name in store.session_dirs() - live_session_uuids:
+    for name in on_disk_sessions - live_session_uuids:
         store.remove_session(name)
         removed += 1
     return removed

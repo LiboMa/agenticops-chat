@@ -57,7 +57,10 @@ def move_into_session(att_ids: list[str], session_uuid: str) -> None:
     for att_id in att_ids:
         src = staging_dir(att_id)
         if src.is_dir():
-            os.replace(src, target / att_id)
+            try:
+                os.replace(src, target / att_id)
+            except FileNotFoundError:   # the sweep's re-home (or another mover) got there first
+                pass
 
 
 def remove_session(session_uuid: str) -> None:
