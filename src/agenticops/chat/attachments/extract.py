@@ -132,14 +132,20 @@ def _html_text(html: str) -> str:
     return "\n".join(p.parts)
 
 
+_STREAMED_ENTRY = re.compile(r"^xl/worksheets/[^/]+\.xml$")
+
+
 def _check_zip(src: Path) -> None:
+    """Refuse an archive that unpacks too far. A worksheet's XML is exempt from the per-entry cap: openpyxl's
+    read-only mode streams it and we stop at SHEET_MAX_ROWS (a 1M-row sheet is one ~200 MB entry); every other entry
+    (document.xml, slides, sharedStrings) is loaded whole and keeps the cap."""
     try:
         with zipfile.ZipFile(src) as z:
             infos = z.infolist()
     except zipfile.BadZipFile as e:
         raise ExtractError("corrupt", str(e)) from None
     if len(infos) > ZIP_MAX_ENTRIES or sum(i.file_size for i in infos) > ZIP_MAX_TOTAL_BYTES \
-            or any(i.file_size > ZIP_MAX_ENTRY_BYTES for i in infos):
+            or any(i.file_size > ZIP_MAX_ENTRY_BYTES and not _STREAMED_ENTRY.match(i.filename) for i in infos):
         raise ExtractError("archive_too_large")
 
 
@@ -294,25 +300,39 @@ def _xlsx(src: Path, out_dir: Path, lim: ExtractLimits, meta: dict) -> None:
     try:
         blocks, sheets, size = [], [], 0
         for ws in wb.worksheets:
+            # a sheet written without <dimension> (streaming exporters) reports no size: count what we read
+            sized = bool(ws.max_row) and bool(ws.max_column)
             rows_total = ws.max_row or 0
-            cols_total = ws.max_column or 0
-            lines, included = [], 0
-            for values in ws.iter_rows(max_col=min(cols_total or SHEET_MAX_COLS, SHEET_MAX_COLS), values_only=True):
+            lines, included, widest, exhausted = [], 0, 0, True
+            for values in ws.iter_rows(max_col=min(ws.max_column or SHEET_MAX_COLS, SHEET_MAX_COLS), values_only=True):
                 if included == SHEET_MAX_ROWS or size > lim.text_max_chars:
+                    exhausted = False
                     break
-                line = "\t".join(_cell(v) for v in values)
+                cells = list(values)
+                while cells and cells[-1] is None:      # no padding with empty trailing cells
+                    cells.pop()
+                widest = max(widest, len(cells))
+                line = "\t".join(_cell(v) for v in cells)
                 lines.append(line)
                 size += len(line) + 1
                 included += 1
-            rows_total = max(rows_total, included)
-            head = f"## Sheet: {ws.title} ({rows_total} rows × {cols_total} cols)"
+            cols_total = ws.max_column if sized else widest
+            if not sized:
+                rows_total = included
+            more = rows_total - included if sized else None
+            head = f"## Sheet: {ws.title} ("
+            head += f"{rows_total} rows" if (sized or exhausted) else f"at least {included} rows"
+            head += f" × {cols_total} cols"
             if cols_total > SHEET_MAX_COLS:
-                head += f" — first {SHEET_MAX_COLS} columns"
-            body = "\n".join(lines)
-            if rows_total > included:
-                body += f"\n[… {rows_total - included} more rows not included]"
-            blocks.append(f"{head}\n{body}")
-            sheets.append({"name": ws.title, "rows": rows_total, "cols": cols_total, "rows_included": included})
+                head += f", first {SHEET_MAX_COLS} columns"
+            if more:
+                head += f"; first {included} rows included, {more} more rows not included"
+            elif not sized and not exhausted:
+                head += f"; first {included} rows included, more rows not included"
+            head += ")"
+            blocks.append(head + "\n" + "\n".join(lines))
+            sheets.append({"name": ws.title, "rows": rows_total, "cols": cols_total, "rows_included": included,
+                           "rows_known": sized or exhausted})
         meta["sheets"] = sheets
         _write_text(out_dir, "\n\n".join(blocks), lim, meta)
     finally:

@@ -80,10 +80,9 @@ def test_xlsx_row_cap_reports_total_rows(tmp_path):
     text = _text(out)
     sheet = meta["sheets"][0]
     assert sheet["name"] == "metrics" and sheet["rows"] == 3000 and sheet["rows_included"] == 2000
-    assert "## Sheet: metrics (3000 rows × 4 cols)" in text
-    assert "[… 1000 more rows not included]" in text
+    assert "## Sheet: metrics (3000 rows × 4 cols; first 2000 rows included, 1000 more rows not included)" in text
     assert TOKENS["xlsx"] in text
-    assert "web-0001\t1\t" + TOKENS["xlsx"] + "\t" in text   # the formula cell has no cached value → empty
+    assert "web-0001\t1\t" + TOKENS["xlsx"] + "\n" in text   # the formula cell has no cached value → nothing
 
 
 def test_xlsm_is_read_like_xlsx(tmp_path):
@@ -238,3 +237,41 @@ def test_stored_original_without_suffix_is_read(tmp_path, kind):
     assert meta["sha256"]
     if kind not in ("heic",):
         assert TOKENS[kind] in _text(out)
+
+
+# ── final review fixes ───────────────────────────────────────────────────────
+
+
+def test_large_worksheet_entry_is_streamed_not_refused(tmp_path, monkeypatch):
+    """A big sheet's XML is streamed by openpyxl read-only: the per-entry archive cap must not refuse it (a 1M-row
+    xlsx unpacks one 197 MB sheet); other entries (docx, sharedStrings) keep the cap."""
+    from agenticops.chat.attachments import extract
+    monkeypatch.setattr(extract, "ZIP_MAX_ENTRY_BYTES", 50_000)   # the sheet is 410 KB
+    meta, out = _run(make("xlsx", tmp_path / "in"), tmp_path)
+    assert meta["sheets"][0]["rows"] == 3000 and TOKENS["xlsx"] in _text(out)
+    with pytest.raises(ExtractError) as e:
+        _run(make("zip_bomb", tmp_path / "in2"), tmp_path / "o2")
+    assert e.value.reason == "archive_too_large"
+
+
+def test_omitted_rows_are_said_in_the_sheet_header(tmp_path):
+    lim = ExtractLimits(text_max_chars=5_000, image_max_edge_px=1568, pdf_render_pages_max=5)
+    meta, out = _run(make("xlsx", tmp_path / "in"), tmp_path, lim)
+    head = _text(out).split("\n", 1)[0]
+    assert head.startswith("## Sheet: metrics (3000 rows × 4 cols") and "more rows not included" in head
+    assert meta["sheets"][0]["rows_included"] < 3000
+
+
+def test_sheet_without_dimension_is_not_padded_and_says_at_least(tmp_path):
+    import openpyxl
+    wb = openpyxl.Workbook(write_only=True)   # write-only output carries no <dimension>
+    ws = wb.create_sheet("stream")
+    for i in range(2500):
+        ws.append([f"h{i}", i])
+    path = tmp_path / "stream.xlsx"
+    wb.save(path)
+    meta, out = _run(path, tmp_path)
+    text = _text(out)
+    assert "\nh1\t1\n" in text                          # two cells, not padded to 50 columns
+    assert "at least 2000 rows" in text.split("\n", 1)[0]
+    assert meta["sheets"][0]["cols"] == 2
