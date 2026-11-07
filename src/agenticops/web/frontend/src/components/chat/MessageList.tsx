@@ -1,23 +1,25 @@
-import { useRef, useMemo, useLayoutEffect } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { MessageAttachments } from "./MessageAttachments";
 import { mergeDeliveries } from "@/lib/messageAttachments";
 import type { AttachmentDelivery } from "@/lib/chatStream";
-import { ToolCallChip } from "./ToolCallChip";
-import { TokenMetrics } from "./TokenMetrics";
 import { SuggestionChips } from "./SuggestionChips";
-import type { ChatMessage } from "@/api/types";
-import { renderMarkdown } from "@/lib/renderMarkdown";
+import { WorkSteps } from "./WorkSteps";
+import { MessageActions } from "./MessageActions";
+import { RichContent } from "./rich/RichContent";
+import type { ChatMessage, ToolStep } from "@/api/types";
 import { renderMessageMarkdown } from "@/lib/markdownCache";
 import { contextRefFromPath, type ContextRef } from "@/lib/contextRef";
 import { messageStatusKey } from "@/lib/chatMessageStatus";
+import { splitWork } from "@/lib/workSteps";
+import { canRegenerate, type RegenCheck } from "@/lib/messageActions";
 import { useLocale } from "@/i18n/LocaleContext";
 
 interface Props {
   messages: ChatMessage[];
   streamingContent?: string;
-  streamingToolCalls?: Array<{ name: string; status: string }>;
+  streamingToolCalls?: ToolStep[];
   streamingTokenMetrics?: { input: number; output: number } | null;
   streaming?: boolean;
   hasOlder?: boolean;
@@ -27,23 +29,26 @@ interface Props {
   onContextRefClick?: (ref: ContextRef) => void; // I# / C# refs open the context panel instead of navigating
   /** 2026-11-07: how the attachments of the message being answered reached the model (the stream's frame) */
   pendingDeliveries?: AttachmentDelivery[];
+  /** send the last answer's question again (a new answer follows) */
+  onRegenerate?: (text: string) => void;
+  onSaveReport?: () => void;
+  readOnly?: boolean;
 }
 
+const AWAY_PX = 200;   // further than this from the bottom: offer «back to bottom»
+
+/** The conversation, ChatGPT-style (2026-11-07): one centered column; the user's messages in a bubble on the right,
+ *  answers flat with their work log above and their actions below. Rows are virtualized; the streaming answer is a
+ *  trailer below them. */
 export function MessageList({
-  messages,
-  streamingContent,
-  streamingToolCalls,
-  streamingTokenMetrics,
-  streaming,
-  hasOlder,
-  isFetchingOlder,
-  onLoadOlder,
-  onSuggestionPick,
-  onContextRefClick,
-  pendingDeliveries,
+  messages, streamingContent, streamingToolCalls, streamingTokenMetrics, streaming, hasOlder, isFetchingOlder,
+  onLoadOlder, onSuggestionPick, onContextRefClick, pendingDeliveries, onRegenerate, onSaveReport, readOnly,
 }: Props) {
+  const { t } = useLocale();
   const navigate = useNavigate();
   const parentRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [away, setAway] = useState(false);
   let lastUserIndex = -1;
   for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === "user") { lastUserIndex = i; break; }
 
@@ -60,200 +65,191 @@ export function MessageList({
     navigate(pathname);
   };
 
-  // One virtual row per message; the streaming bubble is rendered as a sticky
-  // trailer below the virtualizer (always at the bottom), not virtualized.
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 80,
+    estimateSize: () => 120,
     overscan: 8,
     getItemKey: (i) => messages[i].id,
   });
 
-  // Scroll bookkeeping refs.
   const stickToBottomRef = useRef(true);            // auto-scroll only when the user is at the bottom
   const distanceFromBottomRef = useRef(0);          // captured on scroll, used to anchor on prepend
   const prevFirstIdRef = useRef<number | undefined>(undefined);
   const prevLenRef = useRef(0);
 
-  // Track scroll position: whether the user is pinned to the bottom, and the
-  // distance-from-bottom used to anchor the view when older pages prepend.
   const onScroll = () => {
     const el = parentRef.current;
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     stickToBottomRef.current = distanceFromBottom < 80;
     distanceFromBottomRef.current = distanceFromBottom;
+    setAway(distanceFromBottom > AWAY_PX);
     if (hasOlder && !isFetchingOlder && el.scrollTop < 120) onLoadOlder?.();
   };
 
-  // Scroll management runs before paint (useLayoutEffect) to avoid flicker.
-  //  - prepend (older page loaded at top → first id changed AND length grew):
-  //    keep the same distance from the bottom so the viewport stays on the same
-  //    content despite rows added above (no yank-to-bottom, no visible jump).
-  //  - append / streaming (content added at the bottom): stick to bottom only
-  //    if the user was already there.
+  // prepend (older page at the top): keep the distance from the bottom; append / streaming: follow when stuck
   useLayoutEffect(() => {
     const el = parentRef.current;
     if (!el) return;
     const firstId = messages[0]?.id;
-    const prepended =
-      prevFirstIdRef.current !== undefined &&
-      firstId !== prevFirstIdRef.current &&
-      messages.length > prevLenRef.current;
-
-    if (prepended) {
-      el.scrollTop = el.scrollHeight - el.clientHeight - distanceFromBottomRef.current;
-    } else if (stickToBottomRef.current) {
-      el.scrollTop = el.scrollHeight;
-    }
+    const prepended = prevFirstIdRef.current !== undefined && firstId !== prevFirstIdRef.current
+      && messages.length > prevLenRef.current;
+    if (prepended) el.scrollTop = el.scrollHeight - el.clientHeight - distanceFromBottomRef.current;
+    else if (stickToBottomRef.current) el.scrollTop = el.scrollHeight;
     prevFirstIdRef.current = firstId;
     prevLenRef.current = messages.length;
   }, [messages, streamingContent, streaming]);
 
-  const streamingHtml = useMemo(
-    () => (streamingContent ? renderMarkdown(streamingContent.split("<<SUGGEST>>")[0]) : ""),
-    [streamingContent],
-  );
+  // A row that grows after it painted (a chart laid out, a flowchart rendered, a step opened) keeps a stuck view at
+  // the bottom
+  useEffect(() => {
+    const el = parentRef.current, content = contentRef.current;
+    if (!el || !content || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => { if (stickToBottomRef.current) el.scrollTop = el.scrollHeight; });
+    ro.observe(content);
+    return () => ro.disconnect();
+  }, []);
 
-  if (messages.length === 0 && !streamingContent && !streaming) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-center text-muted-foreground">
-          <p className="text-lg font-medium">Start a conversation</p>
-          <p className="text-sm mt-1">
-            Ask about your AWS resources, health issues, or request a report.
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const jumpToBottom = () => {
+    const el = parentRef.current;
+    if (!el) return;
+    stickToBottomRef.current = true;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  };
+
+  const liveTools = streamingToolCalls ?? [];
+  const liveText = (streamingContent ?? "").split("<<SUGGEST>>")[0];
+  const liveAnswer = useMemo(() => splitWork(liveText, liveTools, { live: true }).answer, [liveText, liveTools]);
 
   const items = virtualizer.getVirtualItems();
 
   return (
-    <div
-      ref={parentRef}
-      onScroll={onScroll}
-      onClick={handleRefClick}
-      className="flex-1 overflow-y-auto px-6 py-4"
-    >
-      {isFetchingOlder && (
-        <div className="text-center text-xs text-muted-foreground py-2">Loading older messages…</div>
-      )}
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div ref={parentRef} onScroll={onScroll} onClick={handleRefClick} className="flex-1 overflow-y-auto">
+        <div ref={contentRef} className="mx-auto w-full max-w-[760px] px-4 pb-6 pt-6">
+          {isFetchingOlder && (
+            <div className="py-2 text-center text-xs text-muted-foreground">Loading older messages…</div>
+          )}
 
-      {/* Virtualized message rows */}
-      <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative", width: "100%" }}>
-        {items.map((vi) => {
-          const msg = messages[vi.index];
-          return (
-            <div
-              key={vi.key}
-              data-index={vi.index}
-              ref={virtualizer.measureElement}
-              style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${vi.start}px)` }}
-              className="pb-7"
-            >
-              <MessageRow
-                msg={msg}
-                isLast={vi.index === messages.length - 1}
-                streaming={streaming}
-                onSuggestionPick={onSuggestionPick}
-                deliveries={vi.index === lastUserIndex ? pendingDeliveries : undefined}
-              />
+          <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative", width: "100%" }}>
+            {items.map((vi) => {
+              const msg = messages[vi.index];
+              const isLast = vi.index === messages.length - 1;
+              return (
+                <div key={vi.key} data-index={vi.index} ref={virtualizer.measureElement}
+                     style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${vi.start}px)` }}
+                     className="pb-8">
+                  <MessageRow
+                    msg={msg}
+                    isLast={isLast}
+                    streaming={streaming}
+                    regen={isLast ? canRegenerate(messages, vi.index, !!streaming) : { ok: false, reason: "not_last" }}
+                    onSuggestionPick={onSuggestionPick}
+                    onRegenerate={onRegenerate}
+                    onSaveReport={onSaveReport}
+                    readOnly={readOnly}
+                    deliveries={vi.index === lastUserIndex ? pendingDeliveries : undefined}
+                  />
+                </div>
+              );
+            })}
+          </div>
+
+          {/* The answer being written: its live work log, then the answer so far */}
+          {streaming && (
+            <div className="animate-[fadeIn_0.2s_ease-out] pb-4">
+              {liveTools.length === 0 && !liveText ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span className="flex gap-1" aria-hidden>
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/70 [animation-delay:0ms]" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/70 [animation-delay:150ms]" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/70 [animation-delay:300ms]" />
+                  </span>
+                  {t("chat.thinking")}
+                </div>
+              ) : (
+                <>
+                  <WorkSteps tools={liveTools} content={liveText} live />
+                  {liveAnswer && <RichContent text={liveAnswer} streaming />}
+                  <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-primary/70 align-text-bottom" aria-hidden />
+                  {streamingTokenMetrics && (
+                    <div className="mt-1 text-xs tabular-nums text-muted-foreground">
+                      ↑{streamingTokenMetrics.input.toLocaleString()} ↓{streamingTokenMetrics.output.toLocaleString()}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
-          );
-        })}
+          )}
+        </div>
       </div>
 
-      {/* Thinking indicator — streaming started but no content yet */}
-      {streaming && !streamingContent && (!streamingToolCalls || streamingToolCalls.length === 0) && (
-        <div className="flex gap-3 animate-[fadeIn_0.2s_ease-out] pt-2">
-          <div className="flex-shrink-0 w-7 h-7 rounded-full bg-primary-600 flex items-center justify-center text-white text-xs font-semibold">AI</div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span className="flex gap-1">
-              <span className="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce [animation-delay:0ms]" />
-              <span className="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce [animation-delay:150ms]" />
-              <span className="w-1.5 h-1.5 bg-primary-400 rounded-full animate-bounce [animation-delay:300ms]" />
-            </span>
-            Thinking...
-          </div>
-        </div>
-      )}
-
-      {/* Streaming assistant message (sticky trailer) */}
-      {streaming && (streamingContent || (streamingToolCalls && streamingToolCalls.length > 0)) && (
-        <div className="flex gap-3 animate-[fadeIn_0.2s_ease-out] pt-2">
-          <div className="flex-shrink-0 w-7 h-7 rounded-full bg-primary-600 flex items-center justify-center text-white text-xs font-semibold">AI</div>
-          <div className="flex-1 max-w-3xl space-y-2">
-            {streamingToolCalls && streamingToolCalls.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-1">
-                {streamingToolCalls.map((t, i) => (<ToolCallChip key={i} name={t.name} status={t.status} />))}
-              </div>
-            )}
-            {streamingContent && (
-              <div className="text-sm text-foreground leading-relaxed report-content max-w-none">
-                <span dangerouslySetInnerHTML={{ __html: streamingHtml }} />
-                <span className="inline-block w-1.5 h-4 bg-primary-500 animate-pulse ml-0.5 align-text-bottom" />
-              </div>
-            )}
-            {streamingTokenMetrics && (
-              <span className="text-xs text-muted-foreground tabular-nums">
-                ↑{streamingTokenMetrics.input.toLocaleString()} ↓{streamingTokenMetrics.output.toLocaleString()} Σ{(streamingTokenMetrics.input + streamingTokenMetrics.output).toLocaleString()}
-              </span>
-            )}
-          </div>
-        </div>
+      {away && (
+        <button type="button" onClick={jumpToBottom} aria-label={t("chat.jumpToBottom")} title={t("chat.jumpToBottom")}
+                className="absolute bottom-3 left-1/2 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-md hover:bg-muted">
+          <svg className="h-4 w-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+            <path d="M8 3v10M3.5 8.5 8 13l4.5-4.5" />
+          </svg>
+        </button>
       )}
     </div>
   );
 }
 
-function MessageRow({ msg, isLast, streaming, onSuggestionPick, deliveries }: {
+function MessageRow({ msg, isLast, streaming, regen, onSuggestionPick, onRegenerate, onSaveReport, readOnly, deliveries }: {
   msg: ChatMessage;
   isLast?: boolean;
   streaming?: boolean;
+  regen: RegenCheck;
   onSuggestionPick?: (text: string) => void;
+  onRegenerate?: (text: string) => void;
+  onSaveReport?: () => void;
+  readOnly?: boolean;
   deliveries?: AttachmentDelivery[];
 }) {
   const { t } = useLocale();
+  const answerRef = useRef<HTMLDivElement>(null);
   const statusKey = messageStatusKey(msg);
-  return (
-    <div className={msg.role === "user" ? "flex justify-end" : "flex gap-3"}>
-      {msg.role === "assistant" && (
-        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-primary-600 flex items-center justify-center text-white text-xs font-semibold">AI</div>
-      )}
-      <div className={msg.role === "user"
-        ? "bg-primary-50 border border-primary-100 rounded-2xl rounded-br-md px-4 py-2.5 max-w-2xl text-primary-900"
-        : "flex-1 max-w-3xl space-y-2"}>
-        {msg.role === "user" && msg.attachments && msg.attachments.length > 0 && (
-          <MessageAttachments attachments={mergeDeliveries(msg.attachments, deliveries ?? [])} />
-        )}
-        {msg.role === "assistant" && msg.tool_calls && msg.tool_calls.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-1">
-            {msg.tool_calls.map((tc, i) => (<ToolCallChip key={tc.call_id ?? i} name={tc.name} status={tc.status} outcome={tc.outcome} />))}
-          </div>
-        )}
-        <div
-          className="text-sm text-foreground leading-relaxed report-content max-w-none"
-          dangerouslySetInnerHTML={{ __html: renderMessageMarkdown(msg.id, msg.content) }}
-        />
-        {/* S5: an interrupted or failed reply says so — by its kind of failure, never the raw exception */}
-        {statusKey && (
-          <div className={`text-xs rounded-lg px-3 py-2 border ${statusKey === "chat.status.interrupted"
-            ? "text-amber-700 dark:text-amber-300 bg-amber-500/10 border-amber-500/30"
-            : "text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-900"}`}>
-            {t(statusKey)}
-          </div>
-        )}
-        {msg.role === "assistant" && msg.token_usage && !msg.token_usage.error && (
-          <TokenMetrics msg={msg} />
-        )}
-        {msg.role === "assistant" && isLast && !streaming && onSuggestionPick &&
-          Array.isArray(msg.suggestions) && msg.suggestions.length > 0 && (
-          <SuggestionChips suggestions={msg.suggestions} onPick={onSuggestionPick} />
-        )}
+  const tools = msg.tool_calls ?? [];
+  const answer = useMemo(() => (msg.role === "assistant" ? splitWork(msg.content, tools).answer : msg.content),
+    // a stored message never changes; a temp id is replaced by a new row
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [msg.id, msg.content, msg.tool_calls]);
+
+  if (msg.role === "user") {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[85%] rounded-3xl bg-muted px-4 py-2.5 text-[15px] text-foreground">
+          {msg.attachments && msg.attachments.length > 0 && (
+            <MessageAttachments attachments={mergeDeliveries(msg.attachments, deliveries ?? [])} />
+          )}
+          <div className="report-content max-w-none leading-relaxed [&_.md-p:last-child]:mb-0"
+               dangerouslySetInnerHTML={{ __html: renderMessageMarkdown(msg.id, msg.content) }} />
+        </div>
       </div>
+    );
+  }
+
+  return (
+    <div>
+      <WorkSteps tools={tools} content={msg.content} />
+      {answer && <div ref={answerRef}><RichContent text={answer} cacheKey={msg.id} /></div>}
+      {/* S5: an interrupted or failed reply says so — by its kind of failure, never the raw exception */}
+      {statusKey && (
+        <div className={`mt-2 rounded-lg border px-3 py-2 text-xs ${statusKey === "chat.status.interrupted"
+          ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+          : "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400"}`}>
+          {t(statusKey)}
+        </div>
+      )}
+      {answer.trim() && (
+        <MessageActions msg={msg} answer={answer} answerRef={answerRef} regen={regen}
+                        onRegenerate={onRegenerate} onSaveReport={onSaveReport} readOnly={readOnly} />
+      )}
+      {isLast && !streaming && onSuggestionPick && Array.isArray(msg.suggestions) && msg.suggestions.length > 0 && (
+        <SuggestionChips suggestions={msg.suggestions} onPick={onSuggestionPick} />
+      )}
     </div>
   );
 }

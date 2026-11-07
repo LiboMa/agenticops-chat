@@ -375,6 +375,9 @@ export default function Chat() {
               onSuggestionPick={(text) => sendMessage(text)}
               onContextRefClick={setContextRef}
               pendingDeliveries={attachmentDeliveries}
+              onRegenerate={(text) => { setStopped(false); void sendMessage(text); }}
+              onSaveReport={currentSession ? () => setShowSaveReport(true) : undefined}
+              readOnly={readOnly}
             />
 
             {/* Error banner */}

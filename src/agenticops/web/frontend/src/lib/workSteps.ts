@@ -60,3 +60,14 @@ export function workTotals(tools: ToolStep[]): { count: number; ms: number | nul
   const known = tools.filter((t) => typeof t.duration_ms === "number");
   return { count: tools.length, ms: known.length ? known.reduce((sum, t) => sum + (t.duration_ms ?? 0), 0) : null };
 }
+
+/** "0.9 s" under ten seconds, "52 s" under a minute, "2 min 5 s" above — in the user's language. */
+export function formatDuration(ms: number, t: (k: string) => string): string {
+  const s = ms / 1000;
+  if (s < 60) {
+    const n = s < 10 ? (Math.round(s * 10) / 10).toString() : String(Math.round(s));
+    return t("chat.work.seconds").replace("{n}", n);
+  }
+  const total = Math.round(s);
+  return t("chat.work.minutes").replace("{m}", String(Math.floor(total / 60))).replace("{s}", String(total % 60));
+}

@@ -56,3 +56,13 @@ describe("workTotals", () => {
     expect(workTotals([T({})])).toEqual({ count: 1, ms: null });
   });
 });
+
+import { formatDuration } from "@/lib/workSteps";
+describe("formatDuration", () => {
+  const t = (k: string) => (k === "chat.work.seconds" ? "{n} s" : "{m} min {s} s");
+  it("seconds with one decimal under a minute, minutes above", () => {
+    expect(formatDuration(850, t)).toBe("0.9 s");
+    expect(formatDuration(52_000, t)).toBe("52 s");
+    expect(formatDuration(125_000, t)).toBe("2 min 5 s");
+  });
+});

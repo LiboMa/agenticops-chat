@@ -4,9 +4,11 @@ import type { ChatMessage } from "@/api/types";
 
 interface Props {
   msg: ChatMessage;
+  /** in the answer's action row (2026-11-07): aligned with the row's 32px icons */
+  inline?: boolean;
 }
 
-export function TokenMetrics({ msg }: Props) {
+export function TokenMetrics({ msg, inline }: Props) {
   const [expanded, setExpanded] = useState(false);
   const tu = msg.token_usage;
   if (!tu) return null;
@@ -20,7 +22,7 @@ export function TokenMetrics({ msg }: Props) {
   const timelineQ = useTraceTimeline(msg.trace_id, expanded);
 
   return (
-    <div className="mt-1">
+    <div className={inline ? "pt-[7px]" : "mt-1"}>
       <button
         onClick={() => setExpanded(!expanded)}
         className="text-xs text-muted-foreground tabular-nums hover:text-foreground transition-colors"
