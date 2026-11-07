@@ -3,7 +3,7 @@ set -euo pipefail
 
 # -----------------------------------------------------------------------------
 # AgenticOps EC2 Bootstrap — Ubuntu 24.04
-# Python: uv | Frontend: Node.js 20 | Code: git clone
+# Python: uv | Node.js 22 (frontend build + ACP Claude Code adapter) | Code: git clone
 #
 # Can be invoked by:
 #   1. Terraform templatefile (variables injected at plan time)
@@ -64,10 +64,12 @@ UV_PYTHON_INSTALL_DIR=/opt/uv-python uv python install 3.12
 chmod -R a+rx /opt/uv-python
 
 # -----------------------------------------------------------------------------
-# Install Node.js 20 (for frontend build)
+# Install Node.js 22: the frontend build, and the ACP Claude Code adapter
+# (@agentclientprotocol/claude-agent-acp declares node >= 22 from 0.50.0; on Node 20 npm installs 0.49.0,
+# whose bundled Claude Code rejects the 5.x models)
 # -----------------------------------------------------------------------------
 if ! command -v node &>/dev/null; then
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y nodejs
 fi
 

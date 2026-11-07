@@ -790,7 +790,7 @@ main / sre agent
    ▼
 EnhancedBackend abstraction + registry  (protocol-agnostic core)
    ▼ get_backend(acp_enhanced_backend) — provider chosen in Settings → Enhanced Backend
-   ├─ ClaudeCodeBackend → AcpClient → npx claude-agent-acp   (Bedrock)
+   ├─ ClaudeCodeBackend → AcpClient → npx claude-agent-acp   (Bedrock; Node ≥ 22)
    ├─ KiroCliBackend    → AcpClient → kiro-cli acp           (IAM Identity Center login)
    └─ CodexBackend      → AcpClient → npx codex-acp          (needs OPENAI_API_KEY)
    ▼ stdio subprocess (self-implemented JSON-RPC 2.0)
