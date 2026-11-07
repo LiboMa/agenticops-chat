@@ -255,7 +255,8 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
           ) : (
             <button
               onClick={handleSend}
-              disabled={(!input.trim() && items.length === 0) || disabled || uploading}
+              disabled={(!input.trim() && !items.some((i) => i.serverId && (i.state === "ready" || i.state === "failed")))
+                        || disabled || uploading}
               className="self-center w-9 h-9 flex items-center justify-center bg-primary-600 hover:bg-primary-700 disabled:bg-muted disabled:text-muted-foreground/40 text-white rounded-full transition-colors flex-shrink-0"
               title={t("chat.send")} aria-label={t("chat.send")}
             >

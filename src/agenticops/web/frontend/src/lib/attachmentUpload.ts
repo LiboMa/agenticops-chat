@@ -144,9 +144,10 @@ export class UploadQueue {
     return () => { this.listeners.delete(fn); };
   }
 
-  /** Hand the finished items to a send (the tray empties, nothing is deleted); putBack if the send was refused. */
+  /** Hand the sendable items to a send (they leave the tray, nothing is deleted); putBack if the send was refused.
+   *  An upload that never reached the server stays, with its reason and its retry. */
   take(): UploadItem[] {
-    const taken = this.list.filter((i) => i.state === "ready" || i.state === "failed");
+    const taken = this.list.filter((i) => i.serverId && (i.state === "ready" || i.state === "failed"));
     this.list = this.list.filter((i) => !taken.includes(i));
     this.emit();
     return taken;

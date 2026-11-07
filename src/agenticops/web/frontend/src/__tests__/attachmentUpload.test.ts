@@ -137,3 +137,17 @@ describe("optimisticAttachments", () => {
       .toEqual([{ id: "s1", filename: "r.pdf", size: 9, kind: "pdf", localId: "up-1" }]);
   });
 });
+
+describe("take (the send)", () => {
+  it("leaves uploads that never reached the server in the tray, with their retry", async () => {
+    const { q } = setup();
+    q.add([file("ok.txt"), file("big.pdf")]);
+    FakeXhr.made[0].respond(201, { id: "s1", status: "ready", filename: "ok.txt", size: 10, kind: "text" });
+    FakeXhr.made[1].respond(413, { detail: "too big", code: "file_too_large" });
+    await tick();
+    const taken = q.take();
+    expect(taken.map((i) => i.serverId)).toEqual(["s1"]);
+    expect(q.items().map((i) => [i.name, i.state, i.reason])).toEqual([["big.pdf", "failed", "file_too_large"]]);
+    expect(q.readyIds()).toEqual([]);
+  });
+});
