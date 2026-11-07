@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   FALLBACK_POLICY,
+  attachmentErrorReason,
   attachmentErrorText,
   attachmentRules,
   filesFromPaste,
@@ -118,7 +119,9 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
     const { accepted, errors } = validateFiles(queue.items(), files, rules);
     if (errors.length > 0) {
       setRejected((cur) => [...cur, ...errors.map((e) => ({
-        key: `${Date.now()}-${++pasteSeq}`, name: "name" in e ? e.name : "", text: attachmentErrorText(e, t) }))]);
+        key: `${Date.now()}-${++pasteSeq}`, name: "name" in e ? e.name : "",
+        // a card per file names it already; a count / total refusal has no file name, so it keeps the whole sentence
+        text: "name" in e ? attachmentErrorReason(e, t) : attachmentErrorText(e, t) }))]);
     }
     if (accepted.length > 0) queue.add(accepted);
   }, [queue, rules, t]);

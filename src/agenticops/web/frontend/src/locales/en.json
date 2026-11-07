@@ -1254,5 +1254,6 @@
   "chat.attach.dropHint": "Drop to attach",
   "chat.attach.waitUpload": "Wait for the uploads to finish",
   "chat.attach.pages": "{n} pages",
-  "nav.expand": "Show the full menu"
+  "nav.expand": "Show the full menu",
+  "chat.attach.page": "1 page"
 }

@@ -1254,5 +1254,6 @@
   "chat.attach.dropHint": "放下即可添加",
   "chat.attach.waitUpload": "上传完成后才能发送",
   "chat.attach.pages": "{n} 页",
-  "nav.expand": "展开导航"
+  "nav.expand": "展开导航",
+  "chat.attach.page": "1 页"
 }

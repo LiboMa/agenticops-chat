@@ -1,5 +1,5 @@
 import { useLocale } from "@/i18n/LocaleContext";
-import { attachmentReasonText, humanSize } from "@/lib/attachments";
+import { attachmentReasonText, humanSize, pagesLabel } from "@/lib/attachments";
 import type { UploadItem } from "@/lib/attachmentUpload";
 import { BADGE_CLASS, attachmentBadge } from "@/lib/attachmentBadge";
 
@@ -84,7 +84,7 @@ export function ComposerAttachment({ item, rejected, thumbUrl, onRemove, onRetry
     : item.state === "queued" ? t("chat.attach.queued")
     : item.state === "processing" ? t("chat.attach.processing")
     : failed ? reason
-    : pages ? `${t("chat.attach.pages").replace("{n}", String(pages))} · ${humanSize(item.size)}`
+    : pages ? `${pagesLabel(pages, t)} · ${humanSize(item.size)}`
     : humanSize(item.size);
   return (
     <div className={`flex min-w-[150px] max-w-[240px] shrink-0 items-center gap-2 rounded-xl border px-2.5 py-1.5 ${
