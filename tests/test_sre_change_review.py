@@ -58,7 +58,7 @@ def _build(**kwargs) -> dict:
     with patch.object(mod, "Agent", FakeAgent), patch.object(mod, "BedrockModel", MagicMock()), \
          patch("agenticops.config.get_agent_model_config", return_value=("m", 100)), \
          patch("agenticops.config.get_agent_conversation_manager", return_value=None), \
-         patch("agenticops.config.get_agent_context_manager", return_value=None), \
+         patch("agenticops.config.get_agent_context_plugins", return_value=[]), \
          patch("agenticops.config.get_bedrock_boto_session", return_value=None), \
          patch("agenticops.agents.preamble.bedrock_model_kwargs", return_value={}), \
          patch.object(mod, "build_system_prompt", return_value="p") as build_prompt:

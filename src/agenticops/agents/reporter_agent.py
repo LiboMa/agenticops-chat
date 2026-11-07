@@ -117,7 +117,7 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
         Report summary with ID and file path.
     """
     try:
-        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_manager, get_bedrock_boto_session
+        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_bedrock_boto_session
 
         model_id, max_tokens = get_agent_model_config("reporter")
         from agenticops.agents.preamble import bedrock_model_kwargs
@@ -136,7 +136,7 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
             model=model,
             callback_handler=None,
             conversation_manager=get_agent_conversation_manager("reporter"),
-            context_manager=get_agent_context_manager("reporter"),
+            plugins=get_agent_context_plugins("reporter"),
             tools=[
                 get_active_account,
                 get_managed_resources,

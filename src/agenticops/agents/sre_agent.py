@@ -286,7 +286,7 @@ def _create_sre_agent(cli_tool=None, cli_tools: list | None = None, *, change_re
     change_review=True builds the Mode C (change review) agent: the only build that carries the change tools
     and the only one whose prompt describes Mode C (SRE_SYSTEM_PROMPT; every other build gets SRE_BASE_PROMPT).
     """
-    from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_manager, get_bedrock_boto_session
+    from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_bedrock_boto_session
 
     model_id, max_tokens = get_agent_model_config("sre")
     from agenticops.agents.preamble import bedrock_model_kwargs
@@ -358,7 +358,7 @@ def _create_sre_agent(cli_tool=None, cli_tools: list | None = None, *, change_re
         model=model,
         callback_handler=None,
         conversation_manager=get_agent_conversation_manager("sre"),
-        context_manager=get_agent_context_manager("sre"),
+        plugins=get_agent_context_plugins("sre"),
         tools=_tools,
     )
 

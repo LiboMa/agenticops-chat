@@ -8,6 +8,7 @@ Settings are loaded with the following priority (highest wins):
 """
 
 import contextvars
+import functools
 import uuid
 from pathlib import Path
 from typing import Any, Optional, Tuple, Type
@@ -198,8 +199,13 @@ class Settings(BaseSettings):
     bedrock_cache_enabled: bool = Field(default=True, description="Enable Bedrock prompt caching on all agents")
     strands_context_manager_auto: bool = Field(
         default=True,
-        description="Enable Strands SDK auto context management (SummarizingConversationManager + ContextOffloader) on all agents. Coexists with per-agent conversation_manager.",
+        description="Offload oversized tool results on all agents (the Strands ContextOffloader plugin, passed "
+                    "explicitly). Each agent keeps its own conversation manager (sliding window / full context).",
     )
+    context_offload_max_result_tokens: int = Field(
+        default=1500, description="A tool result estimated above this many tokens is offloaded (preview kept)")
+    context_offload_preview_tokens: int = Field(
+        default=750, description="Tokens of an offloaded tool result kept in context as its preview")
 
     # CLI tool output limit (0 = unlimited)
     cli_max_output_chars: int = Field(default=0, description="Max chars for CLI tool output (0 = no limit)")
@@ -1327,22 +1333,46 @@ def get_agent_conversation_manager(agent_name: str):
     return SlidingWindowConversationManager(window_size=ws, per_turn=True)
 
 
-def get_agent_context_manager(agent_name: str):
-    """Return "auto" to enable Strands SDK auto context management, or None to disable.
+def get_agent_context_plugins(agent_name: str) -> list:
+    """The context plugins every agent build passes as ``plugins=`` (with ``context_manager`` left unset).
 
-    Gated by settings.strands_context_manager_auto. When "auto" is combined with an
-    explicit conversation_manager (which every agent passes), the SDK preserves our
-    conversation_manager and only adds the ContextOffloader plugin — so per-agent
-    window strategy (Null / SlidingWindow) is unchanged; we just gain offloading of
-    oversized tool results. Returns None (== Agent default) when disabled, so toggling
-    the flag off restores exact pre-change behavior.
+    Gated by settings.strands_context_manager_auto: on = one ContextOffloader (oversized tool results are offloaded,
+    a preview stays in context, ``retrieve_offloaded_content`` fetches the rest); off = none. The agent's own
+    conversation manager (get_agent_conversation_manager) is always the one that bounds the history.
 
-    agent_name is accepted for future per-agent override symmetry with
-    get_agent_conversation_manager; currently the flag is global.
+    Why not ``context_manager="auto"``: in Strands 1.45 it kept an explicit conversation manager and only added this
+    offloader, but from 1.56 any ``context_manager`` makes the SDK discard the passed conversation manager (only a
+    UserWarning says so) — every per-agent sliding window would silently stop working. Passing the plugin explicitly
+    is the 1.45 behaviour on every version. agent_name is kept for per-agent symmetry; the flag is global today.
     """
-    if settings.strands_context_manager_auto:
-        return "auto"
-    return None
+    if not settings.strands_context_manager_auto:
+        return []
+    from strands.vended_plugins.context_offloader import InMemoryStorage
+    return [_head_preview_offloader_class()(storage=InMemoryStorage(),
+                                            max_result_tokens=settings.context_offload_max_result_tokens,
+                                            preview_tokens=settings.context_offload_preview_tokens)]
+
+
+@functools.lru_cache(maxsize=1)
+def _head_preview_offloader_class():
+    """ContextOffloader whose preview is the 1.45 one: the first preview_tokens × 4 characters of the result.
+
+    From 1.64 the SDK's preview is 60 % head + 40 % tail around an elision marker. For our large JSON tool results
+    that changes what the model sees: the RCA topology evidence (~20k tokens, always offloaded) lists candidates, then
+    edges, then neighbours — the 1.45 head shows the candidates and the first edges, the 1.64 head + tail shows no
+    edge at all. Strict behaviour parity for the upgrade; ``_slice_preview`` is private SDK API, so
+    tests/test_strands_parity.py pins both the override and that the SDK still calls it.
+    """
+    from strands.vended_plugins.context_offloader import ContextOffloader
+    from strands.vended_plugins.context_offloader import plugin as _offloader_plugin
+
+    chars_per_token = getattr(_offloader_plugin, "_CHARS_PER_TOKEN", 4)
+
+    class HeadPreviewContextOffloader(ContextOffloader):
+        def _slice_preview(self, text: str) -> str:
+            return text[: self._preview_tokens * chars_per_token]
+
+    return HeadPreviewContextOffloader
 
 
 def get_executor_interventions():

@@ -79,6 +79,7 @@ httpx==0.28.1
     #   langsmith
     #   lark-oapi
     #   mcp
+    #   strands-agents
 httpx-sse==0.4.3
     # via mcp
 hypothesis==6.153.2
@@ -300,7 +301,7 @@ starlette==0.52.1
     #   fastapi
     #   mcp
     #   sse-starlette
-strands-agents==1.45.0
+strands-agents==1.64.0
     # via agenticops
 tenacity==9.1.4
     # via langchain-core

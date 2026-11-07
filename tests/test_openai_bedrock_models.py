@@ -55,8 +55,9 @@ class TestBedrockModelKwargs:
     def test_claude_gets_cache_kwargs(self, monkeypatch):
         monkeypatch.setattr(settings, "bedrock_cache_enabled", True)
         kw = bedrock_model_kwargs("global.anthropic.claude-opus-4-8")
-        assert "cache_config" in kw
-        assert kw["cache_tools"] == "default"
+        cc = kw["cache_config"]  # 1.45 parity: messages + tool definitions, not the system prompt (yet)
+        assert (cc.strategy, cc.tools_ttl, cc.system_prompt_ttl) == ("auto", True, False)
+        assert "cache_tools" not in kw  # deprecated since Strands 1.55
 
     def test_claude_thinking_fields_attached(self, monkeypatch):
         monkeypatch.setattr(settings, "bedrock_cache_enabled", True)
