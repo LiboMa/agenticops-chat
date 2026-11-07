@@ -81,7 +81,6 @@ Key variables in `variables.tf` (override with `terraform.tfvars` or `-var`):
 | `domain_name` | agenticops.tinyboat.blog | Custom domain |
 | `acm_certificate_arn` | *.tinyboat.blog wildcard | ACM cert (must be us-east-1) |
 | `bedrock_region` | us-east-1 | Bedrock LLM region |
-| `bedrock_model_id` | claude-opus-4-6 | Default model |
 | `git_branch` | main | Branch to deploy |
 | `ssh_allowed_cidrs` | ["0.0.0.0/0"] | Restrict SSH access |
 | `app_port` | 8000 | Application port |

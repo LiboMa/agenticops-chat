@@ -242,11 +242,12 @@ def _claude_version(model_id: str) -> Optional[tuple[int, int]]:
     """(major, minor) parsed from a Claude model id, else None.
 
     'claude-opus-5' -> (5, 0), 'claude-fable-5-1' -> (5, 1),
-    'claude-haiku-4-5-20251001-v1:0' -> (4, 5). None for ids without a
-    `claude-<family>-<major>` shape: pre-4.x ('claude-3-5-sonnet-…') and
-    every non-Anthropic model.
+    'claude-haiku-4-5-20251001-v1:0' -> (4, 5). A minor is one or two digits,
+    so a date right after the major is not one: 'claude-sonnet-4-20250514' ->
+    (4, 0). None for ids without a `claude-<family>-<major>` shape: pre-4.x
+    ('claude-3-5-sonnet-…') and every non-Anthropic model.
     """
-    m = re.search(r"claude-[a-z]+-(\d+)(?:-(\d+))?", (model_id or "").lower())
+    m = re.search(r"claude-[a-z]+-(\d+)(?:-(\d{1,2})(?!\d))?", (model_id or "").lower())
     return (int(m.group(1)), int(m.group(2) or 0)) if m else None
 
 
@@ -259,6 +260,98 @@ def supports_adaptive_thinking(model_id: str) -> bool:
     """
     version = _claude_version(model_id)
     return version is not None and version >= _ADAPTIVE_THINKING_MIN
+
+
+# Sampling parameters. Claude 4.7 removed them (`temperature` / `top_p` / `top_k` are a 400), and Sonnet 5.5 /
+# Haiku 5.5 reject any non-default value — which temperature 0 is. Opus 5.5 answered "`temperature` is deprecated
+# for this model" on every Galaxy build from 2026-11-06 07:00 (measured on the dev box). Opus/Sonnet 4.6 and
+# Haiku 4.5 still take it. A non-Anthropic id gets none: leaving it out is always a valid request.
+_TEMPERATURE_REMOVED_FROM = (4, 7)
+
+
+def accepts_temperature(model_id: str) -> bool:
+    """True when a request to this model may carry `temperature`: a Claude model before 4.7, including the ids that
+    predate the `claude-<family>-<n>` shape (Claude 3.x, claude-v2)."""
+    if not is_anthropic_model(model_id):
+        return False
+    version = _claude_version(model_id)
+    return version is None or version < _TEMPERATURE_REMOVED_FROM
+
+
+def converse_inference_config(model_id: str, max_tokens: int, temperature: Optional[float] = None) -> dict:
+    """Converse `inferenceConfig`: maxTokens, plus temperature only where the model takes it."""
+    config: dict = {"maxTokens": max_tokens}
+    if temperature is not None and accepts_temperature(model_id):
+        config["temperature"] = temperature
+    return config
+
+
+class ModelReplyError(RuntimeError):
+    """A Converse reply that carries no usable answer."""
+
+
+class ModelReplyEmpty(ModelReplyError):
+    """The reply has no text block — a model that thinks by default can return reasoning blocks only."""
+
+
+class ModelReplyTruncated(ModelReplyError):
+    """The reply stopped at the output limit (stopReason `max_tokens`), so its text is a fragment."""
+
+
+def converse_text(model_id: str, prompt: str, *, max_tokens: int, temperature: Optional[float] = None,
+                  read_timeout: Optional[int] = None, total_attempts: Optional[int] = None) -> tuple[str, dict, str]:
+    """One single-turn Bedrock Converse call: the request and reply rules every direct (non-Strands) model call
+    shares. Returns (text, {"input", "output"} token usage, stopReason).
+
+    `temperature` is sent only where the model takes it (accepts_temperature). The text is the reply's text blocks
+    joined; reasoningContent blocks are skipped (Claude 5.x thinks by default, so a reply can open with one). A reply
+    with no text raises ModelReplyEmpty and one cut at max_tokens raises ModelReplyTruncated: an empty or partial
+    answer is never passed on as a result. `read_timeout` (seconds) and `total_attempts` (botocore
+    total_max_attempts — the first try included; its `max_attempts` counts retries only) set a client Config;
+    without them the client keeps botocore's defaults.
+
+    Callers import this inside their functions: the agents package's __init__ imports every agent, and that chain
+    reaches back to signal_gate and galaxy.builder, so a module-level import there would be circular.
+    """
+    from agenticops.config import get_bedrock_boto_session
+
+    client_kwargs: dict = {}
+    if read_timeout is not None or total_attempts is not None:
+        from botocore.config import Config
+
+        config_kwargs: dict = {}
+        if read_timeout is not None:
+            config_kwargs["read_timeout"] = read_timeout
+        if total_attempts is not None:
+            config_kwargs["retries"] = {"total_max_attempts": total_attempts}
+        client_kwargs["config"] = Config(**config_kwargs)
+    client = get_bedrock_boto_session().client("bedrock-runtime", **client_kwargs)
+    resp = client.converse(
+        modelId=model_id,
+        messages=[{"role": "user", "content": [{"text": prompt}]}],
+        inferenceConfig=converse_inference_config(model_id, max_tokens, temperature),
+    )
+    blocks = ((resp.get("output") or {}).get("message") or {}).get("content") or []
+    text = "".join(b["text"] for b in blocks if isinstance(b, dict) and isinstance(b.get("text"), str))
+    stop_reason = resp.get("stopReason") or ""
+    if stop_reason == "max_tokens":
+        raise ModelReplyTruncated(f"{model_id} stopped at its {max_tokens}-token output limit")
+    if not text.strip():
+        raise ModelReplyEmpty(f"{model_id} returned no text")
+    usage = resp.get("usage") or {}
+    return text, {"input": int(usage.get("inputTokens", 0)), "output": int(usage.get("outputTokens", 0))}, stop_reason
+
+
+def converse_text_on_main(prompt: str) -> str:
+    """converse_text on the main agent's model and output limit — the direct paths that follow Main (owner decision
+    2026-11-07; they used to read settings.bedrock_model_id, which the dev box's env pinned to Opus 4.6): skill
+    generation and improvement, case distillation, SOP generation. 300 s read timeout and at most one retry: a long
+    generation on a model that thinks by default outlasts botocore's 60 s default, and every retry is billed."""
+    from agenticops.config import get_agent_model_config
+
+    model_id, max_tokens = get_agent_model_config("main")
+    text, _, _ = converse_text(model_id, prompt, max_tokens=max_tokens, read_timeout=300, total_attempts=2)
+    return text
 
 
 def _effort_tier(budget: int) -> str:

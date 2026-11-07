@@ -85,16 +85,17 @@ class Settings(BaseSettings):
         description="SQLite database URL",
     )
 
-    # AWS Bedrock — Three-Tier Model Configuration
-    # Default (Sonnet 4.6) for main agent router and executor
-    # Cheap (Haiku 4.5) for tool-orchestration agents (scan, detect, reporter)
-    # Strong (Opus 4.6) for complex reasoning agents (RCA, SRE)
+    # AWS Bedrock — Three-Tier Model Configuration (fallbacks for an agent whose own model id is empty;
+    # config/settings.yaml sets every agent explicitly)
+    # Default (Sonnet 5.5) for main agent router and executor
+    # Cheap (Haiku 4.5) for tool-orchestration agents (scan, detect, reporter) and the cheap single-shot calls
+    # Strong (Opus 5.5) for complex reasoning agents (RCA, SRE)
     bedrock_region: str = Field(
         default="us-east-1",
         description="AWS region for Bedrock",
     )
     bedrock_model_id: str = Field(
-        default="global.anthropic.claude-sonnet-4-6",
+        default="global.anthropic.claude-sonnet-5-5",
         description="Bedrock model ID — default tier for main agent router and executor",
     )
     bedrock_model_id_cheap: str = Field(
@@ -102,8 +103,8 @@ class Settings(BaseSettings):
         description="Bedrock model ID — economy tier (Haiku 4.5) for tool-orchestration agents",
     )
     bedrock_model_id_strong: str = Field(
-        default="global.anthropic.claude-opus-4-6-v1",
-        description="Bedrock model ID — strong tier (Opus 4.6) for complex reasoning",
+        default="global.anthropic.claude-opus-5-5",
+        description="Bedrock model ID — strong tier (Opus 5.5) for complex reasoning",
     )
     bedrock_max_tokens: int = Field(
         default=16384,
@@ -131,8 +132,8 @@ class Settings(BaseSettings):
     # change what "sonnet" means.
     model_aliases: dict[str, str] = Field(
         default={
-            "opus": "global.anthropic.claude-opus-4-6-v1",
-            "sonnet": "global.anthropic.claude-sonnet-4-6",
+            "opus": "global.anthropic.claude-opus-5-5",
+            "sonnet": "global.anthropic.claude-sonnet-5-5",
             "haiku": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
         },
         description="Friendly name → model ID mapping for /model command and UI dropdowns",
@@ -1093,18 +1094,23 @@ class Settings(BaseSettings):
     # Token cost rates per 1M tokens by model family
     token_cost_table: dict[str, dict[str, float]] = Field(
         default={
-            # Claude 5 family rates provisional (Opus-4.8 / Sonnet-4.6 tiers)
-            # until official pricing lands.
-            "claude-opus-5":      {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
-            "claude-sonnet-5":    {"input": 3.0,  "output": 15.0, "cache_read": 0.30, "cache_write": 3.75},
-            "claude-fable-5-1":   {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
-            "claude-fable-5":     {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
-            "claude-opus-4-8":   {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
-            "claude-opus-4-6":   {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
+            # The same table as config/settings.yaml (which wins): AWS Price List, us-east-1, global cross-region,
+            # standard tier, 5-minute cache write, fetched 2026-11-07.
+            "claude-opus-5-5":   {"input": 4.0,  "output": 20.0, "cache_read": 0.20, "cache_write": 5.00},
+            "claude-sonnet-5-5": {"input": 2.0,  "output": 10.0, "cache_read": 0.10, "cache_write": 2.50},
+            "claude-haiku-5-5":  {"input": 0.10, "output": 0.50, "cache_read": 0.01, "cache_write": 0.125},
+            "claude-opus-5":     {"input": 5.0,  "output": 25.0, "cache_read": 0.50, "cache_write": 6.25},
+            "claude-sonnet-5":   {"input": 2.0,  "output": 10.0, "cache_read": 0.20, "cache_write": 2.50},
+            "claude-fable-5-1":  {"input": 10.0, "output": 50.0, "cache_read": 0.25, "cache_write": 12.50},
+            "claude-fable-5":    {"input": 10.0, "output": 50.0, "cache_read": 1.00, "cache_write": 12.50},
+            "claude-opus-4-8":   {"input": 5.0,  "output": 25.0, "cache_read": 0.50, "cache_write": 6.25},
+            "claude-opus-4-6":   {"input": 5.0,  "output": 25.0, "cache_read": 0.50, "cache_write": 6.25},
             "claude-sonnet-4-6": {"input": 3.0,  "output": 15.0, "cache_read": 0.30, "cache_write": 3.75},
-            "claude-haiku-4-5":  {"input": 0.80, "output": 4.0,  "cache_read": 0.08, "cache_write": 1.00},
-            # OpenAI on Bedrock — no prompt caching (cache rates 0).
-            # gpt-oss rates = AWS launch list price; gpt-5.6 provisional until official pricing lands.
+            "claude-haiku-4-5":  {"input": 1.0,  "output": 5.0,  "cache_read": 0.10, "cache_write": 1.25},
+            # OpenAI on Bedrock. gpt-6-astra: Price List standard tier (not long-context), 30-minute cache write.
+            # gpt-oss / gpt-5.6: no prompt caching (cache rates 0); gpt-oss = AWS launch list price;
+            # gpt-5.6 provisional (no us-east-1 Price List rows on 2026-11-07).
+            "gpt-6-astra":            {"input": 10.0, "output": 50.0, "cache_read": 1.0, "cache_write": 12.5},
             "gpt-oss-120b":           {"input": 0.15, "output": 0.60, "cache_read": 0.0, "cache_write": 0.0},
             "gpt-oss-20b":            {"input": 0.07, "output": 0.30, "cache_read": 0.0, "cache_write": 0.0},
             "gpt-oss-safeguard-120b": {"input": 0.15, "output": 0.60, "cache_read": 0.0, "cache_write": 0.0},
@@ -1219,6 +1225,17 @@ MODEL_WINDOW_DEFAULTS: dict[str, dict[str, int]] = {
         "main": 60, "scan": 40, "detect": 40,
         "rca": 80, "sre": 80,
         "executor": 20, "reporter": 40,
+    },
+    "claude-haiku-5-5": {
+        "main": 60, "scan": 40, "detect": 40,
+        "rca": 80, "sre": 80,
+        "executor": 20, "reporter": 40,
+    },
+    # OpenAI on Bedrock — matches 'global.openai.gpt-6-astra'
+    "gpt-6": {
+        "main": 100, "scan": 80, "detect": 80,
+        "rca": 200, "sre": 200,
+        "executor": 20, "reporter": 80,
     },
     # OpenAI on Bedrock — matches 'global.openai.gpt-5.6-terra/luna/sol'
     "gpt-5.6": {

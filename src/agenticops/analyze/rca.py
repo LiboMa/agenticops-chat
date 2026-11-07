@@ -6,10 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
-import boto3
 from botocore.exceptions import ClientError
 
-from agenticops.config import settings
 from agenticops.models import Anomaly, CloudAccount, CloudResource, RCAResult, get_session
 from agenticops.monitor.cloudwatch import CloudWatchMonitor
 
@@ -29,55 +27,34 @@ class RCAAnalysis:
 
 
 class BedrockLLM:
-    """AWS Bedrock LLM client."""
+    """AWS Bedrock LLM client on the main agent's model (2026-11-07: it used to read settings.bedrock_model_id, which
+    the dev box's env pinned to Opus 4.6), through the Bedrock session — agents.preamble.converse_text."""
 
-    def __init__(self, region: str = None, model_id: str = None):
-        """Initialize Bedrock client."""
-        self.region = region or settings.bedrock_region
-        self.model_id = model_id or settings.bedrock_model_id
-        self._client = None
+    def __init__(self, model_id: str = None):
+        """The model is picked here: _save_rca_result stores self.model_id as RCAResult.model_id."""
+        from agenticops.config import get_agent_model_config
 
-    @property
-    def client(self):
-        """Get Bedrock runtime client."""
-        if self._client is None:
-            self._client = boto3.client(
-                "bedrock-runtime",
-                region_name=self.region,
-            )
-        return self._client
+        main_model_id, self.max_tokens = get_agent_model_config("main")
+        self.model_id = model_id or main_model_id
 
-    def invoke(self, prompt: str, max_tokens: int = 4096) -> str:
+    def invoke(self, prompt: str, max_tokens: Optional[int] = None) -> str:
         """
         Invoke Bedrock model with a prompt.
 
         Args:
             prompt: The prompt to send to the model
-            max_tokens: Maximum tokens in response
+            max_tokens: Maximum tokens in response (default: the main agent's output limit — a model that
+                thinks by default spends part of it thinking)
 
         Returns:
-            Model response text
+            Model response text. A reply with no text, or cut at the limit, raises agents.preamble.ModelReplyError.
         """
+        from agenticops.agents.preamble import converse_text
+
         try:
-            # Format for Claude on Bedrock
-            body = json.dumps(
-                {
-                    "anthropic_version": "bedrock-2023-05-31",
-                    "max_tokens": max_tokens,
-                    "messages": [{"role": "user", "content": prompt}],
-                }
-            )
-
-            response = self.client.invoke_model(
-                modelId=self.model_id,
-                body=body,
-                contentType="application/json",
-                accept="application/json",
-            )
-
-            response_body = json.loads(response["body"].read())
-            return response_body["content"][0]["text"]
-
+            text, _, _ = converse_text(self.model_id, prompt, max_tokens=max_tokens or self.max_tokens,
+                                       read_timeout=300, total_attempts=2)
+            return text
         except ClientError as e:
             logger.error(f"Bedrock invocation failed: {e}")
             raise

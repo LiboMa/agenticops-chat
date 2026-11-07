@@ -13,7 +13,6 @@ set -euo pipefail
 # Variables injected by Terraform templatefile
 APP_PORT="${app_port}"
 BEDROCK_REGION="${bedrock_region}"
-BEDROCK_MODEL="${bedrock_model}"
 ADMIN_PASSWORD="${admin_password}"
 GIT_BRANCH="${git_branch}"
 APP_DIR="/opt/agenticops"
@@ -129,7 +128,8 @@ echo '{"mcpServers": {}}' > "$APP_DIR/config/mcp-servers.json"
 # -----------------------------------------------------------------------------
 cat > /etc/agenticops.env <<ENVEOF
 AIOPS_BEDROCK_REGION=$BEDROCK_REGION
-AIOPS_BEDROCK_MODEL_ID=$BEDROCK_MODEL
+# No AIOPS_BEDROCK_MODEL_ID here: an env var beats config/settings.yaml, and this one pinned the default tier to
+# Opus 4.6 for every path that read it (2026-11-07). Models come from settings.yaml and the Web Settings page.
 # Empty profile => boto3 default credential chain => EC2 instance role.
 # Overrides settings.yaml's "bedrock_profile: default" (which has no ~/.aws/config on this host).
 AIOPS_BEDROCK_PROFILE=

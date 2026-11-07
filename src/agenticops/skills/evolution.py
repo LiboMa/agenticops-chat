@@ -193,7 +193,7 @@ def update_draft_skill(name: str, updated_content: str) -> Path | None:
 def generate_skill_from_description(description: str) -> dict[str, Any]:
     """Use LLM to generate a SKILL.md from a natural language description.
 
-    Calls Bedrock directly (no Agent instance) using settings.bedrock_model_id.
+    Calls Bedrock directly (no Agent instance) on the main agent's model (agents.preamble.converse_text_on_main).
 
     Args:
         description: Natural language description of the desired skill
@@ -224,14 +224,8 @@ Requirements for the content:
 Return ONLY valid JSON, no markdown fences or extra text."""
 
     try:
-        from agenticops.config import get_bedrock_boto_session
-        client = get_bedrock_boto_session().client("bedrock-runtime")
-        response = client.converse(
-            modelId=settings.bedrock_model_id,
-            messages=[{"role": "user", "content": [{"text": prompt}]}],
-            inferenceConfig={"maxTokens": 8192},
-        )
-        raw_text = response["output"]["message"]["content"][0]["text"]
+        from agenticops.agents.preamble import converse_text_on_main
+        raw_text = converse_text_on_main(prompt)
 
         # Strip markdown fences if present
         text = raw_text.strip()
@@ -323,14 +317,8 @@ Return ONLY the improved SKILL.md body content (no frontmatter, no JSON wrapper)
 Include decision trees, diagnostic commands, and remediation steps."""
 
     try:
-        from agenticops.config import get_bedrock_boto_session
-        client = get_bedrock_boto_session().client("bedrock-runtime")
-        response = client.converse(
-            modelId=settings.bedrock_model_id,
-            messages=[{"role": "user", "content": [{"text": prompt}]}],
-            inferenceConfig={"maxTokens": 8192},
-        )
-        improved_body = response["output"]["message"]["content"][0]["text"].strip()
+        from agenticops.agents.preamble import converse_text_on_main
+        improved_body = converse_text_on_main(prompt).strip()   # no text raises: never an empty draft
 
         # Create as draft (preserves original)
         draft_path = create_draft_skill(

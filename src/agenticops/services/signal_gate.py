@@ -206,18 +206,14 @@ def merge_into_issue(session, existing, source, title, description, severity,
 
 
 def _call_bedrock(prompt: str, model_id: str, max_tokens: int = 500) -> tuple:
-    """One Bedrock converse call, temp=0. Returns (text, usage-dict)."""
-    from agenticops.config import get_bedrock_boto_session
+    """One Bedrock converse call, temperature 0 where the model takes it. Returns (text, usage-dict).
 
-    client = get_bedrock_boto_session().client("bedrock-runtime")
-    resp = client.converse(
-        modelId=model_id,
-        messages=[{"role": "user", "content": [{"text": prompt}]}],
-        inferenceConfig={"maxTokens": max_tokens, "temperature": 0},
-    )
-    text = resp["output"]["message"]["content"][0]["text"]
-    usage = resp.get("usage", {})
-    return text, {"input": int(usage.get("inputTokens", 0)), "output": int(usage.get("outputTokens", 0))}
+    Also the RCA critic's and the security advisor's call. A reply with no text or cut at max_tokens raises
+    (agents.preamble.ModelReplyError), which every caller's fail-open path already handles."""
+    from agenticops.agents.preamble import converse_text
+
+    text, usage, _ = converse_text(model_id, prompt, max_tokens=max_tokens, temperature=0)
+    return text, usage
 
 
 def _parse_verdict(text: str) -> Optional[dict]:

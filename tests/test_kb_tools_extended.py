@@ -118,25 +118,31 @@ class TestKeywordSearchSops:
 # _llm_distill
 # ---------------------------------------------------------------------------
 
+def _client_replying(text):
+    """A bedrock-runtime client whose Converse reply carries `text` (the shape _llm_distill reads since 2026-11-07)."""
+    client = MagicMock()
+    client.converse.return_value = {
+        "output": {"message": {"role": "assistant", "content": [{"text": text}]}},
+        "stopReason": "end_turn",
+        "usage": {"inputTokens": 1, "outputTokens": 1},
+    }
+    return client
+
+
 class TestLLMDistill:
     def test_success(self):
-        mock_client = MagicMock()
-        mock_body = MagicMock()
-        mock_body.read.return_value = json.dumps({
-            "content": [{"text": json.dumps({
-                "title": "Test Case",
-                "symptoms": "High CPU",
-                "root_cause": "Leak",
-                "immediate_action": "Restart",
-                "long_term_fix": "Fix code",
-                "verification_method": "Monitor",
-                "what_failed": "Alerting",
-                "why_missed": "Threshold",
-                "efficiency_score": 0.7,
-                "tags": ["cpu", "leak"],
-            })}]
-        }).encode()
-        mock_client.invoke_model.return_value = {"body": mock_body}
+        mock_client = _client_replying(json.dumps({
+            "title": "Test Case",
+            "symptoms": "High CPU",
+            "root_cause": "Leak",
+            "immediate_action": "Restart",
+            "long_term_fix": "Fix code",
+            "verification_method": "Monitor",
+            "what_failed": "Alerting",
+            "why_missed": "Threshold",
+            "efficiency_score": 0.7,
+            "tags": ["cpu", "leak"],
+        }))
 
         with patch("agenticops.config.get_bedrock_boto_session") as mock_get_session:
             mock_get_session.return_value.client.return_value = mock_client
@@ -146,12 +152,7 @@ class TestLLMDistill:
             assert result["title"] == "Test Case"
 
     def test_strips_code_fences(self):
-        mock_client = MagicMock()
-        mock_body = MagicMock()
-        mock_body.read.return_value = json.dumps({
-            "content": [{"text": '```json\n{"title": "Fenced"}\n```'}]
-        }).encode()
-        mock_client.invoke_model.return_value = {"body": mock_body}
+        mock_client = _client_replying('```json\n{"title": "Fenced"}\n```')
 
         with patch("agenticops.config.get_bedrock_boto_session") as mock_get_session:
             mock_get_session.return_value.client.return_value = mock_client
@@ -166,12 +167,7 @@ class TestLLMDistill:
             assert result is None
 
     def test_invalid_json(self):
-        mock_client = MagicMock()
-        mock_body = MagicMock()
-        mock_body.read.return_value = json.dumps({
-            "content": [{"text": "not json at all"}]
-        }).encode()
-        mock_client.invoke_model.return_value = {"body": mock_body}
+        mock_client = _client_replying("not json at all")
 
         with patch("agenticops.config.get_bedrock_boto_session") as mock_get_session:
             mock_get_session.return_value.client.return_value = mock_client

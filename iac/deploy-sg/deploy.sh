@@ -161,7 +161,6 @@ case "$ACTION" in
     SETUP_SCRIPT=$(mktemp /tmp/setup-XXXXX.sh)
     sed -e "s/\${app_port}/8000/g" \
         -e "s/\${bedrock_region}/us-east-1/g" \
-        -e "s/\${bedrock_model}/global.anthropic.claude-opus-4-6-v1/g" \
         -e "s/\${admin_password}/aiops2026/g" \
         -e "s/\${git_branch}/${GIT_BRANCH}/g" \
         -e 's/\$\${/\${/g' \

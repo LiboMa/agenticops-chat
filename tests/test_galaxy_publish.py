@@ -139,6 +139,24 @@ def test_llm_failure_fails_the_build_but_keeps_its_rules_readable(db, seeded, mo
         assert s.query(GalaxyResourceState).count() == 0      # the diff baseline only moves on success
 
 
+def test_a_reply_with_no_text_fails_the_build_and_keeps_the_baseline(db, seeded, monkeypatch):
+    """A 5.x model thinks by default: a reply of reasoning blocks only must fail the build like any LLM error,
+    never complete it with zero fresh edges (which would drop the old LLM edges and move the diff baseline)."""
+    from unittest.mock import MagicMock
+    session = MagicMock()
+    session.client.return_value.converse.return_value = {
+        "output": {"message": {"role": "assistant",
+                               "content": [{"reasoningContent": {"reasoningText": {"text": "", "signature": "s"}}}]}},
+        "stopReason": "end_turn", "usage": {"inputTokens": 5, "outputTokens": 5}}
+    monkeypatch.setattr("agenticops.config.get_bedrock_boto_session", lambda: session)
+    bid = B.build_graph(trigger="manual", full=True)
+    with get_db_session() as s:
+        b = s.get(GalaxyBuild, bid)
+        assert b.status == "failed"
+        assert b.rules_published_at is not None
+        assert s.query(GalaxyResourceState).count() == 0
+
+
 def test_upgrade_with_unchanged_inventory_still_publishes_relations(db, seeded, monkeypatch):
     calls = []
     monkeypatch.setattr(B, "_call_bedrock", _llm_returns([EDGE], calls))

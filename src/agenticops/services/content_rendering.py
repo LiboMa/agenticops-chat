@@ -61,17 +61,16 @@ def rendering_view(db, report: Report, version: int, language: str) -> dict:
 
 
 def _call_model(prompt: str, model_id: str, max_tokens: int) -> str:
-    """One Bedrock converse call at temperature 0 (the Signal Gate / RCA critic pattern), with a long read timeout
-    and at most one retry; a reply cut at the output limit raises TranslationTruncated."""
-    from botocore.config import Config
-    from agenticops.config import get_bedrock_boto_session
-    client = get_bedrock_boto_session().client(
-        "bedrock-runtime", config=Config(read_timeout=BEDROCK_READ_TIMEOUT_S, retries={"max_attempts": 2}))
-    resp = client.converse(modelId=model_id, messages=[{"role": "user", "content": [{"text": prompt}]}],
-                           inferenceConfig={"maxTokens": max_tokens, "temperature": 0})
-    if resp.get("stopReason") == "max_tokens":
-        raise TranslationTruncated("the translation hit the model's output limit")
-    return resp["output"]["message"]["content"][0]["text"]
+    """One Bedrock converse call at temperature 0 where the model takes it (the Signal Gate / RCA critic pattern),
+    with a long read timeout and at most one retry (two attempts in all); a reply cut at the output limit raises
+    TranslationTruncated, a reply with no text raises ModelReplyEmpty (recorded as `model_failed`)."""
+    from agenticops.agents.preamble import ModelReplyTruncated, converse_text
+    try:
+        text, _, _ = converse_text(model_id, prompt, max_tokens=max_tokens, temperature=0,
+                                   read_timeout=BEDROCK_READ_TIMEOUT_S, total_attempts=2)
+    except ModelReplyTruncated as e:
+        raise TranslationTruncated("the translation hit the model's output limit") from e
+    return text
 
 
 _FENCED_REPLY = re.compile(r"^\s*```[A-Za-z]*\n(.*)\n```\s*$", re.S)

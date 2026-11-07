@@ -36,6 +36,9 @@ CLAUDE5_IDS = [
     "global.anthropic.claude-opus-5",
     "global.anthropic.claude-sonnet-5",
     "global.anthropic.claude-fable-5-1",
+    "global.anthropic.claude-opus-5-5",
+    "global.anthropic.claude-sonnet-5-5",
+    "global.anthropic.claude-haiku-5-5",
 ]
 
 
@@ -52,6 +55,8 @@ class TestClaude5CostKeys:
         ("global.anthropic.claude-fable-5", "claude-fable-5"),
         # a later dated/versioned respin must still collapse to the family key
         ("global.anthropic.claude-opus-5-v1:0", "claude-opus-5"),
+        ("global.anthropic.claude-opus-5-5", "claude-opus-5-5"),
+        ("global.anthropic.claude-sonnet-5-5", "claude-sonnet-5-5"),
     ])
     def test_normalize(self, mid, key):
         assert normalize_model_key(mid) == key
@@ -75,7 +80,7 @@ class TestClaude5CostKeys:
 
 class TestClaude5Windows:
     @pytest.mark.parametrize("family", [
-        "claude-opus-5", "claude-sonnet-5", "claude-fable-5-1",
+        "claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-haiku-5-5", "gpt-6",
     ])
     def test_family_registered(self, family):
         assert family in MODEL_WINDOW_DEFAULTS
@@ -94,6 +99,9 @@ class TestClaude5Windows:
         ("global.anthropic.claude-opus-5", "claude-opus-5"),
         ("global.anthropic.claude-sonnet-5", "claude-sonnet-5"),
         ("global.anthropic.claude-fable-5-1", "claude-fable-5-1"),
+        ("global.anthropic.claude-opus-5-5", "claude-opus-5"),       # 5.5 shares its 5.0 family's windows
+        ("global.anthropic.claude-haiku-5-5", "claude-haiku-5-5"),
+        ("global.openai.gpt-6-astra", "gpt-6"),
     ])
     def test_window_resolves_to_own_family(self, monkeypatch, mid, family):
         monkeypatch.setattr(settings, "agent_main_model_id", mid)
@@ -186,6 +194,10 @@ class TestThinkingRequestShape:
         ("global.anthropic.claude-opus-4-8", (4, 8)),
         ("global.anthropic.claude-opus-4-6-v1", (4, 6)),
         ("global.anthropic.claude-haiku-4-5-20251001-v1:0", (4, 5)),
+        ("global.anthropic.claude-opus-5-5", (5, 5)),
+        # a date right after the major is not a minor: Sonnet 4 / Opus 4 are 4.0
+        ("us.anthropic.claude-sonnet-4-20250514-v1:0", (4, 0)),
+        ("global.anthropic.claude-opus-4-20250514-v1:0", (4, 0)),
         # no claude-<family>-<major> shape → unknown
         ("anthropic.claude-3-5-sonnet-20240620-v1:0", None),
         ("openai.gpt-oss-120b-1:0", None),
@@ -207,6 +219,7 @@ class TestThinkingRequestShape:
 
     @pytest.mark.parametrize("mid", [
         "global.anthropic.claude-haiku-4-5-20251001-v1:0",  # rejects adaptive
+        "us.anthropic.claude-sonnet-4-20250514-v1:0",       # Sonnet 4.0 — was misread as 4.20250514
         "anthropic.claude-3-5-sonnet-20240620-v1:0",
         "global.openai.gpt-5.6-terra",                       # not Anthropic at all
         "",
@@ -275,23 +288,67 @@ class TestThinkingRequestShape:
 class TestClaude5SettingsSync:
     def test_aliases_present(self):
         aliases = settings.model_aliases
-        assert aliases["opus"] == "global.anthropic.claude-opus-5"
-        assert aliases["sonnet"] == "global.anthropic.claude-sonnet-5"
+        # bare aliases track the latest generation; haiku stays on the cheap tier's 4.5
+        assert aliases["opus"] == "global.anthropic.claude-opus-5-5"
+        assert aliases["sonnet"] == "global.anthropic.claude-sonnet-5-5"
+        assert aliases["haiku"] == "global.anthropic.claude-haiku-4-5-20251001-v1:0"
         assert aliases["fable"] == "global.anthropic.claude-fable-5-1"
-        # versioned aliases keep the previous generation pinnable
+        assert aliases["opus-5-5"] == "global.anthropic.claude-opus-5-5"
+        assert aliases["sonnet-5-5"] == "global.anthropic.claude-sonnet-5-5"
+        assert aliases["gpt-6-astra"] == "global.openai.gpt-6-astra"
+        # versioned aliases keep the previous generations pinnable
+        assert aliases["opus-5"] == "global.anthropic.claude-opus-5"
         assert aliases["opus-4-8"] == "global.anthropic.claude-opus-4-8"
         assert aliases["opus-4-6"] == "global.anthropic.claude-opus-4-6-v1"
 
     def test_cost_table_has_claude5_families(self):
         table = settings.token_cost_table
-        for key in ("claude-opus-5", "claude-sonnet-5", "claude-fable-5-1"):
+        for key in ("claude-opus-5", "claude-sonnet-5", "claude-fable-5-1",
+                    "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "gpt-6-astra"):
             assert key in table, f"token_cost_table missing {key}"
             assert table[key]["input"] > 0
             assert table[key]["output"] > 0
 
-    def test_defaults_upgraded(self):
-        assert get_agent_model_config("main")[0] == "global.anthropic.claude-opus-5"
-        assert get_agent_model_config("sre")[0] == "global.anthropic.claude-fable-5-1"
+    def test_defaults_match_the_live_box(self):
+        """Owner decision 2026-11-07: the committed defaults are what the dev box runs, so a redeploy that does not
+        restore its settings.yaml no longer drops RCA / Executor back to Opus 4.6."""
+        expected = {
+            "main": "global.anthropic.claude-opus-5-5",
+            "rca": "global.anthropic.claude-opus-5-5",
+            "sre": "global.anthropic.claude-opus-5-5",
+            "executor": "global.anthropic.claude-opus-5-5",
+            "scan": "global.anthropic.claude-sonnet-5-5",
+            "detect": "global.anthropic.claude-sonnet-5-5",
+            "reporter": "global.openai.gpt-6-astra",
+        }
+        assert {agent: get_agent_model_config(agent)[0] for agent in expected} == expected
+        assert settings.executor_simple_model_id == "global.anthropic.claude-sonnet-5-5"
+        assert settings.galaxy_model_id == "global.anthropic.claude-opus-5-5"
+
+    def test_tiers_carry_no_opus_4_6(self):
+        assert settings.bedrock_model_id == "global.anthropic.claude-sonnet-5-5"
+        assert settings.bedrock_model_id_cheap == "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+        assert settings.bedrock_model_id_strong == "global.anthropic.claude-opus-5-5"
+
+    @pytest.mark.parametrize("mid,in_out,cached", [
+        # AWS Price List AmazonBedrockFoundationModels, us-east-1, global cross-region, standard tier, 2026-11-07:
+        # (1M input + 1M output), (1M cache read + 1M 5-minute cache write)
+        ("global.anthropic.claude-opus-5-5", 4.0 + 20.0, 0.2 + 5.0),
+        ("global.anthropic.claude-sonnet-5-5", 2.0 + 10.0, 0.1 + 2.5),
+        ("global.anthropic.claude-haiku-5-5", 0.1 + 0.5, 0.01 + 0.125),
+        ("global.openai.gpt-6-astra", 10.0 + 50.0, 1.0 + 12.5),
+        ("global.anthropic.claude-opus-5", 5.0 + 25.0, 0.5 + 6.25),
+        ("global.anthropic.claude-opus-4-8", 5.0 + 25.0, 0.5 + 6.25),
+        ("global.anthropic.claude-opus-4-6-v1", 5.0 + 25.0, 0.5 + 6.25),
+        ("global.anthropic.claude-fable-5-1", 10.0 + 50.0, 0.25 + 12.5),
+        ("global.anthropic.claude-fable-5", 10.0 + 50.0, 1.0 + 12.5),
+        ("global.anthropic.claude-sonnet-5", 2.0 + 10.0, 0.2 + 2.5),
+        ("global.anthropic.claude-haiku-4-5-20251001-v1:0", 1.0 + 5.0, 0.1 + 1.25),
+        ("global.anthropic.claude-sonnet-4-6", 3.0 + 15.0, 0.3 + 3.75),
+    ])
+    def test_rates_are_the_bedrock_list_price(self, mid, in_out, cached):
+        assert compute_cost(mid, {"input": 1_000_000, "output": 1_000_000}) == pytest.approx(in_out)
+        assert compute_cost(mid, {"cache_read": 1_000_000, "cache_write": 1_000_000}) == pytest.approx(cached)
 
     def test_every_alias_has_cost_rates(self):
         """A pickable model with no rates bills 0 — catch drift between the
