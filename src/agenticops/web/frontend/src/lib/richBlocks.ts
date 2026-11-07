@@ -103,7 +103,14 @@ export function parseChartSpec(json: string): ChartSpec | null {
   };
 }
 
-/** Mermaid source without `%%{ … }%%` init directives (they can reconfigure the renderer), trimmed. */
+/** Mermaid source the renderer may draw: no `%%{ … }%%` init directives (they can reconfigure it), and nothing that
+ *  makes the browser fetch an outside image while it draws — an `<img>` tag in a label (raw or escaped) or an image
+ *  shape `A@{ img: "…" }` (an answer never loads outside addresses: it would leak the reader's IP). Trimmed. */
 export function mermaidSource(src: string): string {
-  return src.replace(/%%\{[\s\S]*?\}%%/g, "").trim();
+  return src
+    .replace(/%%\{[\s\S]*?\}%%/g, "")
+    .replace(/<img\b[^>]*>/gi, "")
+    .replace(/&lt;img\b[\s\S]*?&gt;/gi, "")
+    .replace(/@\{[^}]*\bimg\s*:[^}]*\}/gi, "")
+    .trim();
 }

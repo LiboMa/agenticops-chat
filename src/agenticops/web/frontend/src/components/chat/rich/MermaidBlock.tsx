@@ -9,7 +9,9 @@ import { ZoomDialog } from "./ZoomDialog";
  *  no click handlers, labels sanitized. Init directives are stripped first (mermaidSource). */
 async function renderSvg(id: string, src: string, theme: "light" | "dark"): Promise<string> {
   const { default: mermaid } = await import("mermaid");
-  mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: theme === "dark" ? "dark" : "default" });
+  // labels as SVG text, never HTML: an HTML label can carry an <img> the browser fetches while drawing
+  mermaid.initialize({ startOnLoad: false, securityLevel: "strict", htmlLabels: false, flowchart: { htmlLabels: false },
+                       theme: theme === "dark" ? "dark" : "default" });
   await mermaid.parse(src);            // throws on a syntax error before render touches the DOM
   const { svg } = await mermaid.render(id, src);
   return svg;

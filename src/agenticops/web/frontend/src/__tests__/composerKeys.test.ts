@@ -19,3 +19,15 @@ describe("shouldSend", () => {
   });
   it("other keys never send", () => expect(shouldSend(k({ key: "a" }), false)).toBe(false));
 });
+
+import { fileDragAction } from "@/lib/composerKeys";
+describe("fileDragAction — a dropped file never navigates away from the chat", () => {
+  it("a file drag is always taken from the browser; it is attached only while the composer is enabled", () => {
+    expect(fileDragAction(["Files"], false)).toEqual({ prevent: true, accept: true });
+    expect(fileDragAction(["Files"], true)).toEqual({ prevent: true, accept: false });   // a reply is streaming
+  });
+  it("a text-selection drag is left alone", () => {
+    expect(fileDragAction(["text/plain"], false)).toEqual({ prevent: false, accept: false });
+    expect(fileDragAction(undefined, false)).toEqual({ prevent: false, accept: false });
+  });
+});

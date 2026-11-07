@@ -4629,6 +4629,9 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
         def _turn_ms() -> int:   # where on the turn's clock a step starts (the work log's total is a span, not a sum)
             return int((time.monotonic() - _chat_start_time) * 1000)
 
+        def _u16(text: str) -> int:   # an offset the browser's String.slice reads: UTF-16 units (an emoji is two)
+            return len(text.encode("utf-16-le", "surrogatepass")) // 2
+
         input_tokens = 0
         output_tokens = 0
         cache_read_tokens = 0
@@ -4692,10 +4695,10 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
                     if tool_name and call_id not in [t.get("call_id") for t in tool_calls]:
                         # 2026-11-07 work log: where in the reply text this step began, and when (its duration)
                         tool_calls.append({"name": tool_name, "status": "running", "call_id": call_id,
-                                           "text_offset": len(accumulated), "started_ms": _turn_ms()})
+                                           "text_offset": _u16(accumulated), "started_ms": _turn_ms()})
                         _tool_t0[call_id] = time.monotonic()
                         yield {"event": "tool_start", "data": json.dumps(
-                            {"name": tool_name, "call_id": call_id, "text_offset": len(accumulated)})}
+                            {"name": tool_name, "call_id": call_id, "text_offset": _u16(accumulated)})}
                 # A tool's result: its outcome comes from the result's status, never from its name (S5)
                 _msg = ev.get("message")
                 if isinstance(_msg, dict):
@@ -4722,7 +4725,7 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
                                 t["status"], t["outcome"] = "done", tool_outcome(_res.get("status"), _txt)
                                 t["duration_ms"] = _tool_ms(t["call_id"])
                                 t["result_preview"] = result_preview(_txt)
-                                t["text_end"] = len(accumulated)
+                                t["text_end"] = _u16(accumulated)
                                 yield {"event": "tool_end", "data": json.dumps(
                                     {"name": t["name"], "call_id": t["call_id"], "outcome": t["outcome"],
                                      "duration_ms": t["duration_ms"], "result_preview": t["result_preview"],
@@ -4750,7 +4753,7 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
                 # no result: the step owns no reply text (it ends where it began)
                 t["duration_ms"] = _tool_ms(t.get("call_id"))
                 t["result_preview"] = ""
-                t["text_end"] = t.get("text_offset", len(accumulated))
+                t["text_end"] = t.get("text_offset", _u16(accumulated))
                 yield {"event": "tool_end", "data": json.dumps(
                     {"name": t["name"], "call_id": t.get("call_id"), "outcome": "unknown",
                      "duration_ms": t["duration_ms"], "result_preview": "", "text_end": t["text_end"],

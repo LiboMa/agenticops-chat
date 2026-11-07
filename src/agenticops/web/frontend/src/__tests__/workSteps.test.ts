@@ -70,3 +70,12 @@ describe("formatDuration", () => {
     expect(formatDuration(125_000, t)).toBe("2 min 5 s");
   });
 });
+
+describe("splitWork offsets are UTF-16 units (the server counts them the same way)", () => {
+  it("an emoji before a step does not shift the cut", () => {
+    const narration = "🔍 Found 🔴 api down. Checking logs:";
+    const r = splitWork(narration + "Root cause: x", [T({ text_offset: narration.length, text_end: narration.length })]);
+    expect(r.answer).toBe("Root cause: x");
+    expect((r.timeline[0] as any).text).toBe(narration);
+  });
+});

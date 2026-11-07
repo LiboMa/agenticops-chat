@@ -16,3 +16,11 @@ export function shouldSend(e: KeyLike, coarsePointer: boolean): boolean {
   if (e.shiftKey || coarsePointer) return false;
   return true;
 }
+
+/** What a drag over the chat does (2026-11-07): a FILE drag is always taken from the browser (left alone, the browser
+ *  would open the file in the tab and leave the app, cutting a reply that is streaming); its files are attached only
+ *  while the composer is enabled. A text-selection drag is left alone. */
+export function fileDragAction(types: readonly string[] | undefined, disabled: boolean): { prevent: boolean; accept: boolean } {
+  const files = !!types && Array.from(types).includes("Files");
+  return { prevent: files, accept: files && !disabled };
+}

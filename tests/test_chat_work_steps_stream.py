@@ -163,3 +163,22 @@ def test_a_step_is_timed_from_when_it_runs_not_from_when_the_model_began_writing
     assert end["duration_ms"] < 300
     tc = _reply(pk).tool_calls[0]
     assert tc["duration_ms"] < 300 and isinstance(tc["started_ms"], int) and tc["started_ms"] >= 300
+
+
+def test_offsets_count_utf16_units_like_the_browser(env, monkeypatch):
+    # an emoji outside the BMP is one Python code point but two UTF-16 units (String.slice in the browser)
+    client, webapp = env
+    sid, pk = _session()
+
+    class _A:
+        async def stream_async(self, _c):
+            yield {"data": "🔍 Found 🔴 api down. Checking logs:"}
+            yield {"current_tool_use": {"toolUseId": "t1", "name": "sre_query", "input": ""}}
+            yield {"message": {"role": "user", "content": [{"toolResult": {
+                "toolUseId": "t1", "status": "success", "content": [{"text": "ok"}]}}]}}
+            yield {"data": "Root cause: x"}
+    monkeypatch.setattr(webapp._chat_sessions, "get_or_create", lambda s: _A())
+    frames(_send(client, sid).text)
+    tc = _reply(pk).tool_calls[0]
+    narration = "🔍 Found 🔴 api down. Checking logs:"
+    assert tc["text_offset"] == len(narration.encode("utf-16-le")) // 2 == tc["text_end"]

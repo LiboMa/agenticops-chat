@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import re
 
-from agenticops.security.redaction import PLACEHOLDER, redact_secrets
+from agenticops.security.redaction import PLACEHOLDER, redact_obj, redact_secrets
 
 SUMMARY_MAX = 160
 PREVIEW_MAX = 200
-PREVIEW_SCAN_MAX = 4000   # a result is cut to this BEFORE any regex runs (a tool can return megabytes)
+PREVIEW_SCAN_MAX = 4000   # input and result are cut to this BEFORE any regex runs (a tool can return megabytes)
 
 _VALUE = r"""("[^"]*"|'[^']*'|[^\s'",;]+)"""
 _KEYWORD = r"(?:secret|password|passwd|token|api_?key|private_?key)"
@@ -30,10 +30,11 @@ _AUTH_HEADER = re.compile(r"(?i)(Authorization\s*[:=]\s*(?:(?:Bearer|Basic|Token
 _BEARER = re.compile(r"(?i)(\bBearer\s+)([A-Za-z0-9._~+/=\-]{8,})")
 # token: x / AWS_SECRET_ACCESS_KEY=x — any key holding a secret word, then "=", or ":" and a space (an ARN segment
 # "arn:aws:secretsmanager:region:…" is a resource reference, not a key: no space after its colons)
-_KEY_ASSIGN = re.compile(r"(?i)\b([A-Za-z0-9_.\-]*" + _KEYWORD + r"[A-Za-z0-9_.\-]*)(\s*=\s*|:\s+)" + _VALUE)
+# (label runs are bounded, as the shared scrubber's are: an unbounded run backtracks quadratically on "a.a.a.…")
+_KEY_ASSIGN = re.compile(r"(?i)\b([A-Za-z0-9_.\-]{0,40}" + _KEYWORD + r"[A-Za-z0-9_.\-]{0,40})(\s*=\s*|:\s+)" + _VALUE)
 # aws_secret_access_key x — a snake_case config key (has "_") holding a secret word, then whitespace
 _KEY_SPACE = re.compile(
-    r"(?i)\b((?=[A-Za-z0-9_.\-]*?" + _KEYWORD + r")[A-Za-z0-9.\-]*_[A-Za-z0-9_.\-]*)(\s+)" + _VALUE)
+    r"(?i)\b((?=[A-Za-z0-9_.\-]{0,40}?" + _KEYWORD + r")[A-Za-z0-9.\-]{0,40}_[A-Za-z0-9_.\-]{0,40})(\s+)" + _VALUE)
 
 
 def redact_for_display(text: str) -> str:
@@ -63,18 +64,20 @@ def summarize_input(tool_input) -> str:
     if isinstance(tool_input, str):
         raw = tool_input
     elif isinstance(tool_input, dict):
+        # a value under a secret-named key ({"password": …}) is masked first: the summary may drop the key name
+        tool_input = redact_obj(tool_input)
         command = tool_input.get("command")
         texts = [v for v in tool_input.values() if isinstance(v, str) and v.strip()]
         if isinstance(command, str) and command.strip():
             raw = command
-        elif len(texts) == 1:
+        elif len(texts) == 1 and texts[0] != PLACEHOLDER:
             raw = texts[0]
         else:
             raw = " ".join(f"{k}={v}" for k, v in tool_input.items()
                            if isinstance(v, (str, int, float, bool)) and not (isinstance(v, str) and not v.strip()))
     else:
         return ""
-    return _cut(redact_for_display(_one_line(raw)), SUMMARY_MAX)
+    return _cut(redact_for_display(_one_line(raw[:PREVIEW_SCAN_MAX])), SUMMARY_MAX)
 
 
 def result_preview(text: str | None) -> str:

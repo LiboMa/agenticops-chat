@@ -50,3 +50,11 @@ describe("mermaidSource", () => {
     expect(mermaidSource('flowchart LR\n%%{init:\n {"theme":"x"}\n}%%\nA-->B')).toBe("flowchart LR\n\nA-->B");
   });
 });
+
+describe("mermaidSource never lets a diagram fetch an outside image", () => {
+  it("drops img tags (raw or escaped) and image shapes", () => {
+    expect(mermaidSource(`flowchart LR\nA["<img src='http://evil/p.png'> hi"]-->B`)).toBe(`flowchart LR\nA[" hi"]-->B`);
+    expect(mermaidSource(`flowchart LR\nA["&lt;img src='http://evil/p.png'&gt;"]-->B`)).toBe(`flowchart LR\nA[""]-->B`);
+    expect(mermaidSource(`flowchart LR\nA@{ img: "http://evil/p.png", label: "x" }\nA-->B`)).toBe(`flowchart LR\nA\nA-->B`);
+  });
+});

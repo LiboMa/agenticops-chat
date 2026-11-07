@@ -69,3 +69,17 @@ def test_preview_of_a_huge_result_is_bounded():
     t = time.monotonic()
     p = result_preview("A" * 5_000_000)
     assert len(p) <= PREVIEW_MAX and time.monotonic() - t < 0.5
+
+
+def test_a_secret_passed_as_the_only_text_field_is_never_the_summary():
+    for inp, leak in [({"password": "hunter2xyz"}, "hunter2xyz"), ({"secret": "S3cr3tValue99", "ttl": 30}, "S3cr3tValue99")]:
+        out = summarize_input(inp)
+        assert leak not in out and M in out
+
+
+def test_the_display_patterns_cost_stays_linear_on_hostile_input():
+    for raw in ["a." * 2000, "a." * 10_000, "A_b-" * 10_000]:
+        t = time.monotonic()
+        summarize_input({"command": raw})
+        result_preview(raw)
+        assert time.monotonic() - t < 0.5, len(raw)

@@ -21,7 +21,7 @@ import { ComposerAttachment, type RejectedFile } from "./ComposerAttachment";
 import { ImageLightbox } from "./ImageLightbox";
 import { attachmentBlobUrl, localPreviewUrl } from "@/hooks/useAttachmentBlob";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { shouldSend } from "@/lib/composerKeys";
+import { fileDragAction, shouldSend } from "@/lib/composerKeys";
 import { humanSize } from "@/lib/attachments";
 
 interface Props {
@@ -182,12 +182,10 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
     if (!el) return;
 
     const onDragOver = (e: DragEvent) => {
-      if (disabled) return;
-      // Only react to file drags, not text-selection drags.
-      if (e.dataTransfer?.types?.includes("Files")) {
-        e.preventDefault();
-        setIsDragging(true);
-      }
+      // a file drag is always taken (never left to open in the tab); the hint shows only when it would attach
+      const act = fileDragAction(e.dataTransfer?.types, !!disabled);
+      if (act.prevent) e.preventDefault();
+      if (act.accept) setIsDragging(true);
     };
     const onDragLeave = (e: DragEvent) => {
       // Moving onto a child element keeps relatedTarget inside the container → ignore.
@@ -195,10 +193,13 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
       setIsDragging(false);
     };
     const onDrop = (e: DragEvent) => {
-      e.preventDefault();
+      const act = fileDragAction(e.dataTransfer?.types, !!disabled);
+      if (act.prevent) e.preventDefault();
       setIsDragging(false);
-      if (e.dataTransfer) addFiles(filesFromDrop(e.dataTransfer));
+      if (act.accept && e.dataTransfer) addFiles(filesFromDrop(e.dataTransfer));
     };
+    // a file dropped anywhere else on the page (the sidebar, the top bar) must not open in the tab either
+    const onWindowDrag = (e: DragEvent) => { if (fileDragAction(e.dataTransfer?.types, true).prevent) e.preventDefault(); };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") setIsDragging(false);
     };
@@ -208,7 +209,11 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
     el.addEventListener("dragleave", onDragLeave, opts);
     el.addEventListener("drop", onDrop, opts);
     window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("dragover", onWindowDrag);
+    window.addEventListener("drop", onWindowDrag);
     return () => {
+      window.removeEventListener("dragover", onWindowDrag);
+      window.removeEventListener("drop", onWindowDrag);
       el.removeEventListener("dragover", onDragOver, opts);
       el.removeEventListener("dragleave", onDragLeave, opts);
       el.removeEventListener("drop", onDrop, opts);
