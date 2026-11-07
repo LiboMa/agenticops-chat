@@ -377,6 +377,8 @@ from agenticops.web.routers import connectors as _connectors_router
 app.include_router(_connectors_router.router)
 from agenticops.web.routers import ui as _ui_router  # MVP-2.7.0: workspace bootstrap + preferences
 app.include_router(_ui_router.router)
+from agenticops.web.routers import chat_attachments as _chat_attachments_router  # 2026-11-07: chat attachments
+app.include_router(_chat_attachments_router.router)
 
 # Chat session manager
 _chat_sessions = ChatSessionManager()
