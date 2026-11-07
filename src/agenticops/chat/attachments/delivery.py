@@ -34,6 +34,7 @@ REASON_TEXT = {
     "model_no_images": "this model cannot see images",
     "document_quota": "a request takes at most 5 native documents",
     "document_too_large": "larger than the 4.5 MB a native document may be",
+    "document_too_long": "too long to read whole — its extracted text is given instead",
     "image_quota": "a request takes at most 20 images",
     "media_budget": "over this turn's budget for native files",
     "text_budget": "over this turn's budget for attachment text",
@@ -140,11 +141,34 @@ class _Budget:
         self.text_per_file = cfg.text_max_chars
 
 
+# Claude's PDF support stops at 100 pages; a longer one goes as text
+NATIVE_PDF_MAX_PAGES = 100
+
+
+def _too_long(item: Prepared, b: "_Budget") -> bool:
+    """A document whose text would not fit text_max_chars: bytes alone do not bound what the model is given (a 4 MB
+    sheet is millions of tokens). A spreadsheet's text stops at SHEET_MAX_ROWS rows, so its full size is estimated
+    from the rows read; a sheet of unknown length counts as too long."""
+    meta = item.meta or {}
+    if meta.get("truncated") or (item.kind == "pdf" and (meta.get("pages") or 0) > NATIVE_PDF_MAX_PAGES):
+        return True
+    sheets = meta.get("sheets") or []
+    if not sheets:
+        return False
+    if not all(sh.get("rows_known", True) for sh in sheets):
+        return True
+    read = sum(sh.get("rows_included", 0) for sh in sheets)
+    total = sum(sh.get("rows", 0) for sh in sheets)
+    return read > 0 and total > read and meta.get("chars", 0) * total / read > b.text_per_file
+
+
 def _native_doc_refusal(item: Prepared, size: int, b: _Budget) -> Optional[str]:
     if b.docs <= 0:
         return "document_quota"
     if size > BEDROCK_MAX_DOCUMENT_BYTES:
         return "document_too_large"
+    if _too_long(item, b):
+        return "document_too_long"
     if size > b.bytes:
         return "media_budget"
     return None

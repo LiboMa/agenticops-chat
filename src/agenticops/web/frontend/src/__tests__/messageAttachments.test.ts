@@ -9,6 +9,7 @@ const doc = (id: string): MessageAttachment => ({ id, filename: `${id}.pdf`, siz
 
 // every reason the server's delivery (chat/attachments/delivery.py) and processing can report
 const REASONS = ["model_text_only", "model_no_documents", "model_no_images", "document_quota", "document_too_large",
+  "document_too_long",
   "image_quota", "media_budget", "text_budget", "scanned_needs_vision", "claude_only_format", "processing_failed",
   "file_missing", "encrypted", "archive_too_large", "image_too_large", "undecodable", "corrupt", "timeout",
   "worker_crashed", "unreadable", "unsupported_type", "not_found", "file_too_large", "content_mismatch", "binary_text"];

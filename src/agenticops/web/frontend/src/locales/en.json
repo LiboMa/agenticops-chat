@@ -1080,6 +1080,7 @@
   "chat.attach.reason.model_no_images": "this model cannot see images",
   "chat.attach.reason.document_quota": "a request takes at most 5 documents",
   "chat.attach.reason.document_too_large": "larger than 4.5 MB",
+  "chat.attach.reason.document_too_long": "too long to read whole",
   "chat.attach.reason.image_quota": "a request takes at most 20 images",
   "chat.attach.reason.media_budget": "over this turn's budget for files",
   "chat.attach.reason.text_budget": "over this turn's budget for text",

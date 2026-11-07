@@ -242,3 +242,29 @@ def test_history_blocks_cap_text(tmp_path):
     meta = process(att / "original", ".txt", att, ExtractLimits.from_config(cfg))
     blocks = history_blocks([Prepared("b" * 32, "big.txt", ".txt", "text", 5000, "ready", None, att, meta)], cfg)
     assert "z" * 100 in blocks[0]["text"] and "z" * 101 not in blocks[0]["text"]
+
+
+def test_long_document_goes_as_text_not_native(tmp_path):
+    """Bytes alone do not bound a native document: a 4 MB sheet expands to millions of tokens. A document whose text
+    would not fit text_max_chars (or a PDF over 100 pages) goes as truncated text, saying why."""
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    for i in range(10_000):
+        ws.append([f"web-{i:05d}", i, "steady state, nothing to report"])
+    src = tmp_path / "src" / "wide.xlsx"
+    src.parent.mkdir(parents=True)
+    wb.save(src)
+    att = tmp_path / "att" / ("b" * 32)
+    att.mkdir(parents=True)
+    shutil.copyfile(src, att / "original")
+    meta = process(att / "original", ".xlsx", att, ExtractLimits.from_config(CFG))
+    item = Prepared("b" * 32, "wide.xlsx", ".xlsx", "office", src.stat().st_size, "ready", None, att, meta)
+    turn = build_turn([item], CLAUDE, CFG)
+    assert (turn.deliveries[0]["delivery"], turn.deliveries[0]["reason"]) == ("text", "document_too_long")
+    assert _counts(turn) == (0, 0)
+    pdf = _prep("pdf", tmp_path)
+    many_pages = Prepared(pdf.id, pdf.filename, pdf.ext, pdf.kind, pdf.size, "ready", None, pdf.dir,
+                          {**pdf.meta, "pages": 150})
+    assert build_turn([many_pages], CLAUDE, CFG).deliveries[0]["reason"] == "document_too_long"
+    assert build_turn([_prep("xlsx", tmp_path)], CLAUDE, CFG).deliveries[0]["delivery"] == "native_document"

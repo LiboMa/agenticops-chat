@@ -1080,6 +1080,7 @@
   "chat.attach.reason.model_no_images": "此模型不能看图",
   "chat.attach.reason.document_quota": "一次请求最多 5 个文档",
   "chat.attach.reason.document_too_large": "超过 4.5 MB",
+  "chat.attach.reason.document_too_long": "太长，无法整份读取",
   "chat.attach.reason.image_quota": "一次请求最多 20 张图片",
   "chat.attach.reason.media_budget": "超过本轮的文件预算",
   "chat.attach.reason.text_budget": "超过本轮的文本预算",
