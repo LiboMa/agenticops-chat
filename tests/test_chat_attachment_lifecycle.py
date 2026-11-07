@@ -5,6 +5,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import agenticops.web.app  # noqa: F401 — imported at collection, as every API test does: the auth middleware is
+#                            added only when api_auth_enabled is on at import time, and the env fixture turns it on
 from agenticops.auth.actor import Actor
 from agenticops.chat.attachments.types import classify
 from agenticops.config import ChatUploadSettings, settings
@@ -325,3 +327,158 @@ def test_bind_is_compare_and_set(env):
             service.bind(db, [SimpleNamespace(id=att_id)], db.get(ChatSession, pk2), None)   # its stale check
         assert (e.value.status, e.value.code) == (409, "attachment_unavailable")
     assert _row(att_id).session_id == pk1
+
+
+# ── rebuild, delete with the session, startup sweep (Task 10) ────────────────
+
+
+def _message(pk, role, content, attachments=None, state=None):
+    from agenticops.models import ChatMessage, get_db_session
+    with get_db_session() as db:
+        msg = ChatMessage(session_id=pk, role=role, content=content, attachments=attachments, dispatch_state=state)
+        db.add(msg)
+        db.flush()
+        return msg.id
+
+
+def _bound(pk, sid, kind, tmp, message_id=None):
+    from agenticops.chat.attachments import service
+    from agenticops.models import ChatSession, get_db_session
+    att_id = _stage(kind, tmp=tmp)
+    with get_db_session() as db:
+        service.bind(db, service.check_for_send(db, [att_id], ALICE, ChatUploadSettings()), db.get(ChatSession, pk),
+                     message_id)
+    service.move_bound([att_id], sid)
+    return att_id
+
+
+def _texts(history):
+    return "\n".join(b.get("text", "") for m in history for b in m["content"])
+
+
+def test_rebuild_excludes_inflight_message(env):
+    from agenticops.web.session_manager import _load_history_messages
+    pk, sid = _session()
+    _message(pk, "user", "first question")
+    _message(pk, "assistant", "first answer")
+    _message(pk, "user", "IN-FLIGHT question", state="running")
+    history = _load_history_messages(sid, 20)
+    assert "first question" in _texts(history) and "IN-FLIGHT" not in _texts(history)
+
+
+def test_rebuild_replays_pdf_text_and_image(env):
+    from agenticops.web.session_manager import _load_history_messages
+    pk, sid = _session()
+    pdf = _bound(pk, sid, "pdf", env)
+    png = _bound(pk, sid, "png", env)
+    _message(pk, "user", "compare these", attachments=[{"id": pdf, "filename": "sample-pdf.pdf"},
+                                                      {"id": png, "filename": "sample-png.png"}])
+    _message(pk, "assistant", "they differ")
+    history = _load_history_messages(sid, 20)
+    user = history[0]
+    assert user["role"] == "user" and user["content"][0]["text"] == "compare these"
+    assert TOKENS["pdf"] in _texts(history)
+    assert sum("image" in b for b in user["content"]) == 1
+    assert not any("document" in b for m in history for b in m["content"])
+
+
+def test_rebuild_tolerates_legacy_attachment_json(env):
+    from agenticops.web.session_manager import _load_history_messages
+    pk, sid = _session()
+    _message(pk, "user", "old upload", attachments=[{"filename": "a.txt", "size": 3, "type": "text"}])
+    _message(pk, "assistant", "ok")
+    history = _load_history_messages(sid, 20)
+    assert history[0]["content"] == [{"text": "old upload"}]
+
+
+def test_cleared_agent_cache_still_answers_from_attachments(env, monkeypatch):
+    from unittest.mock import MagicMock
+    from agenticops.web import session_manager
+    pk, sid = _session()
+    xlsx = _bound(pk, sid, "xlsx", env)
+    _message(pk, "user", "what is in the sheet?", attachments=[{"id": xlsx, "filename": "sample-xlsx.xlsx"}])
+    _message(pk, "assistant", "metrics")
+    agent = MagicMock()
+    agent.messages = []
+    monkeypatch.setattr(session_manager, "create_main_agent", lambda **kw: agent)
+    manager = session_manager.ChatSessionManager()
+    assert manager.get_or_create(sid) is agent
+    assert TOKENS["xlsx"] in _texts(agent.messages)
+
+
+def test_delete_session_removes_rows_and_dir(env):
+    from fastapi.testclient import TestClient
+    from agenticops.chat.attachments import store
+    from agenticops.models import ChatAttachment, get_db_session
+    from agenticops.web.app import app
+    monkeypatch_auth_off(env)
+    pk, sid = _session()
+    _bound(pk, sid, "docx", env)
+    assert store.session_root(sid).is_dir()
+    assert TestClient(app).delete(f"/api/chat/sessions/{sid}").status_code == 204
+    deadline = __import__("time").monotonic() + 10
+    while store.session_root(sid).exists() and __import__("time").monotonic() < deadline:
+        __import__("time").sleep(0.05)
+    assert not store.session_root(sid).exists()
+    with get_db_session() as db:
+        assert db.query(ChatAttachment).count() == 0
+
+
+def monkeypatch_auth_off(env):
+    settings.api_auth_enabled = False   # restored by the env fixture's monkeypatch on teardown
+
+
+def test_delete_session_during_send_leaves_nothing(env, monkeypatch):
+    import threading
+    import time as _time
+    from types import SimpleNamespace
+    from fastapi.testclient import TestClient
+    import agenticops.web.app as webapp
+    from agenticops.chat.attachments import store
+    from agenticops.models import ChatAttachment, get_db_session
+    monkeypatch_auth_off(env)
+    client = TestClient(webapp.app)
+    pk, sid = _session()
+    att_id = _stage("txt", actor=Actor("web", "anonymous"), tmp=env)
+
+    class _Agent:
+        model = SimpleNamespace(config={"model_id": "global.anthropic.claude-opus-5-5"})
+
+        async def stream_async(self, content):
+            yield {"data": "ok"}
+    monkeypatch.setattr(webapp._chat_sessions, "get_or_create", lambda s, *a: _Agent())
+    monkeypatch.setattr(webapp, "_generate_session_title", lambda *_a: None)
+    entered, release = threading.Event(), threading.Event()
+    real_move = store.move_into_session
+
+    def slow_move(ids, session_uuid):
+        entered.set()
+        release.wait(10)
+        real_move(ids, session_uuid)
+    monkeypatch.setattr(store, "move_into_session", slow_move)
+    result = {}
+
+    def send():
+        result["r"] = client.post(f"/api/chat/sessions/{sid}/messages", json={
+            "content": "read it", "client_message_id": str(uuid.uuid4()), "attachment_ids": [att_id]})
+    t = threading.Thread(target=send)
+    t.start()
+    assert entered.wait(10)
+    assert client.delete(f"/api/chat/sessions/{sid}").status_code == 204
+    release.set()
+    t.join(30)
+    assert result["r"].status_code == 200
+    _time.sleep(0.2)
+    assert not store.session_root(sid).exists()
+    with get_db_session() as db:
+        assert db.query(ChatAttachment).count() == 0
+
+
+def test_startup_sweep_runs(env, monkeypatch):
+    import asyncio
+    from agenticops.chat.attachments import service
+    calls = []
+    monkeypatch.setattr(service, "sweep_staged", lambda now=None: calls.append(1) or 0)
+    from agenticops.web.app import _sweep_chat_attachments_at_startup
+    asyncio.run(_sweep_chat_attachments_at_startup())
+    assert calls == [1]

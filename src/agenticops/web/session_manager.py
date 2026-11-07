@@ -100,6 +100,27 @@ def _rebuild_tool_messages(tool_calls: list) -> list[dict]:
     return messages
 
 
+def _add_history_attachment_blocks(db, session_row, row_data: list[dict]) -> None:
+    """Put each earlier user message's attachments, from disk, on its row as `attachment_blocks`: extracted text and
+    images, never a native document; at most turn_text_max_chars of text per message — the attachment budget hook
+    trims the rest to the model before every call (2026-11-07). Rows without attachment ids are skipped."""
+    wanted = [(msg, [a["id"] for a in msg["attachments"] if isinstance(a, dict) and a.get("id")])
+              for msg in row_data if msg["role"] == "user" and isinstance(msg.get("attachments"), list)]
+    ids = [i for _msg, group in wanted for i in group]
+    if not ids:
+        return
+    from agenticops.chat import upload_config
+    from agenticops.chat.attachments import service
+    from agenticops.chat.attachments.delivery import history_blocks
+    from agenticops.models import ChatAttachment
+    rows = {a.id: a for a in db.query(ChatAttachment).filter(ChatAttachment.id.in_(ids),
+                                                             ChatAttachment.session_id == session_row.id).all()}
+    cfg = upload_config.effective()
+    for msg, group in wanted:
+        items = [service.prepared(rows[i], session_row.session_id) for i in group if i in rows]
+        msg["attachment_blocks"] = history_blocks(items, cfg) if items else []
+
+
 def _load_history_messages(session_id: str, max_turns: int) -> List[dict]:
     """Load recent messages from DB and convert to Strands Message format.
 
@@ -144,12 +165,16 @@ def _load_history_messages(session_id: str, max_turns: int) -> List[dict]:
         if not rows and not summary_texts:
             return []
 
-        # Materialise attributes while session is open to avoid DetachedInstanceError
+        # Materialise attributes while session is open to avoid DetachedInstanceError. The turn being answered now
+        # (claimed: accepted / running) is not history — the agent gets it as the new message (2026-11-07)
+        from agenticops.services.chat_dispatch import OPEN
         row_data = [
             {"role": msg.role, "content": msg.content or "", "tool_calls": msg.tool_calls,
-             "token_usage": msg.token_usage}
+             "token_usage": msg.token_usage, "attachments": msg.attachments}
             for msg in rows
+            if not (msg.role == "user" and msg.dispatch_state in OPEN)
         ] if rows else []
+        _add_history_attachment_blocks(db, row, row_data)
 
     # Reverse to chronological order
     row_data.reverse()
@@ -206,7 +231,7 @@ def _load_history_messages(session_id: str, max_turns: int) -> List[dict]:
 
         raw_messages.append({
             "role": msg["role"],
-            "content": [{"text": content}],
+            "content": [{"text": content}, *msg.get("attachment_blocks", [])],
         })
 
     if not raw_messages and not summary_texts:

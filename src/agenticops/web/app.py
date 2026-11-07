@@ -44,6 +44,7 @@ import asyncio
 import json
 import logging
 import re
+import threading
 import time
 import urllib.request
 import uuid
@@ -105,6 +106,17 @@ def _size_default_executor(loop) -> None:
                                                  thread_name_prefix="aiops-loop"))
 
 
+async def _sweep_chat_attachments_at_startup() -> None:
+    """Unsent uploads past their TTL, and files a previous process left without a row or a session (2026-11-07)."""
+    try:
+        from agenticops.chat.attachments import service as attachment_service
+        removed = await asyncio.to_thread(attachment_service.sweep_staged)
+        if removed:
+            logger.info("Chat attachments: removed %d stale uploads / orphan directories", removed)
+    except Exception as e:
+        logger.warning("Chat attachments: startup sweep failed: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown in a single async context manager."""
@@ -138,6 +150,7 @@ async def lifespan(app: FastAPI):
             logger.warning("Chat: %d reply dispatch(es) left open by an earlier process marked interrupted", _n)
     except Exception as e:
         logger.warning("Chat: interrupt_stale failed: %s", e)
+    await _sweep_chat_attachments_at_startup()
 
     # Seed default admin user if auth is enabled and no users exist
     if settings.api_auth_enabled:
@@ -4321,6 +4334,8 @@ def _generate_session_title(user_msg: str, assistant_msg: str) -> str | None:
 
 @app.delete("/api/chat/sessions/{session_id}", status_code=204)
 async def api_delete_chat_session(session_id: str, actor: Actor = Depends(current_actor)):
+    from agenticops.chat.attachments import service as attachment_service
+    from agenticops.chat.attachments import store as attachment_store
     from agenticops.models import SessionSummary
     from agenticops.services import chat_access
     with get_db_session() as db:
@@ -4330,8 +4345,12 @@ async def api_delete_chat_session(session_id: str, actor: Actor = Depends(curren
         # FK cascades are not enforced on SQLite: a summary left behind could be injected into a later
         # session that reuses this primary key.
         db.query(SessionSummary).filter(SessionSummary.session_id == row.id).delete()
+        attachment_service.delete_for_session(db, row.id)
         db.delete(row)
     _chat_sessions.remove(session_id)
+    # the files go after the commit, off the request (a large chat holds many)
+    threading.Thread(target=attachment_store.remove_session, args=(session_id,), daemon=True,
+                     name="chat-attachments-delete").start()
 
 
 # ============================================================================

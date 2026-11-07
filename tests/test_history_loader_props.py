@@ -447,3 +447,39 @@ class TestSummaryInjectionIntegrityProperty:
             assert summary_text in all_text, (
                 f"Summary text {summary_text!r} not found in output (no history case)"
             )
+
+
+# ---------------------------------------------------------------------------
+# Chat attachments (2026-11-07): whatever a stored message's `attachments` holds, the rebuild never breaks and
+# never invents content — only a list of dicts with ids is looked up (and these mocks have no attachment rows)
+# ---------------------------------------------------------------------------
+
+_attachments_st = st.one_of(
+    st.none(),
+    st.just([]),
+    st.lists(st.fixed_dictionaries({"filename": _msg_content_st, "size": st.integers(0, 10**9),
+                                     "type": st.sampled_from(["text", "image", "document"])}), max_size=3),
+    st.lists(st.one_of(st.text(max_size=5), st.integers(), st.none()), max_size=3),
+    st.text(max_size=10),
+    st.dictionaries(st.text(max_size=5), st.integers(), max_size=2),
+)
+
+
+class TestAttachmentValues:
+    @given(msg_pairs=_msg_pairs_st, attachments=st.lists(_attachments_st, min_size=1, max_size=5))
+    @settings(max_examples=150, deadline=None)
+    def test_any_attachments_value_leaves_the_text_history_unchanged(self, msg_pairs, attachments):
+        session_row = _make_mock_session()
+        message_rows = []
+        for idx, (user_text, asst_text) in enumerate(msg_pairs):
+            minutes = (len(msg_pairs) - idx) * 2
+            message_rows.append(_make_mock_msg("assistant", asst_text, minutes_ago=minutes - 1))
+            message_rows.append(_make_mock_msg("user", user_text, minutes_ago=minutes))
+        with _patch_db_for_prop(session_row, message_rows, []):
+            plain = _load_history_messages("prop-test-session", 20)
+        for i, row in enumerate(message_rows):
+            row.attachments = attachments[i % len(attachments)]
+            row.dispatch_state = None
+        with _patch_db_for_prop(session_row, message_rows, []):
+            with_attachments = _load_history_messages("prop-test-session", 20)
+        assert with_attachments == plain

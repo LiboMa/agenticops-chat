@@ -152,10 +152,15 @@ def move_bound(att_ids: list[str], session_uuid: str) -> None:
     """After the send commits: move the files under the session — unless the session was deleted meanwhile."""
     if not att_ids:
         return
-    with get_db_session() as db:
-        exists = db.query(ChatSession.id).filter(ChatSession.session_id == session_uuid).first() is not None
-    if exists:
-        store.move_into_session(att_ids, session_uuid)
+
+    def _exists() -> bool:
+        with get_db_session() as db:
+            return db.query(ChatSession.id).filter(ChatSession.session_id == session_uuid).first() is not None
+    if not _exists():
+        return
+    store.move_into_session(att_ids, session_uuid)
+    if not _exists():   # deleted while the files moved: its cleanup may already have run — finish it here
+        store.remove_session(session_uuid)
 
 
 def prepared(att: ChatAttachment, session_uuid: Optional[str]) -> Prepared:
