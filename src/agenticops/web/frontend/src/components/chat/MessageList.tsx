@@ -1,6 +1,9 @@
 import { useRef, useMemo, useLayoutEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { MessageAttachments } from "./MessageAttachments";
+import { mergeDeliveries } from "@/lib/messageAttachments";
+import type { AttachmentDelivery } from "@/lib/chatStream";
 import { ToolCallChip } from "./ToolCallChip";
 import { TokenMetrics } from "./TokenMetrics";
 import { SuggestionChips } from "./SuggestionChips";
@@ -22,6 +25,8 @@ interface Props {
   onLoadOlder?: () => void;
   onSuggestionPick?: (text: string) => void;
   onContextRefClick?: (ref: ContextRef) => void; // I# / C# refs open the context panel instead of navigating
+  /** 2026-11-07: how the attachments of the message being answered reached the model (the stream's frame) */
+  pendingDeliveries?: AttachmentDelivery[];
 }
 
 export function MessageList({
@@ -35,9 +40,12 @@ export function MessageList({
   onLoadOlder,
   onSuggestionPick,
   onContextRefClick,
+  pendingDeliveries,
 }: Props) {
   const navigate = useNavigate();
   const parentRef = useRef<HTMLDivElement>(null);
+  let lastUserIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === "user") { lastUserIndex = i; break; }
 
   const handleRefClick = (e: React.MouseEvent) => {
     const anchor = (e.target as HTMLElement).closest("a.md-ref") as HTMLAnchorElement | null;
@@ -151,6 +159,7 @@ export function MessageList({
                 isLast={vi.index === messages.length - 1}
                 streaming={streaming}
                 onSuggestionPick={onSuggestionPick}
+                deliveries={vi.index === lastUserIndex ? pendingDeliveries : undefined}
               />
             </div>
           );
@@ -200,11 +209,12 @@ export function MessageList({
   );
 }
 
-function MessageRow({ msg, isLast, streaming, onSuggestionPick }: {
+function MessageRow({ msg, isLast, streaming, onSuggestionPick, deliveries }: {
   msg: ChatMessage;
   isLast?: boolean;
   streaming?: boolean;
   onSuggestionPick?: (text: string) => void;
+  deliveries?: AttachmentDelivery[];
 }) {
   const { t } = useLocale();
   const statusKey = messageStatusKey(msg);
@@ -217,16 +227,7 @@ function MessageRow({ msg, isLast, streaming, onSuggestionPick }: {
         ? "bg-primary-50 border border-primary-100 rounded-2xl rounded-br-md px-4 py-2.5 max-w-2xl text-primary-900"
         : "flex-1 max-w-3xl space-y-2"}>
         {msg.role === "user" && msg.attachments && msg.attachments.length > 0 && (
-          <div className="flex flex-wrap gap-1 mb-1">
-            {msg.attachments.map((att, i) => (
-              <span key={i} className="inline-flex items-center gap-1 text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full">
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                </svg>
-                {att.filename}
-              </span>
-            ))}
-          </div>
+          <MessageAttachments attachments={mergeDeliveries(msg.attachments, deliveries ?? [])} />
         )}
         {msg.role === "assistant" && msg.tool_calls && msg.tool_calls.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-1">

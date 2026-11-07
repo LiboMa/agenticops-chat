@@ -80,6 +80,7 @@ export function useSessionStream(sessionId: string | null) {
     toolCalls: state.toolCalls,
     tokenMetrics: state.tokenMetrics,
     error: state.error,
+    attachmentDeliveries: state.attachmentDeliveries,
     sendMessage: send,
     cancel,
   };

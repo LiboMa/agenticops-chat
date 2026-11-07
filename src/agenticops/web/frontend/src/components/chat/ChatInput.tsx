@@ -16,6 +16,7 @@ import { draftKey, loadDraft, saveDraft, sessionQueues } from "@/lib/chatDrafts"
 import { currentUserId } from "@/lib/home";
 import { ModelSelector } from "./ModelSelector";
 import { AttachmentTray } from "./AttachmentTray";
+import { attachmentBlobUrl } from "@/hooks/useAttachmentBlob";
 
 interface Props {
   /** → whether the message was taken (S5): false gives the text and the attachments back to the composer */
@@ -51,6 +52,18 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
     return queue.listen(setItems);
   }, [queue]);
   const [attachError, setAttachError] = useState<string | null>(null);
+  // the server's thumbnail when this browser cannot show the file itself: an upload restored after a refresh (no
+  // local file), or a HEIC / TIFF picture
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  useEffect(() => {
+    for (const i of items) {
+      const local = i.file && /^image\/(png|jpeg|gif|webp|bmp)$/.test(i.file.type);
+      if (i.serverId && !local && i.kind === "image" && i.state === "ready" && !thumbs[i.serverId]) {
+        const id = i.serverId;
+        attachmentBlobUrl(id, "thumb").then((url) => setThumbs((cur) => ({ ...cur, [id]: url })), () => {});
+      }
+    }
+  }, [items, thumbs]);
   const loadedKey = useRef<string | null>(null);
 
   // Switching chats (or the bootstrap arriving with the installation id) loads that chat's draft; its uploads come
@@ -181,7 +194,8 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
       ref={containerRef}
       className={`border-t border-border p-4 bg-secondary ${isDragging ? "ring-2 ring-primary-500 ring-inset" : ""}`}
     >
-      <AttachmentTray items={items} rules={rules} onRemove={(id) => queue.remove(id)} onRetry={(id) => queue.retry(id)} />
+      <AttachmentTray items={items} rules={rules} onRemove={(id) => queue.remove(id)} onRetry={(id) => queue.retry(id)}
+                      thumbFor={(i) => (i.serverId && i.kind === "image" && i.state === "ready" ? thumbs[i.serverId] : undefined)} />
 
       {attachError && (
         <div className="max-w-[760px] mx-auto mb-2 text-xs text-red-500">{attachError}</div>

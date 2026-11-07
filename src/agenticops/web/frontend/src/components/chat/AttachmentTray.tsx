@@ -1,7 +1,7 @@
-import { useEffect, useMemo } from "react";
 import { useLocale } from "@/i18n/LocaleContext";
 import { humanSize, type AttachmentRules } from "@/lib/attachments";
 import type { UploadItem } from "@/lib/attachmentUpload";
+import { localPreviewUrl } from "@/hooks/useAttachmentBlob";
 import { AttachmentCard } from "./AttachmentCard";
 
 interface Props {
@@ -18,13 +18,9 @@ const PREVIEWABLE = /^image\/(png|jpeg|gif|webp|bmp)$/;
 /** The composer's attachments above the text box, with how many and how much of the message's allowance. */
 export function AttachmentTray({ items, rules, onRemove, onRetry, thumbFor }: Props) {
   const { t } = useLocale();
-  // local previews for the images still in this browser (HEIC / TIFF: the server's thumbnail once processed)
-  const urls = useMemo(() => {
-    const out = new Map<string, string>();
-    for (const i of items) if (i.file && PREVIEWABLE.test(i.file.type)) out.set(i.localId, URL.createObjectURL(i.file));
-    return out;
-  }, [items.map((i) => i.localId).join(",")]);  // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => () => urls.forEach((u) => URL.revokeObjectURL(u)), [urls]);
+  // local previews of the images still in this browser (HEIC / TIFF: the server's thumbnail once processed); kept
+  // by item id in one registry, so the sent message shows the same picture before the server's copy loads
+  const urlFor = (i: UploadItem) => (i.file && PREVIEWABLE.test(i.file.type) ? localPreviewUrl(i.localId, i.file) : undefined);
 
   if (items.length === 0) return null;
   const used = items.reduce((sum, i) => sum + i.size, 0);
@@ -32,7 +28,7 @@ export function AttachmentTray({ items, rules, onRemove, onRetry, thumbFor }: Pr
     <div className="mx-auto mb-2 max-w-[760px]">
       <div className="flex flex-wrap gap-2">
         {items.map((i) => (
-          <AttachmentCard key={i.localId} item={i} thumbUrl={urls.get(i.localId) ?? thumbFor?.(i)}
+          <AttachmentCard key={i.localId} item={i} thumbUrl={urlFor(i) ?? thumbFor?.(i)}
                           onRemove={() => onRemove(i.localId)} onRetry={() => onRetry(i.localId)} />
         ))}
       </div>
