@@ -369,15 +369,15 @@ flowchart TD
 
     WH --> PARSE["parse_prometheus()<br/>+ create_health_issue()<br/>(fingerprint dedup)"]
 
-    PARSE -->|daemon thread| RCA["④ Auto-RCA<br/>rca_agent() — Opus 4.6<br/>Skills + kubectl + KB lookup"]
+    PARSE -->|daemon thread| RCA["④ Auto-RCA<br/>rca_agent() — Opus 5.5<br/>Skills + kubectl + KB lookup"]
 
-    RCA --> SRE["⑤ Auto-SRE<br/>sre_agent() — Fable 5.1<br/>Fix plan + risk classification"]
+    RCA --> SRE["⑤ Auto-SRE<br/>sre_agent() — Opus 5.5<br/>Fix plan + risk classification"]
 
     SRE --> APPROVE{"⑥ Auto-Approve"}
     APPROVE -->|L0/L1| AUTO["Auto-approved ✓"]
     APPROVE -->|L2/L3| HUMAN["⏸ Paused<br/>Human approval required"]
 
-    AUTO -->|daemon thread| EXEC["⑦ Auto-Execute<br/>executor_agent() — Opus 4.6<br/>Pre-check → Execute → Post-check"]
+    AUTO -->|daemon thread| EXEC["⑦ Auto-Execute<br/>executor_agent() — Opus 5.5 (L0/L1: Sonnet 5.5)<br/>Pre-check → Execute → Post-check"]
 
     HUMAN -->|API/Chat approve| EXEC
 
@@ -1546,10 +1546,10 @@ curl -X POST http://localhost:8000/api/fix-executions/42/accept -H "Authorizatio
 All settings use env vars with `AIOPS_` prefix. Set via `.env` file or shell:
 
 ```bash
-# Core — Tiered Model Configuration
-export AIOPS_BEDROCK_MODEL_ID="global.anthropic.claude-sonnet-4-6"          # Default (Sonnet 4.6)
-export AIOPS_BEDROCK_MODEL_ID_CHEAP="global.anthropic.claude-haiku-4-5-20251001-v1:0"  # Economy (Haiku 4.5)
-export AIOPS_BEDROCK_MODEL_ID_STRONG="global.anthropic.claude-opus-4-6-v1"     # Strong (Opus 4.6)
+# Core — models are set in config/settings.yaml (agent_*_model_id, plus the three tier fallbacks
+# bedrock_model_id / _cheap / _strong) or in Settings → Agent Models — do not pin them here: an AIOPS_* env var
+# beats settings.yaml (a pinned AIOPS_BEDROCK_MODEL_ID kept skill generation, case distillation and SOP writing on
+# Opus 4.6 until 2026-11-07, while every agent ran 5.5).
 export AIOPS_BEDROCK_REGION="us-east-1"
 export AIOPS_BEDROCK_MAX_TOKENS=16384
 export AIOPS_BEDROCK_WINDOW_SIZE=40    # Sliding window conversation manager

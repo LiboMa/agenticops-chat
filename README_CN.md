@@ -29,7 +29,7 @@
 
 1. **智能体即工具。** Main 智能体是*纯路由*;每个专家(Scan、Detect、RCA、SRE、Executor、Reporter)都以可调用工具的形式暴露。专家之间不直接对话。
 2. **读 / 规划 / 执行相互隔离。** SRE 只*规划*修复,永不触碰基础设施;只有 Executor 执行,且必须先过审批门。风险分级:L0/L1 自动批准,L2/L3 需人工。
-3. **分层模型控成本。** 最需要判断力的地方用 Claude 5 家族(Main 用 Opus 5 路由,SRE 用 Fable 5.1 规划),最重的调查与执行(RCA、Executor)用 Opus 4.6,高吞吐工作(Scan、Detect、Reporter)用 Sonnet 4.6,Haiku 4.5 作为经济档。Bedrock 上的 OpenAI 模型(gpt-oss、GPT-5.x)同样是一等公民;Anthropic 专属特性按模型族门控。可按智能体覆盖;扩展思考的 effort 会对高严重级别或重跑的 RCA 自动升档,也可按对话会话固定。Token 与成本按每次调用追踪,配实时看板(Web + `aiops cost` CLI)。
+3. **分层模型控成本。** 最需要判断与动手的地方用 Opus 5.5(Main、RCA、SRE、Executor),高吞吐工作用 Sonnet 5.5(Scan、Detect,以及 Executor 的 L0/L1 方案),报告用 GPT-6 Astra(Reporter),Haiku 4.5 作为经济档(Signal Gate、RCA critic、翻译)。Bedrock 上的 OpenAI 模型(gpt-oss、GPT-5.x、GPT-6)同样是一等公民;Anthropic 专属特性——以及 Claude 4.7+ 拒收的 `temperature`——按模型族门控。可按智能体覆盖;扩展思考的 effort 会对高严重级别或重跑的 RCA 自动升档,也可按对话会话固定。Token 与成本按每次调用追踪,配实时看板(Web + `aiops cost` CLI)。
 4. **智能体安全地学习。** 记忆与技能在硬性安全边界内自优化 —— 智能体的写入先落为草稿;发布经安全门禁;人类撰写的知识被固定,永不被自动改动。
 5. **配置单一真源。** `config/settings.yaml` 定义一切;环境变量覆盖它。代码从不硬编码配置值。
 6. **默认从简。** 本地用 SQLite + 文件记忆;仅在你选择 cloud profile 时才用 Postgres + S3。没有当下需求就不引入任何依赖。
@@ -84,15 +84,15 @@ IM Bots ────────────┘        │                  SRE 
 
 | 智能体 | 模型 | 职责 |
 |--------|------|------|
-| **Main** | Opus 5 | **路由 / 编排。** 唯一与用户对话的智能体;对每个请求分类,并把它作为工具分派给正确的专家,再组合各专家的输出。自身不持有任何运维工具 —— 纯控制流,使路由保持廉价且可审计。 |
-| **Scan** | Sonnet 4.6 | **清单发现。** 通过 provider CLI 跨账号/区域枚举资源(20+ 种 AWS 服务类型),归一化后 upsert 进元数据库。为所有下游智能体 + 图/Galaxy 构建器供数。高吞吐、只读。一次完整列出之后,消失的资源标为缺席(从不删除);所有计数只算存在的资源。resource-scan 调度(启动时种一次,间隔 resource_scan_interval_minutes,默认 60 分钟)定时跑这次扫描:即使没人手动扫描,被完整列出的类型和区域里消失的资源,也会在一个间隔加一次扫描耗时之内被标为缺席。任一账户凭证失败的那次运行记为失败,并写明账户名。 |
-| **Detect** | Sonnet 4.6 | **健康监控与异常检测。** 拉取 CloudWatch 告警/指标,运行 Z-score 异常检测,接入 Prometheus/CloudWatch/Datadog webhook,并开出去重后的 `HealthIssue`(SHA-256 指纹)。同时执行主动巡检(SPOF + 容量风险图检查)。只读。 |
-| **RCA** | Opus 4.6 | **根因分析。** 针对一个未决问题,关联 CloudTrail 变更事件、已发布关系图的拓扑证据(`get_topology_evidence`:邻居、方向、候选根因)、知识库案例和领域技能,产出有据可循的根因 + 置信度 + 经校验的根因定位。只读调查;写入 `RCAResult`,永不触碰基础设施。 |
-| **SRE** | Fable 5.1 | **修复方案生成 —— 只规划,不动手。** 把 RCA 转化为具体的、按风险分级(L0–L3)的修复方案,含精确步骤 + 回滚。严格**只读**:它只提议;只有 Executor 能执行,且必须先过审批门。强制"一问题 → 一活跃方案"。 |
-| **Executor** | Opus 4.6 | **唯一改动基础设施的智能体。** 执行*已审批*的修复方案,跨后端 —— AWS CLI、SSM(→SSH 兜底)、`kubectl` —— 采用账号寻址的凭证解析(fail-closed,绝不用 ambient)。审批后自动跑 L0/L1;L2/L3 需人工。推动 9 态问题生命周期直到 `resolved`。 |
-| **Reporter** | Sonnet 4.6 | **报告与知识沉淀。** 生成日报/周报/事件/清单报告(Markdown/HTML/PDF,本地或 S3),并把已解决事件蒸馏为可复用的知识库 SOP,让后续 RCA 更快。对运维数据只读。 |
+| **Main** | Opus 5.5 | **路由 / 编排。** 唯一与用户对话的智能体;对每个请求分类,并把它作为工具分派给正确的专家,再组合各专家的输出。自身不持有任何运维工具 —— 纯控制流,使路由保持廉价且可审计。 |
+| **Scan** | Sonnet 5.5 | **清单发现。** 通过 provider CLI 跨账号/区域枚举资源(20+ 种 AWS 服务类型),归一化后 upsert 进元数据库。为所有下游智能体 + 图/Galaxy 构建器供数。高吞吐、只读。一次完整列出之后,消失的资源标为缺席(从不删除);所有计数只算存在的资源。resource-scan 调度(启动时种一次,间隔 resource_scan_interval_minutes,默认 60 分钟)定时跑这次扫描:即使没人手动扫描,被完整列出的类型和区域里消失的资源,也会在一个间隔加一次扫描耗时之内被标为缺席。任一账户凭证失败的那次运行记为失败,并写明账户名。 |
+| **Detect** | Sonnet 5.5 | **健康监控与异常检测。** 拉取 CloudWatch 告警/指标,运行 Z-score 异常检测,接入 Prometheus/CloudWatch/Datadog webhook,并开出去重后的 `HealthIssue`(SHA-256 指纹)。同时执行主动巡检(SPOF + 容量风险图检查)。只读。 |
+| **RCA** | Opus 5.5 | **根因分析。** 针对一个未决问题,关联 CloudTrail 变更事件、已发布关系图的拓扑证据(`get_topology_evidence`:邻居、方向、候选根因)、知识库案例和领域技能,产出有据可循的根因 + 置信度 + 经校验的根因定位。只读调查;写入 `RCAResult`,永不触碰基础设施。 |
+| **SRE** | Opus 5.5 | **修复方案生成 —— 只规划,不动手。** 把 RCA 转化为具体的、按风险分级(L0–L3)的修复方案,含精确步骤 + 回滚。严格**只读**:它只提议;只有 Executor 能执行,且必须先过审批门。强制"一问题 → 一活跃方案"。 |
+| **Executor** | Opus 5.5(L0/L1:Sonnet 5.5) | **唯一改动基础设施的智能体。** 执行*已审批*的修复方案,跨后端 —— AWS CLI、SSM(→SSH 兜底)、`kubectl` —— 采用账号寻址的凭证解析(fail-closed,绝不用 ambient)。审批后自动跑 L0/L1;L2/L3 需人工。推动 9 态问题生命周期直到 `resolved`。 |
+| **Reporter** | GPT-6 Astra | **报告与知识沉淀。** 生成日报/周报/事件/清单报告(Markdown/HTML/PDF,本地或 S3),并把已解决事件蒸馏为可复用的知识库 SOP,让后续 RCA 更快。对运维数据只读。 |
 
-默认来自 `config/settings.yaml` —— Claude 5 家族负责路由与规划(Opus 5、Fable 5.1),Opus 4.6 负责最重的调查与执行(RCA、Executor),Sonnet 4.6 负责高吞吐工作。**安全主线**:只有 SRE 规划、只有 Executor 执行,且必过审批门 —— 见 [自动修复流水线](#自动修复流水线) 与 [端到端工作流指南](docs/WORKFLOW.md)。
+默认来自 `config/settings.yaml` —— 与开发机实际运行的一致:Opus 5.5 负责路由、调查、规划与执行(Main、RCA、SRE、Executor),Sonnet 5.5 负责高吞吐工作(Scan、Detect、Executor 的 L0/L1 方案),GPT-6 Astra 负责报告。智能体之外的单次模型调用(技能生成、案例蒸馏、SOP 撰写)跟随 Main 的模型。**安全主线**:只有 SRE 规划、只有 Executor 执行,且必过审批门 —— 见 [自动修复流水线](#自动修复流水线) 与 [端到端工作流指南](docs/WORKFLOW.md)。
 
 模型从 Bedrock 动态获取 —— Anthropic Claude **与** OpenAI(gpt-oss / GPT-5.x)皆可;Anthropic 专属特性(prompt caching、扩展思考)按模型族自动门控。按智能体在 `config/settings.yaml` 或经 `AIOPS_AGENT_{NAME}_MODEL_ID` 覆盖。运行时可用 CLI `/model` 或 Web Settings 切换。
 
@@ -199,7 +199,7 @@ React 18 + TypeScript + Tailwind + TanStack Query,由 FastAPI 在 `http://localh
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `AIOPS_BEDROCK_MODEL_ID` | `global.anthropic.claude-sonnet-4-6` | 默认(中)档;按智能体在 `settings.yaml` 覆盖 |
+| `AIOPS_BEDROCK_MODEL_ID` | `global.anthropic.claude-sonnet-5-5` | 默认(中)档 —— 只在某个智能体自己的模型为空时使用;每个智能体的模型都在 `settings.yaml` 里设定。在环境变量里设置会压过 `settings.yaml` |
 | `AIOPS_BEDROCK_REGION` | `us-east-1` | Bedrock 区域 |
 | `AIOPS_DATABASE_URL` | `sqlite:///…/data/agenticops.db` | 数据库 URL |
 | `AIOPS_AUTO_FIX_ENABLED` | `true` | 自动修复流水线总开关 |
