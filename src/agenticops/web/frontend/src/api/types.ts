@@ -760,11 +760,25 @@ export interface ChatContextView {
 
 export type DispatchState = "accepted" | "running" | "completed" | "failed" | "interrupted";
 
+/** One tool step of a reply, as the stream and the stored message carry it. 2026-11-07: where it sat in the reply
+ *  text, a redacted summary of its input, its duration and a redacted result preview (older rows: name + status). */
+export interface ToolStep {
+  name: string;
+  status: string;
+  call_id?: string;
+  outcome?: "ok" | "error" | "unknown"; // S5: from the tool's result, never assumed from its name
+  summary?: string;
+  duration_ms?: number;
+  result_preview?: string;
+  text_offset?: number;
+  text_end?: number;
+}
+
 export interface ChatMessage {
   id: number;
   role: "user" | "assistant";
   content: string;
-  tool_calls?: Array<{ name: string; status: string; call_id?: string; outcome?: "ok" | "error" | "unknown" }>;
+  tool_calls?: ToolStep[];
   token_usage?: {
     input: number;
     output: number;

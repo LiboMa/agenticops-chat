@@ -1,11 +1,10 @@
 import { getAuthToken } from "@/api/client";
 import { SseParser } from "@/lib/sseParser";
+import type { ToolStep } from "@/api/types";
 
-export interface ToolCall {
-  name: string;
+/** A step while the reply streams: a ToolStep whose status is one of the two the stream uses. */
+export interface ToolCall extends ToolStep {
   status: "running" | "done";
-  call_id?: string;
-  outcome?: "ok" | "error" | "unknown"; // S5: from the tool's result, never assumed from its name
 }
 
 /** Why a send did not finish (MVP-2.7.0 S5): the server's error codes, its 409 codes, or the client's own. */
@@ -195,7 +194,15 @@ class ChatStreamStore {
                 if (data.name) {
                   const cur = this.states.get(sessionId) ?? EMPTY;
                   this.set(sessionId, { toolCalls: [...cur.toolCalls,
-                    { name: data.name, status: "running", call_id: data.call_id ?? undefined }] });
+                    { name: data.name, status: "running", call_id: data.call_id ?? undefined,
+                      ...(typeof data.text_offset === "number" ? { text_offset: data.text_offset } : {}) }] });
+                }
+                break;
+              case "tool_input":   // 2026-11-07: the step's input summary, once the model finished writing the call
+                if (data.call_id) {
+                  const cur = this.states.get(sessionId) ?? EMPTY;
+                  this.set(sessionId, { toolCalls: cur.toolCalls.map((t) =>
+                    (t.call_id === data.call_id ? { ...t, summary: String(data.summary ?? "") } : t)) });
                 }
                 break;
               case "tool_end":
@@ -205,7 +212,10 @@ class ChatStreamStore {
                   const same = (t: ToolCall) => (data.call_id ? t.call_id === data.call_id : t.name === data.name);
                   this.set(sessionId, {
                     toolCalls: cur.toolCalls.map((t) =>
-                      same(t) ? { ...t, status: "done" as const, outcome: data.outcome ?? t.outcome } : t),
+                      same(t) ? { ...t, status: "done" as const, outcome: data.outcome ?? t.outcome,
+                                  ...(typeof data.duration_ms === "number" ? { duration_ms: data.duration_ms } : {}),
+                                  ...(typeof data.result_preview === "string" ? { result_preview: data.result_preview } : {}),
+                                  ...(typeof data.text_end === "number" ? { text_end: data.text_end } : {}) } : t),
                   });
                 }
                 break;

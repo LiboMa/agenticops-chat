@@ -228,3 +228,21 @@ describe("chatStream.send says whether the server took the message (S5 review I6
     expect(await chatStream.send("s5-acc4", "hi")).toBe(false);
   });
 });
+
+describe("chatStream work-log facts (2026-11-07)", () => {
+  it("keeps each step's offsets, summary, duration and preview", async () => {
+    const done: any[] = [];
+    chatStream.setCallbacks({ onDone: (_sid, p) => done.push(p) });
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([
+      'event: text\ndata: {"token":"abc"}\n\n',
+      'event: tool_start\ndata: {"name":"run_kubectl","call_id":"t1","text_offset":3}\n\n',
+      'event: tool_input\ndata: {"call_id":"t1","summary":"kubectl get ns"}\n\n',
+      'event: tool_end\ndata: {"name":"run_kubectl","call_id":"t1","outcome":"ok","duration_ms":420,"result_preview":"default","text_end":3}\n\n',
+      'event: text\ndata: {"token":" done"}\n\n',
+      'event: done\ndata: {"input_tokens":1,"output_tokens":1}\n\n',
+    ])));
+    await chatStream.send("sess-W", "hi");
+    expect(done[0].toolCalls[0]).toEqual({ name: "run_kubectl", status: "done", call_id: "t1", outcome: "ok",
+      text_offset: 3, summary: "kubectl get ns", duration_ms: 420, result_preview: "default", text_end: 3 });
+  });
+});
