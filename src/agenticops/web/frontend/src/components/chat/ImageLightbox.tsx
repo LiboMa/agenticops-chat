@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useLocale } from "@/i18n/LocaleContext";
 import { apiDownload } from "@/api/client";
 import { saveBlob } from "@/lib/download";
@@ -43,7 +44,9 @@ export function ImageLightbox({ images, index, onIndex, onClose }: Props) {
     const { blob, filename } = await apiDownload(`/chat/attachments/${current.id}/content?variant=original`);
     saveBlob(blob, filename ?? current.filename);
   };
-  return (
+  // a portal: the message rows are positioned with transform (virtualized), which would make `fixed` relative to the
+  // row instead of the viewport
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={onClose}>
       <div ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-label={current.filename}
            onClick={(e) => e.stopPropagation()}
@@ -70,6 +73,7 @@ export function ImageLightbox({ images, index, onIndex, onClose }: Props) {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
