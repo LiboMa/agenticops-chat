@@ -52,6 +52,11 @@ def test_display_redaction_masks_the_common_shapes(raw, leak):
 def test_display_redaction_keeps_ordinary_text():
     assert redact_for_display("kubectl get pods -n orders") == "kubectl get pods -n orders"
     assert redact_for_display("postgresql://db:5432/app") == "postgresql://db:5432/app"
+    # a resource reference is not a credential (the shared scrubber keeps ARNs too)
+    arn = "aws secretsmanager describe-secret --secret-id arn:aws:secretsmanager:us-east-1:1:secret:db-pass"
+    assert redact_for_display(arn) == arn
+    assert redact_for_display("why does the secret rotation fail") == "why does the secret rotation fail"
+    assert redact_for_display("token: abc123") == "token: " + M
 
 
 def test_preview_collapses_whitespace_and_truncates():

@@ -28,8 +28,9 @@ _URL_USERINFO = re.compile(r"(?i)\b([a-z][a-z0-9+.\-]*://[^/\s:@]+):([^@\s/]+)@"
 # Authorization: Bearer x / Authorization: Basic x / a bare "Bearer <token>"
 _AUTH_HEADER = re.compile(r"(?i)(Authorization\s*[:=]\s*(?:(?:Bearer|Basic|Token)\s+)?)" + _VALUE)
 _BEARER = re.compile(r"(?i)(\bBearer\s+)([A-Za-z0-9._~+/=\-]{8,})")
-# token: x / AWS_SECRET_ACCESS_KEY=x — any key holding a secret word, then "=" or ":"
-_KEY_ASSIGN = re.compile(r"(?i)\b([A-Za-z0-9_.\-]*" + _KEYWORD + r"[A-Za-z0-9_.\-]*)(\s*[=:]\s*)" + _VALUE)
+# token: x / AWS_SECRET_ACCESS_KEY=x — any key holding a secret word, then "=", or ":" and a space (an ARN segment
+# "arn:aws:secretsmanager:region:…" is a resource reference, not a key: no space after its colons)
+_KEY_ASSIGN = re.compile(r"(?i)\b([A-Za-z0-9_.\-]*" + _KEYWORD + r"[A-Za-z0-9_.\-]*)(\s*=\s*|:\s+)" + _VALUE)
 # aws_secret_access_key x — a snake_case config key (has "_") holding a secret word, then whitespace
 _KEY_SPACE = re.compile(
     r"(?i)\b((?=[A-Za-z0-9_.\-]*?" + _KEYWORD + r")[A-Za-z0-9.\-]*_[A-Za-z0-9_.\-]*)(\s+)" + _VALUE)
