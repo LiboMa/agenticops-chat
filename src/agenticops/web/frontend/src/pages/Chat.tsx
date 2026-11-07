@@ -131,6 +131,8 @@ export default function Chat() {
   const maxFiles = (useBootstrap().data?.upload_policy ?? FALLBACK_POLICY).max_files;
   const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null);
   const [stopped, setStopped] = useState(false);  // S5: stopping the reply is not cancelling any execution
+  const chatColRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState(false);
   // What the welcome composer will start the chat with (the server confirms it on creation)
   const welcomeCtx: ChatContextView | null = contextRef
     ? { primary: { entity_type: contextRef.kind === "issue" ? "health_issue" : "change_request", entity_id: contextRef.id,
@@ -238,11 +240,17 @@ export default function Chat() {
         </div>
       </div>
 
-      {/* Center: Chat area */}
+      {/* Center: Chat area — the whole column takes dropped files (2026-11-07) */}
       <div
+        ref={chatColRef}
         style={{ flex: contextRef ? `0 0 ${splitRatio * 100}%` : "1 1 auto" }}
-        className="flex flex-col min-w-0"
+        className="relative flex flex-col min-w-0"
       >
+        {dragging && (
+          <div className="pointer-events-none absolute inset-3 z-20 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary/60 bg-primary/5">
+            <span className="rounded-full bg-background px-4 py-1.5 text-sm font-medium text-primary shadow-sm">{t("chat.attach.dropHint")}</span>
+          </div>
+        )}
         {showWelcome && !selectedId ? (
           /* Welcome screen — no session yet (Req 1.1) */
           <>
@@ -297,6 +305,8 @@ export default function Chat() {
               streaming={false}
               sessionId={null}
               prefill={prefill}
+              dropTargetRef={chatColRef}
+              onDragChange={setDragging}
             />
           </>
         ) : !selectedId ? (
@@ -401,6 +411,8 @@ export default function Chat() {
               disabled={streaming}
               streaming={streaming}
               sessionId={selectedId}
+              dropTargetRef={chatColRef}
+              onDragChange={setDragging}
             />
           </>
         )}

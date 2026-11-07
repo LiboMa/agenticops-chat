@@ -1121,7 +1121,7 @@
   "chat.independent": "独立请求",
   "chat.viewIssue": "查看事件",
   "chat.viewChange": "查看变更",
-  "chat.input.placeholder": "询问你的资源……（可粘贴或拖入文件，Cmd/Ctrl+Enter 发送）",
+  "chat.input.placeholder": "问点什么……（可粘贴截图、拖入文件）",
   "chat.attach.button": "添加附件",
   "reports.intro": "阅读带版本的报告，并选择交付语言。",
   "reports.search": "搜索报告…",
@@ -1246,5 +1246,12 @@
   "chat.regen.attachments": "附件已随原消息发送，请重新附加后再发",
   "chat.regen.streaming": "等回复结束后再重新生成",
   "chat.nextSteps": "下一步",
-  "chat.jumpToBottom": "回到底部"
+  "chat.jumpToBottom": "回到底部",
+  "chat.attach.menu": "添加",
+  "chat.attach.files": "上传文件",
+  "chat.attach.images": "上传图片",
+  "chat.attach.camera": "拍照",
+  "chat.attach.dropHint": "放下即可添加",
+  "chat.attach.waitUpload": "上传完成后才能发送",
+  "chat.attach.pages": "{n} 页"
 }

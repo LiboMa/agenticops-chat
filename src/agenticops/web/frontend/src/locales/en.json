@@ -1121,7 +1121,7 @@
   "chat.independent": "Independent request",
   "chat.viewIssue": "View issue",
   "chat.viewChange": "View change",
-  "chat.input.placeholder": "Ask about your resources… (paste or drop files, Cmd/Ctrl+Enter to send)",
+  "chat.input.placeholder": "Ask anything… (paste a screenshot or drop files)",
   "chat.attach.button": "Attach files",
   "reports.intro": "Read versioned reports and choose the language you deliver them in.",
   "reports.search": "Search reports…",
@@ -1246,5 +1246,12 @@
   "chat.regen.attachments": "The attachments went with the original message — attach them again and send.",
   "chat.regen.streaming": "Wait for the reply to finish",
   "chat.nextSteps": "Next steps",
-  "chat.jumpToBottom": "Back to bottom"
+  "chat.jumpToBottom": "Back to bottom",
+  "chat.attach.menu": "Attach",
+  "chat.attach.files": "Upload files",
+  "chat.attach.images": "Upload images",
+  "chat.attach.camera": "Take a photo",
+  "chat.attach.dropHint": "Drop to attach",
+  "chat.attach.waitUpload": "Wait for the uploads to finish",
+  "chat.attach.pages": "{n} pages"
 }

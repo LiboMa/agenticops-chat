@@ -14,9 +14,14 @@ import { bootstrapKey, useBootstrap } from "@/hooks/useBootstrap";
 import { useLocale } from "@/i18n/LocaleContext";
 import { draftKey, loadDraft, saveDraft, sessionQueues } from "@/lib/chatDrafts";
 import { currentUserId } from "@/lib/home";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { ModelSelector } from "./ModelSelector";
-import { AttachmentTray } from "./AttachmentTray";
-import { attachmentBlobUrl } from "@/hooks/useAttachmentBlob";
+import { ComposerAttachment, type RejectedFile } from "./ComposerAttachment";
+import { ImageLightbox } from "./ImageLightbox";
+import { attachmentBlobUrl, localPreviewUrl } from "@/hooks/useAttachmentBlob";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { shouldSend } from "@/lib/composerKeys";
+import { humanSize } from "@/lib/attachments";
 
 interface Props {
   /** → whether the message was taken (S5): false gives the text and the attachments back to the composer */
@@ -27,11 +32,20 @@ interface Props {
   sessionId?: string | null;
   /** S5: put this text in the composer (a starter prompt); a new nonce applies it again. Never sends. */
   prefill?: { text: string; nonce: number } | null;
+  /** 2026-11-07: files dropped anywhere on this element are attached (the chat column); default = the composer */
+  dropTargetRef?: React.RefObject<HTMLElement>;
+  /** a file is being dragged over the drop target — the page draws the hint */
+  onDragChange?: (dragging: boolean) => void;
+  /** "center": the welcome page's composer, in the middle of the page */
+  layout?: "dock" | "center";
 }
+
+const PREVIEWABLE = /^image\/(png|jpeg|gif|webp|bmp)$/;
 
 let pasteSeq = 0;
 
-export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, prefill }: Props) {
+export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, prefill, dropTargetRef, onDragChange,
+                           layout = "dock" }: Props) {
   const { t } = useLocale();
   const qc = useQueryClient();
   // what the server accepts (bootstrap upload_policy — the upload limits in force), so composer and server agree
@@ -51,7 +65,10 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
     setItems(queue.items());
     return queue.listen(setItems);
   }, [queue]);
-  const [attachError, setAttachError] = useState<string | null>(null);
+  // files the composer refused: shown in the box, in red, with the reason, until removed or the message is sent
+  const [rejected, setRejected] = useState<RejectedFile[]>([]);
+  const [lightbox, setLightbox] = useState<number | null>(null);
+  const coarse = useMediaQuery("(pointer: coarse)");
   // the server's thumbnail when this browser cannot show the file itself: an upload restored after a refresh (no
   // local file), or a HEIC / TIFF picture
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
@@ -89,6 +106,8 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
   }, [input, items, key]);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -97,7 +116,10 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
     // a pasted screenshot is "image.png" every time: give it a dated name BEFORE the duplicate check
     const files = pasted ? incoming.map((f) => normalizePastedName(f, new Date(), ++pasteSeq)) : incoming;
     const { accepted, errors } = validateFiles(queue.items(), files, rules);
-    setAttachError(errors.length > 0 ? errors.map((e) => attachmentErrorText(e, t)).join("; ") : null);
+    if (errors.length > 0) {
+      setRejected((cur) => [...cur, ...errors.map((e) => ({
+        key: `${Date.now()}-${++pasteSeq}`, name: "name" in e ? e.name : "", text: attachmentErrorText(e, t) }))]);
+    }
     if (accepted.length > 0) queue.add(accepted);
   }, [queue, rules, t]);
 
@@ -119,7 +141,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
     const content = trimmed || `Please analyze the attached file(s): ${taken.map((i) => i.name).join(", ")}`;
     const result = onSend(content, ids, taken);
     setInput("");
-    setAttachError(null);
+    setRejected([]);
     saveDraft(localStorage, key, { text: "", attachmentIds: [] });
     // S5: the draft is gone only once the server took the message — a refused send gives it back
     if (result instanceof Promise) {
@@ -150,8 +172,10 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
   // cleanup (open-webui memory-leak bug #21968). dragover re-asserts true every
   // frame (flicker-immune); dragleave uses the contains-guard (Firefox bug #21664);
   // Escape + drop always reset.
+  useEffect(() => { onDragChange?.(isDragging); }, [isDragging, onDragChange]);
+
   useEffect(() => {
-    const el = containerRef.current;
+    const el = dropTargetRef?.current ?? containerRef.current;
     if (!el) return;
 
     const onDragOver = (e: DragEvent) => {
@@ -187,46 +211,40 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
       el.removeEventListener("drop", onDrop, opts);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [disabled, addFiles]);
+  }, [disabled, addFiles, dropTargetRef]);
+
+  const thumbFor = (i: UploadItem) => (i.file && PREVIEWABLE.test(i.file.type) ? localPreviewUrl(i.localId, i.file)
+    : i.serverId && i.kind === "image" && i.state === "ready" ? thumbs[i.serverId] : undefined);
+  const readyImages = items.filter((i) => i.kind === "image" && i.state === "ready" && i.serverId);
+  const used = items.reduce((sum, i) => sum + i.size, 0);
+  const canSend = (!!input.trim() || items.some((i) => i.serverId && (i.state === "ready" || i.state === "failed")))
+    && !disabled && !uploading;
+  const menuItem = "flex cursor-pointer select-none items-center gap-2 rounded px-2.5 py-1.5 text-sm text-foreground outline-none data-[highlighted]:bg-selected";
+  const pick = (ref: React.RefObject<HTMLInputElement>) => () => ref.current?.click();
 
   return (
-    <div
-      ref={containerRef}
-      className={`border-t border-border p-4 bg-secondary ${isDragging ? "ring-2 ring-primary-500 ring-inset" : ""}`}
-    >
-      <AttachmentTray items={items} rules={rules} onRemove={(id) => queue.remove(id)} onRetry={(id) => queue.retry(id)}
-                      thumbFor={(i) => (i.serverId && i.kind === "image" && i.state === "ready" ? thumbs[i.serverId] : undefined)} />
+    <div ref={containerRef}
+         className={layout === "center" ? "w-full" : "px-4 pb-[max(env(safe-area-inset-bottom),0.75rem)] pt-2"}>
+      <div className="mx-auto max-w-[760px]">
+        <div className={`rounded-3xl border bg-background px-3 pb-2 pt-2.5 shadow-[0_2px_12px_rgba(30,64,175,0.07)] transition-shadow focus-within:ring-2 focus-within:ring-primary-500/30 dark:shadow-[0_2px_12px_rgba(0,0,0,0.4)] ${
+          isDragging && !dropTargetRef ? "border-primary ring-2 ring-primary/30" : "border-border"}`}>
+          <input ref={fileInputRef} type="file" multiple className="hidden" accept={rules.accept || undefined} onChange={handleFileSelect} />
+          <input ref={imageInputRef} type="file" multiple className="hidden" accept="image/*" onChange={handleFileSelect} />
+          <input ref={cameraInputRef} type="file" className="hidden" accept="image/*" capture="environment" onChange={handleFileSelect} />
 
-      {attachError && (
-        <div className="max-w-[760px] mx-auto mb-2 text-xs text-red-500">{attachError}</div>
-      )}
-
-      <div className="max-w-[760px] mx-auto">
-        <div className="flex items-center gap-1.5 rounded-3xl border border-border bg-background shadow-[0_2px_12px_rgba(30,64,175,0.07)] dark:shadow-[0_2px_12px_rgba(0,0,0,0.4)] px-2 py-1.5 focus-within:ring-2 focus-within:ring-primary-500/30 transition-shadow">
-          {/* Hidden file input (multiple) */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            className="hidden"
-            accept={rules.accept || undefined}
-            onChange={handleFileSelect}
-          />
-
-          {/* Per-session model selector */}
-          <ModelSelector sessionId={sessionId ?? null} disabled={disabled || streaming} />
-
-          {/* Attach button */}
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={disabled}
-            className="self-center w-8 h-8 flex items-center justify-center rounded-full text-muted-foreground hover:text-primary-600 hover:bg-muted disabled:opacity-50 transition-colors"
-            title={t("chat.attach.button")} aria-label={t("chat.attach.button")}
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-            </svg>
-          </button>
+          {(items.length > 0 || rejected.length > 0) && (
+            <div className="mb-2 flex flex-wrap gap-2 max-[767px]:flex-nowrap max-[767px]:overflow-x-auto max-[767px]:pb-1">
+              {items.map((i) => (
+                <ComposerAttachment key={i.localId} item={i} thumbUrl={thumbFor(i)}
+                                    onRemove={() => queue.remove(i.localId)} onRetry={() => queue.retry(i.localId)}
+                                    onOpen={i.serverId && i.kind === "image" && i.state === "ready"
+                                      ? () => setLightbox(readyImages.findIndex((r) => r.localId === i.localId)) : undefined} />
+              ))}
+              {rejected.map((r) => (
+                <ComposerAttachment key={r.key} rejected={r} onRemove={() => setRejected((cur) => cur.filter((x) => x.key !== r.key))} />
+              ))}
+            </div>
+          )}
 
           <textarea
             ref={textareaRef}
@@ -234,7 +252,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
             onChange={(e) => setInput(e.target.value)}
             onPaste={handlePaste}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              if (shouldSend(e.nativeEvent, coarse)) {
                 e.preventDefault();
                 handleSend();
               }
@@ -242,31 +260,52 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
             placeholder={t("chat.input.placeholder")}
             disabled={disabled}
             rows={1}
-            className="flex-1 bg-transparent border-none px-2 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none resize-none disabled:opacity-50 max-h-40 overflow-y-auto"
+            className="block max-h-52 w-full resize-none overflow-y-auto border-none bg-transparent px-1.5 py-1.5 text-[15px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none disabled:opacity-50"
           />
-          {streaming ? (
-            <button
-              onClick={onCancel}
-              className="self-center w-9 h-9 flex items-center justify-center bg-red-500 hover:bg-red-600 text-white rounded-full transition-colors flex-shrink-0"
-              title={t("chat.stop")} aria-label={t("chat.stop")}
-            >
-              <span className="w-3 h-3 bg-white rounded-sm" />
-            </button>
-          ) : (
-            <button
-              onClick={handleSend}
-              disabled={(!input.trim() && !items.some((i) => i.serverId && (i.state === "ready" || i.state === "failed")))
-                        || disabled || uploading}
-              className="self-center w-9 h-9 flex items-center justify-center bg-primary-600 hover:bg-primary-700 disabled:bg-muted disabled:text-muted-foreground/40 text-white rounded-full transition-colors flex-shrink-0"
-              title={t("chat.send")} aria-label={t("chat.send")}
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 10l7-7m0 0l7 7m-7-7v18" />
-              </svg>
-            </button>
-          )}
+
+          <div className="mt-1 flex items-center gap-1.5">
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button type="button" disabled={disabled} aria-label={t("chat.attach.menu")} title={t("chat.attach.menu")}
+                        className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
+                  <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden><path d="M10 4v12M4 10h12" /></svg>
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content side="top" align="start" sideOffset={6}
+                                      className="z-50 min-w-[180px] rounded-md border border-border bg-card p-1.5 shadow-lg animate-[slideInRight_0.2s_ease-out]">
+                  <DropdownMenu.Item className={menuItem} onSelect={pick(fileInputRef)}>{t("chat.attach.files")}</DropdownMenu.Item>
+                  <DropdownMenu.Item className={menuItem} onSelect={pick(imageInputRef)}>{t("chat.attach.images")}</DropdownMenu.Item>
+                  {coarse && <DropdownMenu.Item className={menuItem} onSelect={pick(cameraInputRef)}>{t("chat.attach.camera")}</DropdownMenu.Item>}
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+            <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+              {items.length > 0 && t("chat.attach.counter").replace("{n}", String(items.length)).replace("{max}", String(rules.max))
+                .replace("{used}", humanSize(used)).replace("{total}", humanSize(rules.maxTotalBytes))}
+            </span>
+            <ModelSelector sessionId={sessionId ?? null} disabled={disabled || streaming} />
+            {streaming ? (
+              <button type="button" onClick={onCancel} title={t("chat.stop")} aria-label={t("chat.stop")}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-foreground text-background hover:opacity-85">
+                <span className="h-3 w-3 rounded-[3px] bg-background" />
+              </button>
+            ) : (
+              <button type="button" onClick={handleSend} disabled={!canSend}
+                      title={uploading ? t("chat.attach.waitUpload") : t("chat.send")} aria-label={t("chat.send")}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-600 text-white transition-colors hover:bg-primary-700 disabled:bg-muted disabled:text-muted-foreground/50">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
       </div>
+      {lightbox !== null && readyImages[lightbox] && (
+        <ImageLightbox images={readyImages.map((i) => ({ id: i.serverId!, filename: i.name }))} index={lightbox}
+                       onIndex={setLightbox} onClose={() => setLightbox(null)} />
+      )}
     </div>
   );
 }
