@@ -127,3 +127,13 @@ describe("UploadQueue (2026-11-07: upload on attach, then poll until processed)"
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
   });
 });
+
+describe("optimisticAttachments", () => {
+  it("the message shows what was sent: server id, name, size, kind; nothing when there are none", async () => {
+    const { optimisticAttachments } = await import("@/lib/attachmentUpload");
+    expect(optimisticAttachments([])).toBeUndefined();
+    expect(optimisticAttachments([{ localId: "up-1", name: "r.pdf", size: 9, kind: "pdf", serverId: "s1",
+                                    progress: 100, state: "ready" }]))
+      .toEqual([{ id: "s1", filename: "r.pdf", size: 9, kind: "pdf", localId: "up-1" }]);
+  });
+});

@@ -18,6 +18,7 @@ import { fillPlaceholders } from "@/lib/placeholders";
 import { refLabel } from "@/lib/contextRef";
 import { useBootstrap } from "@/hooks/useBootstrap";
 import { FALLBACK_POLICY } from "@/lib/attachments";
+import type { UploadItem } from "@/lib/attachmentUpload";
 import type { ChatContextView } from "@/api/types";
 import { useAccountScope } from "@/components/layout/AccountScope";
 import { useAnomaly } from "@/hooks/useAnomaly";
@@ -198,8 +199,9 @@ export default function Chat() {
 
   // --- Requirement 1.3 ---
   // Handle first message in welcome state: create session lazily, then send message
-  const handleWelcomeSend = (content: string, files: File[]) =>
-    sendFirstMessage(content, files, contextRef ? contextRefQuery(contextRef) : "", contextForNewChat(contextRef, scope.accountId));
+  const handleWelcomeSend = (content: string, attachmentIds: string[], items: UploadItem[]) =>
+    sendFirstMessage(content, attachmentIds, items, contextRef ? contextRefQuery(contextRef) : "",
+                     contextForNewChat(contextRef, scope.accountId));
 
   return (
     <div ref={flyoutContainerRef} className="flex h-[calc(100vh-var(--topbar-h))] -m-6">
@@ -390,7 +392,7 @@ export default function Chat() {
             )}
             <ContextLine ctx={currentSession?.context} t={t} />
             <ChatInput
-              onSend={(msg, files) => { setStopped(false); return sendMessage(msg, files); }}
+              onSend={(msg, ids, items) => { setStopped(false); return sendMessage(msg, ids, items); }}
               onCancel={() => { cancel(); setStopped(true); }}
               disabled={streaming}
               streaming={streaming}
@@ -416,7 +418,7 @@ export default function Chat() {
                 const prompt = t(key).replace("{id}", String(contextRef.id));
                 // no session yet (welcome): create one, and keep the panel open across the new session's page
                 if (selectedId) sendMessage(prompt);
-                else void sendFirstMessage(prompt, undefined, contextRefQuery(contextRef), contextForNewChat(contextRef, null));
+                else void sendFirstMessage(prompt, [], [], contextRefQuery(contextRef), contextForNewChat(contextRef, null));
               }}
               agentCheckDisabled={streaming}
             />

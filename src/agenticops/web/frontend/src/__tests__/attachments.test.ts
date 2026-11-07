@@ -116,3 +116,13 @@ describe("attachments (2026-11-07: any common file, limits from the server)", ()
     expect(attachmentErrorText({ kind: "total", limit: 200 * MB }, t)).toBe("total 200 MB");
   });
 });
+
+describe("attachmentReasonText", () => {
+  it("words a server reason code in the user's language, and shows an unknown code as is", async () => {
+    const { attachmentReasonText } = await import("@/lib/attachments");
+    const t = (k: string) => ({ "chat.attach.reason.encrypted": "password-protected" } as Record<string, string>)[k] ?? k;
+    expect(attachmentReasonText("encrypted", t)).toBe("password-protected");
+    expect(attachmentReasonText("brand_new_code", t)).toBe("brand_new_code");
+    expect(attachmentReasonText(undefined, t)).toBe("");
+  });
+});

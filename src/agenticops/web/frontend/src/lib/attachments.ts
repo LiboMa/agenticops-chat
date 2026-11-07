@@ -172,3 +172,11 @@ export function validateFiles(existing: { name: string; size: number }[], incomi
   }
   return { accepted, errors };
 }
+
+/** A server reason code (file_too_large, encrypted, model_no_images, …) in the user's language; an unknown one as is. */
+export function attachmentReasonText(code: string | null | undefined, t: (k: string) => string): string {
+  if (!code) return "";
+  const key = `chat.attach.reason.${code}`;
+  const text = t(key);
+  return text === key ? code : text;
+}

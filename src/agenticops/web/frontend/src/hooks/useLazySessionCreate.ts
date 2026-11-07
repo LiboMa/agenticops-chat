@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import { chatStream } from "@/lib/chatStream";
+import { optimisticAttachments, type UploadItem } from "@/lib/attachmentUpload";
 import { appendMessageToCache, nextTempId } from "@/hooks/useChatMessages";
 import type { ChatSession, ChatMessage } from "@/api/types";
 import { currentUserId, userKey } from "@/lib/home";
@@ -25,7 +26,8 @@ export function useLazySessionCreate() {
   const sendFirstMessage = useCallback(
     // `search` rides along to the new session's URL (Chat keeps an open context panel through the remount);
     // `context` (S5) is what the chat is about and its account — the server resolves and checks it
-    async (content: string, files?: File[], search = "", context?: NewChatContext): Promise<boolean> => {
+    async (content: string, attachmentIds: string[] = [], items: UploadItem[] = [], search = "",
+           context?: NewChatContext): Promise<boolean> => {
       if (creatingRef.current) return false;
       creatingRef.current = true;
       setCreating(true);
@@ -43,15 +45,21 @@ export function useLazySessionCreate() {
           id: nextTempId(),
           role: "user",
           content,
-          attachments: files && files.length > 0
-            ? files.map((f) => ({ filename: f.name, size: f.size }))
-            : undefined,
+          attachments: optimisticAttachments(items),
           created_at: new Date().toISOString(),
         };
         appendMessageToCache(qc, session.session_id, userMsg);
-        // Kick off the stream in the store, then navigate. The Chat page binds
-        // to the in-flight stream for this session id on mount.
-        void chatStream.send(session.session_id, content, files);
+        // Start the stream in the store and move to the chat once the server has taken the message (its first
+        // frame, before the agent runs): a refused send (an attachment still processing or gone, 2026-11-07)
+        // stays on this composer, with its text and attachments, instead of vanishing into the new chat.
+        const accepted = await new Promise<boolean>((resolve) => {
+          void chatStream.send(session.session_id, content, attachmentIds, undefined, () => resolve(true))
+            .then((ok) => { if (!ok) resolve(false); });
+        });
+        if (!accepted) {
+          setCreateError(chatStream.getSnapshot(session.session_id).error?.message ?? "The message was not sent");
+          return false;
+        }
         navigate(`/app/chat/${session.session_id}${search}`, { replace: true });
         return true;
       } catch (err) {

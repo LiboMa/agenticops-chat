@@ -1,6 +1,7 @@
 import { useSyncExternalStore, useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { chatStream } from "@/lib/chatStream";
+import { optimisticAttachments, type UploadItem } from "@/lib/attachmentUpload";
 import { appendMessageToCache, nextTempId } from "@/hooks/useChatMessages";
 import type { ChatSession, ChatMessage } from "@/api/types";
 
@@ -53,20 +54,18 @@ export function useSessionStream(sessionId: string | null) {
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   const send = useCallback(
-    (content: string, files?: File[]): Promise<boolean> => {
+    (content: string, attachmentIds: string[] = [], items: UploadItem[] = []): Promise<boolean> => {
       if (!sessionId) return Promise.resolve(false);
       // Optimistically append the user's message so it shows immediately.
       const userMsg: ChatMessage = {
         id: nextTempId(),
         role: "user",
         content,
-        attachments: files && files.length > 0
-          ? files.map((f) => ({ filename: f.name, size: f.size }))
-          : undefined,
+        attachments: optimisticAttachments(items),
         created_at: new Date().toISOString(),
       };
       appendMessageToCache(qc, sessionId, userMsg);
-      return chatStream.send(sessionId, content, files);  // → accepted (false: the composer gives the text back)
+      return chatStream.send(sessionId, content, attachmentIds);  // → accepted (false: the composer gives it back)
     },
     [sessionId, qc],
   );

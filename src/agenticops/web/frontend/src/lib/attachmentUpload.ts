@@ -2,6 +2,7 @@
 // one file per request, three at a time, with progress — then polled until the server has processed it. A message
 // is sent with the ids of the uploads that finished (ready, or failed: the model is told why it cannot read it).
 import { getAuthToken } from "@/api/client";
+import type { MessageAttachment } from "@/api/types";
 import type { AttachmentKind } from "@/lib/attachments";
 
 export type UploadState = "queued" | "uploading" | "processing" | "ready" | "failed";
@@ -38,7 +39,7 @@ export type FetchJson = (path: string, init?: { method?: string }) => Promise<{ 
 export interface UploadQueueOptions {
   concurrency?: number;
   token?: () => string | null;
-  onChange: (items: UploadItem[]) => void;
+  onChange?: (items: UploadItem[]) => void;
   xhr?: () => XhrLike;
   fetchJson?: FetchJson;
   pollMs?: number;
@@ -67,11 +68,12 @@ function codeOf(body: any): string | undefined {
 export class UploadQueue {
   private list: UploadItem[] = [];
   private live = new Map<string, XhrLike>();
+  private listeners = new Set<(items: UploadItem[]) => void>();
   private readonly opts: Required<Omit<UploadQueueOptions, "onLimitError">> & Pick<UploadQueueOptions, "onLimitError">;
 
   constructor(opts: UploadQueueOptions) {
     this.opts = {
-      concurrency: 3, token: getAuthToken, xhr: () => new XMLHttpRequest() as unknown as XhrLike,
+      concurrency: 3, token: getAuthToken, onChange: () => {}, xhr: () => new XMLHttpRequest() as unknown as XhrLike,
       fetchJson: defaultFetchJson, pollMs: 1000, pollTimeoutMs: 130_000, ...opts,
     };
   }
@@ -136,7 +138,31 @@ export class UploadQueue {
     }
   }
 
-  private emit(): void { this.opts.onChange(this.items()); }
+  /** Follow the items (the composer that shows this queue now); → unsubscribe. */
+  listen(fn: (items: UploadItem[]) => void): () => void {
+    this.listeners.add(fn);
+    return () => { this.listeners.delete(fn); };
+  }
+
+  /** Hand the finished items to a send (the tray empties, nothing is deleted); putBack if the send was refused. */
+  take(): UploadItem[] {
+    const taken = this.list.filter((i) => i.state === "ready" || i.state === "failed");
+    this.list = this.list.filter((i) => !taken.includes(i));
+    this.emit();
+    return taken;
+  }
+
+  putBack(items: UploadItem[]): void {
+    const have = new Set(this.list.map((i) => i.localId));
+    this.list = [...items.filter((i) => !have.has(i.localId)), ...this.list];
+    this.emit();
+  }
+
+  private emit(): void {
+    const items = this.items();
+    this.opts.onChange(items);
+    this.listeners.forEach((fn) => fn(items));
+  }
 
   private patch(localId: string, changes: Partial<UploadItem>): void {
     let changed = false;
@@ -208,4 +234,10 @@ export class UploadQueue {
     }
     this.patch(localId, { state: "failed", reason: "timeout" });
   }
+}
+
+/** The attachments of a message as it is shown before the server's copy arrives (its local preview, by localId). */
+export function optimisticAttachments(items: UploadItem[]): (MessageAttachment & { localId: string })[] | undefined {
+  if (items.length === 0) return undefined;
+  return items.map((i) => ({ id: i.serverId, filename: i.name, size: i.size, kind: i.kind, localId: i.localId }));
 }
