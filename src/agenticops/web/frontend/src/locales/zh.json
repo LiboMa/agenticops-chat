@@ -1127,5 +1127,6 @@
   "reports.error.idempotency_key_required": "发布未能发送；请重新打开对话框再试。",
   "reports.error.too_long": "这份报告太长，无法一次翻译完。",
   "readOnly.badge": "只读账户",
-  "readOnly.hint": "此账户可以浏览和对话，但不能做任何变更。"
+  "readOnly.hint": "此账户可以浏览和对话，但不能做任何变更。",
+  "settings.readOnlyNotice": "只读 —— 你可以查看这些设置，但不能修改。"
 }

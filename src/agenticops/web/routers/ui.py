@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from agenticops.auth.actor import Actor
-from agenticops.auth.viewer import is_viewer
+from agenticops.auth.viewer import can_view_settings, is_viewer
 from agenticops.config import get_trace_id, settings
 from agenticops.services import ui_preferences as prefs
 from agenticops.web.deps import current_actor, require_authenticated_user
@@ -86,7 +86,8 @@ async def api_ui_bootstrap(user=Depends(signed_in_user)) -> dict:
         # 2.7.0 additions to the contract (it allows extra fields): the avatar menu, auth-dependent controls,
         # the sidebar footer
         "user": {"id": user.id, "email": user.email, "name": user.name, "is_admin": bool(user.is_admin),
-                 "read_only": is_viewer(user)},  # a viewer account: the UI offers no write controls
+                 "read_only": is_viewer(user),  # a viewer account: the UI offers no write controls
+                 "can_view_settings": can_view_settings(user)},  # Settings in the nav (read-only for a viewer)
         "auth_enabled": bool(settings.api_auth_enabled),
         "version": __version__,
     }

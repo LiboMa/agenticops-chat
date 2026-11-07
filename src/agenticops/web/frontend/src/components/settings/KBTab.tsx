@@ -15,6 +15,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { formatShortDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
+import { useReadOnly } from "@/hooks/useBootstrap";
 
 type Tab = "review" | "active" | "cases";
 
@@ -56,6 +57,7 @@ function SOPDetailPanel({
   sopId: number;
   onClose: () => void;
 }) {
+  const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const { data: sop, isLoading } = useKBSop(sopId);
   const approveMut = useApproveSop();
   const rejectMut = useRejectSop();
@@ -164,7 +166,7 @@ function SOPDetailPanel({
           )}
 
           {/* Actions */}
-          {(canApprove || canReject) && (
+          {(canApprove || canReject) && !readOnly && (
             <div className="border-t border-border pt-4 space-y-3">
               {showApproveForm ? (
                 <div className="flex items-end gap-2">
@@ -225,6 +227,7 @@ function SOPDetailPanel({
 }
 
 export function KBTab() {
+  const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const [tab, setTab] = useState<Tab>("review");
   const [selectedSopId, setSelectedSopId] = useState<number | null>(null);
 
@@ -440,13 +443,15 @@ export function KBTab() {
                         {sop.updated_at ? formatShortDate(sop.updated_at) : ""}
                       </td>
                       <td className="px-6 py-3 text-right">
-                        <button
-                          onClick={() => deprecateMut.mutate(sop.id)}
-                          disabled={deprecateMut.isPending}
-                          className="px-3 py-1 text-sm font-medium text-orange-600 hover:text-orange-800 hover:bg-orange-50 rounded-md transition-colors disabled:opacity-50"
-                        >
-                          Deprecate
-                        </button>
+                        {!readOnly && (
+                          <button
+                            onClick={() => deprecateMut.mutate(sop.id)}
+                            disabled={deprecateMut.isPending}
+                            className="px-3 py-1 text-sm font-medium text-orange-600 hover:text-orange-800 hover:bg-orange-50 rounded-md transition-colors disabled:opacity-50"
+                          >
+                            Deprecate
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

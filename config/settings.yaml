@@ -122,6 +122,8 @@ token_cost_table:
     cache_write: 0.0
 bedrock_cache_enabled: true
 strands_context_manager_auto: true
+context_offload_max_result_tokens: 1500   # tool results above this are offloaded (a preview stays)
+context_offload_preview_tokens: 750
 embedding_model_id: amazon.titan-embed-text-v2:0
 embedding_dimension: 1024
 embedding_enabled: true

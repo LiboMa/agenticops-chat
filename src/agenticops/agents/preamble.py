@@ -314,7 +314,9 @@ def bedrock_model_kwargs(model_id: str, thinking_fields: Optional[dict] = None) 
         return kwargs
     if settings.bedrock_cache_enabled:
         from strands.models.model import CacheConfig
-        kwargs = {"cache_config": CacheConfig(strategy="auto"), "cache_tools": "default"}
+        # Exactly what Strands 1.45 cached (auto message cache points + the tool definitions; the old cache_tools is
+        # deprecated). 1.64 would also cache the system prompt by default — kept off until measured on its own.
+        kwargs = {"cache_config": CacheConfig(strategy="auto", tools_ttl=True, system_prompt_ttl=False)}
     if thinking_fields:
         kwargs["additional_request_fields"] = thinking_fields
     return kwargs

@@ -135,6 +135,11 @@ typer / CLI 在 rich 15 下是否正常：未确认 → 先在独立 venv 里试
    preview_tokens=750)]`；`CacheConfig(strategy="auto", tools_ttl=True)`；加强 `test_strands_context_manager.py`，并把
    「ignoring co-provided conversation_manager」warning 当错误。全量测试（临时 DB）→ chaos-lab 真实运行（13 例定位评测或子集），
    与 2.6.1 的准确率和成本对比 → 主人验收后再推送。
+   **进度（2026-11-07）**：已完成，分支 `feat/strands-1.64`。保持行为的做法：不传 `context_manager`，`ContextOffloader`
+   作为插件传入，并覆盖 `_slice_preview` 保留 1.45 的「只取头」预览（1.64 改成头 60% + 尾 40%，RCA 拓扑证据的边因此
+   全部落在预览之外）；`CacheConfig(strategy="auto", tools_ttl=True, system_prompt_ttl=False)`。验收：全量测试除已知 DNS
+   假失败外全部通过；真实 Bedrock 冒烟 PASS；本地 chat 三轮 E2E PASS；3 例定位评测 3/3 valid、AC@1 = 1.0，每例 13.5–16.7 万
+   token（只计这 3 次 RCA；2.6.1 基线按整批合计约 25 万 / 例，口径含批内其他调用）。详见 [`2026-11-06-strands-164-feature-feasibility.md`](2026-11-06-strands-164-feature-feasibility.md) §8。
 3. **重调上下文**：主 chat 与 RCA 上 A/B「保持行为」vs「auto / presets」；盯缓存命中率和「retrying with drop_block」日志。
 4. **Evals 试点**（可与 2 并行，独立 venv）：把 `location_eval.py` 包成基于录制工具输出的确定性评估器；再加 chat / IM 的红队用例。
 5. **阶段 0 零件**：RCA 结构化输出（flag）、`ContextInjector`、OTEL（flag）、critic 改成 `Agent`。

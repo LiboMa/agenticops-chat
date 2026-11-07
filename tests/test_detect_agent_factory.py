@@ -171,7 +171,8 @@ def test_build_detect_agent_for_account_respects_cache_config(
         )
     model_call_kwargs_enabled = mock_model_cls.call_args[1]
     assert "cache_config" in model_call_kwargs_enabled
-    assert "cache_tools" in model_call_kwargs_enabled
+    assert model_call_kwargs_enabled["cache_config"].tools_ttl is True  # tool definitions cached (was cache_tools)
+    assert "cache_tools" not in model_call_kwargs_enabled
 
     # Test with cache disabled
     mock_model_cls.reset_mock()

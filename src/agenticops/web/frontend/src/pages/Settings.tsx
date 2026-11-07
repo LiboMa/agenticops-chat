@@ -38,6 +38,7 @@ import {
 } from "@/hooks/useAgentMemory";
 import type { ScanFocus, AgentModelConfig } from "@/api/types";
 import type { Account, AccountCreate, AccountUpdate, CloudProvider, McpServerConfig, CredentialSourceType } from "@/api/types";
+import { useReadOnly } from "@/hooks/useBootstrap";
 
 /* ── Scan Focus section ─────────────────────────────────────────── */
 
@@ -1111,6 +1112,7 @@ function ReportStorageCard({
 /* ── Main Settings page ─────────────────────────────────────────── */
 
 export default function Settings() {
+  const readOnly = useReadOnly();  // a viewer allowed to view Settings: everything shown, nothing changeable
   const { selected: focusSelected, toggle: toggleFocus, focusValue, ALL_CATEGORIES } = useScanFocus();
   const settingsQ = useSettings();
   const updateMut = useUpdateSettings();
@@ -1160,6 +1162,11 @@ export default function Settings() {
   return (
     <div className="max-w-5xl">
       <h1 className="text-2xl font-semibold text-foreground mb-4">{t("settings.title")}</h1>
+      {readOnly && (
+        <p role="status" className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+          {t("settings.readOnlyNotice")}
+        </p>
+      )}
 
       <Tabs.Root defaultValue="general">
         <Tabs.List className="flex border-b border-border mb-6 gap-0 overflow-x-auto">
@@ -1175,6 +1182,7 @@ export default function Settings() {
 
         {/* ── General Tab ──────────────────────────────────────── */}
         <Tabs.Content value="general" className="space-y-6">
+          <fieldset disabled={readOnly} className="m-0 min-w-0 space-y-6 border-0 p-0">
       {updateMut.error && <ErrorBanner message={updateMut.error.message} onRetry={() => updateMut.reset()} actionLabel={t("common.close")} />}
       <Card>
         <CardHeader>
@@ -1366,10 +1374,12 @@ export default function Settings() {
 
       {/* ── Report Storage ───────────────────────────────────── */}
       {s && <ReportStorageCard settings={s} onSave={(patch) => updateMut.mutate(patch)} saving={updateMut.isPending} />}
+          </fieldset>
         </Tabs.Content>
 
         {/* ── Accounts Tab ─────────────────────────────────────── */}
         <Tabs.Content value="accounts" className="space-y-6">
+          <fieldset disabled={readOnly} className="m-0 min-w-0 space-y-6 border-0 p-0">
       <Card>
         <CardHeader>
           <h2 className="text-lg font-semibold text-foreground">Cloud Accounts</h2>
@@ -1433,11 +1443,14 @@ export default function Settings() {
         )}
       </Card>
 
+          </fieldset>
         </Tabs.Content>
 
         {/* ── Messaging Tab ────────────────────────────────────── */}
         <Tabs.Content value="messaging" className="space-y-6">
+          <fieldset disabled={readOnly} className="m-0 min-w-0 space-y-6 border-0 p-0">
           <MessagingTab />
+          </fieldset>
         </Tabs.Content>
 
         {/* ── Audit Tab ────────────────────────────────────────── */}
@@ -1457,6 +1470,7 @@ export default function Settings() {
 
         {/* ── MCP Servers Tab ──────────────────────────────────── */}
         <Tabs.Content value="mcp" className="space-y-6">
+          <fieldset disabled={readOnly} className="m-0 min-w-0 space-y-6 border-0 p-0">
       <Card>
         <CardHeader>
           <h2 className="text-lg font-semibold text-foreground">MCP Servers</h2>
@@ -1527,6 +1541,7 @@ export default function Settings() {
           )}
         </CardBody>
       </Card>
+          </fieldset>
         </Tabs.Content>
 
         {/* ── Agent Memory Tab ──────────────────────────────────── */}
@@ -1622,7 +1637,7 @@ export default function Settings() {
                           Cancel
                         </button>
                       </div>
-                    ) : (
+                    ) : readOnly ? null : (
                       <button
                         onClick={() => { setMemEditing(m); setMemEditConf(m.confidence); }}
                         className="text-xs text-primary-600 hover:underline"
@@ -1630,7 +1645,7 @@ export default function Settings() {
                         Edit
                       </button>
                     )}
-                    {m.status === "active" && (
+                    {m.status === "active" && !readOnly && (
                       <button
                         onClick={() => deleteMemMut.mutate({ agent: m.agent, filename: m.filename })}
                         disabled={deleteMemMut.isPending}

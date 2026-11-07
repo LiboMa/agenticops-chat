@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch, getAuthToken } from "@/api/client";
 import { currentUserId, type Home } from "@/lib/home";
-import { isReadOnly } from "@/lib/permissions";
+import { canViewSettings, isReadOnly } from "@/lib/permissions";
 
 export interface UiPreferences {
   revision: number;
@@ -26,7 +26,7 @@ export interface UiBootstrap {
   };
   preferences: UiPreferences;
   /** read_only: a viewer account — the server refuses its writes, the UI offers none */
-  user: { id: number; email: string; name: string | null; is_admin: boolean; read_only?: boolean };
+  user: { id: number; email: string; name: string | null; is_admin: boolean; read_only?: boolean; can_view_settings?: boolean };
   auth_enabled: boolean;
   version: string;
 }
@@ -47,4 +47,9 @@ export function useBootstrap() {
 /** A viewer (read-only account): hide write controls. False while the bootstrap loads — the server still refuses. */
 export function useReadOnly(): boolean {
   return isReadOnly(useBootstrap().data);
+}
+
+/** Whether Settings is offered (writers; a viewer only with settings_read — then read-only). */
+export function useCanViewSettings(): boolean {
+  return canViewSettings(useBootstrap().data);
 }

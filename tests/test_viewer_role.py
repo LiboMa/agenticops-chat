@@ -16,7 +16,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from agenticops.auth.actor import Actor
-from agenticops.auth.viewer import READ_ONLY_MESSAGE, is_viewer, viewer_may
+from agenticops.auth.viewer import READ_ONLY_MESSAGE, can_view_settings, is_viewer, viewer_may
 from agenticops.models import Base, ChatSession, CommandAudit, get_session
 from agenticops.run_context import get_run_context, run_context
 
@@ -45,6 +45,13 @@ def test_a_viewer_is_a_user_whose_own_flags_lack_write():
     assert not is_viewer(SimpleNamespace(permissions=["read", "write"]))
     assert not is_viewer(SimpleNamespace(permissions=["read", "write", "admin"]))
     assert not is_viewer(None)
+
+
+def test_settings_are_visible_to_writers_and_to_a_viewer_with_settings_read():
+    assert can_view_settings(SimpleNamespace(permissions=["read", "write"]))
+    assert can_view_settings(SimpleNamespace(permissions=["read", "settings_read"]))
+    assert not can_view_settings(SimpleNamespace(permissions=["read"]))
+    assert is_viewer(SimpleNamespace(permissions=["read", "settings_read"]))   # still changes nothing
 
 
 @pytest.mark.parametrize("method,path", [
@@ -94,7 +101,8 @@ def gate(tmp_path, monkeypatch):
     inner = Starlette(routes=[Route("/{p:path}", passed, methods=["GET", "POST", "PUT", "PATCH", "DELETE"])])
     inner.add_middleware(APIAuthMiddleware)
     tokens = {}
-    for name, kwargs in (("viewer", {"permissions": ["read"]}), ("writer", {}), ("admin", {"is_admin": True})):
+    for name, kwargs in (("viewer", {"permissions": ["read"]}), ("editor", {"permissions": ["read", "settings_read"]}),
+                         ("writer", {}), ("admin", {"is_admin": True})):
         user = AuthService.create_user(email=name, password="pw-not-a-secret", **kwargs)
         tokens[name] = {"Authorization": f"Bearer {AuthService.create_session(user.id)}"}
         if name == "admin":
@@ -124,11 +132,12 @@ def test_the_walk_covers_the_app_and_every_allowlist_entry_is_a_real_route():
     }
 
 
-def test_a_viewer_is_refused_every_write_outside_the_allowlist(gate):
+@pytest.mark.parametrize("who", ["viewer", "editor"])   # editor = a viewer that may also VIEW Settings
+def test_a_viewer_is_refused_every_write_outside_the_allowlist(gate, who):
     from agenticops.web.app import _PUBLIC_PATHS  # sign-in itself: no identity yet, nothing to gate
     refused = 0
     for method, template, path in _mutating_api_routes():
-        r = gate.client.request(method, path, headers=gate.tokens["viewer"])
+        r = gate.client.request(method, path, headers=gate.tokens[who])
         if viewer_may(method, path) or path in _PUBLIC_PATHS:
             assert (r.status_code, r.text) == (200, "passed"), (method, template)
         else:
@@ -432,3 +441,19 @@ def test_aiops_users_create_list_disable(tmp_path, monkeypatch):
     assert AuthService.validate_session(token) is None                              # its session stops at once
     assert AuthService.authenticate("viewer", password) is None
     assert runner.invoke(app, ["users", "disable", "nobody"]).exit_code == 1
+
+
+def test_aiops_users_create_a_viewer_that_may_view_settings(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from agenticops.auth.models import User
+    from agenticops.cli.main import app
+    from agenticops.models import get_db_session
+    _temp_db(tmp_path, monkeypatch, "editor.db")
+    runner = CliRunner()
+    r = runner.invoke(app, ["users", "create", "editor", "--viewer", "--settings"])
+    assert r.exit_code == 0 and "viewer+settings" in r.output, r.output
+    with get_db_session() as db:
+        assert db.query(User).filter_by(email="editor").one().permissions == ["read", "settings_read"]
+    assert runner.invoke(app, ["users", "create", "w", "--settings"]).exit_code == 2      # --settings needs --viewer
+    assert "viewer+settings" in runner.invoke(app, ["users", "list"]).output

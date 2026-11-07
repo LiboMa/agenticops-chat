@@ -215,7 +215,7 @@ def _build_detect_agent_for_account(
     Returns:
         Agent instance pre-configured for the given account
     """
-    from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_manager, get_bedrock_boto_session
+    from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_bedrock_boto_session
 
     model_id, max_tokens = get_agent_model_config("detect")
     from agenticops.agents.preamble import bedrock_model_kwargs
@@ -242,7 +242,7 @@ def _build_detect_agent_for_account(
         model=model,
         callback_handler=None,
         conversation_manager=get_agent_conversation_manager("detect"),
-        context_manager=get_agent_context_manager("detect"),
+        plugins=get_agent_context_plugins("detect"),
         tools=[
             cli_tool,
             get_managed_resources,
@@ -290,7 +290,7 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
         Health summary: issues found, severity breakdown, security findings.
     """
     try:
-        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_manager, get_bedrock_boto_session
+        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_bedrock_boto_session
         from agenticops.services.notification_service import batch_mode
         with batch_mode():
             # Check account count to decide parallel vs single-agent mode.
@@ -356,7 +356,7 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                     model=model,
                     callback_handler=None,
                     conversation_manager=get_agent_conversation_manager("detect"),
-                    context_manager=get_agent_context_manager("detect"),
+                    plugins=get_agent_context_plugins("detect"),
                     tools=[
                         # Multi-account variant: these two enable account switching,
                         # absent from the account-locked parallel path (see above).
