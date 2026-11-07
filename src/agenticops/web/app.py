@@ -4471,6 +4471,7 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
     from agenticops.chat.preprocessor import preprocess_message
     from agenticops.chat.stream_errors import MESSAGES as STREAM_ERROR_MESSAGES
     from agenticops.chat.stream_errors import classify as classify_stream_error, tool_outcome
+    from agenticops.chat.tool_steps import result_preview, summarize_input
     from agenticops.services import chat_access, chat_dispatch
 
     upload_cfg = await asyncio.to_thread(upload_config.effective)
@@ -4619,6 +4620,12 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
         _chat_start_time = time.monotonic()
         accumulated = ""
         tool_calls = []
+        _tool_t0: dict[str, float] = {}  # call id → when the step was first seen (its duration starts there)
+
+        def _tool_ms(call_id) -> int:
+            t0 = _tool_t0.get(call_id)
+            return int((time.monotonic() - t0) * 1000) if t0 is not None else 0
+
         input_tokens = 0
         output_tokens = 0
         cache_read_tokens = 0
@@ -4665,21 +4672,11 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
                 if ev.get("type") == "tool_stream":
                     from agenticops.acp.mapping import tool_stream_to_sse
                     _sse = tool_stream_to_sse(ev)
-                    if _sse:
-                        if _sse["event"] == "text":
-                            accumulated += _sse["data"]["token"]
-                        elif _sse["event"] == "tool_start":
-                            _n = _sse["data"]["name"]
-                            if _n not in [t["name"] for t in tool_calls]:
-                                tool_calls.append({"name": _n, "status": "running"})
-                        elif _sse["event"] == "tool_end":
-                            # already streamed live — mark done so the post-loop
-                            # sweep doesn't emit a duplicate tool_end
-                            _n = _sse["data"]["name"]
-                            for t in tool_calls:
-                                if t["name"] == _n:
-                                    t["status"] = "done"
-                        yield {"event": _sse["event"], "data": json.dumps(_sse["data"])}
+                    # 2026-11-07: an enhanced_task is ONE step of the work log — its text streams (and lands between
+                    # the step's text_offset and text_end), its inner tools are not steps
+                    if _sse and _sse["event"] == "text":
+                        accumulated += _sse["data"]["token"]
+                        yield {"event": "text", "data": json.dumps(_sse["data"])}
                     continue
                 # Text token
                 if "data" in ev and isinstance(ev["data"], str) and ev["data"]:
@@ -4690,12 +4687,24 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
                     tool_name = ev["current_tool_use"].get("name", "")
                     call_id = ev["current_tool_use"].get("toolUseId") or tool_name
                     if tool_name and call_id not in [t.get("call_id") for t in tool_calls]:
-                        tool_calls.append({"name": tool_name, "status": "running", "call_id": call_id})
-                        yield {"event": "tool_start", "data": json.dumps({"name": tool_name, "call_id": call_id})}
+                        # 2026-11-07 work log: where in the reply text this step began, and when (its duration)
+                        tool_calls.append({"name": tool_name, "status": "running", "call_id": call_id,
+                                           "text_offset": len(accumulated)})
+                        _tool_t0[call_id] = time.monotonic()
+                        yield {"event": "tool_start", "data": json.dumps(
+                            {"name": tool_name, "call_id": call_id, "text_offset": len(accumulated)})}
                 # A tool's result: its outcome comes from the result's status, never from its name (S5)
                 _msg = ev.get("message")
                 if isinstance(_msg, dict):
                     for _block in _msg.get("content") or []:
+                        # the model's finished message carries each call's parsed input: its one-line summary
+                        _use = _block.get("toolUse") if isinstance(_block, dict) else None
+                        if isinstance(_use, dict):
+                            for t in tool_calls:
+                                if t.get("call_id") == _use.get("toolUseId") and "summary" not in t:
+                                    t["summary"] = summarize_input(_use.get("input"))
+                                    yield {"event": "tool_input", "data": json.dumps(
+                                        {"call_id": t["call_id"], "summary": t["summary"]})}
                         _res = _block.get("toolResult") if isinstance(_block, dict) else None
                         if not isinstance(_res, dict):
                             continue
@@ -4704,8 +4713,13 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
                                 _txt = " ".join(c.get("text", "") for c in (_res.get("content") or [])
                                                 if isinstance(c, dict) and isinstance(c.get("text"), str))
                                 t["status"], t["outcome"] = "done", tool_outcome(_res.get("status"), _txt)
+                                t["duration_ms"] = _tool_ms(t["call_id"])
+                                t["result_preview"] = result_preview(_txt)
+                                t["text_end"] = len(accumulated)
                                 yield {"event": "tool_end", "data": json.dumps(
-                                    {"name": t["name"], "call_id": t["call_id"], "outcome": t["outcome"]})}
+                                    {"name": t["name"], "call_id": t["call_id"], "outcome": t["outcome"],
+                                     "duration_ms": t["duration_ms"], "result_preview": t["result_preview"],
+                                     "text_end": t["text_end"]})}
                 # Completion with result
                 if "result" in ev:
                     res = ev["result"]
@@ -4726,8 +4740,13 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
                 if t["status"] == "done":
                     continue
                 t["status"], t["outcome"] = "done", "unknown"  # no result seen: unknown, never assumed ok
+                # no result: the step owns no reply text (it ends where it began)
+                t["duration_ms"] = _tool_ms(t.get("call_id"))
+                t["result_preview"] = ""
+                t["text_end"] = t.get("text_offset", len(accumulated))
                 yield {"event": "tool_end", "data": json.dumps(
-                    {"name": t["name"], "call_id": t.get("call_id"), "outcome": "unknown"})}
+                    {"name": t["name"], "call_id": t.get("call_id"), "outcome": "unknown",
+                     "duration_ms": t["duration_ms"], "result_preview": "", "text_end": t["text_end"]})}
 
             # Persist assistant message (re-verify session still exists to avoid
             # FK violation / orphan if it was deleted mid-stream)

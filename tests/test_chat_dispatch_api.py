@@ -401,4 +401,6 @@ def test_a_tool_refused_by_the_binding_shows_as_failed(env, monkeypatch):
             yield {"data": "done"}
     monkeypatch.setattr(webapp._chat_sessions, "get_or_create", lambda s: _Refused())
     ends = [d for e, d in frames(_send(client, sid).text) if e == "tool_end"]
-    assert ends == [{"name": "sre_query", "call_id": "t9", "outcome": "error"}]
+    # the frame also carries the work-log facts (2026-11-07); this test is about the outcome
+    assert [{k: d[k] for k in ("name", "call_id", "outcome")} for d in ends] == [
+        {"name": "sre_query", "call_id": "t9", "outcome": "error"}]
