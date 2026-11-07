@@ -14,6 +14,7 @@ import { contextRefFromPath, type ContextRef } from "@/lib/contextRef";
 import { messageStatusKey } from "@/lib/chatMessageStatus";
 import { splitWork } from "@/lib/workSteps";
 import { canRegenerate, type RegenCheck } from "@/lib/messageActions";
+import { nextStick } from "@/lib/stickToBottom";
 import { useLocale } from "@/i18n/LocaleContext";
 
 interface Props {
@@ -77,12 +78,16 @@ export function MessageList({
   const distanceFromBottomRef = useRef(0);          // captured on scroll, used to anchor on prepend
   const prevFirstIdRef = useRef<number | undefined>(undefined);
   const prevLenRef = useRef(0);
+  const userScrollAt = useRef(0);                    // when the user last scrolled (wheel, touch, keys, scrollbar)
+  const markUser = () => { userScrollAt.current = Date.now(); };
 
   const onScroll = () => {
     const el = parentRef.current;
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    stickToBottomRef.current = distanceFromBottom < 80;
+    // only the user's own scroll unsticks: rows measuring taller than estimated move the offset too
+    stickToBottomRef.current = nextStick(stickToBottomRef.current, distanceFromBottom,
+                                         Date.now() - userScrollAt.current < 1000);
     distanceFromBottomRef.current = distanceFromBottom;
     setAway(distanceFromBottom > AWAY_PX);
     if (hasOlder && !isFetchingOlder && el.scrollTop < 120) onLoadOlder?.();
@@ -126,7 +131,8 @@ export function MessageList({
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <div ref={parentRef} onScroll={onScroll} onClick={handleRefClick} className="flex-1 overflow-y-auto">
+      <div ref={parentRef} onScroll={onScroll} onClick={handleRefClick} onWheel={markUser} onTouchMove={markUser}
+           onKeyDown={markUser} onPointerDown={markUser} tabIndex={-1} className="flex-1 overflow-y-auto outline-none">
         <div ref={contentRef} className="mx-auto w-full max-w-[760px] px-4 pb-6 pt-6">
           {isFetchingOlder && (
             <div className="py-2 text-center text-xs text-muted-foreground">Loading older messages…</div>
