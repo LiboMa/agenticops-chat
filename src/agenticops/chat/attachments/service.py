@@ -136,10 +136,16 @@ def check_for_send(db, ids: list[str], actor, cfg) -> list[ChatAttachment]:
 
 
 def bind(db, atts: list[ChatAttachment], session_row: ChatSession, message_id: Optional[int]) -> None:
+    """Bind the attachments to the session and message — all of them, only while still unsent (compare-and-set)."""
+    ids = [a.id for a in atts]
+    if not ids:
+        return
+    moved = db.query(ChatAttachment).filter(ChatAttachment.id.in_(ids), ChatAttachment.session_id.is_(None)).update(
+        {"session_id": session_row.id, "message_id": message_id}, synchronize_session=False)
+    if moved != len(ids):
+        raise AttachmentError(409, "attachment_unavailable", "An attachment was just sent with another message")
     for att in atts:
-        att.session_id = session_row.id
-        att.message_id = message_id
-    db.flush()
+        att.session_id, att.message_id = session_row.id, message_id
 
 
 def move_bound(att_ids: list[str], session_uuid: str) -> None:
@@ -219,3 +225,36 @@ def maybe_sweep() -> None:
         sweep_staged()
     except Exception:
         logger.exception("chat attachment sweep failed")
+
+
+def discard_unbound(att_ids: list[str]) -> None:
+    """Remove the given uploads that are still unsent (a multipart send that did not bind them)."""
+    if not att_ids:
+        return
+    with get_db_session() as db:
+        unbound = [a.id for a in db.query(ChatAttachment).filter(ChatAttachment.id.in_(att_ids),
+                                                                 ChatAttachment.session_id.is_(None)).all()]
+        if unbound:
+            db.query(ChatAttachment).filter(ChatAttachment.id.in_(unbound)).delete(synchronize_session=False)
+    for att_id in unbound:
+        store.remove_staged(att_id)
+
+
+def filenames(att_ids: list[str], actor) -> list[str]:
+    """The names of the caller's uploads among `att_ids`, in order (for a message sent without text)."""
+    with get_db_session() as db:
+        rows = {a.id: a.filename for a in db.query(ChatAttachment).filter(
+            ChatAttachment.id.in_(att_ids), ChatAttachment.owner_key == actor.key).all()}
+    return [rows[i] for i in att_ids if i in rows]
+
+
+def record_deliveries(message_id: int, deliveries: list[dict]) -> None:
+    """Write how each attachment reached the model onto its message (`delivery`, `reason` per id)."""
+    from agenticops.models import ChatMessage
+    by_id = {d["id"]: d for d in deliveries}
+    with get_db_session() as db:
+        msg = db.get(ChatMessage, message_id)
+        if msg is None or not isinstance(msg.attachments, list):
+            return
+        msg.attachments = [{**a, "delivery": by_id[a["id"]]["delivery"], "reason": by_id[a["id"]]["reason"]}
+                           if isinstance(a, dict) and a.get("id") in by_id else a for a in msg.attachments]

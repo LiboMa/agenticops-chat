@@ -1,7 +1,6 @@
 """Tests for multimodal file processing in the chat pipeline.
 
 Covers:
-- file_reader.py: type helpers, image/document byte readers
 - preprocessor.py: text-only backward compat, image/document content blocks, mixed mode, CLI @file refs
 - Edge cases: oversized files, unsupported formats, missing files
 """
@@ -50,346 +49,39 @@ def _minimal_pdf() -> bytes:
     )
 
 
-# ===========================================================================
-# file_reader.py — type helpers
-# ===========================================================================
-
-class TestFileTypeHelpers:
-    def test_is_image_file_supported(self):
-        from agenticops.chat.file_reader import is_image_file
-
-        assert is_image_file("photo.png") is True
-        assert is_image_file("PHOTO.PNG") is True
-        assert is_image_file("shot.jpg") is True
-        assert is_image_file("shot.jpeg") is True
-        assert is_image_file("anim.gif") is True
-        assert is_image_file("pic.webp") is True
-
-    def test_is_image_file_unsupported(self):
-        from agenticops.chat.file_reader import is_image_file
-
-        assert is_image_file("pic.bmp") is False  # not in Strands ImageFormat
-        assert is_image_file("doc.pdf") is False
-        assert is_image_file("script.py") is False
-        assert is_image_file("noext") is False
-
-    def test_is_document_file_supported(self):
-        from agenticops.chat.file_reader import is_document_file
-
-        assert is_document_file("report.pdf") is True
-        assert is_document_file("data.csv") is True
-        assert is_document_file("file.doc") is True
-        assert is_document_file("file.docx") is True
-        assert is_document_file("sheet.xls") is True
-        assert is_document_file("sheet.xlsx") is True
-        assert is_document_file("page.html") is True
-        assert is_document_file("readme.txt") is True
-        assert is_document_file("notes.md") is True
-
-    def test_is_document_file_unsupported(self):
-        from agenticops.chat.file_reader import is_document_file
-
-        assert is_document_file("script.py") is False
-        assert is_document_file("photo.png") is False
-        assert is_document_file("data.json") is False
-        assert is_document_file("config.yaml") is False
-
 
 # ===========================================================================
-# file_reader.py — image byte readers
+# preprocessor.py — assembling the turn: text-only stays a str, media follow the text
 # ===========================================================================
 
-class TestImageByteReaders:
-    def test_read_file_as_image_bytes_png(self, tmp_path):
-        from agenticops.chat.file_reader import read_file_as_image_bytes
-
-        img = tmp_path / "test.png"
-        img.write_bytes(_minimal_png())
-
-        raw, fmt, error = read_file_as_image_bytes(str(img))
-        assert error is None
-        assert fmt == "png"
-        assert raw is not None
-        assert raw[:4] == b"\x89PNG"
-
-    def test_read_file_as_image_bytes_jpeg(self, tmp_path):
-        from agenticops.chat.file_reader import read_file_as_image_bytes
-
-        img = tmp_path / "test.jpg"
-        img.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 100)  # JPEG header stub
-
-        raw, fmt, error = read_file_as_image_bytes(str(img))
-        assert error is None
-        assert fmt == "jpeg"
-
-    def test_read_file_as_image_bytes_not_found(self):
-        from agenticops.chat.file_reader import read_file_as_image_bytes
-
-        raw, fmt, error = read_file_as_image_bytes("/nonexistent/image.png")
-        assert raw is None
-        assert "not found" in error.lower()
-
-    def test_read_file_as_image_bytes_too_large(self, tmp_path):
-        from agenticops.chat.file_reader import read_file_as_image_bytes, MAX_IMAGE_SIZE
-
-        img = tmp_path / "huge.png"
-        img.write_bytes(b"\x89PNG" + b"\x00" * (MAX_IMAGE_SIZE + 1))
-
-        raw, fmt, error = read_file_as_image_bytes(str(img))
-        assert raw is None
-        assert "too large" in error.lower()
-
-    def test_read_file_as_image_bytes_unsupported_ext(self, tmp_path):
-        from agenticops.chat.file_reader import read_file_as_image_bytes
-
-        img = tmp_path / "test.bmp"
-        img.write_bytes(b"BM" + b"\x00" * 100)
-
-        raw, fmt, error = read_file_as_image_bytes(str(img))
-        assert raw is None
-        assert "unsupported" in error.lower()
-
-    def test_read_upload_image_bytes_ok(self):
-        from agenticops.chat.file_reader import read_upload_image_bytes
-
-        raw, fmt, error = read_upload_image_bytes("shot.png", _minimal_png())
-        assert error is None
-        assert fmt == "png"
-        assert raw is not None
-
-    def test_read_upload_image_bytes_too_large(self):
-        from agenticops.chat.file_reader import read_upload_image_bytes, MAX_IMAGE_SIZE
-
-        raw, fmt, error = read_upload_image_bytes("big.png", b"\x00" * (MAX_IMAGE_SIZE + 1))
-        assert raw is None
-        assert "too large" in error.lower()
-
-    def test_read_upload_image_bytes_bad_ext(self):
-        from agenticops.chat.file_reader import read_upload_image_bytes
-
-        raw, fmt, error = read_upload_image_bytes("file.bmp", b"BM")
-        assert raw is None
-        assert "unsupported" in error.lower()
+def _turn(blocks=(), text="Attachments (1): …"):
+    from agenticops.chat.attachments.delivery import Turn
+    return Turn(text=text, blocks=list(blocks), deliveries=[])
 
 
-# ===========================================================================
-# file_reader.py — document byte readers
-# ===========================================================================
-
-class TestDocumentByteReaders:
-    def test_read_file_as_document_bytes_pdf(self, tmp_path):
-        from agenticops.chat.file_reader import read_file_as_document_bytes
-
-        pdf = tmp_path / "report.pdf"
-        pdf.write_bytes(_minimal_pdf())
-
-        raw, fmt, name, error = read_file_as_document_bytes(str(pdf))
-        assert error is None
-        assert fmt == "pdf"
-        assert name == "report.pdf"
-        assert raw is not None
-        assert raw[:5] == b"%PDF-"
-
-    def test_read_file_as_document_bytes_txt(self, tmp_path):
-        from agenticops.chat.file_reader import read_file_as_document_bytes
-
-        txt = tmp_path / "notes.txt"
-        txt.write_text("hello world")
-
-        raw, fmt, name, error = read_file_as_document_bytes(str(txt))
-        assert error is None
-        assert fmt == "txt"
-        assert name == "notes.txt"
-        assert b"hello world" in raw
-
-    def test_read_file_as_document_bytes_not_found(self):
-        from agenticops.chat.file_reader import read_file_as_document_bytes
-
-        raw, fmt, name, error = read_file_as_document_bytes("/nonexistent/doc.pdf")
-        assert raw is None
-        assert "not found" in error.lower()
-
-    def test_read_file_as_document_bytes_too_large(self, tmp_path):
-        from agenticops.chat.file_reader import read_file_as_document_bytes, MAX_DOCUMENT_SIZE
-
-        pdf = tmp_path / "huge.pdf"
-        pdf.write_bytes(b"%PDF-" + b"\x00" * (MAX_DOCUMENT_SIZE + 1))
-
-        raw, fmt, name, error = read_file_as_document_bytes(str(pdf))
-        assert raw is None
-        assert "too large" in error.lower()
-
-    def test_read_file_as_document_bytes_unsupported_ext(self, tmp_path):
-        from agenticops.chat.file_reader import read_file_as_document_bytes
-
-        py = tmp_path / "script.py"
-        py.write_text("print('hi')")
-
-        raw, fmt, name, error = read_file_as_document_bytes(str(py))
-        assert raw is None
-        assert "unsupported" in error.lower()
-
-    def test_read_upload_document_bytes_ok(self):
-        from agenticops.chat.file_reader import read_upload_document_bytes
-
-        raw, fmt, name, error = read_upload_document_bytes("report.pdf", _minimal_pdf())
-        assert error is None
-        assert fmt == "pdf"
-        assert name == "report.pdf"
-        assert raw is not None
-
-    def test_read_upload_document_bytes_too_large(self):
-        from agenticops.chat.file_reader import read_upload_document_bytes, MAX_DOCUMENT_SIZE
-
-        raw, fmt, name, error = read_upload_document_bytes("big.pdf", b"\x00" * (MAX_DOCUMENT_SIZE + 1))
-        assert raw is None
-        assert "too large" in error.lower()
-
-    def test_read_upload_document_bytes_bad_ext(self):
-        from agenticops.chat.file_reader import read_upload_document_bytes
-
-        raw, fmt, name, error = read_upload_document_bytes("script.py", b"print('hi')")
-        assert raw is None
-        assert "unsupported" in error.lower()
-
-
-# ===========================================================================
-# preprocessor.py — backward compatibility
-# ===========================================================================
-
-class TestPreprocessorBackwardCompat:
-    """Existing text-only messages must still return plain str."""
-
+class TestPreprocessorTurnAssembly:
     def test_text_only_returns_str(self):
         from agenticops.chat.preprocessor import preprocess_message
-
         result, warnings = preprocess_message("hello world")
-        assert isinstance(result, str)
-        assert "hello world" in result
-        assert warnings == []
+        assert result == "hello world" and warnings == []
 
-    def test_text_with_file_contents_returns_str(self):
+    def test_text_attachments_stay_str(self):
         from agenticops.chat.preprocessor import preprocess_message
+        result, _ = preprocess_message("summarize", attachment_turn=_turn(text='<attachment n="1">x</attachment>'))
+        assert isinstance(result, str) and result.endswith("summarize")
 
-        result, warnings = preprocess_message(
-            "check this log",
-            file_contents=[("error.log", "NullPointerException at line 42")],
-        )
-        assert isinstance(result, str)
-        assert "NullPointerException" in result
-        assert "check this log" in result
-
-    def test_empty_media_lists_returns_str(self):
+    def test_empty_turn_is_ignored(self):
         from agenticops.chat.preprocessor import preprocess_message
+        result, _ = preprocess_message("hi", attachment_turn=_turn(text=""))
+        assert result == "hi"
 
-        result, warnings = preprocess_message(
-            "just text",
-            file_images=[],
-            file_documents=[],
-        )
-        assert isinstance(result, str)
-
-
-# ===========================================================================
-# preprocessor.py — multimodal content blocks
-# ===========================================================================
-
-class TestPreprocessorMultimodal:
-    def test_image_returns_content_blocks(self):
+    def test_media_follow_one_text_block(self):
         from agenticops.chat.preprocessor import preprocess_message
-
-        png_bytes = _minimal_png()
-        result, warnings = preprocess_message(
-            "analyze this screenshot",
-            file_images=[("screen.png", png_bytes, "png")],
-        )
-        assert isinstance(result, list), f"Expected list, got {type(result)}"
-        assert any("text" in b for b in result)
-        assert any("image" in b for b in result)
-
-        # Verify image block structure
-        img_block = next(b for b in result if "image" in b)
-        assert img_block["image"]["format"] == "png"
-        assert img_block["image"]["source"]["bytes"] == png_bytes
-
-        # Verify text block contains user message
-        text_block = next(b for b in result if "text" in b)
-        assert "analyze this screenshot" in text_block["text"]
-
-    def test_document_returns_content_blocks(self):
-        from agenticops.chat.preprocessor import preprocess_message
-
-        pdf_bytes = _minimal_pdf()
-        result, warnings = preprocess_message(
-            "review this report",
-            file_documents=[("report.pdf", pdf_bytes, "pdf", "report.pdf")],
-        )
-        assert isinstance(result, list)
-        assert any("text" in b for b in result)
-        assert any("document" in b for b in result)
-
-        # Verify document block structure
-        doc_block = next(b for b in result if "document" in b)
-        assert doc_block["document"]["format"] == "pdf"
-        assert doc_block["document"]["name"] == "report.pdf"
-        assert doc_block["document"]["source"]["bytes"] == pdf_bytes
-
-    def test_mixed_text_file_and_image(self):
-        from agenticops.chat.preprocessor import preprocess_message
-
-        result, warnings = preprocess_message(
-            "compare log with screenshot",
-            file_contents=[("error.log", "StackOverflowError")],
-            file_images=[("screen.png", _minimal_png(), "png")],
-        )
-        assert isinstance(result, list)
-        text_block = next(b for b in result if "text" in b)
-        assert "StackOverflowError" in text_block["text"]
-        assert "compare log with screenshot" in text_block["text"]
-        assert any("image" in b for b in result)
-
-    def test_multiple_images(self):
-        from agenticops.chat.preprocessor import preprocess_message
-
-        result, warnings = preprocess_message(
-            "compare these",
-            file_images=[
-                ("before.png", _minimal_png(), "png"),
-                ("after.jpeg", b"\xff\xd8\xff\xe0" + b"\x00" * 10, "jpeg"),
-            ],
-        )
-        assert isinstance(result, list)
-        image_blocks = [b for b in result if "image" in b]
-        assert len(image_blocks) == 2
-        assert image_blocks[0]["image"]["format"] == "png"
-        assert image_blocks[1]["image"]["format"] == "jpeg"
-
-    def test_image_and_document_together(self):
-        from agenticops.chat.preprocessor import preprocess_message
-
-        result, warnings = preprocess_message(
-            "analyze both",
-            file_images=[("arch.png", _minimal_png(), "png")],
-            file_documents=[("spec.pdf", _minimal_pdf(), "pdf", "spec.pdf")],
-        )
-        assert isinstance(result, list)
-        assert any("text" in b for b in result)
-        assert any("image" in b for b in result)
-        assert any("document" in b for b in result)
-        assert len(result) == 3  # text + image + document
-
-    def test_content_block_ordering(self):
-        """Text block comes first, then images, then documents."""
-        from agenticops.chat.preprocessor import preprocess_message
-
-        result, _ = preprocess_message(
-            "analyze",
-            file_images=[("a.png", _minimal_png(), "png")],
-            file_documents=[("b.pdf", _minimal_pdf(), "pdf", "b.pdf")],
-        )
-        assert "text" in result[0]
-        assert "image" in result[1]
-        assert "document" in result[2]
+        img = {"image": {"format": "png", "source": {"bytes": _minimal_png()}}}
+        doc = {"document": {"format": "pdf", "name": "att-1a2b3c4d-spec-pdf", "source": {"bytes": _minimal_pdf()}}}
+        result, _ = preprocess_message("review", attachment_turn=_turn([img, doc]))
+        assert result[0] == {"text": "Attachments (1): …\n\nreview"}
+        assert result[1:] == [img, doc]
 
 
 # ===========================================================================
@@ -483,29 +175,3 @@ class TestPreprocessorCLIFileRefs:
         assert "not found" in warnings[0].lower()
         # No media blocks → stays str
         assert isinstance(result, str)
-
-
-# ===========================================================================
-# Integration: verify existing read_file_as_text still works for images
-# ===========================================================================
-
-class TestLegacyImageFallback:
-    """Ensure read_file_as_text still returns placeholder for images (no regression)."""
-
-    def test_read_file_as_text_image_placeholder(self, tmp_path):
-        from agenticops.chat.file_reader import read_file_as_text
-
-        img = tmp_path / "test.png"
-        img.write_bytes(_minimal_png())
-
-        content, error = read_file_as_text(str(img))
-        assert error is None
-        assert "Image file" in content
-        assert "cannot be directly analyzed" in content
-
-    def test_read_upload_bytes_image_placeholder(self):
-        from agenticops.chat.file_reader import read_upload_bytes
-
-        content, error = read_upload_bytes("test.png", _minimal_png())
-        assert error is None
-        assert "image" in content.lower()

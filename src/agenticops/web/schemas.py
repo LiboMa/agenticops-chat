@@ -758,11 +758,19 @@ class ChatSessionUpdate(BaseModel):
 
 
 class ChatMessageCreate(BaseModel):
-    content: str = Field(..., min_length=1, max_length=10000)
+    content: str = Field("", max_length=10000)
     scan_focus: Optional[str] = Field(None, description="Resource focus: computing,networking,databases,storage,security,billing,all")
     # MVP-2.7.0 S5 (services/chat_dispatch): the sender's id for this message — a repeat is replayed or refused,
     # never run twice. Multipart sends carry it as a form field of the same name.
     client_message_id: str = Field(..., pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+    # 2026-11-07: files uploaded first (POST /api/chat/attachments), sent with this message
+    attachment_ids: list[str] = Field(default_factory=list, max_length=50)
+
+    @model_validator(mode="after")
+    def _content_or_attachments(self):
+        if not self.content.strip() and not self.attachment_ids:
+            raise ValueError("content or attachment_ids is required")
+        return self
 
 
 class ChatMessageResponse(BaseModel):

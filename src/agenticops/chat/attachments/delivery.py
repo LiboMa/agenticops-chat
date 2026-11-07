@@ -253,6 +253,14 @@ def _kind_label(item: Prepared) -> str:
     return ", ".join(parts)
 
 
+def agent_model_id(agent) -> str:
+    """The model an agent actually runs on (attachments are delivered for it); empty when unknown."""
+    try:
+        return str((agent.model.config or {}).get("model_id") or "")
+    except AttributeError:
+        return ""
+
+
 def build_turn(items: list[Prepared], model_id: str, cfg, images_in_history: int = 0) -> Turn:
     """The attachment part of one user turn for `model_id` (see the module docstring)."""
     from agenticops.agents.preamble import media_capabilities

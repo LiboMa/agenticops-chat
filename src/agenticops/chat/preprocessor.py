@@ -154,25 +154,19 @@ def _extract_file_refs(text: str) -> tuple[str, list[str]]:
 
 def preprocess_message(
     text: str,
-    file_contents: Optional[list[tuple[str, str]]] = None,
-    file_images: Optional[list[tuple[str, bytes, str]]] = None,
-    file_documents: Optional[list[tuple[str, bytes, str, str]]] = None,
-    resolve_file_refs: bool = False,
-    bound_account_id: int | None = None,
-    *,
     attachment_turn: "Turn | None" = None,
+    resolve_file_refs: bool = False,
     model_id: str = "",
+    bound_account_id: int | None = None,
 ) -> tuple[str | list[dict], list[str]]:
     """Full preprocessing pipeline: attachments + reference resolution.
 
     Args:
         text: Raw user message.
-        file_contents / file_images / file_documents: the pre-2026-11-07 Web upload shapes (removed with the old
-            multipart reader).
+        attachment_turn: the Web attachments, already delivered for the answering model (delivery.build_turn).
         resolve_file_refs: If True, extract @file/path from text and attach those files (CLI).
-        bound_account_id: refs outside this account are withheld (S5).
-        attachment_turn: the Web attachments, already delivered for the answering model.
         model_id: the model that will answer (CLI @path delivery); empty = Main's configured model.
+        bound_account_id: refs outside this account are withheld (S5).
 
     Returns:
         (enriched_message_or_content_blocks, warnings).
@@ -186,12 +180,7 @@ def preprocess_message(
         text_parts.append(attachment_turn.text)
         media_blocks.extend(attachment_turn.blocks)
 
-    for filename, raw, fmt in file_images or []:
-        media_blocks.append({"image": {"format": fmt, "source": {"bytes": raw}}})
-    for filename, raw, fmt, name in file_documents or []:
-        media_blocks.append({"document": {"format": fmt, "name": name, "source": {"bytes": raw}}})
-
-    # 1. @file references (CLI): processed and delivered exactly like a Web upload
+    # @file references (CLI): processed and delivered exactly like a Web upload
     if resolve_file_refs:
         cleaned_text, file_paths = _extract_file_refs(text)
         if file_paths:
@@ -202,11 +191,7 @@ def preprocess_message(
             media_blocks.extend(cli_turn.blocks)
         text = cleaned_text if cleaned_text else text
 
-    # 2. Pre-read text file contents (the old web upload shape)
-    for filename, content in file_contents or []:
-        text_parts.append(f'<attached_file path="{filename}">\n{content}\n</attached_file>')
-
-    # 3. Resolve I#/R#/C# references in what the user typed — never in an attached file
+    # I#/R#/C# references resolve from what the user typed — never from an attached file
     enriched_text, ref_warnings = resolve_references(text, change_ref_text=text, bound_account_id=bound_account_id)
     warnings.extend(ref_warnings)
     combined = "\n\n".join([*text_parts, enriched_text])

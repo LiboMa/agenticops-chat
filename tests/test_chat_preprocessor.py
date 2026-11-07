@@ -135,47 +135,6 @@ class TestPreprocessMessage:
         assert warnings == []
 
     @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
-    def test_file_contents_web_upload(self, _mock):
-        result, warnings = preprocess_message(
-            "summarize this",
-            file_contents=[("report.txt", "revenue up 10%")],
-        )
-        assert isinstance(result, str)
-        assert '<attached_file path="report.txt">' in result
-        assert "revenue up 10%" in result
-        assert "summarize this" in result
-
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
-    def test_image_blocks_returns_list(self, _mock):
-        result, warnings = preprocess_message(
-            "what is this?",
-            file_images=[("photo.png", b"\x89PNG", "png")],
-        )
-        assert isinstance(result, list)
-        assert result[0]["text"] == "what is this?"
-        assert result[1]["image"]["format"] == "png"
-
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
-    def test_document_blocks_returns_list(self, _mock):
-        result, warnings = preprocess_message(
-            "review doc",
-            file_documents=[("spec.pdf", b"%PDF", "pdf", "spec")],
-        )
-        assert isinstance(result, list)
-        assert result[1]["document"]["format"] == "pdf"
-        assert result[1]["document"]["name"] == "spec"
-
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
-    def test_mixed_media(self, _mock):
-        result, warnings = preprocess_message(
-            "analyze",
-            file_images=[("a.png", b"\x89PNG", "png")],
-            file_documents=[("b.pdf", b"%PDF", "pdf", "b")],
-        )
-        assert isinstance(result, list)
-        assert len(result) == 3  # text + image + doc
-
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
     def test_cli_file_ref_text(self, _resolve, tmp_path):
         log = tmp_path / "log.txt"
         log.write_text("file content LOG-77")
@@ -256,15 +215,6 @@ class TestPreprocessMessage:
         mock_resolve.return_value = ("text", ["Issue I#99 not found"])
         result, warnings = preprocess_message("I#99")
         assert "I#99 not found" in warnings[0]
-
-    @patch("agenticops.chat.preprocessor.resolve_references", side_effect=lambda t, **_: (t, []))
-    def test_multiple_file_contents(self, _mock):
-        result, warnings = preprocess_message(
-            "compare",
-            file_contents=[("a.txt", "AAA"), ("b.txt", "BBB")],
-        )
-        assert "AAA" in result
-        assert "BBB" in result
 
 
 # ── shared reference resolver ───────────────────────────────────

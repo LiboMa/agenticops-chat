@@ -4253,11 +4253,8 @@ def _run_headless(query: str, account: Optional[str] = None):
 
 
 def _agent_model_id(agent) -> str:
-    """The model an agent actually runs on (attachments are delivered for it); empty when unknown."""
-    try:
-        return str((agent.model.config or {}).get("model_id") or "")
-    except AttributeError:
-        return ""
+    from agenticops.chat.attachments.delivery import agent_model_id
+    return agent_model_id(agent)
 
 
 def _cli_persist_message(

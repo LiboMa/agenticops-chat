@@ -307,3 +307,21 @@ def test_submit_processing_runs_in_background(env):
     att_id = _stage(tmp=env, process=False)
     service.submit_processing(att_id).result(timeout=60)
     assert _row(att_id).status == "ready"
+
+
+def test_bind_is_compare_and_set(env):
+    """Two sends that both passed check_for_send with the same upload: only the first binds it."""
+    from types import SimpleNamespace
+    from agenticops.chat.attachments import service
+    from agenticops.models import ChatSession, get_db_session
+    pk1, _ = _session()
+    pk2, _ = _session()
+    att_id = _stage(tmp=env)
+    with get_db_session() as db:
+        service.bind(db, service.check_for_send(db, [att_id], ALICE, ChatUploadSettings()), db.get(ChatSession, pk1),
+                     None)
+    with get_db_session() as db:
+        with pytest.raises(service.AttachmentError) as e:
+            service.bind(db, [SimpleNamespace(id=att_id)], db.get(ChatSession, pk2), None)   # its stale check
+        assert (e.value.status, e.value.code) == (409, "attachment_unavailable")
+    assert _row(att_id).session_id == pk1
