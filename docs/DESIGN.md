@@ -25,6 +25,8 @@ AgenticOps (`aiops`) 是一个 Agent-First 的 AWS 云运维平台，通过 LLM 
 | 变更管理（Change / ITSM） | 2.6.0 | 日常变更走 Main → SRE 合法性审核（只读 Mode C）→ 审批 → Executor，**不建 HealthIssue**；一张 Plan 表两来源（`fix_plans.plan_kind` fix\|change + `ck_fix_plans_origin` CHECK）+ `change_requests` 12 态工单；RBAC 影子模式（审批人身份绑定 + 结构化 SoD）；两本账（`audit_logs` 决策 + `command_audits` 命令）+ `/api/plans/stats`。2026-09-26 在 dev 上跑完真实 E2E，七步全过，发现的 3 个缺陷已修复（dev 待重新部署复验） | `services/change_service.py`、`tools/change_tools.py`、`auth/`、`web/routers/{changes,plans,audit}.py`，前端 `pages/ChangeDetail.tsx`、`components/plans/`（`pages/PlansAndChanges.tsx` 在 2.6.1 拆为 `pages/Changes.tsx` + `pages/Audit.tsx`） | `MVP-2.6.0-RELEASE.md`，`MVP-2.6.0-E2E-REPORT.md` |
 | 图事实层 + RCA 定位闭环 | 2.6.1 | Issue 经 7 条确定性规则锚定到规范资源（锚不上就明说 `unanchored` / `ambiguous` / `account_level`，不取第一条）；规范关系表 `resource_relations` 先于 LLM 阶段发布；有上限的 `GraphQueryService`；K8s 拉取式连接器（账户寻址、不碰 `~/.kube/config`）；RCA 用 `get_topology_evidence` 取局部图证据，输出 ≤ 3 个候选 + 因果路径，fail-closed 校验（路径逐条边校验，不等于验证了因果链）后记 `location_status`，由人判定并统计；潜在影响进策略默认影子模式 | `services/identity_resolver.py`，`graph/{query_service,relations,evidence}.py`，`connectors/`，`services/rca_location.py`，前端 `components/graph/LocalGraph.tsx` | `MVP-2.6.1-RELEASE.md`，`MVP-2.6.1-GRAPH-FACTS-MEASUREMENT.md`，`MVP-2.6.1-LOCATION-EVAL-REPORT.md`（chaos-lab 实测） |
 | Issue / Change 逻辑 + 界面 | 2.6.1 | 审批绑定内容哈希（执行前比对，不一致拒绝执行）；变更单可自带步骤与外部工单，外部系统经 HMAC 签名的 intake 开单；统一的执行后验证（缺结果永不算 passed，`pending_acceptance` 待人工验收）；Issue 状态只由 `transition_issue` 写（CAS + 时间线事件）；界面按 问题 / 变更 / 审计 重排，IssueDetail 五个 tab、ChangeDetail 重排、局部关系图、Galaxy `?focus=` 深链。**真实 E2E 待与主人联合验证** | `services/{plan_content,verification,issue_state,change_steps}.py`，`web/routers/changes.py`，前端 `pages/{IssueDetail,ChangeDetail,Changes,Audit}.tsx` | `MVP-2.6.1-RELEASE.md`，`MVP-2.6.1-E2E-REPORT.md`（进行中） |
+| 只读账户（viewer / editor） | 2.7.0 后（main） | 自身权限不含 write 的用户：中间件对白名单外的写请求一律 403 `read_only`；对话跑只读主 agent（查询工具白名单，无技能 / 记忆 / MCP）；命令层拒写、拒读 K8s Secret；`settings_read` 可只读看 Settings；删除自助注册，账户由 `aiops users` 建立 | `auth/viewer.py`，`web/app.py`（APIAuthMiddleware），`agents/main_agent.py`（`read_only` 构建），`cli/main.py`（`users`），前端 `lib/permissions.ts` | `MVP-2.7.0-RELEASE.md`「发布后追加」 |
+| Strands 1.64 上下文对齐 | 2.7.0 后（main） | 不再给任何 agent 传 `context_manager`（1.56 起它会丢弃传入的 `conversation_manager`，各 agent 的滑动窗口会静默失效）；`ContextOffloader` 作为插件传入（1500 / 750 token），并保留 1.45「只取头」的预览；缓存点与 1.45 相同（`system_prompt_ttl=False`） | `config.get_agent_context_plugins`，`agents/preamble.bedrock_model_kwargs`，`tests/test_strands_parity.py` | `STRANDS-1.64-UPGRADE-REPORT.md` |
 
 ---
 
@@ -749,7 +751,7 @@ data/
 | ORM | sqlalchemy | >=2.0.0 |
 | CLI | typer, rich, prompt_toolkit | >=0.12.0, >=13.0.0, >=3.0.0 |
 | Web | fastapi, uvicorn | >=0.109.0, >=0.27.0 |
-| LLM | strands-agents, strands-agents-tools | >=0.1.0 |
+| LLM | strands-agents | >=1.64.0,<2.0.0 |
 | 验证 | pydantic, pydantic-settings | >=2.0.0 |
 | 数据 | pandas, numpy | >=2.0.0, >=1.26.0 |
 | 调度 | croniter | >=1.3.0 |

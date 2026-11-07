@@ -4,6 +4,8 @@
 >
 > **状态：S1–S7 全部由主人验收通过（S1 10-05、S2 10-06、S3–S5 10-07、S6 与 S7 10-08）。S1–S5 已推 `origin/MVP-2.7.0`（`5d82aec`），S6 已推（`0fb94b3`）。S7（联合验收与发布）已于 2026-10-08 验收：版本串 2.7.0，chaos-lab 集群内用真实模型跑完 2.7.0 各条流程，发现并修复两处缺陷（见文末「S7 联合验收与发布」与 `docs/MVP-2.7.0-E2E-REPORT.md`）；主人 10-08 同意推送、开 PR 到 main、打 `v2.7.0` tag，并重部署开发机。** **核心能力轨 A1–A4 不在 v2.7.0：移至 MVP-2.7.1（主人 10-08）。** 依主人铁律，只有 E2E 通过且当面确认后才 `git push --no-verify` / 打 `v2.7.0` tag。
 >
+> **发布后追加（2026-11-06 / 11-07，已合入 main，不改版本号）**：只读 viewer / editor 账户与删除自助注册、Strands 1.45 → 1.64 保持行为升级 —— 见文末「发布后追加」与 `docs/STRANDS-1.64-UPGRADE-REPORT.md`。
+>
 > 全链规划（含 S1 详细计划）：`docs/superpowers/plans/2026-10-05-mvp-2.7.0-roadmap.md`
 > 设计输入：`docs/AgenticOps_BlueWhite_Review.zip`、`docs/superpowers/specs/2026-10-05-blue-white-sre-workspace-design.md`、`docs/ui-contracts/2026-10-05/`
 
@@ -933,3 +935,39 @@
 3. 开启后每账户每分钟只读调用数受 `sensing_max_calls_per_minute_per_account`（默认 60）限制；超了先推迟拉取，永不停对账。
 
 门禁数字与验收清单在 A1 实现后回填。
+
+---
+
+## 发布后追加（2026-11-06 / 11-07，已合入 main，不改版本号）
+
+v2.7.0 之后直接在 main 上交付的工作。版本串仍是 2.7.0，它们还不属于任何带 tag 的版本；MVP-2.7.1 合并 main 时会一并带上。
+下表只列合入 main 的提交，不重写上文。
+
+| 交付 | 提交 / PR | 一句话 |
+|---|---|---|
+| 只读 viewer 账户，删除自助注册 | `6abcbe6`（PR #28，11-06） | 自身权限不含 write 的用户：可以浏览、对话、改自己的密码和偏好，其余写请求一律 403 `read_only`；对话跑只读主 agent（只有查询工具，没有子 agent、审批、变更和配置）；CLI 工具拒绝写命令和 K8s Secret 读取；界面显示「只读」徽标，不提供写控件。`/api/auth/register` 已删除 |
+| 可只读查看 Settings 的 viewer（`settings_read`） | `ae62cd2`（PR #29，11-07） | `--viewer --settings` 建的账户能打开 Settings、看到所有设置，所有控件都禁用 |
+| RAW 想法文档只留本地 | `f02769b`（PR #30，11-06） | `RAW-Idea-latest-v3.md`、`RAW-Creative-Idea.md` 不再进 git（已在 `.gitignore`），本地副本保留 |
+| 两份研究 | `c7db5f6`（PR #31，11-06） | `superpowers/specs/2026-11-06-agentcore-china-region-study.md`、`superpowers/specs/2026-11-06-strands-upgrade-study.md` |
+| Strands 1.45 → 1.64 保持行为升级 + 下个版本可行性报告 | `3eb8883` + `18d587a`（PR #32；与 #29 一起经 PR #33 合入，合并提交 `603046d`，11-07） | 详见 [`STRANDS-1.64-UPGRADE-REPORT.md`](STRANDS-1.64-UPGRADE-REPORT.md)；可行性报告 `superpowers/specs/2026-11-06-strands-164-feature-feasibility.md`（主人 11-07 选组合 A） |
+
+### 只读账户的六个可达面
+
+- **CLI** — 做：`aiops users create <name> [--viewer [--settings] | --admin] [--display-name ...]`（随机密码只打印一次）、`aiops users list`、`aiops users disable <name>`（该账户的会话和 API key 立即失效）。
+- **Web API** — 做：白名单之外的 POST / PUT / PATCH / DELETE 一律 403 `{detail, code: read_only}`；`GET /api/ui/bootstrap` 的 `user` 带 `read_only`、`can_view_settings`；`/api/auth/register` 删除。
+- **Web UI** — 做：「只读」徽标；写控件隐藏；Settings 对 viewer 隐藏，对 `settings_read` 只读（General / Accounts / Messaging / MCP 在 `<fieldset disabled>` 里，KB 和记忆隐藏写操作）。
+- **Agent tool** — 做：viewer 的回合用 `create_main_agent(read_only=True)`（显式查询工具白名单，无技能 XML、记忆、Curator、MCP）；`change_context_refusal` 拒绝一切非只读命令，`run_kubectl` 拒绝 Secret / `--raw` 读取。
+- **Schedule** — 非目标。
+- **Notification** — 非目标。
+
+### 升级注意
+
+1. **没有自助注册**：账户只能由运维用 `aiops users create` 建立。开发机的 ALB 另有一条 `block_self_register` 规则（`iac/deploy-sg/alb.tf`），在边缘拦截 `/api/auth/register`。
+2. **Strands 1.64**：`requirements.txt` 钉 `strands-agents==1.64.0`，部署时重装依赖即可。`settings.yaml` 新增 `context_offload_max_result_tokens: 1500`、`context_offload_preview_tokens: 750`；schema 默认值相同，旧的 `settings.yaml` 不用改。行为不变。
+3. 机器上有未提交的 `config/settings.yaml` / `agent-memory/` / `skills/` 时，redeploy 会 `reset --hard` 抹掉它们，要先备份再恢复。分支本身改了 `settings.yaml` 时，`git checkout` 会中止（见升级报告 §5）。
+
+### 已知缺口（升级前就有，本次未修）
+
+- `/api/cost/summary` 少记 main 的对话成本（chat 路径写 AgentLog 时没有缓存 token）；单条对话消息上的成本不含子 agent。→ 可行性报告 X2。
+- RCA 的拓扑证据包约 2 万 token，每次都被卸载成 3000 字符的预览。→ X1。
+- `list_cloud_accounts` 在会话关闭后读取账户属性，报 `DetachedInstanceError`。→ tracker 待办。
