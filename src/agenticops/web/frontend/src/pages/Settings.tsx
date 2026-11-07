@@ -781,9 +781,10 @@ function ExcludePatternsCard() {
 /* ── Agent Models Card ──────────────────────────────────────────── */
 
 // MODEL_PRESETS loaded from GET /api/settings → s.model_presets (single source: config.py)
+// Shown only when the API returns no presets — the current generation, matching config/settings.yaml's bare aliases
 const MODEL_PRESETS_FALLBACK = [
-  { label: "Opus 4.6", value: "global.anthropic.claude-opus-4-6-v1" },
-  { label: "Sonnet 4.6", value: "global.anthropic.claude-sonnet-4-6" },
+  { label: "Opus 5.5", value: "global.anthropic.claude-opus-5-5" },
+  { label: "Sonnet 5.5", value: "global.anthropic.claude-sonnet-5-5" },
   { label: "Haiku 4.5", value: "global.anthropic.claude-haiku-4-5-20251001-v1:0" },
 ];
 

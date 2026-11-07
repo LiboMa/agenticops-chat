@@ -42,37 +42,29 @@ class TestRCAAnalysis:
 
 
 class TestBedrockLLM:
-    """Tests for BedrockLLM initialization."""
+    """BedrockLLM runs on the main agent's model unless given one (2026-11-07: it used to read the env-pinned
+    settings.bedrock_model_id); the call itself goes through agents.preamble.converse_text."""
 
-    @patch("agenticops.analyze.rca.settings")
-    def test_default_init(self, mock_settings):
-        mock_settings.bedrock_region = "us-east-1"
-        mock_settings.bedrock_model_id = "anthropic.claude-3-haiku"
-        llm = BedrockLLM()
-        assert llm.region == "us-east-1"
-        assert llm.model_id == "anthropic.claude-3-haiku"
-        assert llm._client is None
+    def test_default_model_is_mains(self, monkeypatch):
+        from agenticops.config import settings
+        monkeypatch.setattr(settings, "agent_main_model_id", "global.anthropic.claude-opus-5-5")
+        monkeypatch.setattr(settings, "bedrock_model_id", "global.anthropic.claude-opus-4-6-v1")
+        assert BedrockLLM().model_id == "global.anthropic.claude-opus-5-5"
 
-    @patch("agenticops.analyze.rca.settings")
-    def test_custom_init(self, mock_settings):
-        mock_settings.bedrock_region = "us-east-1"
-        mock_settings.bedrock_model_id = "default-model"
-        llm = BedrockLLM(region="eu-west-1", model_id="custom-model")
-        assert llm.region == "eu-west-1"
-        assert llm.model_id == "custom-model"
+    def test_an_explicit_model_wins(self, monkeypatch):
+        from agenticops.config import settings
+        monkeypatch.setattr(settings, "agent_main_model_id", "global.anthropic.claude-opus-5-5")
+        assert BedrockLLM(model_id="custom-model").model_id == "custom-model"
 
 
 class TestRCAEngineParseResponse:
     """Tests for RCAEngine._parse_rca_response."""
 
-    @patch("agenticops.analyze.rca.settings")
-    def setup_method(self, method, mock_settings=None):
-        mock_settings = MagicMock()
-        with patch("agenticops.analyze.rca.settings", mock_settings):
-            self.engine = RCAEngine.__new__(RCAEngine)
-            self.engine.llm = MagicMock()
-            self.engine.monitor = None
-            self.engine.account = None
+    def setup_method(self, method):
+        self.engine = RCAEngine.__new__(RCAEngine)
+        self.engine.llm = MagicMock()
+        self.engine.monitor = None
+        self.engine.account = None
 
     def test_valid_json_response(self):
         response = json.dumps(
@@ -164,13 +156,11 @@ Hope this helps!"""
 class TestRCAEngineBuildPrompt:
     """Tests for RCAEngine._build_rca_prompt."""
 
-    @patch("agenticops.analyze.rca.settings")
-    def setup_method(self, method, mock_settings=None):
-        with patch("agenticops.analyze.rca.settings", MagicMock()):
-            self.engine = RCAEngine.__new__(RCAEngine)
-            self.engine.llm = MagicMock()
-            self.engine.monitor = None
-            self.engine.account = None
+    def setup_method(self, method):
+        self.engine = RCAEngine.__new__(RCAEngine)
+        self.engine.llm = MagicMock()
+        self.engine.monitor = None
+        self.engine.account = None
 
     def _make_anomaly(self, **kwargs):
         anomaly = MagicMock()
@@ -219,13 +209,11 @@ class TestRCAEngineBuildPrompt:
 class TestRCAEngineAnalyze:
     """Tests for RCAEngine.analyze_anomaly with mocked LLM."""
 
-    @patch("agenticops.analyze.rca.settings")
-    def setup_method(self, method, mock_settings=None):
-        with patch("agenticops.analyze.rca.settings", MagicMock()):
-            self.engine = RCAEngine.__new__(RCAEngine)
-            self.engine.llm = MagicMock()
-            self.engine.monitor = None
-            self.engine.account = None
+    def setup_method(self, method):
+        self.engine = RCAEngine.__new__(RCAEngine)
+        self.engine.llm = MagicMock()
+        self.engine.monitor = None
+        self.engine.account = None
 
     def _make_anomaly(self):
         anomaly = MagicMock()
@@ -293,13 +281,11 @@ class TestRCAEngineAnalyze:
 class TestRCAEngineBatchAnalyze:
     """Tests for batch_analyze."""
 
-    @patch("agenticops.analyze.rca.settings")
-    def setup_method(self, method, mock_settings=None):
-        with patch("agenticops.analyze.rca.settings", MagicMock()):
-            self.engine = RCAEngine.__new__(RCAEngine)
-            self.engine.llm = MagicMock()
-            self.engine.monitor = None
-            self.engine.account = None
+    def setup_method(self, method):
+        self.engine = RCAEngine.__new__(RCAEngine)
+        self.engine.llm = MagicMock()
+        self.engine.monitor = None
+        self.engine.account = None
 
     def _make_anomaly(self, id_val):
         anomaly = MagicMock()

@@ -9,9 +9,9 @@ def test_normalize_strips_prefixes_and_version():
 
 
 def test_compute_cost_opus48():
-    # 1M input @15 + 1M output @75 + 1M cache_read @1.50 + 1M cache_write @18.75
+    # Bedrock list price (global, standard): 1M input @5 + 1M output @25 + 1M cache_read @0.50 + 1M cache_write @6.25
     tokens = {"input": 1_000_000, "output": 1_000_000, "cache_read": 1_000_000, "cache_write": 1_000_000}
-    assert compute_cost("global.anthropic.claude-opus-4-8", tokens) == 15.0 + 75.0 + 1.50 + 18.75
+    assert compute_cost("global.anthropic.claude-opus-4-8", tokens) == 5.0 + 25.0 + 0.50 + 6.25
 
 
 def test_compute_cost_missing_keys_default_zero():

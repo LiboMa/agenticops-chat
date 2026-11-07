@@ -120,8 +120,13 @@ def track_agent(
     parent_agent: Optional[str] = None,
     actor_type: str = "system",
     actor_id: Optional[str] = None,
+    model_id: Optional[str] = None,
 ):
     """Context manager that records agent invocation metrics.
+
+    ``model_id`` is the model the agent was actually built with; the row is labelled and priced by it. Without one
+    the agent's configured model is recorded — wrong whenever a caller picked another (the executor's smart model
+    runs L0/L1 plans on ``executor_simple_model_id``).
 
     Usage::
 
@@ -142,10 +147,11 @@ def track_agent(
         raise
     finally:
         duration_ms = int((time.monotonic() - start) * 1000)
-        try:
-            model_id, _ = get_agent_model_config(agent_name)
-        except Exception:
-            model_id = None
+        if not model_id:
+            try:
+                model_id, _ = get_agent_model_config(agent_name)
+            except Exception:
+                model_id = None
 
         log_agent_call(
             agent_name=agent_name,

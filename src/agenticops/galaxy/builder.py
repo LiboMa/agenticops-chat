@@ -14,7 +14,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Optional
 
-from agenticops.config import settings, get_bedrock_boto_session
+from agenticops.config import settings
 from agenticops.cost import compute_cost
 from agenticops.models import get_db_session, CloudResource
 from agenticops.galaxy.models import GalaxyBuild, GalaxyResourceState, GalaxyGroup, ResourceRelation
@@ -107,16 +107,16 @@ FOCUS BATCH:
 
 
 def _call_bedrock(prompt: str, model_id: str, max_tokens: int) -> tuple:
-    """One Bedrock converse call. Returns (text, {"input","output"}). temperature=0."""
-    client = get_bedrock_boto_session().client("bedrock-runtime")
-    resp = client.converse(
-        modelId=model_id,
-        messages=[{"role": "user", "content": [{"text": prompt}]}],
-        inferenceConfig={"maxTokens": max_tokens, "temperature": 0},
-    )
-    text = resp["output"]["message"]["content"][0]["text"]
-    usage = resp.get("usage", {})
-    return text, {"input": int(usage.get("inputTokens", 0)), "output": int(usage.get("outputTokens", 0))}
+    """One Bedrock converse call. Returns (text, {"input","output"}). temperature 0 where the model takes it.
+
+    A 40-resource batch on a model that thinks by default, with a 16k output limit, can outlast botocore's 60 s
+    read timeout, and every retry is billed: 300 s and at most one retry. A reply with no text or cut at the limit
+    raises, so the build fails (rules kept, diff baseline unmoved) instead of completing with no LLM edges."""
+    from agenticops.agents.preamble import converse_text
+
+    text, usage, _ = converse_text(model_id, prompt, max_tokens=max_tokens, temperature=0,
+                                   read_timeout=300, total_attempts=2)
+    return text, usage
 
 
 def _parse_llm_edges(text: str) -> list:

@@ -562,24 +562,10 @@ RULES:
 def _llm_distill(context: dict) -> Optional[dict]:
     """Call Bedrock LLM to distill context into structured case study fields."""
     try:
-        from agenticops.config import get_bedrock_boto_session
+        from agenticops.agents.preamble import converse_text_on_main
 
-        client = get_bedrock_boto_session().client("bedrock-runtime")
         prompt = DISTILLATION_PROMPT.format(context=json.dumps(context, indent=2, default=str))
-
-        body = json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 2000,
-            "messages": [{"role": "user", "content": prompt}],
-        })
-        resp = client.invoke_model(
-            modelId=settings.bedrock_model_id,
-            contentType="application/json",
-            accept="application/json",
-            body=body,
-        )
-        result = json.loads(resp["body"].read())
-        text = result.get("content", [{}])[0].get("text", "")
+        text = converse_text_on_main(prompt)   # the main agent's model; no text raises → None below
 
         # Strip markdown code fences if present
         text = text.strip()

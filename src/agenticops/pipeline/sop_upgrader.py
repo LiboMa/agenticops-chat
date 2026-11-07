@@ -7,7 +7,6 @@ import json
 import logging
 from datetime import datetime, timezone
 
-from agenticops.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -156,22 +155,10 @@ def upgrade_existing_sop(existing_sop_content: str, case_data: dict) -> str:
 def _call_llm(prompt: str) -> str | None:
     """Call Bedrock LLM with the given prompt. Returns text or None."""
     try:
-        from agenticops.config import get_bedrock_boto_session
+        from agenticops.agents.preamble import converse_text_on_main
 
-        client = get_bedrock_boto_session().client("bedrock-runtime")
-        body = json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 4000,
-            "messages": [{"role": "user", "content": prompt}],
-        })
-        resp = client.invoke_model(
-            modelId=settings.bedrock_model_id,
-            contentType="application/json",
-            accept="application/json",
-            body=body,
-        )
-        result = json.loads(resp["body"].read())
-        text = result.get("content", [{}])[0].get("text", "")
+        # The main agent's model. A reply with no text raises → None, so the caller keeps the original SOP.
+        text = converse_text_on_main(prompt)
 
         # Strip markdown code fences if present
         text = text.strip()

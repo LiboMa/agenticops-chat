@@ -139,39 +139,32 @@ class TestUpgradeExistingSop:
 # ---------------------------------------------------------------------------
 
 class TestCallLlm:
+    """_call_llm goes through Converse (agents.preamble.converse_text) on the main agent's model."""
+
+    @staticmethod
+    def _client_replying(text):
+        client = MagicMock()
+        client.converse.return_value = {
+            "output": {"message": {"role": "assistant", "content": [{"text": text}]}},
+            "stopReason": "end_turn",
+            "usage": {"inputTokens": 1, "outputTokens": 1},
+        }
+        return client
+
     @patch("agenticops.config.get_bedrock_boto_session")
-    @patch("agenticops.pipeline.sop_upgrader.settings")
-    def test_successful_call(self, mock_settings, mock_get_session):
-        mock_settings.bedrock_model_id = "anthropic.claude-v2"
-
-        body_payload = json.dumps({
-            "content": [{"text": "---\nresource_type: EC2\n---\n# Test SOP"}]
-        }).encode()
-        mock_resp_body = MagicMock()
-        mock_resp_body.read.return_value = body_payload
-
-        mock_client = MagicMock()
-        mock_client.invoke_model.return_value = {"body": mock_resp_body}
+    def test_successful_call(self, mock_get_session):
+        mock_client = self._client_replying("---\nresource_type: EC2\n---\n# Test SOP")
         mock_get_session.return_value.client.return_value = mock_client
 
         from agenticops.pipeline.sop_upgrader import _call_llm
         result = _call_llm("test prompt")
         assert "resource_type: EC2" in result
-        mock_client.invoke_model.assert_called_once()
+        mock_client.converse.assert_called_once()
 
     @patch("agenticops.config.get_bedrock_boto_session")
-    @patch("agenticops.pipeline.sop_upgrader.settings")
-    def test_strips_code_fences(self, mock_settings, mock_get_session):
-        mock_settings.bedrock_model_id = "anthropic.claude-v2"
-
-        body_payload = json.dumps({
-            "content": [{"text": "```markdown\n# My SOP\nContent here\n```"}]
-        }).encode()
-        mock_resp_body = MagicMock()
-        mock_resp_body.read.return_value = body_payload
-        mock_client = MagicMock()
-        mock_client.invoke_model.return_value = {"body": mock_resp_body}
-        mock_get_session.return_value.client.return_value = mock_client
+    def test_strips_code_fences(self, mock_get_session):
+        mock_get_session.return_value.client.return_value = self._client_replying(
+            "```markdown\n# My SOP\nContent here\n```")
 
         from agenticops.pipeline.sop_upgrader import _call_llm
         result = _call_llm("test prompt")
@@ -180,9 +173,7 @@ class TestCallLlm:
         assert "# My SOP" in result
 
     @patch("agenticops.config.get_bedrock_boto_session")
-    @patch("agenticops.pipeline.sop_upgrader.settings")
-    def test_returns_none_on_exception(self, mock_settings, mock_get_session):
-        mock_settings.bedrock_model_id = "anthropic.claude-v2"
+    def test_returns_none_on_exception(self, mock_get_session):
         mock_get_session.side_effect = Exception("connection error")
 
         from agenticops.pipeline.sop_upgrader import _call_llm
