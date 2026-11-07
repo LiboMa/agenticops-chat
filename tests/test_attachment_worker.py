@@ -58,3 +58,27 @@ def test_child_env_has_no_aws_keys(tmp_path, monkeypatch):
 def test_missing_source_is_failed(tmp_path):
     result = run(tmp_path / "nope.txt", ".txt", _out(tmp_path), LIM)
     assert result.ok is False and result.reason
+
+
+def test_memory_limit_is_set_in_the_child_not_through_preexec_fn(tmp_path, monkeypatch):
+    """preexec_fn is unsafe in a threaded process (and disables the vfork fast path): the child limits itself."""
+    import subprocess as sp
+    from agenticops.chat.attachments import worker
+    seen = {}
+    real_run = sp.run
+
+    def spy(cmd, **kw):
+        seen.update(kw)
+        return real_run(cmd, **kw)
+    monkeypatch.setattr(worker.subprocess, "run", spy)
+    monkeypatch.setattr(worker.sys, "platform", "linux")
+    run(make("txt", tmp_path / "in"), ".txt", _out(tmp_path), LIM)
+    assert seen.get("preexec_fn") is None
+    calls = []
+    monkeypatch.setattr(worker, "_limit_memory", lambda: calls.append("limited"))
+    out = tmp_path / "child"
+    out.mkdir()
+    src = make("txt", tmp_path / "in2")
+    assert worker.main([str(src), ".txt", str(out), json.dumps({"text_max_chars": 1000, "image_max_edge_px": 512,
+                                                               "pdf_render_pages_max": 1})]) == 0
+    assert calls == ["limited"]
