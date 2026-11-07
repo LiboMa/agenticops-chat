@@ -29,6 +29,8 @@ import { ApiError } from "@/api/client";
 import { apiFetch } from "@/api/client";
 import { currentUserId, userKey } from "@/lib/home";
 import { useReadOnly } from "@/hooks/useBootstrap";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import * as Dialog from "@radix-ui/react-dialog";
 
 // Per signed-in user: a shared browser must never reopen someone else's last conversation
 const lastSessionKey = () => userKey("aiops-last-session-id", currentUserId());
@@ -118,7 +120,11 @@ export default function Chat() {
     ?? (sessionDetail?.session_id === selectedId ? sessionDetail : undefined);
 
   // Three-zone layout state
-  const [flyoutOpen, setFlyoutOpen] = useState(false);
+  // 2026-11-07: the chat list is open by default on a wide screen (persisted); below 768px it is a drawer
+  const [flyoutOpen, setFlyoutOpen] = usePersistedState("aiops-chat-list-open", true);
+  const isMobile = useMediaQuery("(max-width: 767px)");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const toggleList = () => (isMobile ? setDrawerOpen(true) : setFlyoutOpen((prev) => !prev));
   const [contextRef, setContextRef] = useState<ContextRef | null>(initialRef);
   // S5: the top bar shows the account this chat is bound to, locked — an open chat's own, or (before the first
   // message) the account of the issue / change it was asked about; a new free chat leaves the scope usable
@@ -205,9 +211,35 @@ export default function Chat() {
     sendFirstMessage(content, attachmentIds, items, contextRef ? contextRefQuery(contextRef) : "",
                      contextForNewChat(contextRef, scope.accountId));
 
+  const welcomeError = createError ? (
+    <div role="alert" className="mx-4 mb-2 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+      {t("chat.createFailed").replace("{error}", createError)}
+    </div>
+  ) : null;
+  const welcomeComposer = (layout: "dock" | "center") => (
+    <ChatInput onSend={handleWelcomeSend} disabled={creating} streaming={false} sessionId={null} prefill={prefill}
+               dropTargetRef={chatColRef} onDragChange={setDragging} layout={layout} />
+  );
+
   return (
-    <div ref={flyoutContainerRef} className="flex h-[calc(100vh-var(--topbar-h))] -m-6">
+    <div ref={flyoutContainerRef} className="flex h-[calc(100dvh-var(--topbar-h))] -m-6">
+      {/* Below 768px the chat list is a drawer */}
+      {isMobile && (
+        <Dialog.Root open={drawerOpen} onOpenChange={setDrawerOpen}>
+          <Dialog.Portal>
+            <Dialog.Overlay className="fixed inset-0 z-50 bg-black/30" />
+            <Dialog.Content aria-describedby={undefined}
+                            className="fixed inset-y-0 left-0 z-50 w-[85vw] max-w-[320px] bg-card shadow-xl outline-none animate-[slideInRight_0.2s_ease-out]">
+              <Dialog.Title className="sr-only">{t("chat.sessions")}</Dialog.Title>
+              <SessionFlyout open={drawerOpen} selectedId={selectedId}
+                             onSelect={(id) => { setDrawerOpen(false); handleSelectSession(id); }}
+                             onClose={() => setDrawerOpen(false)} />
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      )}
       {/* Left: Session Flyout (resizable) */}
+      {!isMobile && <>
       <div
         style={{ width: flyoutOpen ? `${flyoutWidth}px` : 0 }}
         className={`flex-shrink-0 overflow-hidden ${flyoutDragging ? "" : "transition-[width] duration-200 ease-in-out"} ${flyoutOpen ? "" : "w-0"}`}
@@ -239,6 +271,7 @@ export default function Chat() {
           <div className="w-1 h-1 rounded-full bg-border group-hover:bg-primary/60 transition-colors" />
         </div>
       </div>
+      </>}
 
       {/* Center: Chat area — the whole column takes dropped files (2026-11-07) */}
       <div
@@ -257,7 +290,7 @@ export default function Chat() {
             <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6">
               {/* Flyout toggle in welcome mode */}
               <button
-                onClick={() => setFlyoutOpen((prev) => !prev)}
+                onClick={toggleList}
                 className="absolute top-4 left-4 w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                 title={t("chat.sessions")}
               >
@@ -272,12 +305,20 @@ export default function Chat() {
               </button>
 
               <div className="w-full max-w-[760px] text-center">
-                <h2 className="text-xl font-semibold text-foreground mb-2">
+                <h2 className="mb-2 text-2xl font-semibold tracking-tight text-foreground">
                   {t("chat.welcome")}
                 </h2>
                 <p className="mx-auto text-sm text-muted-foreground max-w-md">
                   {t("chat.welcomeHint")}
                 </p>
+                {/* ≥768px: the composer sits in the middle of the page, under the heading (2026-11-07) */}
+                {!isMobile && (
+                  <div className="mt-6 text-left">
+                    {welcomeError}
+                    <ContextLine ctx={welcomeCtx} t={t} />
+                    {welcomeComposer("center")}
+                  </div>
+                )}
                 {/* Starters fill the composer — they never send */}
                 <div className="mt-5 flex flex-wrap justify-center gap-2">
                   {STARTERS.map((id) => (
@@ -292,22 +333,14 @@ export default function Chat() {
               </div>
             </div>
 
-            {createError && (
-              <div role="alert" className="mx-6 mb-2 px-3 py-2 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
-                {t("chat.createFailed").replace("{error}", createError)}
-              </div>
+            {/* Below 768px the composer docks at the bottom (Req 1.3: the first message creates the session) */}
+            {isMobile && (
+              <>
+                {welcomeError}
+                <ContextLine ctx={welcomeCtx} t={t} />
+                {welcomeComposer("dock")}
+              </>
             )}
-            <ContextLine ctx={welcomeCtx} t={t} />
-            {/* Chat input in welcome mode — triggers lazy session creation (Req 1.3) */}
-            <ChatInput
-              onSend={handleWelcomeSend}
-              disabled={creating}
-              streaming={false}
-              sessionId={null}
-              prefill={prefill}
-              dropTargetRef={chatColRef}
-              onDragChange={setDragging}
-            />
           </>
         ) : !selectedId ? (
           <div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -319,7 +352,7 @@ export default function Chat() {
             <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border/60">
               {/* Flyout toggle */}
               <button
-                onClick={() => setFlyoutOpen((prev) => !prev)}
+                onClick={toggleList}
                 className="w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                 title={t("chat.sessions")}
               >

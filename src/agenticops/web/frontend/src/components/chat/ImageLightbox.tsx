@@ -4,6 +4,7 @@ import { useLocale } from "@/i18n/LocaleContext";
 import { apiDownload } from "@/api/client";
 import { saveBlob } from "@/lib/download";
 import { useAttachmentBlob } from "@/hooks/useAttachmentBlob";
+import { swipeStep } from "@/lib/swipe";
 
 export interface LightboxImage { id: string; filename: string }
 
@@ -20,6 +21,7 @@ export function ImageLightbox({ images, index, onIndex, onClose }: Props) {
   const current = images[index];
   const { url } = useAttachmentBlob(current?.id, "preview");
   const box = useRef<HTMLDivElement>(null);
+  const touch = useRef<{ x: number; y: number } | null>(null);   // 2026-11-07: swipe left / right on a phone
 
   useEffect(() => {
     box.current?.focus();
@@ -60,7 +62,16 @@ export function ImageLightbox({ images, index, onIndex, onClose }: Props) {
           <button type="button" onClick={onClose} aria-label={t("chat.attach.close")}
                   className="rounded px-2 py-1 text-muted-foreground hover:bg-muted">✕</button>
         </div>
-        <div className="relative flex min-h-[200px] min-w-[300px] items-center justify-center">
+        <div className="relative flex min-h-[200px] min-w-[min(300px,86vw)] items-center justify-center"
+             onTouchStart={(e) => { const p = e.touches[0]; touch.current = { x: p.clientX, y: p.clientY }; }}
+             onTouchEnd={(e) => {
+               const p = e.changedTouches[0], start = touch.current;
+               touch.current = null;
+               if (!start || !p) return;
+               const step = swipeStep(p.clientX - start.x, p.clientY - start.y);
+               const next = index + step;
+               if (step !== 0 && next >= 0 && next < images.length) onIndex(next);
+             }}>
           {url ? <img src={url} alt={current.filename} className="max-h-[78vh] max-w-[86vw] object-contain" />
             : <span className="text-sm text-muted-foreground">…</span>}
           {index > 0 && (

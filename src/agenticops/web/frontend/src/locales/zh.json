@@ -45,7 +45,7 @@
   "chat.placeholder": "询问 AWS 资源、健康问题或报告... (Cmd+Enter 发送)",
   "chat.saveAsReport": "保存为报告",
   "chat.selectSession": "选择一个会话或创建新会话",
-  "chat.welcome": "想处理什么？",
+  "chat.welcome": "今天要排查什么？",
   "chat.welcomeHint": "描述你的目标。对话会沿用它开始时的账户，以及关联的事件或变更。",
   "chat.deleteConfirm": "删除此会话？",
   "chat.noSessions": "暂无对话",
@@ -1253,5 +1253,6 @@
   "chat.attach.camera": "拍照",
   "chat.attach.dropHint": "放下即可添加",
   "chat.attach.waitUpload": "上传完成后才能发送",
-  "chat.attach.pages": "{n} 页"
+  "chat.attach.pages": "{n} 页",
+  "nav.expand": "展开导航"
 }

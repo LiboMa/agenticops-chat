@@ -45,7 +45,7 @@
   "chat.placeholder": "Ask about AWS resources, health issues, or reports... (Cmd+Enter to send)",
   "chat.saveAsReport": "Save as Report",
   "chat.selectSession": "Select a session or create a new one",
-  "chat.welcome": "What would you like to work on?",
+  "chat.welcome": "What are we troubleshooting today?",
   "chat.welcomeHint": "Describe your goal. A chat keeps the account and the issue or change it starts with.",
   "chat.deleteConfirm": "Delete this chat session?",
   "chat.noSessions": "No conversations yet",
@@ -1253,5 +1253,6 @@
   "chat.attach.camera": "Take a photo",
   "chat.attach.dropHint": "Drop to attach",
   "chat.attach.waitUpload": "Wait for the uploads to finish",
-  "chat.attach.pages": "{n} pages"
+  "chat.attach.pages": "{n} pages",
+  "nav.expand": "Show the full menu"
 }

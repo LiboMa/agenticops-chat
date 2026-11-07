@@ -86,3 +86,13 @@ describe("breadcrumbFor", () => {
     expect(breadcrumbFor("/app/skills/%E0")).toEqual({ sectionKey: "nav.skills", object: "%E0" });
   });
 });
+
+import { isRailRoute } from "@/lib/navGroups";
+describe("isRailRoute (2026-11-07: Chat gets the icon rail)", () => {
+  it("chat routes only", () => {
+    expect(isRailRoute("/app/chat")).toBe(true);
+    expect(isRailRoute("/app/chat/abc")).toBe(true);
+    expect(isRailRoute("/app/chats")).toBe(false);
+    expect(isRailRoute("/app/issues")).toBe(false);
+  });
+});

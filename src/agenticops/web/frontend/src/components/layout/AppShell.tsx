@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
+import { isRailRoute } from "@/lib/navGroups";
 import { Sidebar } from "./Sidebar";
 import { TopBar } from "./TopBar";
 import { CommandPalette } from "../CommandPalette";
@@ -10,6 +11,7 @@ import { AccountScopeProvider, ScopeNotice } from "./AccountScope";
  *  carries a menu), the top bar, and the page on the canvas. ⌘K / Ctrl+K opens search. */
 export function AppShell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const rail = isRailRoute(useLocation().pathname);   // 2026-11-07: Chat keeps the width for its chat list
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -26,8 +28,8 @@ export function AppShell() {
   return (
     <AccountScopeProvider>
     <div className="min-h-screen bg-canvas text-foreground">
-      <Sidebar />
-      <div className="min-[801px]:pl-[166px] min-[1101px]:pl-[200px]">
+      <Sidebar rail={rail} />
+      <div className={rail ? "min-[801px]:pl-[56px]" : "min-[801px]:pl-[166px] min-[1101px]:pl-[200px]"}>
         <TopBar onSearch={() => setPaletteOpen(true)} />
         <main className="p-6">
           <RestoreNotice />
