@@ -121,3 +121,54 @@ The new defaults equal the box's settings.yaml except the new keys, so the box n
 redeploy (back it up anyway); agent-memory / skills as usual; delete `AIOPS_BEDROCK_MODEL_ID` from
 `/etc/agenticops.env` once and restart. Live checks: the next Galaxy build completes; no opus-4-6 from the box in
 CloudTrail; a reporter run distils on opus-5-5; agent_logs rows for 5.5 carry a cost.
+
+## Deploy result (2026-11-07)
+
+- Deployed `main` `f115743` (PR #35) to the dev box; the service restarted at 06:33:39 UTC. Before the deploy, the DB,
+  env file, unit and local state were backed up to `/opt/agenticops-backups/pre-model-config-fix-20261107T062902Z/`.
+  `/etc/agenticops.env` no longer has an `AIOPS_BEDROCK_MODEL_ID` line.
+- Galaxy works again: build #1237 completed 07:00:04–07:02:08 UTC on `global.anthropic.claude-opus-5-5`
+  (951,682 input / 13,394 output tokens, $4.07). It was the first build after the failing streak, so it re-enriched
+  the backlog.
+- CloudTrail, us-east-1, the instance role, 06:33:39–13:35 UTC: **0 calls to `opus-4-6`**. Calls seen by model:
+  - Haiku 4.5: 81 Converse + 3 InvokeModel (the cheap tier);
+  - Opus 5.5: 47 Converse + 15 ConverseStream;
+  - GPT-6 Astra: 12 ConverseStream;
+  - Titan embeddings: 26 InvokeModel;
+  - plus Claude Code's own calls.
+- `agent_logs` since the restart: Opus 5.5 4 runs, $0.1105; GPT-6 Astra 4 runs, $2.1542. No run is priced at $0.
+
+### Follow-up: ACP needed Node 22 on the dev box
+
+- **Symptom:** with `ANTHROPIC_MODEL` set to Opus 5.5, Claude Code 2.1.185 answered "does not support this model".
+- **Cause:**
+  - The box ran Node v20.20.2, installed by `iac/deploy-sg/user_data.sh` for the frontend build.
+  - `@agentclientprotocol/claude-agent-acp` declares `engines.node >= 22` from 0.50.0 (2026-06-23).
+  - On Node 20, npm therefore installs 0.49.0, which bundles claude-agent-sdk 0.3.185, and that Claude Code does not
+    know the 5.x models. Moving the npx cache aside did not help: at 06:35 npx installed 0.49.0 again.
+- **Fix (owner decision: keep ACP), applied at 13:30 UTC:**
+  - nodesource 22.x, `nodejs` 22.23.4-1nodesource1 (npm 10.9.9).
+  - The npx cache moved to `…/npx-d820eb7d96bc2600-claude-agent-acp-0.49.0-node20` in the backup folder.
+  - The service was not restarted: ACP starts a new subprocess for every task.
+- **Verified:**
+  - **Frontend, locally:** a clean copy of origin/main on Node 22.23.4 passed `npm ci`, `npm run build` and vitest,
+    61 files / 725 tests (the same counts on Node 25.4.0).
+  - **Frontend, on the box:** the `git archive HEAD` (7893547) frontend built in a temp dir with
+    `npm install && npm run build` on Node 22. The deployed `dist` was not touched.
+  - **ACP smoke:** run as the service user (`systemd-run` with the unit's `EnvironmentFile` and the app venv),
+    `ClaudeCodeBackend().run("Reply with exactly one word: pong")` returned `pong` in 21.2 s with no error.
+    npx now holds claude-agent-acp 0.101.0 (claude-agent-sdk 0.3.318).
+  - **CloudTrail:** at 13:33:15, `InvokeModelWithResponseStream` on `global.anthropic.claude-opus-5-5`, user agent
+    `claude-cli/2.1.318`. Claude Code's own helper call went to `us.anthropic.claude-haiku-4-5-20251001-v1:0`.
+  - **Service:** active the whole time; `/api/health` returned 200.
+- **`iac/deploy-sg/user_data.sh` now installs Node 22.** Only a rebuilt box runs it, because `user_data_base64` is in
+  `ignore_changes`. `terraform plan -lock=false` on a copy of the live state: 0 to add, 1 to change, 0 to destroy. The
+  one change is the pre-existing `QSConfigName-igp8l` tag drift; there is no replacement.
+- **Rollback:** reinstall Node 20 from nodesource 20 with
+  `apt-get install -y --allow-downgrades nodejs=20.20.2-1nodesource1`, and put the npx cache back from the backup folder.
+- **Not changed:**
+  - The Docker image. Its runtime stage (`python:3.12-slim`) has no Node, so ACP cannot run in that deployment anyway;
+    its frontend build stage stays on `node:20-alpine`.
+  - `infra/cloud-deploy`.
+  - The adapter is still unpinned: npx picks the newest version the installed Node supports. If a newer Main model is
+    ever reported as unsupported, clear the npx cache.
