@@ -291,7 +291,7 @@ export default function Chat() {
               {/* Flyout toggle in welcome mode */}
               <button
                 onClick={toggleList}
-                className="absolute top-4 left-4 w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                className="absolute top-4 left-4 w-7 h-7 max-[767px]:h-[44px] max-[767px]:w-[44px] flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                 title={t("chat.sessions")}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -353,7 +353,7 @@ export default function Chat() {
               {/* Flyout toggle */}
               <button
                 onClick={toggleList}
-                className="w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                className="w-7 h-7 max-[767px]:h-[44px] max-[767px]:w-[44px] flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                 title={t("chat.sessions")}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

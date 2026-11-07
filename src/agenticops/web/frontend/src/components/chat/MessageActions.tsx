@@ -18,7 +18,7 @@ interface Props {
   readOnly?: boolean;
 }
 
-const icon = "flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40";
+const icon = "flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 max-[767px]:h-[44px] max-[767px]:w-[44px]";
 const item = "flex cursor-pointer select-none items-center gap-2 rounded px-2.5 py-1.5 text-sm text-foreground outline-none data-[highlighted]:bg-selected";
 
 /** Under an answer: copy, regenerate (the last answer only), ⋯ (save as report, copy as plain text), the tokens. */

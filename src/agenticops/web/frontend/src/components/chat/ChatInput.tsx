@@ -270,7 +270,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
                 <button type="button" disabled={disabled} aria-label={t("chat.attach.menu")} title={t("chat.attach.menu")}
-                        className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
+                        className="flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50 max-[767px]:h-[44px] max-[767px]:w-[44px]">
                   <svg className="h-5 w-5" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden><path d="M10 4v12M4 10h12" /></svg>
                 </button>
               </DropdownMenu.Trigger>
@@ -290,13 +290,13 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
             <ModelSelector sessionId={sessionId ?? null} disabled={disabled || streaming} />
             {streaming ? (
               <button type="button" onClick={onCancel} title={t("chat.stop")} aria-label={t("chat.stop")}
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-foreground text-background hover:opacity-85">
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-foreground text-background hover:opacity-85 max-[767px]:h-[44px] max-[767px]:w-[44px]">
                 <span className="h-3 w-3 rounded-[3px] bg-background" />
               </button>
             ) : (
               <button type="button" onClick={handleSend} disabled={!canSend}
                       title={uploading ? t("chat.attach.waitUpload") : t("chat.send")} aria-label={t("chat.send")}
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-600 text-white transition-colors hover:bg-primary-700 disabled:bg-muted disabled:text-muted-foreground/50">
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-600 text-white transition-colors hover:bg-primary-700 disabled:bg-muted disabled:text-muted-foreground/50 max-[767px]:h-[44px] max-[767px]:w-[44px]">
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 10l7-7m0 0l7 7m-7-7v18" />
                 </svg>
