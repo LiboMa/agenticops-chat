@@ -392,6 +392,8 @@ from agenticops.web.routers import ui as _ui_router  # MVP-2.7.0: workspace boot
 app.include_router(_ui_router.router)
 from agenticops.web.routers import chat_attachments as _chat_attachments_router  # 2026-11-07: chat attachments
 app.include_router(_chat_attachments_router.router)
+from agenticops.web.routers import upload_settings as _upload_settings_router  # 2026-11-07: chat upload limits
+app.include_router(_upload_settings_router.router)
 
 # Chat session manager
 _chat_sessions = ChatSessionManager()
