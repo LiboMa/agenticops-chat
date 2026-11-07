@@ -137,7 +137,6 @@ resource "aws_instance" "app" {
   user_data_base64 = base64encode(templatefile("${path.module}/user_data.sh", {
     app_port       = var.app_port
     bedrock_region = var.bedrock_region
-    bedrock_model  = var.bedrock_model_id
     admin_password = var.admin_password
     project_name   = var.project_name
     git_branch     = var.git_branch
@@ -151,4 +150,12 @@ resource "aws_instance" "app" {
   tags = merge(local.tags, {
     Name = "${var.project_name}-app"
   })
+
+  # The live box is long-lived and its root disk holds the SQLite DB: never stop or replace it for an edit
+  # that only matters at first boot. user_data runs once (AWS provider >= 5 stops and starts the instance to
+  # change it), and `ami` follows a most_recent lookup, so every new Ubuntu image would otherwise force a
+  # replacement. Recreate the instance on purpose (terraform apply -replace=aws_instance.app) to pick either up.
+  lifecycle {
+    ignore_changes = [ami, user_data_base64]
+  }
 }

@@ -98,12 +98,6 @@ variable "bedrock_region" {
   default     = "us-east-1"
 }
 
-variable "bedrock_model_id" {
-  description = "Default Bedrock model ID"
-  type        = string
-  default     = "global.anthropic.claude-opus-4-6-v1"
-}
-
 variable "admin_password" {
   description = "Default admin user password"
   type        = string
