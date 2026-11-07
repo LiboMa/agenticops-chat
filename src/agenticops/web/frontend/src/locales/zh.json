@@ -1207,5 +1207,17 @@
   "settings.chatUpload.save": "保存",
   "settings.chatUpload.reset": "恢复默认",
   "settings.chatUpload.resetConfirm": "所有限额都恢复为 settings.yaml 里的默认值。这次修改会写入审计。",
-  "settings.chatUpload.updated": "{who} 于 {when} 修改"
+  "settings.chatUpload.updated": "{who} 于 {when} 修改",
+  "chat.rich.chartInvalid": "图表数据无法解析，按代码显示。",
+  "chat.rich.mermaidFailed": "流程图无法绘制，按代码显示。",
+  "chat.rich.zoomIn": "放大",
+  "chat.rich.zoomOut": "缩小",
+  "chat.rich.zoomFit": "恢复原始大小",
+  "chat.rich.copy": "复制",
+  "chat.rich.copied": "已复制",
+  "chat.rich.enlarge": "放大查看",
+  "chat.rich.close": "关闭",
+  "chat.rich.chart": "图表",
+  "chat.rich.flowchart": "流程图",
+  "chat.rich.data": "数据"
 }

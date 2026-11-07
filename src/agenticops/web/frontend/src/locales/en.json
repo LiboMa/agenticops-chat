@@ -1207,5 +1207,17 @@
   "settings.chatUpload.save": "Save",
   "settings.chatUpload.reset": "Restore defaults",
   "settings.chatUpload.resetConfirm": "Every limit goes back to its default from settings.yaml. The change is audited.",
-  "settings.chatUpload.updated": "Changed by {who} at {when}"
+  "settings.chatUpload.updated": "Changed by {who} at {when}",
+  "chat.rich.chartInvalid": "Chart data could not be read — shown as code.",
+  "chat.rich.mermaidFailed": "The flowchart could not be drawn — shown as code.",
+  "chat.rich.zoomIn": "Zoom in",
+  "chat.rich.zoomOut": "Zoom out",
+  "chat.rich.zoomFit": "Reset zoom",
+  "chat.rich.copy": "Copy",
+  "chat.rich.copied": "Copied",
+  "chat.rich.enlarge": "Enlarge",
+  "chat.rich.close": "Close",
+  "chat.rich.chart": "Chart",
+  "chat.rich.flowchart": "Flowchart",
+  "chat.rich.data": "Data"
 }

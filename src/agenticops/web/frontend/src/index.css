@@ -177,6 +177,19 @@ input:focus, select:focus, textarea:focus {
 .report-content .md-table td { @apply px-4 py-2 border-b; }
 .report-content .md-table tr:last-child td { @apply border-b-0; }
 
+/* Chat answers (2026-11-07): code blocks carry a copy button; flowcharts keep their natural width and scroll */
+.report-content .md-pre-wrap { position: relative; }
+.report-content .md-copy {
+  @apply absolute right-2 top-2 rounded-md px-2 py-0.5 text-[11px] opacity-0 transition-opacity;
+  background: rgba(255, 255, 255, 0.12);
+  color: #cdd6f4;
+}
+.report-content .md-pre-wrap:hover .md-copy,
+.report-content .md-copy:focus-visible { opacity: 1; }
+@media (pointer: coarse) { .report-content .md-copy { opacity: 1; } }
+.aiops-mermaid svg { height: auto; margin: 0 auto; display: block; }
+.aiops-mermaid-zoom svg { width: 100% !important; max-width: none !important; }
+
 /* Code blocks: <pre><code> has no chip background (the pre provides the surface) */
 .report-content pre code {
   background: transparent;
