@@ -16,6 +16,7 @@ other two are appended to, never rewritten.
 | [`../skills/ADDING_SKILLS.md`](../skills/ADDING_SKILLS.md) | How to write, import (URL / git / zip), scan, promote and sandbox skills | Any change to the skills pipeline |
 | [`../CLAUDE.md`](../CLAUDE.md) | Development guide for humans and agents working on the code: architecture, module map, config keys, rules | Any change to modules, config surface, or engineering rules |
 | [`setup/`](setup/) | Integration setup guides (Slack bot manifests, dual-bot setup) | When an integration's setup steps change |
+| [`progress/`](progress/) | Development progress dashboard: `tracker.yaml` (the one source of truth), generated `dashboard.html`, generator, CI. Open `progress/dashboard.html` to see done / in-progress / blocked, who blocks whom, and code-module dependencies | Whenever a task's status changes (update `tracker.yaml`, rebuild) |
 
 ### Bilingual rule (README.md ↔ README_CN.md)
 
