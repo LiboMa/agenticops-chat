@@ -59,8 +59,12 @@ cryptography==46.0.5
     # via pyjwt
 cssselect2==0.9.0
     # via weasyprint
+defusedxml==0.7.1
+    # via agenticops
 docstring-parser==0.17.0
     # via strands-agents
+et-xmlfile==2.0.0
+    # via openpyxl
 fastapi==0.129.0
     # via agenticops
 fonttools==4.61.1
@@ -122,7 +126,9 @@ lark-oapi==1.5.3
 librt==0.8.0 ; platform_python_implementation != 'PyPy'
     # via mypy
 lxml==6.0.2
-    # via python-docx
+    # via
+    #   python-docx
+    #   python-pptx
 markdown==3.10.2
     # via agenticops
 markdown-it-py==4.0.0
@@ -159,6 +165,8 @@ numpy==2.4.2
     #   langchain-aws
     #   pandas
     #   pgvector
+openpyxl==3.1.5
+    # via agenticops
 opentelemetry-api==1.39.1
     # via
     #   opentelemetry-instrumentation
@@ -191,7 +199,13 @@ pathspec==1.0.4
 pgvector==0.4.2
     # via agenticops
 pillow==12.1.1
-    # via weasyprint
+    # via
+    #   agenticops
+    #   pillow-heif
+    #   python-pptx
+    #   weasyprint
+pillow-heif==1.8.1
+    # via agenticops
 pluggy==1.6.0
     # via pytest
 prompt-toolkit==3.0.52
@@ -249,6 +263,8 @@ python-multipart==0.0.22
     # via
     #   agenticops
     #   mcp
+python-pptx==1.0.2
+    # via agenticops
 python-socks==2.8.1
     # via agenticops
 pywin32==311 ; sys_platform == 'win32'
@@ -339,6 +355,7 @@ typing-extensions==4.15.0
     #   pydantic-core
     #   pytest-asyncio
     #   python-docx
+    #   python-pptx
     #   referencing
     #   sqlalchemy
     #   starlette
@@ -381,6 +398,8 @@ wrapt==1.17.3
     # via
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-threading
+xlsxwriter==3.3.1
+    # via python-pptx
 xxhash==3.6.0
     # via langsmith
 zipp==3.23.0
