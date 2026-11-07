@@ -287,6 +287,20 @@ OUTPUT FORMATTING:
 """
 
 
+# Web chat renders ```chart and ```mermaid blocks (2026-11-07); appended only for a Web chat build (rich_output=True) —
+# the CLI, IM bots and scheduled runs show raw text, so they never get this rule.
+RICH_OUTPUT_PROMPT = """
+RICH OUTPUT (this chat renders these blocks; never draw charts, diagrams or flows with ASCII characters):
+- Numbers that compare categories, show shares, or change over time -> one ```chart block holding only JSON:
+  {"type":"bar|line|area|pie","title":"...","x":["label", ...],"series":[{"name":"...","data":[1, 2, ...]}],"unit":"..."}
+  x and every series' data have the same length; a pie has exactly one series; at most 8 series and 50 points.
+  Chart only real figures you obtained from tools or context - never invent data - and state the key numbers in prose too.
+- A flow, a call chain, a dependency path, or a sequence of steps -> one ```mermaid block (flowchart LR/TD or
+  sequenceDiagram). Quote node labels; no click handlers, links, HTML, or %%{init}%% directives.
+- Tabular detail stays a markdown table.
+"""
+
+
 def read_only_main_tools() -> list:
     """The read-only agent's tools — an explicit allowlist, so a tool added to the full agent is never in it by
     default. The change reads follow change_management_enabled, like change_management_tools()."""
@@ -311,7 +325,8 @@ def change_management_tools() -> list:
     return [request_change, review_change, get_change_request, list_change_requests, execute_change]
 
 
-def create_main_agent(model_id_override: str = "", effort_override: str = "", read_only: bool = False) -> Agent:
+def create_main_agent(model_id_override: str = "", effort_override: str = "", read_only: bool = False,
+                      rich_output: bool = False) -> Agent:
     """Create and return the Main Agent (Orchestrator).
 
     Args:
@@ -319,6 +334,7 @@ def create_main_agent(model_id_override: str = "", effort_override: str = "", re
         effort_override: Per-session effort level (off|standard|deep);
             empty = Auto (follow agent_main_thinking_budget).
         read_only: A viewer's chat — READ_ONLY_SYSTEM_PROMPT + read_only_main_tools() only, no curator runs.
+        rich_output: A Web chat build — the chart / mermaid output rule (CLI, IM, scheduler stay plain).
 
     Returns:
         Configured Strands Agent with sub-agents and metadata tools.
@@ -361,7 +377,8 @@ def create_main_agent(model_id_override: str = "", effort_override: str = "", re
 
     if read_only:
         return Agent(
-            system_prompt=build_system_prompt(READ_ONLY_SYSTEM_PROMPT, include_account=False, include_skills=False),
+            system_prompt=build_system_prompt(READ_ONLY_SYSTEM_PROMPT + (RICH_OUTPUT_PROMPT if rich_output else ""),
+                                              include_account=False, include_skills=False),
             model=model,
             conversation_manager=get_agent_conversation_manager("main"),
             plugins=get_agent_context_plugins("main"),
@@ -382,7 +399,7 @@ When dispatching to detect_agent, scope the check to: {focus} resources.
 If the user explicitly requests a different scope, honor their request over this default.
 """
 
-    prompt = MAIN_SYSTEM_PROMPT + change_management_prompt() + focus_section
+    prompt = MAIN_SYSTEM_PROMPT + change_management_prompt() + focus_section + (RICH_OUTPUT_PROMPT if rich_output else "")
 
     mcp_tools = _safe_mcp_clients()
 

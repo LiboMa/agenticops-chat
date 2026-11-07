@@ -502,8 +502,9 @@ class ChatSessionManager:
             except Exception:
                 logger.warning("Could not read session model for %s; using global", session_id, exc_info=True)
             viewer = {"read_only": True} if read_only else {}  # a writer's build is called exactly as before
+            # a Web chat build: the chart / mermaid output rule (2026-11-07) — this manager only builds Web chat agents
             agent = create_main_agent(model_id_override=session_model,
-                                      effort_override=session_effort, **viewer)
+                                      effort_override=session_effort, rich_output=True, **viewer)
             agent._aiops_read_only = read_only
             history = _load_history_messages(session_id, settings.session_history_depth)
             if history:
