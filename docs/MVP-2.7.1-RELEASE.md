@@ -232,10 +232,17 @@
 
 ### 闸门
 
-- 后端全量：7360 passed · 99 skipped · 4 failed（4 个都与本改动无关：2 个是本机未提交的 `settings.yaml`，1 个是本机未提交的 `reporter_agent.py` 中文行，1 个是 DNS 误报；前 3 个在干净的 HEAD 上通过）。
-- 前端：vitest 70 个文件 / 769 个测试；`tsc` 0。
+- 后端全量（含评审修复）：7363 passed · 99 skipped · 4 failed（4 个都与本改动无关：2 个是本机未提交的 `settings.yaml`，1 个是本机未提交的 `reporter_agent.py` 中文行，1 个是 DNS 误报；前 3 个在干净的 HEAD 上通过）。
+- 前端：vitest 70 个文件 / 773 个测试；`tsc` 0。
 - 在 `/tmp` 空目录里 `npm ci && npm run build && vitest`：通过。
 - 真实模型 E2E：桌面、移动、性能、纯文本渠道全部通过，见报告。
+- 全分支评审：没有 Critical；5 个 Important 已修复（`ac1779f`）：
+  - emoji 导致分界错位；
+  - 只有一个字段的密钥原样显示；
+  - 正则平方级耗时；
+  - 流程图加载外站图片；
+  - 生成中拖入文件导致离开页面。
+- 10 个 Minor 记录在案，见报告。
 
 ## 随 rebase 带入的 main 交付（2026-11-07）
 

@@ -2,7 +2,7 @@
 
 2026-11-07/08 · 本机，分支 `MVP-2.7.1`（`cd4f0d2` → `8a57088`），`aiops service`，真实模型（Main = Opus 5.5，Bedrock） · Playwright（Chromium）· 设计：`docs/superpowers/specs/2026-11-07-chatgpt-style-chat-design.md` · 计划：`docs/superpowers/plans/2026-11-07-chatgpt-style-chat.md`
 
-测试账户 `e2e-chat`（writer，非管理员，验证结束后停用），测试会话都开在这个账户下。
+测试账户 `e2e-chat`；评审修复的浏览器复验用了 `e2e-chat2`。两个都是 writer，非管理员，用完即停用。测试会话都开在这两个账户下，临时造的会话用完即删。
 
 ## 结论
 
@@ -86,6 +86,34 @@ E2E 过程中发现 6 个问题，都已修复，每个都先写了失败的测�
    - 原因：行的实际高度比估计的高（有表格、图表），虚拟列表调整滚动位置时触发的 scroll 事件被当成「用户上翻」。
    - 修复：只有用户手势（滚轮、触摸、按键、指针）才会取消吸底。
    - 测试：`stickToBottom.test.ts`。
+
+## 全分支评审后的修复（`ac1779f`）
+
+由一位全新的评审者看完整个分支，结论：没有 Critical，5 个 Important，10 个 Minor。5 个 Important 都已修复，每个都先写了失败的测试再修复，其中两个另做了浏览器复验：
+
+| 问题 | 修复 | 证据 |
+|---|---|---|
+| 服务端按 Python 码点计偏移，浏览器按 UTF-16 切分，回答里带 emoji（🔍 🔴）时，过程话和正文的分界会错位 | 服务端改为按 UTF-16 计数 | `test_offsets_count_utf16_units_like_the_browser` |
+| 只有一个文本字段且字段名是密钥（`{"password": …}`）时，摘要直接显示原值并写入库 | 先用 `redact_obj` 按字段名盖值，再选摘要 | `test_a_secret_passed_as_the_only_text_field_is_never_the_summary` |
+| 显示层脱敏正则在 `a.a.a.…` 这类输入上是平方级耗时：40 KB 摘要要 27 秒，卡住整个单进程 | 给标签匹配加长度上限；摘要先截到 4000 字再跑正则 | `test_the_display_patterns_cost_stays_linear_on_hostile_input` |
+| mermaid 的 HTML 标签和 `img:` 形状会加载外站图片，违反「外站图片不自动加载」 | 标签改用 SVG 文本（`htmlLabels: false`）；绘制前去掉 `<img>`（含转义形式）和 `img:` 形状 | 单元测试 + 浏览器复验：恶意源 0 个外站请求、0 个 `foreignObject`，绘制失败后按代码显示；真实的中文多行流程图照常渲染 |
+| 回复生成中把文件拖进对话区，浏览器会打开这个文件、离开页面，正在进行的回答被打断 | 文件拖拽一律拦下，只在可用时才添加附件；页面其它位置也拦下 | `fileDragAction` 单元测试 + 浏览器复验：生成中在对话区和侧栏放下文件，事件都被取消，没有添加附件，页面不变 |
+
+修复后的闸门：
+- 后端全量：7363 passed · 99 skipped，失败的仍是同样 4 个环境相关用例。
+- 前端：vitest 70 个文件 / 773 个测试；`tsc` 0；构建通过。
+
+10 个 Minor 记录在案，没有在这一轮修复，见计划工作区的 ledger：
+- 显示层脱敏还漏几种写法；
+- mermaid 绘制失败时可能在页面底部留下错误图；
+- 「复制为纯文本」会带上按钮文字；
+- ⋯ 菜单里的「存为报告」保存的是整段对话；
+- `enhanced_task` 的标签固定写着 Claude Code；
+- 虚拟行重新挂载后，工作过程的展开状态会丢；
+- 过程话不渲染 markdown；
+- 缓存不回收；
+- 没有去掉 front-matter 配置；
+- 附件的 ✕ 只有 20 px。
 
 ## 没验证的
 
