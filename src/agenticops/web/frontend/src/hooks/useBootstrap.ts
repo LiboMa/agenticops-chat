@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiFetch, getAuthToken } from "@/api/client";
 import { currentUserId, type Home } from "@/lib/home";
 import { canViewSettings, isReadOnly } from "@/lib/permissions";
+import type { UploadPolicy } from "@/lib/attachments";
 
 export interface UiPreferences {
   revision: number;
@@ -20,10 +21,8 @@ export interface UiBootstrap {
   features: Record<string, boolean>;
   /** S6: the export formats this server can produce (html always) */
   report_export_formats?: string[];
-  upload_policy: {
-    max_files: number; image_max_bytes: number; document_max_bytes: number; text_fallback_max_bytes: number;
-    image_extensions: string[]; document_extensions: string[]; text_extensions: string[];
-  };
+  /** 2026-11-07: the upload limits in force (yaml defaults + admin overrides) — lib/attachments */
+  upload_policy: UploadPolicy;
   preferences: UiPreferences;
   /** read_only: a viewer account — the server refuses its writes, the UI offers none */
   user: { id: number; email: string; name: string | null; is_admin: boolean; read_only?: boolean; can_view_settings?: boolean };

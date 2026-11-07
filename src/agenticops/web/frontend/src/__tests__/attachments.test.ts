@@ -3,145 +3,116 @@ import {
   filesFromPaste,
   filesFromDrop,
   validateFiles,
-  maxSizeForFile,
-  acceptAttr,
   fileKey,
-  MAX_ATTACHMENTS,
   FALLBACK_POLICY,
   attachmentRules,
   attachmentErrorText,
+  normalizePastedName,
   type UploadPolicy,
 } from "@/lib/attachments";
 
-function file(name: string, size: number): File {
-  // node File global accepts (bits, name); override size via a small Blob slice trick.
-  const f = new File([new Uint8Array(size)], name);
-  return f;
+function file(name: string, size: number, type = ""): File {
+  return new File([new Uint8Array(size)], name, { type });
 }
 
-describe("attachments", () => {
-  it("filesFromPaste extracts image items and ignores text items", () => {
-    const img = file("shot.png", 10);
-    const clipboard = {
-      items: [
-        { kind: "string", type: "text/plain", getAsFile: () => null },
-        { kind: "file", type: "image/png", getAsFile: () => img },
-      ],
-    };
-    const out = filesFromPaste(clipboard);
-    expect(out).toHaveLength(1);
-    expect(out[0].name).toBe("shot.png");
+const MB = 1024 * 1024;
+const rules = attachmentRules(FALLBACK_POLICY);
+
+describe("attachments (2026-11-07: any common file, limits from the server)", () => {
+  it("non-image paste is accepted", () => {
+    const pdf = file("report.pdf", 10, "application/pdf");
+    const xlsx = file("q3.xlsx", 10);
+    const out = filesFromPaste({ items: [
+      { kind: "string", type: "text/plain", getAsFile: () => null },
+      { kind: "file", type: "application/pdf", getAsFile: () => pdf },
+      { kind: "file", type: "", getAsFile: () => xlsx },
+    ] });
+    expect(out.map((f) => f.name)).toEqual(["report.pdf", "q3.xlsx"]);
   });
 
-  it("filesFromPaste returns [] when no items", () => {
+  it("filesFromPaste returns [] when no items; filesFromDrop returns the dropped files", () => {
     expect(filesFromPaste({})).toEqual([]);
+    expect(filesFromDrop({ files: [file("a.log", 1), file("b.json", 1)] }).map((f) => f.name)).toEqual(["a.log", "b.json"]);
   });
 
-  it("filesFromDrop returns dropped files", () => {
-    const a = file("a.log", 10);
-    const b = file("b.json", 10);
-    expect(filesFromDrop({ files: [a, b] }).map((f) => f.name)).toEqual(["a.log", "b.json"]);
+  it("pasted files get a dated name before dedupe; user-named files keep theirs", () => {
+    const now = new Date(2026, 10, 7, 9, 5, 3);
+    expect(normalizePastedName(file("image.png", 5, "image/png"), now, 1).name).toBe("pasted-20261107-090503-1.png");
+    expect(normalizePastedName(file("", 5, "image/jpeg"), now, 2).name).toBe("pasted-20261107-090503-2.jpg");
+    expect(normalizePastedName(file("Pasted Graphic 3.tiff", 5, "image/tiff"), now, 3).name)
+      .toBe("pasted-20261107-090503-3.tiff");
+    expect(normalizePastedName(file("blob", 5, "application/pdf"), now, 4).name).toBe("pasted-20261107-090503-4.pdf");
+    expect(normalizePastedName(file("clipboard", 5, ""), now, 5).name).toBe("pasted-20261107-090503-5.bin");
+    expect(normalizePastedName(file("imagery-report.pdf", 5, "application/pdf"), now, 6).name).toBe("imagery-report.pdf");
+    expect(normalizePastedName(file("q3.xlsx", 5), now, 7).name).toBe("q3.xlsx");
+    const renamed = normalizePastedName(file("image.png", 7, "image/png"), now, 1);
+    expect([renamed.size, renamed.type]).toEqual([7, "image/png"]);
   });
 
-  it("validateFiles accepts supported types under the size cap", () => {
-    const r = validateFiles([], [file("ok.png", 100), file("ok.log", 100)]);
-    expect(r.accepted.map((f) => f.name)).toEqual(["ok.png", "ok.log"]);
-    expect(r.errors).toEqual([]);
-  });
-
-  it("validateFiles rejects unsupported extension", () => {
-    const r = validateFiles([], [file("bad.exe", 10)]);
-    expect(r.accepted).toEqual([]);
-    expect(r.errors[0]).toEqual({ kind: "type", name: "bad.exe" });
-  });
-
-  it("validateFiles rejects oversize per-type (text 512KB, image 5MB)", () => {
-    const bigLog = validateFiles([], [file("big.log", 600 * 1024)]); // > 512KB text cap
-    expect(bigLog.accepted).toEqual([]);
-    expect(bigLog.errors[0]).toEqual({ kind: "size", name: "big.log", limit: 512 * 1024 });
-
-    const okImg = validateFiles([], [file("pic.png", 600 * 1024)]); // fine under 5MB
-    expect(okImg.accepted).toHaveLength(1);
-  });
-
-  it("validateFiles caps total at MAX_ATTACHMENTS across existing + incoming", () => {
-    const existing = [file("1.png", 10), file("2.png", 10), file("3.png", 10)];
-    const incoming = [file("4.png", 10), file("5.png", 10), file("6.png", 10)];
-    const r = validateFiles(existing, incoming);
-    expect(r.accepted).toHaveLength(MAX_ATTACHMENTS - existing.length); // 2
-    expect(r.errors.some((e) => e.kind === "count" && e.limit === MAX_ATTACHMENTS)).toBe(true);
-  });
-
-  it("maxSizeForFile classifies by extension (matches backend routing)", () => {
-    expect(maxSizeForFile("x.png")).toBe(5 * 1024 * 1024);   // image
-    expect(maxSizeForFile("x.pdf")).toBe(5 * 1024 * 1024);   // document
-    expect(maxSizeForFile("x.txt")).toBe(5 * 1024 * 1024);   // document server-side, NOT 512KB
-    expect(maxSizeForFile("x.csv")).toBe(5 * 1024 * 1024);   // document
-    expect(maxSizeForFile("x.log")).toBe(512 * 1024);        // else/text branch
-    expect(maxSizeForFile("x.json")).toBe(512 * 1024);       // else/text branch
-    expect(maxSizeForFile("x.unknown")).toBe(512 * 1024);    // default → smallest
-  });
-
-  it("acceptAttr is a dotted comma list", () => {
-    expect(acceptAttr).toContain(".png");
-    expect(acceptAttr).toContain(".log");
-    expect(acceptAttr.startsWith(".")).toBe(true);
-  });
-
-  it("validateFiles dedups against existing selection (name+size), silently", () => {
-    const existing = [file("shot.png", 100)];
-    const r = validateFiles(existing, [file("shot.png", 100), file("other.png", 100)]);
-    expect(r.accepted.map((f) => f.name)).toEqual(["other.png"]); // dup skipped
-    expect(r.errors).toEqual([]); // no error noise for dedup
-  });
-
-  it("validateFiles dedups within the incoming batch", () => {
-    const r = validateFiles([], [file("a.png", 100), file("a.png", 100)]);
+  it("pasted files with the same name and size are both kept", () => {
+    const now = new Date(2026, 10, 7, 9, 5, 3);
+    const a = normalizePastedName(file("image.png", 100, "image/png"), now, 1);
+    const b = normalizePastedName(file("image.png", 100, "image/png"), now, 2);
+    const r = validateFiles([a], [b], rules);
     expect(r.accepted).toHaveLength(1);
   });
 
-  it("same name but different size is NOT a duplicate", () => {
-    const r = validateFiles([file("a.log", 100)], [file("a.log", 200)]);
-    expect(r.accepted).toHaveLength(1);
+  it("accepts every common type the server supports, refuses others", () => {
+    for (const name of ["a.txt", "a.md", "a.html", "a.htm", "a.pdf", "a.docx", "a.doc", "a.xlsx", "a.xlsm", "a.xls",
+                        "a.csv", "a.tsv", "a.pptx", "a.jpg", "a.png", "a.gif", "a.webp", "a.bmp", "a.tiff", "a.heic",
+                        "a.json", "a.log", "deploy.sh", "Makefile"]) {
+      expect(rules.accepted(name)).toBe(true);
+    }
+    expect(rules.accepted("setup.exe")).toBe(false);
+    expect(rules.accepted("logo.svg")).toBe(false);
+    expect(rules.kindOf("A.HEIC")).toBe("image");
+    expect(rules.kindOf("q.xlsx")).toBe("office");
   });
 
-  it("fileKey combines name and size", () => {
+  it("an extensionless type allowed means no accept filter (the picker would hide Makefile)", () => {
+    expect(rules.accept).toBe("");
+    const pdfOnly = attachmentRules({ ...FALLBACK_POLICY, extensions: [".pdf", ".png"] });
+    expect(pdfOnly.accept).toBe(".pdf,.png");
+    expect(pdfOnly.accepted("Makefile")).toBe(false);
+  });
+
+  it("validateFiles: type, per-file size, count, then total size", () => {
+    const small: UploadPolicy = { ...FALLBACK_POLICY, max_files: 3, max_file_bytes: 2 * MB, max_total_bytes: 3 * MB };
+    const r = attachmentRules(small);
+    expect(validateFiles([], [file("bad.exe", 1)], r).errors).toEqual([{ kind: "type", name: "bad.exe" }]);
+    expect(validateFiles([], [file("big.pdf", 3 * MB)], r).errors).toEqual([{ kind: "size", name: "big.pdf", limit: 2 * MB }]);
+    const total = validateFiles([file("a.pdf", 2 * MB)], [file("b.pdf", 2 * MB)], r);
+    expect(total.accepted).toEqual([]);
+    expect(total.errors).toEqual([{ kind: "total", limit: 3 * MB }]);
+    const count = validateFiles([file("1.png", 1), file("2.png", 1)], [file("3.png", 1), file("4.png", 1)], r);
+    expect(count.accepted.map((f) => f.name)).toEqual(["3.png"]);
+    expect(count.errors).toEqual([{ kind: "count", limit: 3 }]);
+  });
+
+  it("existing entries need only a name and a size (restored uploads have no File)", () => {
+    const r = validateFiles([{ name: "a.pdf", size: 10 }], [file("a.pdf", 10), file("b.pdf", 10)], rules);
+    expect(r.accepted.map((f) => f.name)).toEqual(["b.pdf"]);
+  });
+
+  it("dedups within the batch, same name with another size is not a duplicate", () => {
+    expect(validateFiles([], [file("a.png", 100), file("a.png", 100)], rules).accepted).toHaveLength(1);
+    expect(validateFiles([file("a.log", 100)], [file("a.log", 200)], rules).accepted).toHaveLength(1);
     expect(fileKey(file("x.png", 42))).toBe("x.png:42");
   });
-});
 
-
-describe("attachments follow the server's upload policy (MVP-2.7.0 S5)", () => {
-  const policy: UploadPolicy = { ...FALLBACK_POLICY, document_extensions: [...FALLBACK_POLICY.document_extensions, "html", "xlsx"],
-    text_extensions: [...FALLBACK_POLICY.text_extensions, "toml"], max_files: 5 };
-  const rules = attachmentRules(policy);
-
-  it("accepts what the server accepts", () => {
-    expect(rules.accepted("a.html") && rules.accepted("b.toml") && rules.accepted("c.XLSX")).toBe(true);
-    expect(rules.accepted("d.exe")).toBe(false);
-    expect(rules.accept).toContain(".html");
-  });
-  it("sizes come from the policy, per type class", () => {
-    expect(rules.maxSizeFor("b.xlsx")).toBe(policy.document_max_bytes);
-    expect(rules.maxSizeFor("c.log")).toBe(policy.text_fallback_max_bytes);
-    expect(rules.maxSizeFor("p.png")).toBe(policy.image_max_bytes);
-    expect(rules.max).toBe(5);
-  });
-  it("validateFiles takes the rules", () => {
-    const r = validateFiles([], [file("page.html", 10), file("x.exe", 10)], rules);
-    expect(r.accepted.map((f) => f.name)).toEqual(["page.html"]);
-    expect(r.errors).toEqual([{ kind: "type", name: "x.exe" }]);
-  });
   it("a smaller max from the server is honoured", () => {
-    const two = attachmentRules({ ...policy, max_files: 2 });
+    const two = attachmentRules({ ...FALLBACK_POLICY, max_files: 2 });
     const r = validateFiles([], [file("1.png", 1), file("2.png", 1), file("3.png", 1)], two);
     expect(r.accepted).toHaveLength(2);
     expect(r.errors).toEqual([{ kind: "count", limit: 2 }]);
   });
+
   it("error text goes through the locale", () => {
     const t = (k: string) => ({ "chat.attach.type": "{name}: type", "chat.attach.size": "{name}: max {limit}",
-                                "chat.attach.count": "max {limit}" } as Record<string, string>)[k] ?? k;
-    expect(attachmentErrorText({ kind: "size", name: "a.log", limit: 512 * 1024 }, t)).toBe("a.log: max 512 KB");
-    expect(attachmentErrorText({ kind: "count", limit: 5 }, t)).toBe("max 5");
+                                "chat.attach.count": "max {limit}", "chat.attach.total": "total {limit}" } as
+                                Record<string, string>)[k] ?? k;
+    expect(attachmentErrorText({ kind: "size", name: "a.log", limit: 50 * MB }, t)).toBe("a.log: max 50 MB");
+    expect(attachmentErrorText({ kind: "count", limit: 20 }, t)).toBe("max 20");
+    expect(attachmentErrorText({ kind: "total", limit: 200 * MB }, t)).toBe("total 200 MB");
   });
 });

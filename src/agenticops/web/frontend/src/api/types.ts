@@ -779,11 +779,39 @@ export interface ChatMessage {
   cost_usd?: number;
   /** Follow-up suggestion chips from the reply tail; only rendered on the last assistant message */
   suggestions?: string[];
-  attachments?: Array<{ filename: string; size: number }>;
+  /** 2026-11-07: id / kind / delivery on new rows; older rows carry a name and a size only */
+  attachments?: MessageAttachment[];
   created_at: string;
   /** S5: the sender's id and where the dispatch stands; null/absent on older rows = completed */
   client_message_id?: string | null;
   dispatch_state?: DispatchState | null;
+}
+
+/** An attachment as a message records it (2026-11-07): how it reached the model, once it did. */
+export interface MessageAttachment {
+  id?: string;
+  filename: string;
+  size: number;
+  kind?: "image" | "pdf" | "office" | "text";
+  delivery?: "native_document" | "native_image" | "page_images" | "text" | "notice" | "failed";
+  reason?: string | null;
+}
+
+/** GET /api/chat/attachments/{id} (2026-11-07) */
+export interface ChatAttachment {
+  id: string;
+  filename: string;
+  size: number;
+  kind: "image" | "pdf" | "office" | "text";
+  ext: string;
+  status: "processing" | "ready" | "failed";
+  reason?: string | null;
+  meta?: { pages?: number; has_text_layer?: boolean; rendered_pages?: number; width?: number; height?: number;
+           sheets?: { name: string; rows: number; cols: number; rows_included: number }[]; slides?: number;
+           chars?: number; truncated?: boolean };
+  created_at?: string | null;
+  session_id?: string | null;
+  message_id?: number | null;
 }
 
 export interface ChatSessionDetail extends ChatSession {
