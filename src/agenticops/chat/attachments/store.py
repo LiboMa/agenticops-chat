@@ -16,18 +16,23 @@ from agenticops.config import settings
 STAGING = "_staging"
 
 
+def _base() -> Path:
+    return Path(settings.chat_attachments_dir) if settings.chat_attachments_dir else settings.data_dir / "chat_attachments"
+
+
 def root() -> Path:
-    base = Path(settings.chat_attachments_dir) if settings.chat_attachments_dir else settings.data_dir / "chat_attachments"
+    """The store's root, created on first use by a write (staging an upload, moving one into its session)."""
+    base = _base()
     (base / STAGING).mkdir(parents=True, exist_ok=True)
     return base
 
 
 def staging_dir(att_id: str) -> Path:
-    return root() / STAGING / att_id
+    return _base() / STAGING / att_id
 
 
 def session_root(session_uuid: str) -> Path:
-    return root() / session_uuid
+    return _base() / session_uuid
 
 
 def attachment_dir(att, session_uuid: str | None) -> Path:
@@ -41,11 +46,12 @@ def attachment_dir(att, session_uuid: str | None) -> Path:
 
 
 def disk_free_ok() -> bool:
-    return shutil.disk_usage(root()).free >= MIN_FREE_DISK_BYTES
+    return shutil.disk_usage(root()).free >= MIN_FREE_DISK_BYTES   # the upload that asks is about to write here
 
 
 def move_into_session(att_ids: list[str], session_uuid: str) -> None:
     """Move staged directories under the session's (created without parents: a root that vanished is not rebuilt)."""
+    root()
     target = session_root(session_uuid)
     target.mkdir(parents=False, exist_ok=True)
     for att_id in att_ids:
@@ -65,8 +71,10 @@ def remove_staged(att_id: str) -> None:
 
 
 def staged_ids() -> set[str]:
-    return {p.name for p in (root() / STAGING).iterdir() if p.is_dir()}
+    staging = _base() / STAGING
+    return {p.name for p in staging.iterdir() if p.is_dir()} if staging.is_dir() else set()
 
 
 def session_dirs() -> set[str]:
-    return {p.name for p in root().iterdir() if p.is_dir() and p.name != STAGING}
+    base = _base()
+    return {p.name for p in base.iterdir() if p.is_dir() and p.name != STAGING} if base.is_dir() else set()

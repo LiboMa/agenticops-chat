@@ -482,3 +482,14 @@ def test_startup_sweep_runs(env, monkeypatch):
     from agenticops.web.app import _sweep_chat_attachments_at_startup
     asyncio.run(_sweep_chat_attachments_at_startup())
     assert calls == [1]
+
+
+def test_removing_from_a_fresh_store_creates_nothing(tmp_path, monkeypatch):
+    """Deleting a chat (or sweeping) on a server that never stored an attachment leaves no directory behind."""
+    from agenticops.chat.attachments import store
+    base = tmp_path / "never-used"
+    monkeypatch.setattr(settings, "chat_attachments_dir", str(base))
+    store.remove_session(str(uuid.uuid4()))
+    store.remove_staged("0" * 32)
+    assert store.staged_ids() == set() and store.session_dirs() == set()
+    assert not base.exists()
