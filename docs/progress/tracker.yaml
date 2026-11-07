@@ -480,7 +480,9 @@ releases:
           commits:
             - {sha: "3eb8883", date: "2026-11-07", title: "feat(platform): Strands 1.45 → 1.64, behaviour-preserving"}
             - {sha: "18d587a", date: "2026-11-07", title: "docs(study): Strands 1.64 feature feasibility report + upgrade progress"}
-        notes: "分支 feat/strands-1.64，PR #32 待主人合并（未进 main）。不传 context_manager，ContextOffloader 作插件（1500 / 750）并覆盖 _slice_preview 保留 1.45 的只取头预览（1.64 的头 + 尾预览让 RCA 拓扑证据的边全部落在预览外）；CacheConfig(tools_ttl=True, system_prompt_ttl=False)。验收：全量除已知 DNS 假失败外通过；真实 Bedrock 冒烟 PASS；本地 chat 三轮 E2E PASS；chaos-lab 3 例定位评测 3/3 valid、AC@1 1.0。dev 11-07 已部署 deploy/dev-strands-1.64（= 本分支 + ae62cd2，免得 editor 的 Settings 只读视图回退），strands-agents 1.64.0，live chat 正常；部署前备份 /opt/agenticops-backups/pre-strands-164-20261107T030437Z。下个版本候选与主人选择（组合 A）见 feat/strands-1.64 上的 docs/superpowers/specs/2026-11-06-strands-164-feature-feasibility.md。"
+            - {sha: "603046d", date: "2026-11-07", title: "Merge pull request #33 from LiboMa/deploy/dev-strands-1.64"}
+            - {sha: "2fe21cb", date: "2026-11-07", title: "docs: Strands 1.64 upgrade report + 2.7.0 post-release addendum (read-only accounts, SDK upgrade)"}
+        notes: "2026-11-07 经 PR #33 合入 main（603046d，PR #32 / #29 随之合并）；升级报告 docs/STRANDS-1.64-UPGRADE-REPORT.md 与 2.7.0 发布说明「发布后追加」在 PR #34（2fe21cb，待合）。不传 context_manager，ContextOffloader 作插件（1500 / 750）并覆盖 _slice_preview 保留 1.45 的只取头预览（1.64 的头 + 尾预览让 RCA 拓扑证据的边全部落在预览外）；CacheConfig(tools_ttl=True, system_prompt_ttl=False)。验收：全量除已知 DNS 假失败外通过；真实 Bedrock 冒烟 PASS；本地 chat 三轮 E2E PASS；chaos-lab 3 例定位评测 3/3 valid、AC@1 1.0。dev 11-07 先部署 deploy/dev-strands-1.64（= 本分支 + ae62cd2，免得 editor 的 Settings 只读视图回退），合并后切到 main 603046d（文件树相同，只移分支指针、不重启），strands-agents 1.64.0，live chat 正常；部署前备份 /opt/agenticops-backups/pre-strands-164-20261107T030437Z。下个版本候选与主人选择（组合 A）见 feat/strands-1.64 上的 docs/superpowers/specs/2026-11-06-strands-164-feature-feasibility.md。"
       - id: "acct/viewer"
         title: "只读 viewer 账户 + 删除自助注册"
         status: done
@@ -501,7 +503,8 @@ releases:
         evidence:
           commits:
             - {sha: "ae62cd2", date: "2026-11-06", title: "feat(auth): a read-only account that may view Settings (settings_read)"}
-        notes: "在 feat/viewer-role 上，是 PR #28 合并之后的提交，尚未进 main（需要新 PR）。dev 已部署、live 检查通过（General 0/59 控件可用，写请求 403），dev 上账户 editor。全量 6981 passed / 1 已知 DNS 假失败。"
+            - {sha: "603046d", date: "2026-11-07", title: "Merge pull request #33 from LiboMa/deploy/dev-strands-1.64"}
+        notes: "2026-11-07 随 PR #33 合入 main（603046d；PR #29 随之合并）。dev 已部署、live 检查通过（General 0/59 控件可用，写请求 403），dev 上账户 editor。全量 6981 passed / 1 已知 DNS 假失败。"
       - id: "acct/rbac-admin"
         title: "管理员在 Web 管理用户与角色"
         status: todo
