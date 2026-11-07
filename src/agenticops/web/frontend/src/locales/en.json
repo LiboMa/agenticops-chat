@@ -1127,5 +1127,6 @@
   "reports.error.idempotency_key_required": "The publish could not be sent; reopen the dialog and try again.",
   "reports.error.too_long": "This report is too long to translate in one pass.",
   "readOnly.badge": "Read-only",
-  "readOnly.hint": "This account can browse and chat, but cannot change anything."
+  "readOnly.hint": "This account can browse and chat, but cannot change anything.",
+  "settings.readOnlyNotice": "Read-only — you can view these settings but not change them."
 }

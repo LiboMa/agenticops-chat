@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import * as Dialog from "@radix-ui/react-dialog";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { useStats } from "@/hooks/useStats";
-import { useBootstrap, useReadOnly } from "@/hooks/useBootstrap";
+import { useBootstrap, useCanViewSettings } from "@/hooks/useBootstrap";
 import { navItemVisible } from "@/lib/permissions";
 import { useLocale } from "@/i18n/LocaleContext";
 import {
@@ -34,7 +34,7 @@ export function Sidebar() {
   const { t } = useLocale();
   const { pathname } = useLocation();
   const boot = useBootstrap();
-  const readOnly = useReadOnly();
+  const settingsVisible = useCanViewSettings();
   const stats = useStats();
   const hasOpenIssues = (stats.data?.open_anomalies ?? 0) > 0;
 
@@ -77,7 +77,7 @@ export function Sidebar() {
           const collapsible = g.id !== "daily";
           const open = !collapsible || isOpen(g.id as CollapsibleGroup);
           const items = order[g.id].map((id) => g.items.find((i) => i.id === id)!).filter(Boolean)
-            .filter((i) => navItemVisible(i.id, readOnly));
+            .filter((i) => navItemVisible(i.id, settingsVisible));
           return (
             <section key={g.id} className={collapsible ? "border-t border-border py-3" : "mb-5"}>
               {collapsible ? (
@@ -218,7 +218,7 @@ export function MobileNav() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const current = entryForPath(pathname)?.entry;
-  const readOnly = useReadOnly();
+  const settingsVisible = useCanViewSettings();
   return (
     <select
       aria-label={t("nav.menu")}
@@ -229,7 +229,7 @@ export function MobileNav() {
       <option value="" disabled>{current ? t(current.labelKey) : t("nav.menu")}</option>
       {NAV_GROUPS.map((g) => (
         <optgroup key={g.id} label={t(g.labelKey)}>
-          {g.items.filter((i) => navItemVisible(i.id, readOnly))
+          {g.items.filter((i) => navItemVisible(i.id, settingsVisible))
             .map((i) => <option key={i.id} value={i.to}>{t(i.labelKey)}</option>)}
         </optgroup>
       ))}

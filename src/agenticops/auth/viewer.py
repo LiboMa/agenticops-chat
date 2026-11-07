@@ -1,8 +1,9 @@
 """Viewer accounts — a signed-in user without the write flag.
 
 A viewer may sign in, browse, chat and look after its own sign-in and preferences; every other state change is
-refused. The flag is the user's own row (`users.permissions`), never intersected with an API key, so API-key scope
-semantics stay as they were. Three places act on it:
+refused. A viewer that also holds `settings_read` may view the Settings page (read-only in the UI). The flags are
+the user's own row (`users.permissions`), never intersected with an API key, so API-key scope semantics stay as they
+were. Three places act on a viewer:
   * APIAuthMiddleware refuses every other POST/PUT/PATCH/DELETE (it runs before routing, so `viewer_may` matches the
     concrete request path, not a route template);
   * a viewer's chat turn runs a read-only agent (agents/main_agent.create_main_agent(read_only=True));
@@ -37,6 +38,14 @@ _ALLOWED: tuple[tuple[str, re.Pattern], ...] = tuple(
 def is_viewer(user: Any) -> bool:
     """A signed-in user whose own permissions lack "write"."""
     return user is not None and "write" not in (getattr(user, "permissions", None) or ())
+
+
+SETTINGS_READ = "settings_read"  # a viewer holding it may also VIEW the Settings page (still changes nothing)
+
+
+def can_view_settings(user: Any) -> bool:
+    """Writers and admins see Settings; a viewer only when its own permissions hold settings_read."""
+    return not is_viewer(user) or SETTINGS_READ in (getattr(user, "permissions", None) or ())
 
 
 def viewer_may(method: str, path: str) -> bool:
