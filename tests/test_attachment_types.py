@@ -90,16 +90,16 @@ def _name(filename, taken=None):
 
 
 def test_document_name_ascii():
-    assert re.fullmatch(r"att-[0-9a-f]{8}-report-pdf", _name("report.pdf"))
-    assert _name("report.pdf").startswith("att-1a2b3c4d-")
+    assert re.fullmatch(r"att-[0-9a-f]{12}-report-pdf", _name("report.pdf"))
+    assert _name("report.pdf").startswith("att-1a2b3c4d5e6f-")   # 48 bits of the id: no two files share a key
 
 
 def test_document_name_cjk_keeps_extension():
-    assert re.fullmatch(r"att-[0-9a-f]{8}-docx", _name("报告.docx"))
+    assert re.fullmatch(r"att-[0-9a-f]{12}-docx", _name("报告.docx"))
 
 
 def test_document_name_only_dots():
-    assert re.fullmatch(r"att-[0-9a-f]{8}(-[A-Za-z0-9]+)?", _name("...."))
+    assert re.fullmatch(r"att-[0-9a-f]{12}(-[A-Za-z0-9]+)?", _name("...."))
 
 
 def test_document_name_no_double_space():

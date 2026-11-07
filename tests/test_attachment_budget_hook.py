@@ -63,10 +63,44 @@ def test_history_documents_become_text():
 
 
 def test_registry_miss_placeholder():
-    msgs = [user({"text": "read"}, doc("att-ffffffff-gone-pdf")), assistant(), user({"text": "and now?"})]
+    """A history document with no text (a .doc, a scanned PDF, or one this process no longer remembers) stays native
+    while the request's 5-document budget allows — the newest first; an older one beyond it is a placeholder."""
+    msgs = []
+    for i in range(6):
+        msgs += [user({"text": f"doc {i}"}, doc(f"att-{i:012x}-gone-pdf")), assistant()]
+    msgs.append(user({"text": "and now?"}))
     enforce_history_budget(msgs, FULL, CFG)
     assert msgs[0]["content"][1] == {
-        "text": '[document "att-ffffffff-gone-pdf" from an earlier turn — content no longer available]'}
+        "text": '[document "att-000000000000-gone-pdf" from an earlier turn — content no longer available]'}
+    assert all("document" in msgs[2 * i]["content"][1] for i in range(1, 6))
+
+
+def test_history_textless_document_stays_native():
+    msgs = [user({"text": "read this scan"}, doc("att-ffffffffffff-scan-pdf")), assistant(),
+            user({"text": "what is on page 2?"})]
+    enforce_history_budget(msgs, FULL, CFG)
+    assert "document" in msgs[0]["content"][1]
+
+
+def test_history_attachment_text_has_a_request_wide_budget():
+    """Text-heavy turns pile up (Main has no conversation window): attachment text in history is kept newest first up
+    to turn_text_max_chars in all; older bodies become a one-line placeholder."""
+    cfg = ChatUploadSettings(turn_text_max_chars=100_000, history_text_max_chars=20_000)
+    body = lambda n, c: f'<attachment n="{n}" name="f{n}.log" type="log">\n' + c * 20_000 + "\n</attachment>"
+    msgs = []
+    for turn in range(10):
+        msgs += [user({"text": "\n".join(body(k, chr(97 + turn)) for k in range(3)) + "\n\nsummarize"}), assistant()]
+    msgs.append(user({"text": "and now?"}))
+    enforce_history_budget(msgs, FULL, cfg)
+    import re as _re
+    bodies = [m.group(1) for msg in msgs[:-1] for b in msg["content"]
+              for m in _re.finditer(r"<attachment[^>]*>\n(.*?)\n</attachment>", b.get("text", ""), _re.S)]
+    assert sum(len(x) for x in bodies if "omitted" not in x) <= 100_000
+    assert "j" * 20_000 in msgs[18]["content"][0]["text"]            # the newest turn is whole
+    assert "a" * 100 not in msgs[0]["content"][0]["text"]              # the oldest is gone
+    assert "omitted" in msgs[0]["content"][0]["text"] and msgs[0]["content"][0]["text"].endswith("summarize")
+    again = copy.deepcopy(msgs)
+    assert enforce_history_budget(again, FULL, cfg) == 0 and again == msgs
 
 
 def test_history_attachment_text_is_cut():
@@ -118,8 +152,8 @@ def test_tool_result_images_counted():
 
 
 def test_text_only_model_strips_all_media_from_history():
-    delivery.remember_history_text("att-22222222-spec-pdf", "spec text")
-    msgs = [user({"text": "a"}, img(), doc("att-22222222-spec-pdf")), assistant(),
+    delivery.remember_history_text("att-222222222222-spec-pdf", "spec text")
+    msgs = [user({"text": "a"}, img(), doc("att-222222222222-spec-pdf")), assistant(),
             user({"text": "b"}, img(b"z"))]
     enforce_history_budget(msgs, MediaCaps(images=False, documents=False), CFG)
     assert media(msgs) == (0, 0, 0)

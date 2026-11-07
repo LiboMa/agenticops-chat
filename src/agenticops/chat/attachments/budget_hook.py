@@ -7,8 +7,10 @@ request), and a session switched to a text-only model would fail on its first im
 place, so the Web chat, the CLI REPL and media inside tool results are all covered by one rule:
 
 - the current turn = the last user message that is not a tool result; everything before it is history;
-- a history document becomes its extracted text (delivery.history_text), or a placeholder when that is gone;
-- `<attachment>` text in history is cut to `history_text_max_chars`;
+- a history document becomes its extracted text (delivery.history_text); one without text (a .doc / .xls, a scanned
+  PDF, one this process no longer remembers) stays native within the document budget, else becomes a placeholder;
+- `<attachment>` text in history is cut to `history_text_max_chars` per file and `turn_text_max_chars` in all
+  (newest first; an older body becomes a one-line placeholder);
 - images: the current turn's first, then the newest; history images ≤ `history_images_max`; every image in the
   request ≤ 20; native bytes ≤ `native_media_max_mb`; documents in the request ≤ 5 (oldest become text first);
 - a model that cannot read images / documents gets none, current turn included.
@@ -26,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 IMAGE_PLACEHOLDER = "[an image from an earlier turn was omitted to stay within the model's limits]"
 IMAGE_UNSUPPORTED = "[an image was omitted: this model cannot see images]"
+TEXT_OMITTED = "[attachment text from an earlier turn omitted to stay within the model's limits]"
 _TRUNC = "\n[… truncated]"
 _ATTACHMENT = re.compile(r"(<attachment\b[^>]*>\n)(.*?)(\n</attachment>)", re.DOTALL)
 _CLOSING = re.compile(r"</(attachment)", re.IGNORECASE)
@@ -95,13 +98,28 @@ def _document_text(block: dict, cfg) -> str:
     return f'<attachment name="{name}" type="document">\n{safe}\n</attachment>'
 
 
-def _cut_attachment_text(text: str, cap: int) -> str:
-    def cut(m: re.Match) -> str:
+def _cut_attachment_text(text: str, cap: int, left: list[int]) -> str:
+    """Cut each body to `cap`; then spend `left[0]` (the history-wide allowance, walked newest first by the caller,
+    bodies here newest last) — a body that no longer fits becomes TEXT_OMITTED."""
+    matches = list(_ATTACHMENT.finditer(text))
+    out, pos = [], 0
+    for m in reversed(matches):
         body = m.group(2)
-        if len(body) <= cap or (body.endswith(_TRUNC) and len(body) == cap + len(_TRUNC)):
-            return m.group(0)
-        return m.group(1) + body[:cap] + _TRUNC + m.group(3)
-    return _ATTACHMENT.sub(cut, text)
+        if body != TEXT_OMITTED:
+            if len(body) > cap and not (body.endswith(_TRUNC) and len(body) == cap + len(_TRUNC)):
+                body = body[:cap] + _TRUNC
+            if len(body) > left[0]:
+                body = TEXT_OMITTED
+            else:
+                left[0] -= len(body)
+        out.append((m, body))
+    pieces = []
+    for m, body in reversed(out):
+        pieces.append(text[pos:m.start()])
+        pieces.append(m.group(1) + body + m.group(3))
+        pos = m.end()
+    pieces.append(text[pos:])
+    return "".join(pieces)
 
 
 def enforce_history_budget(messages: list[dict], caps, cfg) -> int:
@@ -109,25 +127,17 @@ def enforce_history_budget(messages: list[dict], caps, cfg) -> int:
     changed = 0
     current = _current_index(messages)
 
-    # history text: cut every <attachment> body of an earlier user message
-    for m in range(max(current, 0)):
-        if messages[m].get("role") != "user":
-            continue
-        for block in messages[m].get("content") or []:
-            if isinstance(block.get("text"), str) and "<attachment" in block["text"]:
-                cut = _cut_attachment_text(block["text"], cfg.history_text_max_chars)
-                if cut != block["text"]:
-                    block["text"] = cut
-                    changed += 1
-
     refs = list(_media(messages, current))
-    # what the model cannot read at all, and history documents (always text from the second turn on)
+    # what the model cannot read at all; history documents become their text when this process still has it — one
+    # without text stays native, within the budget below
+    from agenticops.chat.attachments.delivery import history_text
     keep: list[_Ref] = []
     for ref in refs:
         if ref.kind == "image" and not caps.images:
             ref.replace(IMAGE_UNSUPPORTED if ref.current else IMAGE_PLACEHOLDER)
             changed += 1
-        elif ref.kind == "document" and (not caps.documents or ref.msg < current):
+        elif ref.kind == "document" and (not caps.documents or (
+                ref.msg < current and history_text((ref.block.get("document") or {}).get("name") or "") is not None)):
             ref.replace(_document_text(ref.block, cfg))
             changed += 1
         else:
@@ -156,6 +166,18 @@ def enforce_history_budget(messages: list[dict], caps, cfg) -> int:
                 continue
             ref.replace(_document_text(ref.block, cfg))
         changed += 1
+
+    # history text: each <attachment> body ≤ history_text_max_chars, all of them ≤ turn_text_max_chars, newest first
+    allowance = [cfg.turn_text_max_chars]
+    for m in range(max(current, 0) - 1, -1, -1):
+        if messages[m].get("role") != "user":
+            continue
+        for block in reversed(messages[m].get("content") or []):
+            if isinstance(block.get("text"), str) and "<attachment" in block["text"]:
+                cut = _cut_attachment_text(block["text"], cfg.history_text_max_chars, allowance)
+                if cut != block["text"]:
+                    block["text"] = cut
+                    changed += 1
     return changed
 
 

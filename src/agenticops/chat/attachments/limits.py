@@ -18,11 +18,12 @@ _UNSAFE = re.compile(r"[^A-Za-z0-9()\[\]]+")
 
 
 def document_name(att_id: str, filename: str, taken: set[str]) -> str:
-    """`att-<8 hex of the id>-<safe name>`, unique within `taken` (the name is added to it).
+    """`att-<12 hex of the id>-<safe name>`, unique within `taken` (the name is added to it). The name also keys the
+    history text registry, so the id part is long enough (48 bits) that two files never share a key.
 
     Every run of characters outside the allowed set (spaces included) becomes one hyphen, so the result never has
     a double space or a dot; a name with nothing usable left is just `att-<id8>`."""
-    prefix = f"att-{(att_id or '').replace('-', '')[:8].lower() or '0' * 8}"
+    prefix = f"att-{(att_id or '').replace('-', '')[:12].lower() or '0' * 12}"
     safe = _UNSAFE.sub("-", filename or "").strip("-")
     base = f"{prefix}-{safe}" if safe else prefix
     base = base[:_NAME_MAX].rstrip("-")
