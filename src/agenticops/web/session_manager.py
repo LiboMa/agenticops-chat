@@ -5,7 +5,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from strands import Agent
 
@@ -121,7 +121,7 @@ def _add_history_attachment_blocks(db, session_row, row_data: list[dict]) -> Non
         msg["attachment_blocks"] = history_blocks(items, cfg) if items else []
 
 
-def _load_history_messages(session_id: str, max_turns: int) -> List[dict]:
+def _load_history_messages(session_id: str, max_turns: int, known_tools: Optional[set] = None) -> List[dict]:
     """Load recent messages from DB and convert to Strands Message format.
 
     Also loads session summaries (if any) and prepends them as context-prefix
@@ -130,6 +130,9 @@ def _load_history_messages(session_id: str, max_turns: int) -> List[dict]:
     Args:
         session_id: The string session UUID (ChatSession.session_id).
         max_turns: Number of conversation turns to load (each turn = user + assistant).
+        known_tools: The agent's own tool names. Given, a stored tool call of another name is not rebuilt — an
+            enhanced_task's inner steps (Claude Code's "Read File", "Terminal", stored before 2026-11-07) were never
+            this agent's calls, and rebuilt they become toolUse blocks Strands renames INVALID_TOOL_NAME.
 
     Returns:
         List of Strands-compatible message dicts with role/content keys.
@@ -199,6 +202,9 @@ def _load_history_messages(session_id: str, max_turns: int) -> List[dict]:
         if len(content) > _MAX_MSG_CHARS:
             content = content[:_MAX_MSG_CHARS] + "\n... (truncated)"
 
+        if known_tools is not None and isinstance(msg["tool_calls"], list):
+            msg["tool_calls"] = [tc for tc in msg["tool_calls"]
+                                 if isinstance(tc, dict) and (tc.get("name") or tc.get("tool_name")) in known_tools]
         # For assistant messages with tool_calls, try faithful reconstruction first
         if msg["role"] == "assistant" and msg["tool_calls"]:
             rebuilt = _rebuild_tool_messages(msg["tool_calls"])
@@ -506,7 +512,8 @@ class ChatSessionManager:
             agent = create_main_agent(model_id_override=session_model,
                                       effort_override=session_effort, rich_output=True, **viewer)
             agent._aiops_read_only = read_only
-            history = _load_history_messages(session_id, settings.session_history_depth)
+            history = _load_history_messages(session_id, settings.session_history_depth,
+                                             known_tools=set(getattr(agent, "tool_names", None) or ()) or None)
             if history:
                 agent.messages.extend(history)
                 logger.info("Restored %d messages for session %s", len(history), session_id)

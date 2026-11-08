@@ -182,3 +182,21 @@ def test_offsets_count_utf16_units_like_the_browser(env, monkeypatch):
     tc = _reply(pk).tool_calls[0]
     narration = "🔍 Found 🔴 api down. Checking logs:"
     assert tc["text_offset"] == len(narration.encode("utf-16-le")) // 2 == tc["text_end"]
+
+
+def test_a_thinking_summary_streams_and_is_not_stored(env, monkeypatch):
+    # 2026-11-08: Claude 4.7+ streams its thinking summary ("display": "summarized") — shown live, never stored
+    client, webapp = env
+    sid, pk = _session()
+
+    class _A:
+        async def stream_async(self, _c):
+            yield {"reasoningText": "Weighing the three services", "delta": {}, "reasoning": True}
+            yield {"reasoningText": " against the pool limit.", "delta": {}, "reasoning": True}
+            yield {"data": "C is the root cause."}
+    monkeypatch.setattr(webapp._chat_sessions, "get_or_create", lambda s: _A())
+    fs = frames(_send(client, sid).text)
+    assert [d for e, d in fs if e == "thinking"] == [{"text": "Weighing the three services"},
+                                                     {"text": " against the pool limit."}]
+    reply = _reply(pk)
+    assert reply.content == "C is the root cause." and "Weighing" not in json.dumps(reply.tool_calls or [])

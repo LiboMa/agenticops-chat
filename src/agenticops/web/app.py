@@ -4686,6 +4686,11 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
                         accumulated += _sse["data"]["token"]
                         yield {"event": "text", "data": json.dumps(_sse["data"])}
                     continue
+                # 2026-11-08: the thinking summary (Claude 4.7+, "display": "summarized") — shown live in the work log,
+                # never part of the reply nor stored
+                if ev.get("reasoning") and isinstance(ev.get("reasoningText"), str) and ev["reasoningText"]:
+                    yield {"event": "thinking", "data": json.dumps({"text": ev["reasoningText"]})}
+                    continue
                 # Text token
                 if "data" in ev and isinstance(ev["data"], str) and ev["data"]:
                     accumulated += ev["data"]

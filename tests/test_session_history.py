@@ -186,6 +186,34 @@ class TestLoadHistoryMessages:
         assert len(tool_results) == 1
         assert tool_results[0]["toolResult"]["content"] == [{"text": "(result from previous session)"}]
 
+    def test_steps_that_were_not_the_agents_tools_are_not_rebuilt(self):
+        """An enhanced_task's inner steps (Claude Code's "Read File", "Terminal"…) were stored as tool calls before
+        2026-11-07; rebuilt, they become toolUse blocks Strands renames INVALID_TOOL_NAME. Only the agent's tools."""
+        tool_calls = [{"name": "enhanced_task", "call_id": "t1"}, {"name": "Read File", "status": "done"},
+                      {"name": "Terminal", "status": "done"}]
+        msgs = [_make_msg("user", "research it", minutes_ago=2),
+                _make_msg("assistant", "Done", tool_calls=tool_calls, minutes_ago=1)]
+        with _patch_db(_make_session_row(), list(reversed(msgs))):
+            result = _load_history_messages("test-session", 20, known_tools={"enhanced_task", "sre_query"})
+        names = [b["toolUse"]["name"] for m in result for b in m["content"] if "toolUse" in b]
+        assert names == ["enhanced_task"]
+
+    def test_a_turn_whose_steps_were_all_unknown_is_plain_text(self):
+        msgs = [_make_msg("user", "research it", minutes_ago=2),
+                _make_msg("assistant", "Done", tool_calls=[{"name": "Read File"}], minutes_ago=1)]
+        with _patch_db(_make_session_row(), list(reversed(msgs))):
+            result = _load_history_messages("test-session", 20, known_tools={"sre_query"})
+        blocks = [b for m in result for b in m["content"]]
+        assert not any("toolUse" in b for b in blocks)
+        assert [b["text"] for b in blocks if "text" in b][-1] == "Done"   # no "[Used tools: …]" prefix
+
+    def test_without_known_tools_every_step_is_rebuilt_as_before(self):
+        msgs = [_make_msg("user", "x", minutes_ago=2),
+                _make_msg("assistant", "y", tool_calls=[{"name": "Read File"}], minutes_ago=1)]
+        with _patch_db(_make_session_row(), list(reversed(msgs))):
+            result = _load_history_messages("test-session", 20)
+        assert [b["toolUse"]["name"] for m in result for b in m["content"] if "toolUse" in b] == ["Read File"]
+
     def test_tool_calls_fallback_to_prefix_on_invalid_data(self):
         """When tool_calls data is invalid, falls back to [Used tools: ...] prefix."""
         # tool_calls with entries missing 'name' — _rebuild_tool_messages returns []
@@ -453,7 +481,7 @@ class TestGetOrCreateWithHistory:
             agent.messages = []
             return agent
 
-        def slow_load(sid, depth):
+        def slow_load(sid, depth, **_kw):   # 2026-11-08: also given known_tools
             creation_order.append(f"load-start-{sid}")
             barrier.wait()  # both threads must reach here
             creation_order.append(f"load-end-{sid}")
