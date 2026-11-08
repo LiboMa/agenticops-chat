@@ -1268,5 +1268,20 @@
   "settings.modelRuntime.resetConfirm": "等待上限恢复为 settings.yaml 中的默认值，此次修改会留审计记录。",
   "common.state.failed": "加载失败",
   "common.state.staleNotice": "刷新失败，正在显示上次成功获取的数据 · 数据截至 {time}",
-  "common.state.refetch": "重新获取"
+  "common.state.refetch": "重新获取",
+  "security.refresh": "刷新",
+  "security.cardCounts": "{reachable} 条可达路径 · {open} 未关闭",
+  "security.trend": "评分趋势（30 天）",
+  "security.categories": "分类评分",
+  "security.findings": "安全发现",
+  "security.recommendations": "建议",
+  "security.paths": "暴露路径",
+  "security.noSnapshot": "还没有安全快照。",
+  "security.noTrend": "最近 30 天没有评分记录。",
+  "security.noFindings": "没有安全发现。",
+  "security.noRecommendations": "没有待处理的建议。",
+  "security.noPaths": "没有暴露路径。",
+  "security.reach.reachable": "可达",
+  "security.reach.undetermined": "无法确定",
+  "security.reach.not_reachable": "不可达"
 }

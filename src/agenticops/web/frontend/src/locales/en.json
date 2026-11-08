@@ -1268,5 +1268,20 @@
   "settings.modelRuntime.resetConfirm": "The wait limit goes back to its default from settings.yaml. The change is audited.",
   "common.state.failed": "Couldn't load",
   "common.state.staleNotice": "Refresh failed — showing the last data fetched · as of {time}",
-  "common.state.refetch": "Fetch again"
+  "common.state.refetch": "Fetch again",
+  "security.refresh": "Refresh",
+  "security.cardCounts": "{reachable} reachable paths · {open} open",
+  "security.trend": "Score trend (30 days)",
+  "security.categories": "Category scores",
+  "security.findings": "Findings",
+  "security.recommendations": "Recommendations",
+  "security.paths": "Exposure paths",
+  "security.noSnapshot": "No security snapshot yet.",
+  "security.noTrend": "No scores in the last 30 days.",
+  "security.noFindings": "No security findings.",
+  "security.noRecommendations": "No open recommendations.",
+  "security.noPaths": "No exposure paths.",
+  "security.reach.reachable": "Reachable",
+  "security.reach.undetermined": "Undetermined",
+  "security.reach.not_reachable": "Not reachable"
 }
