@@ -454,37 +454,48 @@ class TraceIdFilter(logging.Filter):
 _trace_filter = TraceIdFilter()
 
 
-def _setup_service_logging() -> None:
-    """Configure file-based logging for backend + frontend (access) logs."""
+_SERVICE_LOG_HANDLERS: dict[str, logging.Handler] = {}   # by file: installing twice adds nothing (2026-11-08)
+
+
+def _service_log_handler(path: Path, level: int, fmt: logging.Formatter) -> logging.Handler:
     import logging.handlers
 
-    from agenticops.config import PROJECT_ROOT
-    log_dir = PROJECT_ROOT / "logs"
-    log_dir.mkdir(exist_ok=True)
+    handler = _SERVICE_LOG_HANDLERS.get(str(path))
+    if handler is None:
+        handler = logging.handlers.RotatingFileHandler(path, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8")
+        handler.setLevel(level)
+        handler.setFormatter(fmt)
+        handler.addFilter(_trace_filter)
+        _SERVICE_LOG_HANDLERS[str(path)] = handler
+    return handler
+
+
+def _setup_service_logging() -> None:
+    """Configure file-based logging for backend + frontend (access) logs.
+
+    The directory is `settings.log_dir` (`<project>/logs`; the test suite sets AIOPS_LOG_DIR to a temp dir, so a test
+    that starts the lifespan never writes, or rotates away, the running service's logs — 2026-11-08). Idempotent: a
+    logger never gets the same file's handler twice.
+    """
+    log_dir = Path(settings.log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
 
     fmt = logging.Formatter("%(asctime)s %(name)s %(levelname)s [%(trace_id)s] %(message)s")
 
     # backend.log — application errors, startup, agent activity
-    backend_handler = logging.handlers.RotatingFileHandler(
-        log_dir / "backend.log", maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8",
-    )
-    backend_handler.setLevel(logging.DEBUG)
-    backend_handler.setFormatter(fmt)
-    backend_handler.addFilter(_trace_filter)
+    backend_handler = _service_log_handler(log_dir / "backend.log", logging.DEBUG, fmt)
     for name in ("agenticops", "uvicorn.error", "uvicorn"):
         _logger = logging.getLogger(name)
-        _logger.addHandler(backend_handler)
+        if backend_handler not in _logger.handlers:
+            _logger.addHandler(backend_handler)
         if _logger.level == logging.NOTSET:
             _logger.setLevel(logging.DEBUG)
 
     # frontend.log — HTTP access logs (asset + API requests)
-    access_handler = logging.handlers.RotatingFileHandler(
-        log_dir / "frontend.log", maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8",
-    )
-    access_handler.setLevel(logging.INFO)
-    access_handler.setFormatter(fmt)
-    access_handler.addFilter(_trace_filter)
-    logging.getLogger("uvicorn.access").addHandler(access_handler)
+    access_handler = _service_log_handler(log_dir / "frontend.log", logging.INFO, fmt)
+    access_logger = logging.getLogger("uvicorn.access")
+    if access_handler not in access_logger.handlers:
+        access_logger.addHandler(access_handler)
 
 
 # ============================================================================

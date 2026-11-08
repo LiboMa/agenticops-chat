@@ -301,6 +301,11 @@ class Settings(BaseSettings):
         default=PROJECT_ROOT / "data",
         description="Directory for data storage",
     )
+    log_dir: Path = Field(
+        default=PROJECT_ROOT / "logs",
+        description="Directory of the service's backend.log / frontend.log (a bootstrap path: AIOPS_LOG_DIR; the "
+                    "test suite points it at a temp dir so it never writes the running service's logs)",
+    )
     reports_dir: Path = Field(
         default=PROJECT_ROOT / "data" / "reports",
         description="Directory for generated reports",

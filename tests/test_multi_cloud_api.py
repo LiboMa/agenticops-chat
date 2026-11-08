@@ -8,10 +8,16 @@ from agenticops.web.app import app
 
 
 @pytest.fixture
-def client(tmp_path):
+def client(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     engine = create_engine(f"sqlite:///{db_path}")
     init_db(engine)
+    # The account routes live in web/routers/accounts and open their own sessions: the process-wide engine must be this
+    # test's database too, never the one AIOPS_DATABASE_URL names (2026-11-08: rows piled up there across runs → 409)
+    import agenticops.models as models_mod
+    from agenticops.config import settings as real_settings
+    monkeypatch.setattr(models_mod, "_engine", None)
+    monkeypatch.setattr(real_settings, "database_url", f"sqlite:///{db_path}")
     # Patch get_db_session to use test engine
     from agenticops.models import Base
     from sqlalchemy.orm import Session
@@ -42,6 +48,7 @@ def client(tmp_path):
         mock_settings.executor_poll_interval = 60
         mock_settings.event_loop_executor_threads = 8
         mock_settings.data_dir = tmp_path  # the instance lock file; a MagicMock path wrote MagicMock/ in the repo
+        mock_settings.log_dir = tmp_path / "logs"  # the lifespan's log handlers — never the running service's logs/
         with TestClient(app) as c:
             yield c
 

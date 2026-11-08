@@ -6,6 +6,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# Imported before any _patch_db: _load_history_messages imports it lazily, and a module first imported inside that window
+# keeps the fake get_db_session for the rest of the process (2026-11-08 — every later chat test failed on FakeQuery)
+import agenticops.services.chat_dispatch  # noqa: F401
 from agenticops.web.session_manager import _load_history_messages, _MAX_MSG_CHARS
 
 
@@ -523,3 +526,16 @@ class TestGetOrCreateWithHistory:
         mgr.remove("sess-z")
         assert "sess-z" not in mgr._agents
         assert "sess-z" not in mgr._session_locks
+
+
+def test_no_module_keeps_the_fake_session_maker():
+    """_patch_db replaces agenticops.models.get_db_session for one call. A module first imported inside that window
+    (chat_dispatch, imported lazily by _load_history_messages) must not keep the fake for the rest of the process —
+    every later chat test failed on FakeQuery (2026-11-08). The modules it pulls in are imported at the top of this
+    file, so they bind the real one first."""
+    import agenticops.models as models
+    msgs = [_make_msg("user", "q", minutes_ago=2), _make_msg("assistant", "a", minutes_ago=1)]
+    with _patch_db(_make_session_row(), list(reversed(msgs))):   # past the early return: the lazy imports run
+        _load_history_messages("test-session", 20)
+    from agenticops.services import chat_dispatch
+    assert chat_dispatch.get_db_session is models.get_db_session

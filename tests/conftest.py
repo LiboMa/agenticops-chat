@@ -2,10 +2,17 @@
 
 import os
 import subprocess
+import tempfile
 import threading
 import warnings
 
 import pytest
+
+# The service's log handlers write under settings.log_dir (web/app._setup_service_logging). A test that starts the app's
+# lifespan would otherwise attach them to the RUNNING service's logs/backend.log and rotate its history away with DEBUG
+# test output (2026-11-08: five rotations in one full run). Set before anything reads the settings; unconditional, so a
+# developer's shell value can never point the suite back at the real logs.
+os.environ["AIOPS_LOG_DIR"] = tempfile.mkdtemp(prefix="aiops-test-logs-")
 
 
 def _block_live_bedrock_runtime() -> None:
