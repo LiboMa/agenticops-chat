@@ -484,6 +484,16 @@ export interface SkillImprovementRecord {
 
 export type ScheduleType = "recurring" | "one_time";
 
+/** A schedule's newest run (MVP-2.8.0 S1, GET /api/schedules) */
+export interface ScheduleLastExecution {
+  id: number;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  duration_ms: number | null;
+  error_summary: string | null;
+}
+
 export interface Schedule {
   id: number;
   name: string;
@@ -497,6 +507,7 @@ export interface Schedule {
   next_run_at: string | null;
   created_at: string;
   updated_at: string;
+  last_execution?: ScheduleLastExecution | null;
 }
 
 export interface ScheduleCreate {

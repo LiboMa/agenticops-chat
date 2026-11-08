@@ -1,12 +1,15 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Badge } from "@/components/ui/Badge";
 import { Switch } from "@/components/ui/Switch";
-import { formatShortDate } from "@/lib/formatDate";
+import { formatElapsed, formatShortDate } from "@/lib/formatDate";
+import { StatusText, type StatusTone } from "@/components/ui/StatusText";
+import { cronSummary, runState, type RunKind } from "@/lib/scheduleRows";
+import { useLocale } from "@/i18n/LocaleContext";
 import {
   useSchedules,
   useCreateSchedule,
@@ -413,71 +416,106 @@ function DeleteModal({
 /*  Main page                                                          */
 /* ------------------------------------------------------------------ */
 
-const columns: Column<Schedule>[] = [
-  {
-    key: "name",
-    header: "Name",
-    sortable: true,
-    sortValue: (r) => r.name,
-    render: (r) => <span className="font-medium text-foreground">{r.name}</span>,
-  },
-  {
-    key: "pipeline_name",
-    header: "Pipeline",
-    render: (r) => {
-      const meta = PIPELINE_META[r.pipeline_name];
-      return <Badge className={meta?.badge ?? "bg-blue-100 text-blue-700"}>{meta?.label ?? r.pipeline_name}</Badge>;
+const RUN_TONE: Record<RunKind, StatusTone> = {
+  running: "info", retrying: "warn", succeeded: "ok", failed: "danger", never_run: "neutral", other: "neutral",
+};
+const NEXT_KEY: Record<RunKind, string> = {
+  running: "schedules.next.progress", retrying: "schedules.next.progress", succeeded: "schedules.next.result",
+  failed: "schedules.next.error", never_run: "schedules.next.view", other: "schedules.next.view",
+};
+
+/** MVP-2.8.0 S1: the configuration (enabled) and the latest REAL run are two separate columns — a schedule never
+ *  shows "Running" because its switch is on. */
+function scheduleColumns(t: (k: string) => string): Column<Schedule>[] {
+  return [
+    {
+      key: "name",
+      header: t("schedules.col.task"),
+      sortable: true,
+      sortValue: (r) => r.name,
+      render: (r) => {
+        const meta = PIPELINE_META[r.pipeline_name];
+        const summary = cronSummary(r.cron_expression, t);
+        return (
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-foreground">{r.name}</span>
+              <Badge className={meta?.badge ?? "bg-blue-100 text-blue-700"}>{meta?.label ?? r.pipeline_name}</Badge>
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {summary && <>{summary} · </>}
+              {r.cron_expression !== "@once" && <span className="font-mono">{r.cron_expression}</span>}
+            </div>
+          </div>
+        );
+      },
     },
-  },
-  {
-    key: "cron_expression",
-    header: "Type / Cron",
-    render: (r) =>
-      r.cron_expression === "@once" ? (
-        <Badge className={r.is_enabled ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"}>
-          {r.is_enabled ? "Running" : "Completed"}
-        </Badge>
-      ) : (
-        <span className="font-mono text-sm">{r.cron_expression}</span>
+    {
+      key: "is_enabled",
+      header: t("schedules.col.config"),
+      render: (r) => (
+        <StatusText tone={r.is_enabled ? "ok" : "neutral"} className="text-xs">
+          {t(r.is_enabled ? "schedules.enabled" : "schedules.disabled")}
+        </StatusText>
       ),
-  },
-  {
-    key: "is_enabled",
-    header: "Enabled",
-    render: (r) =>
-      r.is_enabled ? (
-        <Badge className="bg-green-100 text-green-700">Enabled</Badge>
-      ) : (
-        <Badge className="bg-secondary text-muted-foreground">Disabled</Badge>
+    },
+    {
+      key: "last_execution",
+      header: t("schedules.col.lastRun"),
+      render: (r) => {
+        const run = runState(r.last_execution);
+        const note = run.kind === "failed" ? r.last_execution?.error_summary
+          : run.kind === "succeeded" ? t("schedules.run.doneNote")
+          : run.kind === "never_run" ? t("schedules.run.neverNote") : null;
+        return (
+          <div className="min-w-0 max-w-xs">
+            <StatusText tone={RUN_TONE[run.kind]} className="text-xs">
+              {run.kind === "other" ? run.raw : t(`schedules.run.${run.kind}`)}
+            </StatusText>
+            {note && <div className="mt-0.5 truncate text-xs text-muted-foreground" title={note}>{note}</div>}
+          </div>
+        );
+      },
+    },
+    {
+      key: "times",
+      header: t("schedules.col.times"),
+      render: (r) => {
+        const e = r.last_execution;
+        const running = e && !e.completed_at;
+        return (
+          <div className="text-xs text-muted-foreground space-y-0.5">
+            {e && running && <div>{t("schedules.time.started").replace("{at}", formatShortDate(e.started_at))}</div>}
+            {e && !running && (
+              <div>
+                {t("schedules.time.finished").replace("{at}", formatShortDate(e.completed_at))}
+                {typeof e.duration_ms === "number" && <> · {t("schedules.time.took").replace("{d}", formatElapsed(e.duration_ms))}</>}
+              </div>
+            )}
+            {r.is_enabled && r.next_run_at && <div>{t("schedules.time.next").replace("{at}", formatShortDate(r.next_run_at))}</div>}
+            {!e && !(r.is_enabled && r.next_run_at) && <div>—</div>}
+          </div>
+        );
+      },
+    },
+    {
+      key: "next_step",
+      header: t("schedules.col.next"),
+      render: (r) => (
+        <Link to={`/app/schedules/${r.id}`} onClick={(ev) => ev.stopPropagation()} className="text-xs font-medium text-primary hover:underline">
+          {t(NEXT_KEY[runState(r.last_execution).kind])}
+        </Link>
       ),
-  },
-  {
-    key: "last_run_at",
-    header: "Last Run",
-    sortable: true,
-    sortValue: (r) => r.last_run_at ?? "",
-    render: (r) => (
-      <span className="text-sm text-muted-foreground">
-        {r.last_run_at ? formatShortDate(r.last_run_at) : "Never"}
-      </span>
-    ),
-  },
-  {
-    key: "next_run_at",
-    header: "Next Run",
-    render: (r) => (
-      <span className="text-sm text-muted-foreground">
-        {r.next_run_at ? formatShortDate(r.next_run_at) : "-"}
-      </span>
-    ),
-  },
-];
+    },
+  ];
+}
 
 type TabFilter = "all" | "recurring" | "one_shot";
 
 const PAGE_SIZE = 10;
 
 export default function Schedules() {
+  const { t } = useLocale();
   const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const navigate = useNavigate();
   const { data: schedules, isLoading, error } = useSchedules();
@@ -512,26 +550,27 @@ export default function Schedules() {
       <Card>
         <CardHeader>
           <div className="flex items-center gap-4">
-            <h2 className="text-lg font-semibold text-foreground">Schedules</h2>
+            <h2 className="text-lg font-semibold text-foreground">{t("schedules.title")}</h2>
             <div className="flex gap-1 bg-secondary rounded-lg p-0.5">
-              {(["all", "recurring", "one_shot"] as TabFilter[]).map((t) => (
+              {(["all", "recurring", "one_shot"] as TabFilter[]).map((tb) => (
                 <button
-                  key={t}
-                  onClick={() => { setTab(t); setPage(0); }}
+                  key={tb}
+                  onClick={() => { setTab(tb); setPage(0); }}
                   className={`px-3 py-1 text-xs rounded-md transition-colors ${
-                    tab === t
+                    tab === tb
                       ? "bg-background text-foreground shadow-sm font-medium"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  {t === "all" ? `All (${schedules?.length ?? 0})` : t === "recurring" ? "Recurring" : "One-shot"}
+                  {tb === "all" ? t("schedules.tab.all").replace("{n}", String(schedules?.length ?? 0))
+                    : t(tb === "recurring" ? "schedules.tab.recurring" : "schedules.tab.oneShot")}
                 </button>
               ))}
             </div>
             <input
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(0); }}
-              placeholder="Search..."
+              placeholder={t("schedules.search")}
               className="px-3 py-1.5 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary-500 w-40"
             />
           </div>
@@ -543,7 +582,7 @@ export default function Schedules() {
               }}
               className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500"
             >
-              New Schedule
+              {t("schedules.new")}
             </button>
           )}
         </CardHeader>
@@ -554,7 +593,7 @@ export default function Schedules() {
               header: "#",
               render: (r) => <span className="text-xs text-muted-foreground font-mono">{page * PAGE_SIZE + paginated.indexOf(r) + 1}</span>,
             },
-            ...columns,
+            ...scheduleColumns(t),
             {
               key: "actions",
               header: "",
@@ -569,7 +608,7 @@ export default function Schedules() {
                       }}
                       className="text-xs text-primary-600 hover:underline"
                     >
-                      Edit
+                      {t("common.edit")}
                     </button>
                   )}
                   {!readOnly && (
@@ -580,7 +619,7 @@ export default function Schedules() {
                       }}
                       className="text-xs text-red-600 hover:underline"
                     >
-                      Delete
+                      {t("common.delete")}
                     </button>
                   )}
                 </div>

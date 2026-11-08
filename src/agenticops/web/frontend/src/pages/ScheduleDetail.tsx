@@ -6,10 +6,20 @@ import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { formatFullDate } from "@/lib/formatDate";
+import { StatusText, type StatusTone } from "@/components/ui/StatusText";
+import { runState, type RunKind } from "@/lib/scheduleRows";
+import { useLocale } from "@/i18n/LocaleContext";
 import { PIPELINE_META } from "./Schedules";
 import { useReadOnly } from "@/hooks/useBootstrap";
 
+const POLL_MS = 3000;
+const SUBMITTED_MAX_MS = 60_000;
+const RUN_TONE: Record<RunKind, StatusTone> = {
+  running: "info", retrying: "warn", succeeded: "ok", failed: "danger", never_run: "neutral", other: "neutral",
+};
+
 export default function ScheduleDetail() {
+  const { t } = useLocale();
   const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const { id } = useParams<{ id: string }>();
   const scheduleId = Number(id);
@@ -18,16 +28,26 @@ export default function ScheduleDetail() {
   const executions = useScheduleExecutions(scheduleId);
   const runMut = useRunSchedule();
   const [expandedExec, setExpandedExec] = useState<number | null>(null);
-  const [runSuccess, setRunSuccess] = useState(false);
+  // MVP-2.8.0 S1: after «Run now» the page says «submitted» until a run newer than the one before appears (≤ 60 s),
+  // and keeps polling while the newest run is still running — the state shown is always a real run's.
+  const [submitted, setSubmitted] = useState<{ after: number; at: number } | null>(null);
+  const newest = executions.data?.[0];
+  const newestLive = !!newest && (newest.status === "running" || newest.status === "retrying");
 
-  // Auto-clear success state after 3s and refresh executions
   useEffect(() => {
-    if (runSuccess) {
-      executions.refetch();
-      const t = setTimeout(() => setRunSuccess(false), 3000);
-      return () => clearTimeout(t);
-    }
-  }, [runSuccess]);
+    if (!submitted) return;
+    if ((newest?.id ?? 0) > submitted.after || Date.now() - submitted.at > SUBMITTED_MAX_MS) setSubmitted(null);
+  }, [submitted, newest?.id]);
+
+  useEffect(() => {
+    if (!submitted && !newestLive) return;
+    const timer = setInterval(() => {
+      void executions.refetch();
+      if (submitted && Date.now() - submitted.at > SUBMITTED_MAX_MS) setSubmitted(null);
+    }, POLL_MS);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submitted, newestLive]);
 
   if (schedule.isLoading) return <Spinner label="Loading schedule..." />;
   if (schedule.error)
@@ -76,23 +96,18 @@ export default function ScheduleDetail() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              {runSuccess && (
-                <span className="text-sm text-primary-600 font-medium flex items-center gap-1 duo-fade">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  Triggered
-                </span>
+              {submitted && (
+                <StatusText tone="info" className="text-sm">{t("schedules.run.submitted")}</StatusText>
               )}
               {runMut.isError && (
-                <span className="text-sm text-destructive">Failed</span>
+                <StatusText tone="danger" className="text-sm">{t("schedules.run.submitFailed")}</StatusText>
               )}
               {!readOnly && (
                 <button
                   onClick={() => {
-                    setRunSuccess(false);
+                    const after = executions.data?.[0]?.id ?? 0;
                     runMut.mutate(scheduleId, {
-                      onSuccess: () => setRunSuccess(true),
+                      onSuccess: () => { setSubmitted({ after, at: Date.now() }); void executions.refetch(); },
                     });
                   }}
                   disabled={runMut.isPending}
@@ -104,7 +119,7 @@ export default function ScheduleDetail() {
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                     </svg>
                   )}
-                  {runMut.isPending ? "Running..." : "Run Now"}
+                  {t("schedules.runNow")}
                 </button>
               )}
             </div>
@@ -278,19 +293,14 @@ export default function ScheduleDetail() {
                       <tr key={ex.id} className="hover:bg-secondary align-top">
                         <td className="px-4 py-2 text-sm font-mono">#{ex.id}</td>
                         <td className="px-4 py-2">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                              ex.status === "completed" || ex.status === "succeeded"
-                                ? "bg-green-100 text-green-800"
-                                : ex.status === "failed"
-                                  ? "bg-red-100 text-red-800"
-                                  : ex.status === "running"
-                                    ? "bg-blue-100 text-blue-800"
-                                    : "bg-secondary text-foreground"
-                            }`}
-                          >
-                            {ex.status}
-                          </span>
+                          {(() => {
+                            const run = runState(ex);
+                            return (
+                              <StatusText tone={RUN_TONE[run.kind]} className="text-xs">
+                                {run.kind === "other" ? run.raw : t(`schedules.run.${run.kind}`)}
+                              </StatusText>
+                            );
+                          })()}
                         </td>
                         <td className="px-4 py-2 text-sm text-muted-foreground">
                           {formatFullDate(ex.started_at)}

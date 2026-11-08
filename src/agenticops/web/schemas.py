@@ -548,6 +548,16 @@ class ScheduleUpdate(BaseModel):
     config: Optional[dict] = None
 
 
+class ScheduleLastExecution(BaseModel):
+    """A schedule's newest run (MVP-2.8.0 S1) — the real run state, never inferred from is_enabled."""
+    id: int
+    status: str
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    duration_ms: Optional[int] = None
+    error_summary: Optional[str] = None
+
+
 class ScheduleResponse(BaseModel):
     """Schema for schedule response."""
     id: int
@@ -563,6 +573,7 @@ class ScheduleResponse(BaseModel):
     next_run_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
+    last_execution: Optional[ScheduleLastExecution] = None
 
     model_config = ConfigDict(from_attributes=True)
 
