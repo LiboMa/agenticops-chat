@@ -19,6 +19,7 @@
 | 受保护值按表格行比较 | 主人 10-08 决定（见下文「2.7.0 的跟进项」第 1 条） | **已做（10-09）**：逐行、行内逐单元格 |
 | 2.7.0 E2E 观察 | 第 1 条（SRE 越界）、第 2 条（回滚复现故障）、第 3 条（命令分类器 + 自动批准下限）、第 4 条（RCA 模型 id）、第 5 条（执行时长）**已修** | 已修（10-09） |
 | ChatGPT 风格的 Web Chat | 工作过程块（步骤、耗时、结果、过程话）+ 回答里的图表 / 流程图 + 输入框内附件 + 移动端（见下文「ChatGPT 风格的 Web Chat」） | **已做（11-07），E2E 通过，待主人验收** |
+| 模型流读超时 + 思考摘要 | 修复「分析 HTML」一连三轮回复失败：读超时进 DB 配置、5.x 思考摘要、两个新错误码（见下文「模型流读超时与思考摘要」） | **已做（11-08）** |
 | v2.7.0 之后 main 上的交付 | 只读账户、Strands 1.64、模型配置一致性、聊天附件、开发机 Node 22 等（PR #28–#37，见「随 rebase 带入的 main 交付」） | **已在 main，11-07 随 rebase 带入** |
 
 ---
@@ -243,6 +244,77 @@
   - 流程图加载外站图片；
   - 生成中拖入文件导致离开页面。
 - 10 个 Minor 记录在案，见报告。
+
+## 模型流读超时与思考摘要（2026-11-08）
+
+### 起因
+
+一个会话（Fable 5.1，effort max）分析一份 39 KB 的 HTML 时，一连三轮都报 `ReadTimeoutError`，界面只显示「回复失败」。
+
+### 实测
+
+真实模型，约 3.3 美元：
+
+| 实测 | 结果 |
+|---|---|
+| 原样重放第 1 轮（读超时放宽到 900 s） | 首字节在 **271.9 s** 才到；停止原因 **`max_tokens`，正文 0 字** |
+| 同一会话重放「hi」 | 22 s 出首字节，32 s 完成 |
+| ConverseStream 加 `thinking.display: "summarized"` | Opus 5.5、Sonnet 5.5、Fable 5.1 都接受，并流回思考摘要 |
+| Fable 5.1 + effort max + summarized | 5.9 s 起持续流回摘要（1613 段），**最大间隔 7.3 s**，用掉 14845 / 16000 输出 token |
+
+三个缺陷叠在一起：
+
+1. **读超时太短。** 所有 agent 的 Bedrock 连接都用 Strands 默认的 120 s 读超时，而 4.7 及以后的模型思考时默认不返回内容，连接上一个字节都没有。
+2. **effort max 下输出上限不够。** 选 effort max 时，Main 的 16384 输出 token 被思考用完了。
+3. **失败原因看不出来。** 两种失败都归为 `internal`。
+
+### 修复
+
+- **思考摘要（`preamble.thinking_fields_for_budget`）：**
+  - Claude ≥ 4.7 的自适应思考请求带上 `"display": "summarized"`，思考期间持续有数据流回；计费不变。
+  - 4.6 默认就是 summarized，不改。
+  - 每个开着思考的 agent（Main、RCA）都受益。
+- **读超时进 DB 配置：**
+  - `settings.yaml` 新增 `model_runtime.stream_read_timeout_seconds`，默认 600，范围 60–3600。
+  - 管理员的覆盖值存在 `runtime_settings` 的 key `model_runtime` 下（`agents/model_runtime`，做法和 `chat_upload` 一样）。
+  - `bedrock_model_kwargs` 给每个模型都带上 `boto_client_config`；报告 agent 原来单独设的 300 s 去掉了。
+  - 接口：`GET` / `PATCH` / `DELETE /api/settings/model-runtime`，只有管理员能改，留审计；修改后清空聊天 agent 缓存，下一轮按新值。
+  - 界面：Settings → 通用 →「模型连接」卡片。
+- **两个新错误码（`chat/stream_errors`）：**
+  - `timeout`：读超时。界面提示降低 effort 或换模型，管理员也可以在 Settings → 通用 → 模型连接 调高等待上限。
+  - `max_tokens`：Strands 的 `MaxTokensReachedException`。界面提示到 Settings → 通用 → Agent 模型 调高 Main 的 Max tokens，或降低 effort。
+  - 存库的失败消息也按这两个码显示对应文案。
+- **思考摘要实时显示（主人决定：不存库）：**
+  - SSE 新帧 `thinking {text}`。
+  - 生成中，「思考中…」后面和工作过程块的最后一行显示「正在思考 · <最新一句>」。
+  - 回答完成后不保留。
+- **历史重建（`_load_history_messages(known_tools=)`）：**
+  - 只重建 agent 自己有的工具调用。
+  - 11-07 之前存下的 Claude Code 内部步骤（`Read File`、`Terminal`）不再被重建成 toolUse；以前它们会被 Strands 改名为 `INVALID_TOOL_NAME` 并打警告。
+
+### 可达面
+
+| 面 | 本次 |
+|---|---|
+| CLI | 做（无界面）：同一个构建入口，CLI 的 agent 也拿到读超时和思考摘要 |
+| Web API | 做：`/api/settings/model-runtime`；SSE `thinking` 帧；`error` 帧的 `timeout`、`max_tokens` 两个码 |
+| Web UI | 做：「模型连接」卡片；两条错误文案；实时的思考摘要行 |
+| Agent tool | 非目标 |
+| Schedule | 非目标（定时任务跑的 agent 经同一个构建入口拿到新超时；无界面） |
+| Notification | 非目标 |
+
+### 验证
+
+- 后端全量 7390 passed（失败的只有已知的环境用例，以及一个单独跑能通过的偶发测试）；前端 780 个测试通过。
+- 真实 E2E 全部通过，见 [`MVP-2.7.1-CHAT-E2E-REPORT.md`](MVP-2.7.1-CHAT-E2E-REPORT.md)「追加：模型流读超时与思考摘要」：
+  - 思考期间帧与帧之间最大间隔 5.9 s；
+  - 输出上限用完时，界面给出新的提示；
+  - Max tokens 调到 64000 后，同样重的请求 139 s 完成；
+  - 历史重建不再出现 INVALID_TOOL_NAME。
+
+### 配置方向（主人 11-08 决定）
+
+`settings.yaml` 逐步交给 DB 接管：非核心或限额类配置逐步迁进 DB 配置表；yaml 只保留默认值和启动配置。这次只迁了新增的读超时；各 agent 的 model / max tokens / 窗口留到之后单独迁。
 
 ## 随 rebase 带入的 main 交付（2026-11-07）
 

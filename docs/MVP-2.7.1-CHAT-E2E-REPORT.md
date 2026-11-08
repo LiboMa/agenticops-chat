@@ -115,6 +115,28 @@ E2E 过程中发现 6 个问题，都已修复，每个都先写了失败的测�
 - 没有去掉 front-matter 配置；
 - 附件的 ✕ 只有 20 px。
 
+## 追加：模型流读超时与思考摘要（2026-11-08，`743a434..de9b86f`）
+
+修复的是一个会话一连三轮「回复失败」：它分析 HTML 时用的是 Fable 5.1 + effort max。根因与实测数据见 `MVP-2.7.1-RELEASE.md`「模型流读超时与思考摘要」。验证时先重启了本地服务，用一次性的管理员账户 `e2e-admin3`，用完已停用。
+
+| 场景 | 结果 | 证据 |
+|---|---|---|
+| 「模型连接」卡片 | PASS | Settings → 通用 里把等待上限从 600 改为 900 并保存：<br>• 卡片显示「已改」标记，以及修改人和时间；<br>• `audit_logs` 记一行 `update`（600 → 900）；<br>• 「恢复默认」后再记一行 `reset`，值回到 600。<br>![](images/chat-e2e-2026-11-07/model-runtime-card.png) |
+| 思考摘要不断流 | PASS | 用 `curl` 抓同一轮的原始 SSE（Fable 5.1、effort max、Max tokens 16384，请模型列出八皇后的全部 92 个解）：<br>• 共 695 个 `thinking` 帧，第一个在 33.7 s（主要是约 28 s 的 agent 构建）；<br>• 之后帧与帧之间**最大间隔 5.9 s**；<br>• 读超时从未触发 |
+| 用完输出上限 | PASS | 同一轮在 208.7 s 结束，收到 `error {code: "max_tokens"}`。存库的失败消息显示：「模型在思考时用完了输出上限（Max tokens）……可以在 Settings → 通用 → Agent 模型 调高 Main 的 Max tokens，或降低 effort。」<br>![](images/chat-e2e-2026-11-07/max-tokens-stored.png) |
+| 调高 Max tokens 后完整回答 | PASS | Main 的 Max tokens 调到 64000 后，发了一个同样需要长时间推敲的请求（季度故障切换演练计划，Fable 5.1 max）：<br>• 139 s 完成，输出 6528 token；<br>• 生成过程中显示实时的「思考中… …Application Recovery Controller, and Well-Architected reliability pillar guidance…」，过长时从左边截断。<br>![](images/chat-e2e-2026-11-07/thinking-live.png) |
+| 历史重建 | PASS | 造了一个会话，旧回复的 `tool_calls` 里有 `Read File`、`Load skill`、`Terminal`，然后发「hi」：<br>• 日志里是 `Restored 3 messages`，`invalid tool name pattern` 为 0 条；<br>• 测试会话已删除 |
+| 收尾 | — | • Main 的 Max tokens 恢复默认（0 = 16384）；<br>• 本机 `config/settings.yaml` 按备份逐字节还原（sha1 `7872e30…` 一致）；<br>• 「模型连接」已恢复默认 |
+
+本轮闸门：
+- 后端全量：7390 passed · 99 skipped · 5 failed。其中 4 个是已知的环境问题；另 1 个是 `test_change_intake[from-the-future]`，单独跑 30/30 通过，与本次改动无关，属于全量运行时的偶发失败。
+- 前端：vitest 71 个文件 / 780 个测试，`tsc` 0，构建通过。
+- 真实模型花费：诊断（两次重放 + 三组探测）约 3.3 美元，E2E 约 2.5 美元。
+
+本轮发现，未修复：
+- **测试覆盖服务日志。** 全量测试会把正在运行的服务的 `logs/backend.log` 覆盖成测试输出。这是老问题，导致 11-08 早上那段服务日志丢失。
+- **测试相互污染。** `test_session_history` 的数据库 mock 会污染之后才首次 import `web.app` 的测试。这也是老问题；全量按字母顺序跑时碰不到。
+
 ## 没验证的
 
 - **移动端「拍照」菜单项。** 它只在 `pointer: coarse`（触屏）下出现，Playwright 调整窗口大小模拟不出触屏，需要在真机上看一下。
