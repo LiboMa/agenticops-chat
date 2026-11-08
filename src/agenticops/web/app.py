@@ -394,6 +394,8 @@ from agenticops.web.routers import chat_attachments as _chat_attachments_router 
 app.include_router(_chat_attachments_router.router)
 from agenticops.web.routers import upload_settings as _upload_settings_router  # 2026-11-07: chat upload limits
 app.include_router(_upload_settings_router.router)
+from agenticops.web.routers import model_runtime_settings as _model_runtime_router  # 2026-11-08: model stream read timeout
+app.include_router(_model_runtime_router.router)
 
 # Chat session manager
 _chat_sessions = ChatSessionManager()

@@ -46,6 +46,12 @@ CLAUDE5_IDS = [
 # Cost key normalization
 # ---------------------------------------------------------------------------
 
+
+def _sans_client(kwargs: dict) -> dict:
+    """The kwargs without the stream client config every model gets (2026-11-08, test_model_runtime)."""
+    return {k: v for k, v in kwargs.items() if k != "boto_client_config"}
+
+
 class TestClaude5CostKeys:
     @pytest.mark.parametrize("mid,key", [
         ("anthropic.claude-opus-5", "claude-opus-5"),
@@ -172,7 +178,7 @@ class TestClaude5CapabilityGate:
     def test_gets_cache_and_thinking(self, monkeypatch, mid):
         monkeypatch.setattr(settings, "bedrock_cache_enabled", True)
         fields = {"thinking": {"type": "enabled", "budget_tokens": 4096}}
-        kw = bedrock_model_kwargs(mid, fields)
+        kw = _sans_client(bedrock_model_kwargs(mid, fields))
         assert "cache_config" in kw
         assert kw["additional_request_fields"] is fields
 
@@ -266,7 +272,7 @@ class TestThinkingRequestShape:
         mid = "global.openai.gpt-5.6-terra"
         fields = thinking_fields_for_budget(4096, 16384, mid)
         assert fields == {"thinking": {"type": "enabled", "budget_tokens": 4096}}
-        assert bedrock_model_kwargs(mid, fields) == {
+        assert _sans_client(bedrock_model_kwargs(mid, fields)) == {
             "additional_request_fields": {"reasoning_effort": "medium"}
         }
 

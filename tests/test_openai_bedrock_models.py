@@ -22,6 +22,12 @@ from agenticops.cost import compute_cost, normalize_model_key
 # is_anthropic_model
 # ---------------------------------------------------------------------------
 
+
+def _sans_client(kwargs: dict) -> dict:
+    """The kwargs without the stream client config every model gets (2026-11-08, test_model_runtime)."""
+    return {k: v for k, v in kwargs.items() if k != "boto_client_config"}
+
+
 class TestIsAnthropicModel:
     @pytest.mark.parametrize("mid", [
         "anthropic.claude-opus-4-6-v1",
@@ -54,7 +60,7 @@ class TestIsAnthropicModel:
 class TestBedrockModelKwargs:
     def test_claude_gets_cache_kwargs(self, monkeypatch):
         monkeypatch.setattr(settings, "bedrock_cache_enabled", True)
-        kw = bedrock_model_kwargs("global.anthropic.claude-opus-4-8")
+        kw = _sans_client(bedrock_model_kwargs("global.anthropic.claude-opus-4-8"))
         cc = kw["cache_config"]  # 1.45 parity: messages + tool definitions, not the system prompt (yet)
         assert (cc.strategy, cc.tools_ttl, cc.system_prompt_ttl) == ("auto", True, False)
         assert "cache_tools" not in kw  # deprecated since Strands 1.55
@@ -62,26 +68,26 @@ class TestBedrockModelKwargs:
     def test_claude_thinking_fields_attached(self, monkeypatch):
         monkeypatch.setattr(settings, "bedrock_cache_enabled", True)
         fields = {"thinking": {"type": "enabled", "budget_tokens": 4096}}
-        kw = bedrock_model_kwargs("global.anthropic.claude-opus-4-6-v1", fields)
+        kw = _sans_client(bedrock_model_kwargs("global.anthropic.claude-opus-4-6-v1", fields))
         assert kw["additional_request_fields"] is fields
 
     def test_claude_cache_disabled_still_gets_thinking(self, monkeypatch):
         monkeypatch.setattr(settings, "bedrock_cache_enabled", False)
         fields = {"thinking": {"type": "enabled", "budget_tokens": 4096}}
-        kw = bedrock_model_kwargs("global.anthropic.claude-opus-4-6-v1", fields)
+        kw = _sans_client(bedrock_model_kwargs("global.anthropic.claude-opus-4-6-v1", fields))
         assert "cache_config" not in kw
         assert kw["additional_request_fields"] is fields
 
     def test_openai_gets_no_cache(self, monkeypatch):
         monkeypatch.setattr(settings, "bedrock_cache_enabled", True)
-        assert bedrock_model_kwargs("openai.gpt-oss-120b-1:0") == {}
+        assert _sans_client(bedrock_model_kwargs("openai.gpt-oss-120b-1:0")) == {}
 
     def test_openai_thinking_translated_to_reasoning_effort(self, monkeypatch):
         """Anthropic `thinking` field never reaches an OpenAI model — the
         budget is translated to their native reasoning_effort tier instead."""
         monkeypatch.setattr(settings, "bedrock_cache_enabled", True)
         fields = {"thinking": {"type": "enabled", "budget_tokens": 4096}}
-        kw = bedrock_model_kwargs("global.openai.gpt-5.6-terra", fields)
+        kw = _sans_client(bedrock_model_kwargs("global.openai.gpt-5.6-terra", fields))
         assert kw == {"additional_request_fields": {"reasoning_effort": "medium"}}
         assert "cache_config" not in kw
 
@@ -94,16 +100,16 @@ class TestBedrockModelKwargs:
     ])
     def test_reasoning_effort_tiers(self, budget, tier):
         fields = {"thinking": {"type": "enabled", "budget_tokens": budget}}
-        kw = bedrock_model_kwargs("openai.gpt-oss-120b-1:0", fields)
+        kw = _sans_client(bedrock_model_kwargs("openai.gpt-oss-120b-1:0", fields))
         assert kw["additional_request_fields"]["reasoning_effort"] == tier
 
     def test_openai_zero_budget_sends_nothing(self):
         fields = {"thinking": {"type": "enabled", "budget_tokens": 0}}
-        assert bedrock_model_kwargs("openai.gpt-oss-120b-1:0", fields) == {}
+        assert _sans_client(bedrock_model_kwargs("openai.gpt-oss-120b-1:0", fields)) == {}
 
     def test_none_thinking_fields_omitted_for_claude(self, monkeypatch):
         monkeypatch.setattr(settings, "bedrock_cache_enabled", True)
-        kw = bedrock_model_kwargs("global.anthropic.claude-sonnet-4-6", None)
+        kw = _sans_client(bedrock_model_kwargs("global.anthropic.claude-sonnet-4-6", None))
         assert "additional_request_fields" not in kw
 
 

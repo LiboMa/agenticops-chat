@@ -30,6 +30,15 @@ _YAML_CONFIG_PATH = Path(__import__("os").environ.get(
 ))
 
 
+class ModelRuntimeSettings(BaseModel):
+    """Model connection settings (2026-11-08). The values live in settings.yaml `model_runtime:`; these defaults only
+    let the app start without that block. Admins override fields at runtime (DB `runtime_settings`, key
+    `model_runtime`, through `agents/model_runtime` and `/api/settings/model-runtime`)."""
+    stream_read_timeout_seconds: int = Field(
+        default=600, ge=60, le=3600,
+        description="How long a model stream may send nothing before it is cut (the botocore read timeout), seconds")
+
+
 class ChatUploadSettings(BaseModel):
     """Chat attachment limits (2026-11-07). The values live in settings.yaml `chat_upload:`; these defaults only let
     the app start without that block. Admins override fields at runtime (DB `runtime_settings`, key `chat_upload`,
@@ -1115,6 +1124,7 @@ class Settings(BaseSettings):
 
     # Chat attachments (2026-11-07): limits (runtime-overridable by admins) and where the files live (yaml only)
     chat_upload: ChatUploadSettings = Field(default_factory=ChatUploadSettings)
+    model_runtime: ModelRuntimeSettings = Field(default_factory=ModelRuntimeSettings)
     chat_attachments_dir: str = Field(
         default="",
         description="Directory for chat attachment files; empty = <data_dir>/chat_attachments. Not changeable at runtime",

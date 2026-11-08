@@ -259,6 +259,8 @@ chat_upload:                  # chat attachment limits; admins override fields a
   native_media_max_mb: 16     # native image/document bytes per request, MiB
   staged_ttl_hours: 24        # hours an unsent upload is kept
 chat_attachments_dir: ''      # empty = <data_dir>/chat_attachments
+model_runtime:                # model connection; admins override at runtime (Settings → Model connection)
+  stream_read_timeout_seconds: 600  # a model stream may send nothing this long before it is cut (60–3600)
 default_regions:
   aws:
   - us-east-1

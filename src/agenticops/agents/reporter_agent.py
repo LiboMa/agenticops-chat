@@ -8,7 +8,6 @@ structured reports. Exposed as a tool for the Main Agent
 import logging
 
 from strands import Agent, tool
-from botocore.config import Config as BotocoreConfig
 from strands.models.bedrock import BedrockModel
 
 from agenticops.config import settings
@@ -126,8 +125,7 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
             model_id=model_id,
             boto_session=get_bedrock_boto_session(),
             max_tokens=max_tokens,
-            boto_client_config=BotocoreConfig(read_timeout=300),
-            **cache_kwargs,
+            **cache_kwargs,   # carries the stream read timeout (model connection settings, ≥ the 300 s it had)
         )
 
         from agenticops.agents.preamble import build_system_prompt

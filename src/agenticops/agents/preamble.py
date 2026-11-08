@@ -412,8 +412,20 @@ def _openai_reasoning_effort(budget: int) -> Optional[str]:
     return "high"
 
 
+def _stream_client_config():
+    """The botocore config every agent's model stream gets (2026-11-08): the read timeout from the model connection
+    settings (`agents/model_runtime`, DB-overridable) — Strands' own default is 120 s, shorter than a long think."""
+    from botocore.config import Config as BotocoreConfig
+
+    from agenticops.agents import model_runtime
+    return BotocoreConfig(read_timeout=model_runtime.effective().stream_read_timeout_seconds)
+
+
 def bedrock_model_kwargs(model_id: str, thinking_fields: Optional[dict] = None) -> dict:
-    """Prompt-cache + extended-thinking kwargs for a BedrockModel, capability-gated.
+    """Client config + prompt-cache + extended-thinking kwargs for a BedrockModel, capability-gated.
+
+    Every model gets `boto_client_config` (the stream read timeout, `_stream_client_config`): a build site must not
+    pass its own.
 
     Anthropic models: prompt caching + the anthropic `thinking` field.
     OpenAI models (gpt-oss / gpt-5.x on Bedrock): no promptCaching cachePoints
@@ -421,7 +433,7 @@ def bedrock_model_kwargs(model_id: str, thinking_fields: Optional[dict] = None) 
     thinking budget is translated to their native `reasoning_effort` tier.
     Single source of truth for all agent build sites.
     """
-    kwargs: dict = {}
+    kwargs: dict = {"boto_client_config": _stream_client_config()}
     if not is_anthropic_model(model_id):
         budget = (thinking_fields or {}).get("thinking", {}).get("budget_tokens", 0)
         effort = _openai_reasoning_effort(budget)
@@ -432,7 +444,7 @@ def bedrock_model_kwargs(model_id: str, thinking_fields: Optional[dict] = None) 
         from strands.models.model import CacheConfig
         # Exactly what Strands 1.45 cached (auto message cache points + the tool definitions; the old cache_tools is
         # deprecated). 1.64 would also cache the system prompt by default — kept off until measured on its own.
-        kwargs = {"cache_config": CacheConfig(strategy="auto", tools_ttl=True, system_prompt_ttl=False)}
+        kwargs["cache_config"] = CacheConfig(strategy="auto", tools_ttl=True, system_prompt_ttl=False)
     if thinking_fields:
         kwargs["additional_request_fields"] = thinking_fields
     return kwargs
