@@ -1284,5 +1284,9 @@
   "security.reach.reachable": "Reachable",
   "security.reach.undetermined": "Undetermined",
   "security.reach.not_reachable": "Not reachable",
-  "messaging.channelSwitch": "Enable channel {name}"
+  "messaging.channelSwitch": "Enable channel {name}",
+  "palette.title": "Search",
+  "palette.hint": "Type to search; arrow keys choose, Enter opens, Esc closes.",
+  "palette.resultCount": "{n} results",
+  "palette.failed": "Search failed"
 }

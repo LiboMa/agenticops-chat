@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useId } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
 import { useNavigate } from "react-router-dom";
 import { useSearch } from "@/hooks/useSearch";
 import { useLocale } from "@/i18n/LocaleContext";
@@ -40,10 +41,14 @@ function badgeText(item: SearchResultItem): string {
   return item.severity ?? item.status ?? item.report_type ?? item.entity_type;
 }
 
+/** The global search (MVP-2.8.0 S1): a Radix dialog (focus kept inside, Esc closes, focus returns to what opened it)
+ *  around a combobox — the input owns the active option (aria-activedescendant), the results are a listbox, the
+ *  count is announced, and a failed search says so instead of "no results". */
 export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const { t } = useLocale();
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
+  const listboxId = useId();
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -58,11 +63,10 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       setQuery("");
       setDebouncedQuery("");
       setSelectedIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 0);
     }
   }, [open]);
 
-  const { data, isLoading } = useSearch(debouncedQuery);
+  const { data, isLoading, isError, refetch } = useSearch(debouncedQuery);
 
   const flatResults = useMemo(() => {
     if (!data?.results) return [];
@@ -79,16 +83,19 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     setSelectedIndex(0);
   }, [flatResults]);
 
+  const optionId = (idx: number) => `${listboxId}-opt-${idx}`;
+  useEffect(() => {
+    if (!open || !flatResults.length) return;
+    document.getElementById(optionId(selectedIndex))?.scrollIntoView({ block: "nearest" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIndex, open, flatResults.length]);
+
   function navigateToItem(item: SearchResultItem) {
     navigate(entityRoute(item));
     onClose();
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Escape") {
-      onClose();
-      return;
-    }
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setSelectedIndex((i) => (flatResults.length ? (i + 1) % flatResults.length : 0));
@@ -105,13 +112,18 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     }
   }
 
-  if (!open) return null;
-
   const issues = data?.results.issues ?? [];
   const fixPlans = data?.results.fix_plans ?? [];
   const changeRequests = data?.results.change_requests ?? [];
   const reports = data?.results.reports ?? [];
   const resources = data?.results.resources ?? [];
+  const searching = !!debouncedQuery && isLoading;
+  const failed = !!debouncedQuery && !isLoading && isError && !data;
+  const showResults = !!debouncedQuery && !isLoading && !failed;
+  const announce = !debouncedQuery || searching ? ""
+    : failed ? t("palette.failed")
+    : flatResults.length ? t("palette.resultCount").replace("{n}", String(flatResults.length))
+    : t("palette.noResults").replace("{q}", () => debouncedQuery);
 
   let runningIndex = 0;
 
@@ -121,8 +133,8 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     runningIndex += items.length;
     const style = ENTITY_STYLES[entityType];
     return (
-      <div key={entityType}>
-        <div className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+      <div key={entityType} role="group" aria-label={label}>
+        <div role="presentation" className="px-3 py-1.5 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
           {label} ({items.length})
         </div>
         {items.map((item, i) => {
@@ -130,7 +142,11 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
           return (
             <div
               key={`${entityType}-${item.id}`}
+              id={optionId(idx)}
+              role="option"
+              aria-selected={idx === selectedIndex}
               onClick={() => navigateToItem(item)}
+              onMouseMove={() => setSelectedIndex(idx)}
               className={`px-3 py-2 cursor-pointer flex items-center gap-3 ${
                 idx === selectedIndex ? "bg-accent" : "hover:bg-accent/50"
               }`}
@@ -150,20 +166,30 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40" onClick={onClose}>
-      <div className="flex items-start justify-center pt-[20vh]">
-        <div
-          className="bg-background rounded-xl shadow-2xl w-full max-w-lg mx-4 border border-border overflow-hidden"
-          onClick={(e) => e.stopPropagation()}
+    <Dialog.Root open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <Dialog.Portal>
+        {/* centred by the overlay, not by a translate: the slideInRight keyframe owns `transform` */}
+        <Dialog.Overlay className="fixed inset-0 z-50 grid items-start justify-items-center overflow-y-auto bg-black/40 px-4 pt-[20vh]">
+        <Dialog.Content
+          onOpenAutoFocus={(e) => { e.preventDefault(); inputRef.current?.focus(); }}
           onKeyDown={handleKeyDown}
+          className="w-full max-w-lg overflow-hidden rounded-xl border border-border bg-background shadow-2xl animate-[slideInRight_0.2s_ease-out]"
         >
+          <Dialog.Title className="sr-only">{t("palette.title")}</Dialog.Title>
+          <Dialog.Description className="sr-only">{t("palette.hint")}</Dialog.Description>
           <div className="flex items-center border-b px-3">
-            <svg className="h-4 w-4 text-muted-foreground shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="h-4 w-4 text-muted-foreground shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             <input
               ref={inputRef}
               type="text"
+              role="combobox"
+              aria-label={t("palette.title")}
+              aria-expanded={showResults && flatResults.length > 0}
+              aria-controls={listboxId}
+              aria-autocomplete="list"
+              aria-activedescendant={showResults && flatResults.length ? optionId(selectedIndex) : undefined}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t("palette.placeholder")}
@@ -174,26 +200,38 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
             </kbd>
           </div>
 
-          <div className="max-h-[60vh] overflow-y-auto">
+          <div aria-live="polite" className="sr-only">{announce}</div>
+
+          <div id={listboxId} role="listbox" aria-label={t("palette.title")} className="max-h-[60vh] overflow-y-auto">
             {!debouncedQuery && (
-              <div className="py-12 text-center text-sm text-muted-foreground">
+              <div role="presentation" className="py-12 text-center text-sm text-muted-foreground">
                 {t("palette.typeToSearch")}
               </div>
             )}
 
-            {debouncedQuery && isLoading && (
-              <div className="py-12 flex justify-center">
+            {searching && (
+              <div role="presentation" className="py-12 flex justify-center">
                 <div className="h-5 w-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
               </div>
             )}
 
-            {debouncedQuery && !isLoading && flatResults.length === 0 && (
-              <div className="py-12 text-center text-sm text-muted-foreground">
+            {failed && (
+              <div role="presentation" className="flex flex-col items-center gap-3 py-10 text-sm text-status-danger">
+                {t("palette.failed")}
+                <button type="button" onClick={() => void refetch()}
+                        className="rounded-md border border-border px-3 py-1 text-xs text-foreground hover:bg-accent">
+                  {t("common.retry")}
+                </button>
+              </div>
+            )}
+
+            {showResults && flatResults.length === 0 && (
+              <div role="presentation" className="py-12 text-center text-sm text-muted-foreground">
                 {t("palette.noResults").replace("{q}", () => debouncedQuery)}
               </div>
             )}
 
-            {debouncedQuery && !isLoading && flatResults.length > 0 && (
+            {showResults && flatResults.length > 0 && (
               <div className="py-1">
                 {renderSection(t(ENTITY_STYLES.issue.label), issues, "issue")}
                 {renderSection(t(ENTITY_STYLES.fix_plan.label), fixPlans, "fix_plan")}
@@ -203,8 +241,9 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
               </div>
             )}
           </div>
-        </div>
-      </div>
-    </div>
+        </Dialog.Content>
+        </Dialog.Overlay>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

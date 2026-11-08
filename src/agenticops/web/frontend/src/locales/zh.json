@@ -1284,5 +1284,9 @@
   "security.reach.reachable": "可达",
   "security.reach.undetermined": "无法确定",
   "security.reach.not_reachable": "不可达",
-  "messaging.channelSwitch": "启用渠道 {name}"
+  "messaging.channelSwitch": "启用渠道 {name}",
+  "palette.title": "全局搜索",
+  "palette.hint": "输入关键词，用上下方向键选择，回车打开，Esc 关闭。",
+  "palette.resultCount": "{n} 条结果",
+  "palette.failed": "搜索失败"
 }
