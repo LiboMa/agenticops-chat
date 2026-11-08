@@ -83,19 +83,19 @@ export default function Reports() {
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader>
+        <CardHeader className="flex-wrap gap-3">
           <div>
             <h2 className="text-lg font-semibold text-foreground">{t("reports.title")}</h2>
             <p className="text-xs text-muted-foreground">{t("reports.intro")}</p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
             <input
               type="text"
               aria-label={t("reports.search")}
               placeholder={t("reports.search")}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="text-sm border border-border rounded-lg px-3 py-1.5 w-64 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              className="text-sm border border-border rounded-lg px-3 py-1.5 w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
             />
             <span className="text-sm text-muted-foreground">
               {t("reports.count").replace("{n}", String(total))}

@@ -961,12 +961,12 @@ function GalaxyModelCard() {
               LLM edges are always fail-closed verified regardless of model.
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <select
               value={current}
               onChange={(e) => updateMut.mutate({ galaxy_model_id: e.target.value })}
               disabled={updateMut.isPending}
-              className="px-2 py-1 border border-border rounded text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 max-w-[280px]"
+              className="px-2 py-1 border border-border rounded text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 min-w-0 max-w-full sm:max-w-[280px]"
             >
               <option value="">Default (cheap tier · Haiku)</option>
               {presets.map((p) => (

@@ -548,8 +548,8 @@ export default function Schedules() {
   return (
     <>
       <Card>
-        <CardHeader>
-          <div className="flex items-center gap-4">
+        <CardHeader className="flex-wrap gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
             <h2 className="text-lg font-semibold text-foreground">{t("schedules.title")}</h2>
             <div className="flex gap-1 bg-secondary rounded-lg p-0.5">
               {(["all", "recurring", "one_shot"] as TabFilter[]).map((tb) => (
@@ -571,7 +571,7 @@ export default function Schedules() {
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(0); }}
               placeholder={t("schedules.search")}
-              className="px-3 py-1.5 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary-500 w-40"
+              className="px-3 py-1.5 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary-500 w-full sm:w-40"
             />
           </div>
           {!readOnly && (
