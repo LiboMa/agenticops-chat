@@ -316,6 +316,82 @@
 
 `settings.yaml` 逐步交给 DB 接管：非核心或限额类配置逐步迁进 DB 配置表；yaml 只保留默认值和启动配置。这次只迁了新增的读超时；各 agent 的 model / max tokens / 窗口留到之后单独迁。
 
+## OpenAI 模型的推理参数、被拒请求的原因、SQLite 锁（2026-11-08）
+
+### 起因
+
+主人在开发机上用 GPT-6 Astra 加任意一个 effort 对话，每一轮都只显示「The reply failed.」。同一天开发机上还有一轮对话以 `database is locked` 失败（14:31 UTC）。
+
+### 实测
+
+错误原文存在失败消息的 `token_usage.error` 里（开发机，只读查询）：
+
+- GPT-6 Astra 那两轮：`ValidationException … Unknown parameter: 'reasoning_effort'.`
+- 14:31 那一轮：`(sqlite3.OperationalError) database is locked`，发生在服务重启后、Signal Gate 删除 5706 条过期信号的 0.6 秒后。
+
+直接调 Bedrock ConverseStream（开发机和本机都调了；本机现在能直连这些模型），每次调用不到几美分。逐个型号、逐个档位都发了一遍：
+
+| 型号 | `reasoning_effort`（原来发的） | `reasoning: {effort}` | 支持到的最高档位 |
+|---|---|---|---|
+| GPT-6 Astra / Sol / Luna，GPT-6.1 Terra / Sol | **400 `Unknown parameter: 'reasoning_effort'`** | 正常 | max |
+| GPT-5.6 Terra / Luna / Sol | **同样 400** | 正常 | max |
+| GPT 5.5、GPT 5.4 | 被接受但无效（连 "bogus" 也照收） | 正常，档位生效（GPT 5.4：6 → 42 token） | xhigh（max 返回 "'max' is not supported"） |
+| gpt-oss-120b / 20b、gpt-oss-safeguard-120b / 20b | 正常，档位生效（如 120b：76 → 169 token） | 被接受，但几乎不改变输出 | high（minimal、xhigh、max 都报错） |
+
+### 原因
+
+1. **推理参数的格式写错了。**
+   - `preamble.bedrock_model_kwargs` 给所有非 Anthropic 模型都发 `reasoning_effort`，而这只在 gpt-oss 上实测过。
+   - GPT-5.6 接入时本机被地域限制，没法实测；单元测试照这个假设，把错误的格式固定成了预期结果。
+   - 结果是，GPT-5.6 和 GPT-6 上选任何一个 effort（low 到 max）都会让整个请求失败。
+2. **档位映射不分型号。** 原来所有 OpenAI 模型都最高给 high：GPT-5.6 / GPT-6.x 的 xhigh、max 从未发出，GPT 5.4 / 5.5 的 xhigh 也没有。
+3. **被拒的请求说不清原因。** `ValidationException` 被归为 `internal`。11-07 附件文件名不合法那次也是这样。
+4. **SQLite 锁住了读。**
+   - 过期信号是在 Signal Gate 自己的事务里、持着 `_gate_lock` 一次删完的。
+   - SQLite 用回滚日志，大事务一旦溢出到文件就挡住所有读者；Python 默认只等锁 5 秒。
+
+### 修复
+
+- **按模型家族发推理参数（`preamble._openai_reasoning_fields`）：**
+  - 一张实测出来的表 `_OPENAI_REASONING`（型号、请求字段、最高档位）：gpt-oss → `reasoning_effort`，最高 high；GPT 5.4 / 5.5 → `reasoning: {effort}`，最高 xhigh；GPT-5.6 / GPT-6.x → `reasoning: {effort}`，最高 max。
+  - 档位先按 Claude 的 `_effort_tier` 五档映射（2048 → low，4096 → medium，8192 → high，12288 → xhigh，更高 → max），再截到该型号的最高档位。
+  - 表里没有的型号不发这个字段，只记一次 warning。不带这个字段的请求总是合法的。
+- **被拒的请求单独一类（`chat/stream_errors`）：**
+  - 不是上下文超长的 `ValidationException` 归为 `request_rejected`。
+  - `rejection_detail` 取 Bedrock 给的原因：去掉 "The model returned the following errors: " 前缀、脱敏、最多 300 字。
+  - 原因写进 SSE `error` 帧的 `detail`，并存进 `token_usage.error_detail`。
+  - 界面在「模型拒绝了这次请求。」下面显示「原因：…」，生成时和重新打开会话时都显示。
+- **SQLite：**
+  - `init_db` 把库切到 WAL（`models._use_wal`，记在库文件里），读者不再等写者。
+  - 每个连接等锁 30 秒（`models._SQLITE_BUSY_TIMEOUT_S`）。
+  - 过期信号每批删 500 行，每批一个事务，在拿 gate 锁之前做；每个进程每天一次（`_prune_lock`）。
+  - 所有用 SQLite 的部署都在本地盘、EBS 或 emptyDir 上：WAL 不能放在 NFS / EFS 上。
+  - **备份：** 只拷 `.db` 文件已不是完整备份；部署流程用的在线备份 API 会把 WAL 里的内容一起拷进去。
+
+### 可达面
+
+| 面 | 本次 |
+|---|---|
+| CLI | 做（无界面）：CLI 的 agent 走同一个 `bedrock_model_kwargs`；两项数据库改动对 CLI 进程同样生效。CLI 的错误输出不改（非目标） |
+| Web API | 做：SSE `error` 帧新增码 `request_rejected` 和 `detail` 字段；失败消息的 `token_usage` 多了 `error_detail` |
+| Web UI | 做：被拒的请求显示「模型拒绝了这次请求。」和「原因：…」 |
+| Agent tool | 非目标 |
+| Schedule | 做（无界面）：定时任务的 agent 同样拿到修正；安全轮询里的过期信号清理改为分批 |
+| Notification | 非目标 |
+
+### 验证
+
+- **后端全量**：7478 passed、99 skipped、4 failed。4 个失败都是本机环境造成的：
+  - 本机 `settings.yaml` 的本地模型配置，影响 2 个用例；其中一个还受本机 `.env` 影响，它仍钉着 `AIOPS_BEDROCK_MODEL_ID=…claude-opus-4-6-v1`；
+  - reporter 提示词里一行未提交的中文；
+  - DNS 误报。
+- **前端**：vitest 71 个文件、783 条全部通过；`tsc --noEmit` 0 错误；在 `/tmp` 空目录里 `npm ci && npm run build` 通过。
+- **真实 E2E（本机）**：结果全部通过，见 [`MVP-2.7.1-CHAT-E2E-REPORT.md`](MVP-2.7.1-CHAT-E2E-REPORT.md)「追加：OpenAI 模型的推理参数、被拒请求的原因、SQLite 锁」：
+  - 被拒请求的原因，在生成时和重新打开会话时都显示；
+  - GPT-6 Astra + 极限两轮对话（含工具调用）完成；
+  - 选择器里 14 个 OpenAI 型号 × 4 个档位，56 / 56 成功。
+- **E2E 中发现并修正**：第一版按「OpenAI 都到 max」映射，gpt-oss + 极限被拒（"'reasoning_effort' value 'max' is not supported"）。之后逐档实测所有型号，改成按型号截断的表。
+
 ## 随 rebase 带入的 main 交付（2026-11-07）
 
 11-07 本分支 rebase 到 `main` = `bb01e5f`。v2.7.0（`a953e6b`）之后直接在 main 上交付的工作因此都在 2.7.1 里，版本串仍是 2.7.0。它们各自的设计、可达面与证据在下表所指的文档里，这里不重复。

@@ -138,6 +138,24 @@ E2E 过程中发现 6 个问题，都已修复，每个都先写了失败的测�
 - **测试相互污染。** `test_session_history` 在任何 mock 之前先 import `chat_dispatch`。原来它在 mock 期间被首次 import，留下了假的 `get_db_session`，导致之后的聊天测试失败。
 - **测试写进环境数据库。** `test_multi_cloud_api` 的账户接口原来写进 `AIOPS_DATABASE_URL` 指定的库，同一个库跑第二次就 409；现在用测试自己的临时库。
 
+## 追加：OpenAI 模型的推理参数、被拒请求的原因、SQLite 锁（2026-11-08）
+
+修复的是：GPT-6 Astra 加任意一个 effort，每一轮都「回复失败」；以及开发机 14:31 一轮对话以 `database is locked` 失败。根因与实测见 `MVP-2.7.1-RELEASE.md`「OpenAI 模型的推理参数、被拒请求的原因、SQLite 锁」。
+
+验证在本机服务上做，用一次性的管理员账户 `e2e-admin4`，用完已停用。顺序是：先只上「被拒原因」和 SQLite 两项，用旧的推理参数复现失败；再上推理参数的修正。
+
+| 场景 | 结果 | 证据 |
+|---|---|---|
+| 被拒的请求显示原因（生成时） | PASS | GPT-6 Astra + 极限，用旧的推理参数：失败消息和输入框上方的横幅都显示「模型拒绝了这次请求。原因：Unknown parameter: 'reasoning_effort'.」<br>![](images/chat-e2e-2026-11-08/rejected-live.png) |
+| 被拒的请求显示原因（重新打开） | PASS | 刷新后，存下的失败消息仍显示原因（`token_usage.error_code = request_rejected`，`error_detail` 就是上面那句）<br>![](images/chat-e2e-2026-11-08/rejected-stored.png) |
+| GPT-6 Astra + 极限，修正后 | PASS | 同一会话重发：完成，调了 `get_active_account`、`list_cloud_accounts`，回答是账户表格。基于上一轮历史的追问 5 秒完成。<br>![](images/chat-e2e-2026-11-08/astra-max-fixed.png) |
+| GPT-6 Astra + 浅度 | PASS（请求） | 在界面里把 effort 改为「浅度」后，这一轮完成。但模型调了 10 次 `list_health_issues` 仍没数清，回答「无法确定（工具结果被截断）」。这就是下文已记录的「`list_health_issues` 无法统计总数」，不是这次的问题 |
+| gpt-oss-120b + 极限 | 先 FAIL，修正后 PASS | 第一次按「所有家族都到 max」发出 `reasoning_effort: max`，被拒：「'reasoning_effort' value 'max' is not supported by this model」。新的原因提示让问题一眼可见。逐档实测后，gpt-oss 截到 high，重跑完成（31 s，含 agent 构建） |
+| GPT-5.6 Terra + 深度 | PASS | 完成，3 s |
+| GPT 5.5 + 极限 | PASS | 实际发的是 xhigh（5.5 不支持 max），完成，6 s |
+| 全部 OpenAI 型号 × 四个档位 | PASS | 选择器里的 14 个 OpenAI 型号，乘以浅度 / 深度 / 超深 / 极限四档，都经真实的 `resolve_thinking_budget` → `thinking_fields_for_budget` → `bedrock_model_kwargs` 生成请求，直接调 Bedrock：56 / 56 成功 |
+| SQLite WAL | 本机无法验证切换 | 本机库原本就已是 WAL：设置存在库文件里，不清楚之前是谁设的，所以在本机看不到切换。开发机现在是回滚日志模式，部署后在那里验证 |
+
 ## 没验证的
 
 - **移动端「拍照」菜单项。** 它只在 `pointer: coarse`（触屏）下出现，Playwright 调整窗口大小模拟不出触屏，需要在真机上看一下。
