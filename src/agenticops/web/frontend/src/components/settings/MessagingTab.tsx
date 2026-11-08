@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
+import { Switch } from "@/components/ui/Switch";
+import { useLocale } from "@/i18n/LocaleContext";
 import { ConfigureModal } from "./ConfigureModal";
 import { buildConfigPayload, channelFields, appFields } from "@/lib/messagingFields";
 import {
@@ -20,14 +22,6 @@ function StatusBadge({ on, label }: { on: boolean; label: string }) {
   );
 }
 
-function Switch({ on, onClick }: { on: boolean; onClick: () => void }) {
-  return (
-    <div onClick={onClick} className={`relative w-9 h-5 rounded-full cursor-pointer transition-colors ${on ? "bg-primary-600" : "bg-muted-foreground/30"}`}>
-      <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${on ? "translate-x-[18px]" : "translate-x-0.5"}`} />
-    </div>
-  );
-}
-
 function IconBtn({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) {
   return <button title={title} onClick={onClick} className="w-7 h-7 rounded-lg border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-secondary flex items-center justify-center">{children}</button>;
 }
@@ -41,6 +35,7 @@ interface ModalState {
 }
 
 export function MessagingTab() {
+  const { t } = useLocale();
   const schemaQ = useMessagingSchema();
   const appsQ = useMessagingApps();
   const channelsQ = useMessagingChannels();
@@ -120,7 +115,7 @@ export function MessagingTab() {
             <div className="space-y-2">
               {(channelsQ.data ?? []).map((ch: ChannelInfo) => (
                 <div key={ch.name} className="flex items-center gap-3 p-2.5 border border-border rounded-lg">
-                  <Switch on={ch.enabled} onClick={() => toggleChannel.mutate({ name: ch.name, enabled: !ch.enabled })} />
+                  <Switch checked={ch.enabled} label={t("messaging.channelSwitch").replace("{name}", ch.name)} onCheckedChange={(v) => toggleChannel.mutate({ name: ch.name, enabled: v })} />
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-foreground flex items-center gap-2">{ch.name} <StatusBadge on={ch.enabled} label={ch.enabled ? "Enabled" : "Disabled"} /></div>
                     <div className="text-[11px] text-muted-foreground">{ch.type} · role: {ch.role}</div>

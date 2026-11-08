@@ -1,10 +1,11 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useId } from "react";
 import * as Tabs from "@radix-ui/react-tabs";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Badge } from "@/components/ui/Badge";
+import { Switch } from "@/components/ui/Switch";
 import { formatShortDate } from "@/lib/formatDate";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useScanFocus } from "@/hooks/useScanFocus";
@@ -61,7 +62,9 @@ function FocusToggle({
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={`group flex items-start gap-3 p-3 rounded-lg border transition-all text-left ${
         active
           ? "bg-primary-50 border-primary-300 shadow-sm"
@@ -78,7 +81,7 @@ function FocusToggle({
           <span className={`text-sm font-medium ${active ? "text-primary-700" : "text-foreground"}`}>
             {label}
           </span>
-          <div className={`w-7 h-4 rounded-full transition-colors flex items-center ${
+          <div aria-hidden className={`w-7 h-4 rounded-full transition-colors flex items-center ${
             active ? "bg-primary-500 justify-end" : "bg-muted-foreground/30 justify-start"
           }`}>
             <div className="w-3 h-3 mx-0.5 rounded-full bg-background shadow-sm" />
@@ -97,23 +100,15 @@ function SettingToggle({
 }: {
   label: string; description: string; enabled: boolean; onChange: (v: boolean) => void; saving?: boolean;
 }) {
+  const id = useId();
   return (
-    <div className="flex items-center justify-between py-3 border-b border-border/50 last:border-b-0">
+    <div className="flex items-center justify-between gap-4 py-3 border-b border-border/50 last:border-b-0">
       <div>
-        <span className="text-sm font-medium text-foreground">{label}</span>
-        <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+        <span id={`${id}-name`} className="text-sm font-medium text-foreground">{label}</span>
+        <p id={`${id}-desc`} className="text-xs text-muted-foreground mt-0.5">{description}</p>
       </div>
-      <button
-        onClick={() => onChange(!enabled)}
-        disabled={saving}
-        className={`relative w-10 h-5 rounded-full transition-colors ${
-          enabled ? "bg-primary-500" : "bg-muted-foreground/30"
-        } ${saving ? "opacity-50 cursor-not-allowed" : ""}`}
-      >
-        <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-background shadow-sm transition-transform ${
-          enabled ? "translate-x-5" : "translate-x-0.5"
-        }`} />
-      </button>
+      <Switch checked={enabled} onCheckedChange={onChange} disabled={saving}
+              labelledBy={`${id}-name`} describedBy={`${id}-desc`} />
     </div>
   );
 }

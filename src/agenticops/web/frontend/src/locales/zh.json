@@ -1283,5 +1283,6 @@
   "security.noPaths": "没有暴露路径。",
   "security.reach.reachable": "可达",
   "security.reach.undetermined": "无法确定",
-  "security.reach.not_reachable": "不可达"
+  "security.reach.not_reachable": "不可达",
+  "messaging.channelSwitch": "启用渠道 {name}"
 }

@@ -1283,5 +1283,6 @@
   "security.noPaths": "No exposure paths.",
   "security.reach.reachable": "Reachable",
   "security.reach.undetermined": "Undetermined",
-  "security.reach.not_reachable": "Not reachable"
+  "security.reach.not_reachable": "Not reachable",
+  "messaging.channelSwitch": "Enable channel {name}"
 }

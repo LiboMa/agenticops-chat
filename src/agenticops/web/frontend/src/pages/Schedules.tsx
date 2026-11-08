@@ -5,6 +5,7 @@ import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Badge } from "@/components/ui/Badge";
+import { Switch } from "@/components/ui/Switch";
 import { formatShortDate } from "@/lib/formatDate";
 import {
   useSchedules,
@@ -243,15 +244,10 @@ function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: Fo
               <label className="block text-xs font-medium text-muted-foreground mb-1">Account</label>
               <input value={accountName} onChange={(e) => setAccountName(e.target.value)} placeholder="optional" className={inputCls} />
             </div>
-            <label className="flex items-center gap-2 pb-2 cursor-pointer select-none">
-              <div
-                onClick={() => setIsEnabled(!isEnabled)}
-                className={`relative w-9 h-5 rounded-full transition-colors cursor-pointer ${isEnabled ? "bg-primary-500" : "bg-muted-foreground/30"}`}
-              >
-                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${isEnabled ? "translate-x-[18px]" : "translate-x-0.5"}`} />
-              </div>
-              <span className="text-xs text-muted-foreground">{isEnabled ? "On" : "Off"}</span>
-            </label>
+            <div className="flex items-center gap-2 pb-2 select-none">
+              <Switch checked={isEnabled} onCheckedChange={setIsEnabled} labelledBy="schedule-enabled-label" />
+              <span id="schedule-enabled-label" className="text-xs text-muted-foreground">{isEnabled ? "On" : "Off"}</span>
+            </div>
           </div>
 
           {/* HealthPatrol config — compact */}
@@ -270,15 +266,10 @@ function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: Fo
                   <input value={hpProviders} onChange={(e) => setHpProviders(e.target.value)} placeholder="all" className={inputCls} />
                 </div>
               </div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <div
-                  onClick={() => setHpDeep(!hpDeep)}
-                  className={`relative w-8 h-4 rounded-full transition-colors cursor-pointer ${hpDeep ? "bg-primary-500" : "bg-muted-foreground/30"}`}
-                >
-                  <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${hpDeep ? "translate-x-[14px]" : "translate-x-0.5"}`} />
-                </div>
-                <span className="text-xs text-foreground">Deep investigation</span>
-              </label>
+              <div className="flex items-center gap-2">
+                <Switch checked={hpDeep} onCheckedChange={setHpDeep} labelledBy="schedule-deep-label" />
+                <span id="schedule-deep-label" className="text-xs text-foreground">Deep investigation</span>
+              </div>
             </div>
           )}
 
