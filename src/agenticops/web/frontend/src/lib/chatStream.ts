@@ -8,7 +8,8 @@ export interface ToolCall extends ToolStep {
 }
 
 /** Why a send did not finish (MVP-2.7.0 S5): the server's error codes, its 409 codes, or the client's own. */
-export type StreamErrorCode = "throttled" | "model_unavailable" | "context_too_long" | "timeout" | "max_tokens" | "internal"
+export type StreamErrorCode = "throttled" | "model_unavailable" | "context_too_long" | "timeout" | "max_tokens"
+  | "request_rejected" | "internal"
   | "session_busy" | "duplicate_in_flight" | "network" | "http";
 
 export interface StreamState {
@@ -16,7 +17,8 @@ export interface StreamState {
   content: string;
   toolCalls: ToolCall[];
   tokenMetrics: { input: number; output: number } | null;
-  error: { code: StreamErrorCode; message: string } | null;
+  /** `detail`: Bedrock's reason when it rejected the request (code request_rejected, 2026-11-08) */
+  error: { code: StreamErrorCode; message: string; detail?: string } | null;
   /** how each attachment of the message being answered reached the model (the `attachments` frame, 2026-11-07) */
   attachmentDeliveries: AttachmentDelivery[];
   /** the model's thinking summary so far (the `thinking` frame, 2026-11-08): its last 1000 characters, live only */
@@ -30,7 +32,8 @@ export interface AttachmentDelivery {
   reason: string | null;
 }
 
-const SERVER_CODES = new Set<string>(["throttled", "model_unavailable", "context_too_long", "timeout", "max_tokens", "internal",
+const SERVER_CODES = new Set<string>(["throttled", "model_unavailable", "context_too_long", "timeout", "max_tokens",
+  "request_rejected", "internal",
   "session_busy", "duplicate_in_flight"]);
 const asCode = (c: unknown, fallback: StreamErrorCode): StreamErrorCode =>
   typeof c === "string" && SERVER_CODES.has(c) ? (c as StreamErrorCode) : fallback;
@@ -239,7 +242,8 @@ class ChatStreamStore {
                 doneSuggestions = Array.isArray(data.suggestions) ? data.suggestions : [];
                 break;
               case "error":
-                this.set(sessionId, { error: { code: asCode(data.code, "internal"), message: data.message ?? "" } });
+                this.set(sessionId, { error: { code: asCode(data.code, "internal"), message: data.message ?? "",
+                  ...(typeof data.detail === "string" && data.detail ? { detail: data.detail } : {}) } });
                 break;
             }
           } catch {

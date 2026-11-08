@@ -428,6 +428,7 @@ export default function Chat() {
             {error && (
               <div role="alert" className="mx-6 mb-2 px-3 py-2 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
                 {t(`chat.error.${error.code}`)}
+                {error.detail && <div className="mt-0.5 break-words text-xs">{t("chat.error.reason").replace("{reason}", error.detail)}</div>}
               </div>
             )}
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { messageStatusKey, STARTERS, sessionRowLabel } from "@/lib/chatMessageStatus";
+import { messageErrorDetail, messageStatusKey, STARTERS, sessionRowLabel } from "@/lib/chatMessageStatus";
 import type { ChatMessage, ChatSession } from "@/api/types";
 
 const m = (x: Partial<ChatMessage>) => ({ role: "assistant", ...x }) as ChatMessage;
@@ -12,6 +12,18 @@ describe("chat message status (MVP-2.7.0 S5)", () => {
     expect(messageStatusKey(m({ dispatch_state: "failed", token_usage: { input: 0, output: 0, error: "boto: x", error_code: "throttled" } }))).toBe("chat.error.throttled");
     expect(messageStatusKey(m({ dispatch_state: "failed", token_usage: { input: 0, output: 0, error_code: "weird" } }))).toBe("chat.error.internal");
     expect(messageStatusKey(m({ dispatch_state: "failed" }))).toBe("chat.error.internal");
+  });
+  it("a rejected request is its own kind and carries Bedrock's reason (2026-11-08)", () => {
+    const rejected = m({ dispatch_state: "failed", token_usage: { input: 0, output: 0, error: "raw",
+      error_code: "request_rejected", error_detail: "Unknown parameter: 'reasoning_effort'." } });
+    expect(messageStatusKey(rejected)).toBe("chat.error.request_rejected");
+    expect(messageErrorDetail(rejected)).toBe("Unknown parameter: 'reasoning_effort'.");
+  });
+  it("no other failure shows a reason — never the raw exception", () => {
+    expect(messageErrorDetail(m({ dispatch_state: "failed", token_usage: { input: 0, output: 0, error: "boto: x",
+      error_code: "internal", error_detail: "x" } }))).toBeNull();
+    expect(messageErrorDetail(m({ dispatch_state: "failed", token_usage: { input: 0, output: 0, error: "boto: x" } }))).toBeNull();
+    expect(messageErrorDetail(m({ dispatch_state: "completed" }))).toBeNull();
   });
   it("an older failed row (error, no code) reads as internal", () => {
     expect(messageStatusKey(m({ token_usage: { input: 0, output: 0, error: "old raw text" } }))).toBe("chat.error.internal");

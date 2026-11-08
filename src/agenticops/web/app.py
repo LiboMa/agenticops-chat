@@ -4484,6 +4484,7 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
     from agenticops.chat.preprocessor import preprocess_message
     from agenticops.chat.stream_errors import MESSAGES as STREAM_ERROR_MESSAGES
     from agenticops.chat.stream_errors import classify as classify_stream_error, tool_outcome
+    from agenticops.chat.stream_errors import rejection_detail as stream_rejection_detail
     from agenticops.chat.tool_steps import result_preview, summarize_input
     from agenticops.services import chat_access, chat_dispatch
 
@@ -4875,6 +4876,9 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
             # marker rides in the token_usage JSON.
             _code = classify_stream_error(e)
             err_meta = {"input": input_tokens, "output": output_tokens, "error": str(e)[:500], "error_code": _code}
+            _detail = stream_rejection_detail(e)   # 2026-11-08: Bedrock's reason when it rejected the request
+            if _detail:
+                err_meta["error_detail"] = _detail
             with get_db_session() as db:
                 db.add(ChatMessage(
                     session_id=db_session_pk,
@@ -4888,7 +4892,8 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
                     {"dispatch_state": "failed"}, synchronize_session=False)
             closed = True
             yield {"event": "error", "data": json.dumps({"code": _code, "message": STREAM_ERROR_MESSAGES[_code],
-                                                         "trace_id": _chat_trace_id})}
+                                                         "trace_id": _chat_trace_id,
+                                                         **({"detail": _detail} if _detail else {})})}
         finally:
             # A cancelled stream (the client went away; sse-starlette cancels the generator) skips the code above:
             # the dispatch is still closed, as interrupted — a chat is never left busy (S5)

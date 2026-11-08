@@ -137,6 +137,13 @@ describe("chatStream — S5 stream client", () => {
     expect(settled).toEqual(["s5-busy"]);
   });
 
+  it("a rejected request keeps Bedrock's reason (2026-11-08)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([
+      'event: error\ndata: {"code":"request_rejected","message":"m","detail":"Unknown parameter: \'reasoning_effort\'."}\n\n'])));
+    await chatStream.send("s5-rej", "hi");
+    expect(chatStream.getSnapshot("s5-rej").error).toEqual(
+      { code: "request_rejected", message: "m", detail: "Unknown parameter: 'reasoning_effort'." });
+  });
   it("an error frame keeps its code", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => sseResponse(['event: error\ndata: {"code":"throttled","message":"m"}\n\n'])));
     await chatStream.send("s5-err", "hi");

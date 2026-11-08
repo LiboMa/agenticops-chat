@@ -200,3 +200,44 @@ def test_a_thinking_summary_streams_and_is_not_stored(env, monkeypatch):
                                                      {"text": " against the pool limit."}]
     reply = _reply(pk)
     assert reply.content == "C is the root cause." and "Weighing" not in json.dumps(reply.tool_calls or [])
+
+
+def test_a_rejected_request_streams_and_stores_its_reason(env, monkeypatch):
+    # 2026-11-08: GPT-6 Astra rejected `reasoning_effort` and the chat said only "The reply failed."
+    client, webapp = env
+    sid, pk = _session()
+    message = "The model returned the following errors: Unknown parameter: 'reasoning_effort'."
+
+    class _Rejected(Exception):
+        def __init__(self):
+            super().__init__(f"An error occurred (ValidationException) when calling the ConverseStream operation: {message}")
+            self.response = {"Error": {"Code": "ValidationException", "Message": message}}
+
+    class _A:
+        async def stream_async(self, _c):
+            raise _Rejected()
+            yield  # an async generator, like the agent's
+    monkeypatch.setattr(webapp._chat_sessions, "get_or_create", lambda s: _A())
+    errors = [d for e, d in frames(_send(client, sid).text) if e == "error"]
+    assert len(errors) == 1
+    assert errors[0]["code"] == "request_rejected"
+    assert errors[0]["detail"] == "Unknown parameter: 'reasoning_effort'."
+    reply = _reply(pk)
+    assert reply.dispatch_state == "failed"
+    assert reply.token_usage["error_code"] == "request_rejected"
+    assert reply.token_usage["error_detail"] == "Unknown parameter: 'reasoning_effort'."
+
+
+def test_other_failures_carry_no_detail(env, monkeypatch):
+    client, webapp = env
+    sid, pk = _session()
+
+    class _A:
+        async def stream_async(self, _c):
+            raise RuntimeError("boom")
+            yield
+    monkeypatch.setattr(webapp._chat_sessions, "get_or_create", lambda s: _A())
+    errors = [d for e, d in frames(_send(client, sid).text) if e == "error"]
+    assert errors[0]["code"] == "internal" and "detail" not in errors[0]
+    assert "error_detail" not in (_reply(pk).token_usage or {})
+

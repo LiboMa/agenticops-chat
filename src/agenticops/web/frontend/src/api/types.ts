@@ -789,7 +789,8 @@ export interface ChatMessage {
     cost_usd?: number;
     model?: string;
     error?: string; // persisted when the stream failed (e.g. model unavailable)
-    error_code?: string; // S5: throttled | model_unavailable | context_too_long | internal
+    error_code?: string; // S5: throttled | model_unavailable | context_too_long | timeout | max_tokens | request_rejected | internal
+    error_detail?: string; // 2026-11-08: Bedrock's reason, only for request_rejected
   };
   trace_id?: string;
   cost_usd?: number;

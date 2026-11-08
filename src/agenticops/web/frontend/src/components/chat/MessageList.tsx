@@ -11,7 +11,7 @@ import { RichContent } from "./rich/RichContent";
 import type { ChatMessage, ToolStep } from "@/api/types";
 import { renderMessageMarkdown } from "@/lib/markdownCache";
 import { contextRefFromPath, type ContextRef } from "@/lib/contextRef";
-import { messageStatusKey } from "@/lib/chatMessageStatus";
+import { messageErrorDetail, messageStatusKey } from "@/lib/chatMessageStatus";
 import { splitWork } from "@/lib/workSteps";
 import { canRegenerate, type RegenCheck } from "@/lib/messageActions";
 import { nextStick } from "@/lib/stickToBottom";
@@ -223,6 +223,7 @@ function MessageRow({ msg, isLast, streaming, regen, onSuggestionPick, onRegener
   const { t } = useLocale();
   const answerRef = useRef<HTMLDivElement>(null);
   const statusKey = messageStatusKey(msg);
+  const errorDetail = messageErrorDetail(msg);
   const tools = msg.tool_calls ?? [];
   const answer = useMemo(() => (msg.role === "assistant" ? splitWork(msg.content, tools).answer : msg.content),
     // a stored message never changes; a temp id is replaced by a new row
@@ -253,6 +254,7 @@ function MessageRow({ msg, isLast, streaming, regen, onSuggestionPick, onRegener
           ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
           : "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400"}`}>
           {t(statusKey)}
+          {errorDetail && <div className="mt-0.5 break-words">{t("chat.error.reason").replace("{reason}", errorDetail)}</div>}
         </div>
       )}
       {answer.trim() && (

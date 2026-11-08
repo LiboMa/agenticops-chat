@@ -4,7 +4,8 @@
  */
 import type { ChatMessage, ChatSession } from "@/api/types";
 
-const ERROR_CODES = new Set(["throttled", "model_unavailable", "context_too_long", "timeout", "max_tokens", "internal"]);
+const ERROR_CODES = new Set(["throttled", "model_unavailable", "context_too_long", "timeout", "max_tokens",
+  "request_rejected", "internal"]);
 
 export function messageStatusKey(m: Pick<ChatMessage, "role" | "dispatch_state" | "token_usage">): string | null {
   if (m.role !== "assistant") return null;
@@ -14,6 +15,14 @@ export function messageStatusKey(m: Pick<ChatMessage, "role" | "dispatch_state" 
     return `chat.error.${code && ERROR_CODES.has(code) ? code : "internal"}`;
   }
   return null;
+}
+
+/** Bedrock's reason for a rejected request (2026-11-08) — shown under the failure label; every other failure shows
+ *  no detail (never the raw exception). */
+export function messageErrorDetail(m: Pick<ChatMessage, "role" | "token_usage">): string | null {
+  if (m.role !== "assistant" || m.token_usage?.error_code !== "request_rejected") return null;
+  const detail = m.token_usage?.error_detail;
+  return typeof detail === "string" && detail ? detail : null;
 }
 
 /** The empty state's starter prompts: chat.starter.<id>.label / .prompt — they fill the composer, never send. */
