@@ -109,11 +109,22 @@ class TestThinkingFields:
         }
 
     def test_adaptive_shape(self, effort_settings):
-        """4.6+ models take adaptive + an effort tier; budget_tokens 400s there."""
+        """4.6+ models take adaptive + an effort tier; budget_tokens 400s there. From 4.7 the thinking display
+        defaults to "omitted" (no bytes while the model thinks — a long think trips the stream's read timeout), so
+        the summary is asked for (2026-11-08: accepted and streamed by Opus 5.5 / Sonnet 5.5 / Fable 5.1 on Bedrock)."""
         assert thinking_fields_for_budget(4096, 16384, ADAPTIVE_MODEL) == {
-            "thinking": {"type": "adaptive"},
+            "thinking": {"type": "adaptive", "display": "summarized"},
             "output_config": {"effort": "medium"},
         }
+
+    @pytest.mark.parametrize("model", ["global.anthropic.claude-fable-5-1", "global.anthropic.claude-opus-5-5",
+                                       "global.anthropic.claude-sonnet-5-5", "us.anthropic.claude-opus-4-7"])
+    def test_summarized_display_from_4_7(self, effort_settings, model):
+        assert thinking_fields_for_budget(8192, 16384, model)["thinking"] == {"type": "adaptive", "display": "summarized"}
+
+    def test_4_6_keeps_its_default_display(self, effort_settings):
+        """Opus / Sonnet 4.6 summarize by default: the request stays as it was."""
+        assert thinking_fields_for_budget(4096, 16384, "global.anthropic.claude-opus-4-6-v1")["thinking"] == {"type": "adaptive"}
 
     @pytest.mark.parametrize("model", [LEGACY_MODEL, ADAPTIVE_MODEL])
     def test_zero_and_illegal_give_none(self, effort_settings, model):
@@ -123,9 +134,9 @@ class TestThinkingFields:
 
     def test_wrapper_follows_agent_model(self, effort_settings):
         """thinking_request_fields keeps its 2-arg contract and derives the
-        shape from the agent's own configured model (rca = Opus 4.6)."""
+        shape from the agent's own configured model (rca = a Claude 5 model: the summary is asked for)."""
         assert thinking_request_fields("rca", 16384) == {
-            "thinking": {"type": "adaptive"},
+            "thinking": {"type": "adaptive", "display": "summarized"},
             "output_config": {"effort": "medium"},
         }
         assert thinking_request_fields("main", 16384) is None
@@ -279,7 +290,7 @@ class TestAgentEffortWiring:
         must reach Bedrock as effort=xhigh, never as budget_tokens (a 400)."""
         kwargs = self._build(effort_override="deep")
         fields = kwargs.get("additional_request_fields")
-        assert fields == {"thinking": {"type": "adaptive"},
+        assert fields == {"thinking": {"type": "adaptive", "display": "summarized"},
                           "output_config": {"effort": "xhigh"}}
 
     def test_no_override_matches_2_2_0_behaviour(self, effort_settings):

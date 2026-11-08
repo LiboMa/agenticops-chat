@@ -254,6 +254,11 @@ def media_capabilities(model_id: str) -> MediaCaps:
 # live against Bedrock us-east-1; 4.6 accepts either, so it takes the modern
 # one — budget_tokens is deprecated there and only ever gets narrower.
 _ADAPTIVE_THINKING_MIN = (4, 6)
+# From 4.7 the thinking display defaults to "omitted": the model sends no bytes while it thinks, so a long think at a
+# high effort trips the stream's read timeout (measured 2026-11-08: Fable 5.1 at effort max silent for 272 s) and the
+# user sees nothing happen. "summarized" streams a summary as it goes (Fable 5.1 max: the largest gap 7.3 s) at the
+# same billing. Accepted by Opus 5.5 / Sonnet 5.5 / Fable 5.1 on Bedrock us-east-1; 4.6 summarizes by default.
+_SUMMARIZED_DISPLAY_FROM = (4, 7)
 
 
 def _claude_version(model_id: str) -> Optional[tuple[int, int]]:
@@ -459,8 +464,11 @@ def thinking_fields_for_budget(budget: int, max_tokens: int, model_id: str):
         )
         return None
     if supports_adaptive_thinking(model_id):
-        return {"thinking": {"type": "adaptive"},
-                "output_config": {"effort": _effort_tier(budget)}}
+        thinking = {"type": "adaptive"}
+        version = _claude_version(model_id)
+        if version is not None and version >= _SUMMARIZED_DISPLAY_FROM:
+            thinking["display"] = "summarized"
+        return {"thinking": thinking, "output_config": {"effort": _effort_tier(budget)}}
     return {"thinking": {"type": "enabled", "budget_tokens": budget}}
 
 

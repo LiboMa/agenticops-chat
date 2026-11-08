@@ -230,7 +230,8 @@ class TestThinkingRequestShape:
     @pytest.mark.parametrize("mid", CLAUDE5_IDS)
     def test_claude5_gets_adaptive_not_budget_tokens(self, mid):
         fields = thinking_fields_for_budget(4096, 16384, mid)
-        assert fields == {"thinking": {"type": "adaptive"},
+        # 5.x: the thinking summary is asked for (its default "omitted" streams no bytes while the model thinks)
+        assert fields == {"thinking": {"type": "adaptive", "display": "summarized"},
                           "output_config": {"effort": "medium"}}
         assert "budget_tokens" not in fields["thinking"]
 

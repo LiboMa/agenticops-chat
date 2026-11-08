@@ -113,8 +113,8 @@ class TestThinking:
 
         rca_settings.agent_rca_thinking_budget = 4096
         fields = thinking_request_fields("rca", 16384)
-        # RCA runs on Opus 4.6, which takes adaptive thinking + an effort tier
-        assert fields == {"thinking": {"type": "adaptive"},
+        # RCA runs on a Claude 5 model: adaptive thinking + an effort tier, with the thinking summary asked for
+        assert fields == {"thinking": {"type": "adaptive", "display": "summarized"},
                           "output_config": {"effort": "medium"}}
 
     def test_zero_budget_off(self, rca_settings):

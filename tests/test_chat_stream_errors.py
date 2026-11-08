@@ -22,6 +22,22 @@ def test_classify(exc, code):
     assert classify(exc) == code
 
 
+def test_a_read_timeout_is_timeout():
+    """The stream read nothing within the read timeout (a long silent think, 2026-11-08) — not a generic failure."""
+    from urllib3.exceptions import ReadTimeoutError
+    assert classify(ReadTimeoutError(None, None, "Read timed out.")) == "timeout"
+    from botocore.exceptions import ReadTimeoutError as BotoReadTimeout
+    assert classify(BotoReadTimeout(endpoint_url="https://bedrock-runtime.us-east-1.amazonaws.com")) == "timeout"
+    assert classify(TimeoutError("The read operation timed out")) == "timeout"
+
+
+def test_the_output_allowance_used_up_is_max_tokens():
+    """Thinking used the whole Max tokens and no answer was written (Strands raises MaxTokensReachedException)."""
+    from strands.types.exceptions import MaxTokensReachedException
+    assert classify(MaxTokensReachedException("Agent has reached an unrecoverable state due to max_tokens limit")) \
+        == "max_tokens"
+
+
 def test_context_overflow_by_type_name():
     class ContextWindowOverflowException(Exception): ...
     assert classify(ContextWindowOverflowException("x")) == "context_too_long"
