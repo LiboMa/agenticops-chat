@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { splitWork, workTotals } from "@/lib/workSteps";
+import { splitWork, stepStatus, workTotals } from "@/lib/workSteps";
 import type { ToolStep } from "@/api/types";
 
 const T = (o: Partial<ToolStep>): ToolStep => ({ name: "x", status: "done", ...o });
@@ -77,5 +77,19 @@ describe("splitWork offsets are UTF-16 units (the server counts them the same wa
     const r = splitWork(narration + "Root cause: x", [T({ text_offset: narration.length, text_end: narration.length })]);
     expect(r.answer).toBe("Root cause: x");
     expect((r.timeline[0] as any).text).toBe(narration);
+  });
+});
+
+describe("stepStatus — a step says its state in words (MVP-2.8.0 S1)", () => {
+  it("is running while the step runs", () => {
+    expect(stepStatus(T({ status: "running" }))).toBe("running");
+  });
+  it("is ok / error from the result", () => {
+    expect(stepStatus(T({ outcome: "ok" }))).toBe("ok");
+    expect(stepStatus(T({ outcome: "error" }))).toBe("error");
+  });
+  it("is unknown for a finished step stored without an outcome — never assumed successful", () => {
+    expect(stepStatus(T({}))).toBe("unknown");
+    expect(stepStatus(T({ outcome: "unknown" }))).toBe("unknown");
   });
 });

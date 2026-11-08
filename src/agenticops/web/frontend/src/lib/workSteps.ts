@@ -58,6 +58,17 @@ export function splitWork(content: string, tools: ToolStep[], opts: { live?: boo
 /** How many steps and how long they took: the span on the turn's clock when every step knows when it started
  *  (steps run in parallel — a sum would count the overlap), else the sum of the known durations (older rows), else
  *  null (no duration known). */
+export type StepStatus = "running" | "ok" | "error" | "unknown";
+
+/** A step's state in words (MVP-2.8.0 S1): the result decides ok / error; a finished step stored without an
+ *  outcome (pre-S5 history) is unknown — never shown as a success. */
+export function stepStatus(tool: ToolStep): StepStatus {
+  if (tool.status === "running") return "running";
+  if (tool.outcome === "ok") return "ok";
+  if (tool.outcome === "error") return "error";
+  return "unknown";
+}
+
 export function workTotals(tools: ToolStep[]): { count: number; ms: number | null } {
   const known = tools.filter((t) => typeof t.duration_ms === "number");
   if (known.length === 0) return { count: tools.length, ms: null };

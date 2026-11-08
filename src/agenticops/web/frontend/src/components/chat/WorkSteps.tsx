@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useLocale } from "@/i18n/LocaleContext";
 import type { ToolStep } from "@/api/types";
-import { formatDuration, splitWork, workTotals, type TimelineItem } from "@/lib/workSteps";
+import { formatDuration, splitWork, stepStatus, workTotals, type StepStatus, type TimelineItem } from "@/lib/workSteps";
+import { StatusText, type StatusTone } from "@/components/ui/StatusText";
 import { toolLabelKey } from "@/lib/toolLabels";
 
 interface Props {
@@ -55,12 +56,15 @@ export function WorkSteps({ tools, content, live, thinking }: Props) {
   );
 }
 
+const STEP_TONE: Record<StepStatus, StatusTone> = { running: "info", ok: "ok", error: "danger", unknown: "neutral" };
+
 function StatusDot({ tool }: { tool: ToolStep }) {
   const base = "absolute -left-[21.5px] top-[5px] flex h-[11px] w-[11px] items-center justify-center rounded-full bg-background";
-  if (tool.status === "running") {
+  const status = stepStatus(tool);
+  if (status === "running") {
     return <span className={base}><span className="h-[9px] w-[9px] animate-spin rounded-full border-[1.5px] border-primary border-t-transparent" /></span>;
   }
-  const tone = tool.outcome === "error" ? "bg-red-500" : tool.outcome === "unknown" ? "bg-muted-foreground/40" : "bg-primary";
+  const tone = status === "error" ? "bg-status-danger" : status === "unknown" ? "bg-muted-foreground/40" : "bg-status-ok";
   return <span className={base}><span className={`h-[7px] w-[7px] rounded-full ${tone}`} /></span>;
 }
 
@@ -72,7 +76,8 @@ function Row({ item }: { item: TimelineItem }) {
   }
   const tool = item.tool;
   const key = toolLabelKey(tool.name);
-  const failed = tool.outcome === "error";
+  const status = stepStatus(tool);
+  const failed = status === "error";
   return (
     <li className="relative">
       <StatusDot tool={tool} />
@@ -81,6 +86,7 @@ function Row({ item }: { item: TimelineItem }) {
         <span className={`shrink-0 ${failed ? "text-red-600 dark:text-red-400" : "text-foreground"}`}>
           {key ? t(key) : <code className="font-mono text-[12px]">{tool.name}</code>}
         </span>
+        <StatusText tone={STEP_TONE[status]} className="shrink-0 text-[12px]">{t(`chat.work.status.${status}`)}</StatusText>
         {tool.summary && (
           <code className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted-foreground" title={tool.summary}>
             {tool.summary}

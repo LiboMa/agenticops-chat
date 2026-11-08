@@ -1288,5 +1288,9 @@
   "palette.title": "全局搜索",
   "palette.hint": "输入关键词，用上下方向键选择，回车打开，Esc 关闭。",
   "palette.resultCount": "{n} 条结果",
-  "palette.failed": "搜索失败"
+  "palette.failed": "搜索失败",
+  "chat.work.status.running": "运行中",
+  "chat.work.status.ok": "成功",
+  "chat.work.status.error": "失败",
+  "chat.work.status.unknown": "结果未知"
 }

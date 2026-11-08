@@ -1288,5 +1288,9 @@
   "palette.title": "Search",
   "palette.hint": "Type to search; arrow keys choose, Enter opens, Esc closes.",
   "palette.resultCount": "{n} results",
-  "palette.failed": "Search failed"
+  "palette.failed": "Search failed",
+  "chat.work.status.running": "Running",
+  "chat.work.status.ok": "Succeeded",
+  "chat.work.status.error": "Failed",
+  "chat.work.status.unknown": "Result unknown"
 }
