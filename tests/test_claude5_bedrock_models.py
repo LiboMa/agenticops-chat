@@ -266,14 +266,14 @@ class TestThinkingRequestShape:
             if fields:
                 assert fields["output_config"]["effort"] in valid
 
-    def test_openai_still_translates_to_reasoning_effort(self):
+    def test_openai_budget_becomes_the_family_reasoning_field(self):
         """OpenAI ids fall to the budget_tokens shape on purpose — that is what
-        bedrock_model_kwargs reads to build their native reasoning_effort."""
+        bedrock_model_kwargs reads to build their family's reasoning field."""
         mid = "global.openai.gpt-5.6-terra"
         fields = thinking_fields_for_budget(4096, 16384, mid)
         assert fields == {"thinking": {"type": "enabled", "budget_tokens": 4096}}
         assert _sans_client(bedrock_model_kwargs(mid, fields)) == {
-            "additional_request_fields": {"reasoning_effort": "medium"}
+            "additional_request_fields": {"reasoning": {"effort": "medium"}}
         }
 
     def test_shipped_agent_models_never_get_a_rejected_shape(self, monkeypatch):
@@ -286,6 +286,11 @@ class TestThinkingRequestShape:
             thinking_type = fields["thinking"]["type"]
             assert thinking_type == ("adaptive" if supports_adaptive_thinking(mid)
                                      else "enabled"), f"{agent} -> {mid}"
+            if "openai." in mid:
+                # 2026-11-08: GPT-5.6 / GPT-6 reject `reasoning_effort` ("Unknown parameter"); gpt-oss takes it
+                sent = _sans_client(bedrock_model_kwargs(mid, fields))["additional_request_fields"]
+                expected = "reasoning_effort" if "gpt-oss" in mid else "reasoning"
+                assert list(sent) == [expected], f"{agent} -> {mid}: {sent}"
 
 
 # ---------------------------------------------------------------------------

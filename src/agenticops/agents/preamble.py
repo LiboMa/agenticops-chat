@@ -279,7 +279,7 @@ def supports_adaptive_thinking(model_id: str) -> bool:
 
     False means the legacy `thinking.budget_tokens` shape — correct for
     pre-4.6 Claude models and for non-Anthropic ids, whose budget
-    bedrock_model_kwargs translates into their native reasoning_effort.
+    bedrock_model_kwargs translates into their family's reasoning field.
     """
     version = _claude_version(model_id)
     return version is not None and version >= _ADAPTIVE_THINKING_MIN
@@ -397,19 +397,42 @@ def _effort_tier(budget: int) -> str:
     return "max"
 
 
-def _openai_reasoning_effort(budget: int) -> Optional[str]:
-    """Map an anthropic-style thinking budget to OpenAI's reasoning_effort tier.
+_UNVERIFIED_REASONING_WARNED: set = set()
+_EFFORT_TIERS = ("low", "medium", "high", "xhigh", "max")
+# OpenAI on Bedrock: (model id substring, request field, highest tier the model takes). Measured live on Bedrock,
+# 2026-11-08, every tier sent to every model in the chat picker:
+# - GPT-5.6 / GPT-6.x reject `reasoning_effort` ("Unknown parameter" — the whole request fails; every chat turn with
+#   an effort set read "The reply failed.") and take `reasoning: {"effort": …}` up to max;
+# - GPT 5.4 / 5.5 accept `reasoning_effort` and ignore it (even "bogus") and take `reasoning` up to xhigh ("'max' is
+#   not supported");
+# - gpt-oss (and its safeguard models) take `reasoning_effort` low | medium | high — minimal, xhigh and max fail.
+_OPENAI_REASONING = (
+    ("openai.gpt-oss", "reasoning_effort", "high"),
+    ("openai.gpt-5.4", "reasoning", "xhigh"),
+    ("openai.gpt-5.5", "reasoning", "xhigh"),
+    ("openai.gpt-5.6", "reasoning", "max"),
+    ("openai.gpt-6", "reasoning", "max"),      # gpt-6-astra / -sol / -luna, gpt-6.1-terra / -sol
+)
 
-    OpenAI Bedrock models take low|medium|high (verified live on gpt-oss):
-    low ≤ 2048 < medium ≤ 4096 < high. 0 = no override (model default).
+
+def _openai_reasoning_fields(model_id: str, budget: int) -> Optional[dict]:
+    """The reasoning request field for an OpenAI model on Bedrock, or None (see `_OPENAI_REASONING`).
+
+    The budget maps to Claude's effort tiers (`_effort_tier`), capped at the model's highest tier. A model of an
+    unverified family gets no field: a request without one is always valid, a guessed one can fail it. A budget of
+    0 = no override (the model's default).
     """
     if budget <= 0:
         return None
-    if budget <= 2048:
-        return "low"
-    if budget <= 4096:
-        return "medium"
-    return "high"
+    mid = (model_id or "").lower()
+    for needle, field, top in _OPENAI_REASONING:
+        if needle in mid:
+            tier = _EFFORT_TIERS[min(_EFFORT_TIERS.index(_effort_tier(budget)), _EFFORT_TIERS.index(top))]
+            return {"reasoning_effort": tier} if field == "reasoning_effort" else {"reasoning": {"effort": tier}}
+    if mid not in _UNVERIFIED_REASONING_WARNED:
+        _UNVERIFIED_REASONING_WARNED.add(mid)
+        _retry_logger.warning("no verified reasoning field for model %s — its effort is not sent", model_id)
+    return None
 
 
 def _stream_client_config():
@@ -428,17 +451,17 @@ def bedrock_model_kwargs(model_id: str, thinking_fields: Optional[dict] = None) 
     pass its own.
 
     Anthropic models: prompt caching + the anthropic `thinking` field.
-    OpenAI models (gpt-oss / gpt-5.x on Bedrock): no promptCaching cachePoints
+    OpenAI models (gpt-oss / GPT-5.x / GPT-6.x on Bedrock): no promptCaching cachePoints
     and no `thinking` field (either fails the whole request) — instead the
-    thinking budget is translated to their native `reasoning_effort` tier.
+    thinking budget becomes the family's own reasoning field (`_openai_reasoning_fields`).
     Single source of truth for all agent build sites.
     """
     kwargs: dict = {"boto_client_config": _stream_client_config()}
     if not is_anthropic_model(model_id):
         budget = (thinking_fields or {}).get("thinking", {}).get("budget_tokens", 0)
-        effort = _openai_reasoning_effort(budget)
-        if effort:
-            kwargs["additional_request_fields"] = {"reasoning_effort": effort}
+        reasoning = _openai_reasoning_fields(model_id, budget)
+        if reasoning:
+            kwargs["additional_request_fields"] = reasoning
         return kwargs
     if settings.bedrock_cache_enabled:
         from strands.models.model import CacheConfig
