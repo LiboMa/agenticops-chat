@@ -1265,5 +1265,8 @@
   "settings.modelRuntime.subtitle": "How long a model may stay silent before its reply is cut",
   "settings.modelRuntime.readTimeout": "Wait limit (seconds)",
   "settings.modelRuntime.hint": "Models stream a short summary while they think, so a reply rarely stays silent; raise this only if a long reply is cut with a timeout. The next turn of every chat uses the new value.",
-  "settings.modelRuntime.resetConfirm": "The wait limit goes back to its default from settings.yaml. The change is audited."
+  "settings.modelRuntime.resetConfirm": "The wait limit goes back to its default from settings.yaml. The change is audited.",
+  "common.state.failed": "Couldn't load",
+  "common.state.staleNotice": "Refresh failed — showing the last data fetched · as of {time}",
+  "common.state.refetch": "Fetch again"
 }

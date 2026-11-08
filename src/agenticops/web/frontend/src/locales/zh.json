@@ -1265,5 +1265,8 @@
   "settings.modelRuntime.subtitle": "模型最多可以多久不返回内容，超过就断开这次回复",
   "settings.modelRuntime.readTimeout": "等待上限（秒）",
   "settings.modelRuntime.hint": "模型思考时会持续返回摘要，回复很少长时间没有内容；只有长回复因超时被断开时才需要调高。修改后，每个对话的下一轮都按新值。",
-  "settings.modelRuntime.resetConfirm": "等待上限恢复为 settings.yaml 中的默认值，此次修改会留审计记录。"
+  "settings.modelRuntime.resetConfirm": "等待上限恢复为 settings.yaml 中的默认值，此次修改会留审计记录。",
+  "common.state.failed": "加载失败",
+  "common.state.staleNotice": "刷新失败，正在显示上次成功获取的数据 · 数据截至 {time}",
+  "common.state.refetch": "重新获取"
 }

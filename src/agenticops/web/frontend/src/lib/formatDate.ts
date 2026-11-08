@@ -49,6 +49,19 @@ export function formatFullDate(date: string | Date | null | undefined): string {
   return d ? fullFormatter.format(d) : "-";
 }
 
+const timeFormatter = new Intl.DateTimeFormat("en-GB", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+  timeZone: "UTC",
+});
+
+/** "HH:MM UTC" — a time of day, always in UTC and labelled (MVP-2.8.0 S1). "-" for nothing. */
+export function formatUtcTime(date: string | Date | number | null | undefined): string {
+  const d = typeof date === "number" ? new Date(date) : parseApiDate(date);
+  return d && !Number.isNaN(d.getTime()) ? `${timeFormatter.format(d)} UTC` : "-";
+}
+
 export function formatUtcClock(date: Date): string {
   return clockFormatter.format(date) + " UTC";
 }

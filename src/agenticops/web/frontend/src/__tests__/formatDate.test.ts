@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, it, expect, vi } from "vitest";
-import { formatElapsed, formatFullDate, formatShortDate, parseApiDate } from "@/lib/formatDate";
+import { formatElapsed, formatFullDate, formatShortDate, formatUtcTime, parseApiDate } from "@/lib/formatDate";
 
 // A naive timestamp only misparses when the local zone is not UTC, so pin a +08:00 zone:
 // these tests must also fail against a broken parser on a UTC machine.
@@ -54,6 +54,17 @@ describe("formatShortDate / formatFullDate", () => {
       expect(formatShortDate(bad)).toBe("-");
       expect(formatFullDate(bad)).toBe("-");
     }
+  });
+});
+
+describe("formatUtcTime", () => {
+  it("is HH:MM in UTC, labelled — not the browser's zone (+08:00 here)", () => {
+    expect(formatUtcTime("2026-11-07T16:30:00Z")).toBe("16:30 UTC");
+    expect(formatUtcTime(new Date(Date.UTC(2026, 10, 7, 5, 4)))).toBe("05:04 UTC");
+    expect(formatUtcTime(Date.UTC(2026, 10, 7, 23, 59))).toBe("23:59 UTC");
+  });
+  it('is "-" for nothing', () => {
+    expect(formatUtcTime(null)).toBe("-");
   });
 });
 
