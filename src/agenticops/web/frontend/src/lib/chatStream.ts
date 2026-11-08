@@ -8,7 +8,7 @@ export interface ToolCall extends ToolStep {
 }
 
 /** Why a send did not finish (MVP-2.7.0 S5): the server's error codes, its 409 codes, or the client's own. */
-export type StreamErrorCode = "throttled" | "model_unavailable" | "context_too_long" | "internal"
+export type StreamErrorCode = "throttled" | "model_unavailable" | "context_too_long" | "timeout" | "max_tokens" | "internal"
   | "session_busy" | "duplicate_in_flight" | "network" | "http";
 
 export interface StreamState {
@@ -19,6 +19,8 @@ export interface StreamState {
   error: { code: StreamErrorCode; message: string } | null;
   /** how each attachment of the message being answered reached the model (the `attachments` frame, 2026-11-07) */
   attachmentDeliveries: AttachmentDelivery[];
+  /** the model's thinking summary so far (the `thinking` frame, 2026-11-08): its last 1000 characters, live only */
+  thinking: string;
 }
 
 export interface AttachmentDelivery {
@@ -28,7 +30,7 @@ export interface AttachmentDelivery {
   reason: string | null;
 }
 
-const SERVER_CODES = new Set<string>(["throttled", "model_unavailable", "context_too_long", "internal",
+const SERVER_CODES = new Set<string>(["throttled", "model_unavailable", "context_too_long", "timeout", "max_tokens", "internal",
   "session_busy", "duplicate_in_flight"]);
 const asCode = (c: unknown, fallback: StreamErrorCode): StreamErrorCode =>
   typeof c === "string" && SERVER_CODES.has(c) ? (c as StreamErrorCode) : fallback;
@@ -54,6 +56,7 @@ const EMPTY: StreamState = {
   tokenMetrics: null,
   error: null,
   attachmentDeliveries: [],
+  thinking: "",
 };
 
 const TOKEN_FLUSH_MS = 60;
@@ -121,7 +124,7 @@ class ChatStreamStore {
     let accepted = false;
 
     this.set(sessionId, { streaming: true, content: "", toolCalls: [], tokenMetrics: null, error: null,
-                          attachmentDeliveries: [] });
+                          attachmentDeliveries: [], thinking: "" });
 
     const controller = new AbortController();
     this.controllers.set(sessionId, controller);
@@ -198,6 +201,12 @@ class ChatStreamStore {
                       ...(typeof data.text_offset === "number" ? { text_offset: data.text_offset } : {}) }] });
                 }
                 break;
+              case "thinking":   // 2026-11-08: the model's thinking summary, shown live, never stored
+                if (typeof data.text === "string" && data.text) {
+                  const cur = this.states.get(sessionId) ?? EMPTY;
+                  this.set(sessionId, { thinking: (cur.thinking + data.text).slice(-1000) });
+                }
+                break;
               case "tool_input":   // 2026-11-07: the step's input summary, once the model finished writing the call
                 if (data.call_id) {
                   const cur = this.states.get(sessionId) ?? EMPTY;
@@ -269,7 +278,7 @@ class ChatStreamStore {
       this.controllers.delete(sessionId);
       // Clear the live slice FIRST so the streaming trailer disappears, THEN
       // hand the completed turn to the cache layer (no double-render flash).
-      this.set(sessionId, { streaming: false, content: "", toolCalls: [], tokenMetrics: null });
+      this.set(sessionId, { streaming: false, content: "", toolCalls: [], tokenMetrics: null, thinking: "" });
       if (donePayload) this.callbacks.onDone?.(sessionId, donePayload);
       this.callbacks.onSettled?.(sessionId);
     }

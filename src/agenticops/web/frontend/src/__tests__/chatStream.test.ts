@@ -246,3 +246,27 @@ describe("chatStream work-log facts (2026-11-07)", () => {
       text_offset: 3, summary: "kubectl get ns", duration_ms: 420, result_preview: "default", text_end: 3, started_ms: 15 });
   });
 });
+
+describe("chatStream thinking summary (2026-11-08)", () => {
+  it("keeps the latest thinking text while streaming and clears it when the reply ends", async () => {
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([
+      'event: thinking\ndata: {"text":"Weighing A"}\n\n',
+      'event: thinking\ndata: {"text":" and B."}\n\n',
+      'event: text\ndata: {"token":"C."}\n\n',
+      'event: done\ndata: {"input_tokens":1,"output_tokens":1}\n\n',
+    ])));
+    const unsub = chatStream.subscribe("sess-T", () => { const s = chatStream.getSnapshot("sess-T"); if (s.thinking) seen.push(s.thinking); });
+    await chatStream.send("sess-T", "hi");
+    unsub();
+    expect(seen).toContain("Weighing A and B.");
+    expect(chatStream.getSnapshot("sess-T").thinking).toBe("");
+  });
+  it("the two new error codes keep their code", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([
+      'event: error\ndata: {"code":"max_tokens","message":"used up"}\n\n',
+    ])));
+    await chatStream.send("sess-M", "hi");
+    expect(chatStream.getSnapshot("sess-M").error?.code).toBe("max_tokens");
+  });
+});

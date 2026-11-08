@@ -10,11 +10,13 @@ interface Props {
   content: string;
   /** still streaming: open, steps appear as they start */
   live?: boolean;
+  /** live only: one line of the model's latest thinking summary (2026-11-08) */
+  thinking?: string;
 }
 
 /** The Codex-style work log above an answer (2026-11-07): what the agent did, step by step, with the model's own
  *  narration between steps. Open while it runs, one line once done («已处理 N 步 · T»); the user's toggle wins. */
-export function WorkSteps({ tools, content, live }: Props) {
+export function WorkSteps({ tools, content, live, thinking }: Props) {
   const { t } = useLocale();
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   if (tools.length === 0) return null;
@@ -39,6 +41,14 @@ export function WorkSteps({ tools, content, live }: Props) {
       {open && (
         <ol className="relative ml-[5px] mt-1.5 space-y-1.5 border-l border-border pl-4">
           {timeline.map((item, i) => <Row key={i} item={item} />)}
+          {live && thinking && (
+            <li className="relative truncate text-muted-foreground/80" title={thinking}>
+              <span className="absolute -left-[21.5px] top-[5px] flex h-[11px] w-[11px] items-center justify-center rounded-full bg-background">
+                <span className="h-[7px] w-[7px] animate-pulse rounded-full bg-primary/50" />
+              </span>
+              <span className="text-muted-foreground">{t("chat.work.thinking")} · </span>{thinking}
+            </li>
+          )}
         </ol>
       )}
     </div>

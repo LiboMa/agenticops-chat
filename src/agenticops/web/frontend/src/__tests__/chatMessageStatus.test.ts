@@ -32,3 +32,11 @@ describe("chat message status (MVP-2.7.0 S5)", () => {
     expect(sessionRowLabel(s(undefined))).toEqual({ key: "chat.independent", text: null });
   });
 });
+
+describe("the 2026-11-08 failure kinds", () => {
+  it("a stored timeout / max_tokens failure says its kind", () => {
+    const m = (code: string) => ({ role: "assistant", dispatch_state: "failed", token_usage: { input: 0, output: 0, error: "x", error_code: code } }) as any;
+    expect(messageStatusKey(m("timeout"))).toBe("chat.error.timeout");
+    expect(messageStatusKey(m("max_tokens"))).toBe("chat.error.max_tokens");
+  });
+});

@@ -1255,5 +1255,13 @@
   "chat.attach.waitUpload": "Wait for the uploads to finish",
   "chat.attach.pages": "{n} pages",
   "nav.expand": "Show the full menu",
-  "chat.attach.page": "1 page"
+  "chat.attach.page": "1 page",
+  "chat.error.timeout": "The model sent nothing within the wait limit. Lower the effort or pick another model; an admin can raise the limit in Settings → General → Model connection.",
+  "chat.error.max_tokens": "The model used its whole output allowance (Max tokens) while thinking and wrote no answer. Raise Main's Max tokens in Settings → General → Agent models, or lower the effort.",
+  "chat.work.thinking": "Thinking",
+  "settings.modelRuntime.title": "Model connection",
+  "settings.modelRuntime.subtitle": "How long a model may stay silent before its reply is cut",
+  "settings.modelRuntime.readTimeout": "Wait limit (seconds)",
+  "settings.modelRuntime.hint": "Models stream a short summary while they think, so a reply rarely stays silent; raise this only if a long reply is cut with a timeout. The next turn of every chat uses the new value.",
+  "settings.modelRuntime.resetConfirm": "The wait limit goes back to its default from settings.yaml. The change is audited."
 }

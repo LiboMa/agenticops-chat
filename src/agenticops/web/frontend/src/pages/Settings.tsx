@@ -16,6 +16,7 @@ import { KBTab } from "@/components/settings/KBTab";
 import { SkillsTab } from "@/components/settings/SkillsTab";
 import { ConnectorsCard } from "@/components/settings/ConnectorsCard";
 import { ChatUploadCard } from "@/components/settings/ChatUploadCard";
+import { ModelRuntimeCard } from "@/components/settings/ModelRuntimeCard";
 import {
   useAccounts,
   useCreateAccount,
@@ -1370,6 +1371,7 @@ export default function Settings() {
 
       {/* ── Chat attachments (2026-11-07) ────────────────────── */}
       <ChatUploadCard />
+      <ModelRuntimeCard />
 
       {/* ── Pull connectors (k8s discovery) ──────────────────── */}
       <ConnectorsCard />

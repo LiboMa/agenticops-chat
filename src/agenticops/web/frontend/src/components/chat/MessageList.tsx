@@ -16,6 +16,7 @@ import { splitWork } from "@/lib/workSteps";
 import { canRegenerate, type RegenCheck } from "@/lib/messageActions";
 import { nextStick } from "@/lib/stickToBottom";
 import { useLocale } from "@/i18n/LocaleContext";
+import { thinkingTail } from "@/lib/thinking";
 
 interface Props {
   messages: ChatMessage[];
@@ -30,6 +31,8 @@ interface Props {
   onContextRefClick?: (ref: ContextRef) => void; // I# / C# refs open the context panel instead of navigating
   /** 2026-11-07: how the attachments of the message being answered reached the model (the stream's frame) */
   pendingDeliveries?: AttachmentDelivery[];
+  /** the model's thinking summary so far (live only, 2026-11-08) */
+  streamingThinking?: string;
   /** send the last answer's question again (a new answer follows) */
   onRegenerate?: (text: string) => void;
   onSaveReport?: () => void;
@@ -44,6 +47,7 @@ const AWAY_PX = 200;   // further than this from the bottom: offer «back to bot
 export function MessageList({
   messages, streamingContent, streamingToolCalls, streamingTokenMetrics, streaming, hasOlder, isFetchingOlder,
   onLoadOlder, onSuggestionPick, onContextRefClick, pendingDeliveries, onRegenerate, onSaveReport, readOnly,
+  streamingThinking,
 }: Props) {
   const { t } = useLocale();
   const navigate = useNavigate();
@@ -126,6 +130,7 @@ export function MessageList({
   const liveTools = streamingToolCalls ?? [];
   const liveText = (streamingContent ?? "").split("<<SUGGEST>>")[0];
   const liveAnswer = useMemo(() => splitWork(liveText, liveTools, { live: true }).answer, [liveText, liveTools]);
+  const liveThinking = thinkingTail(streamingThinking ?? "");
 
   const items = virtualizer.getVirtualItems();
 
@@ -172,11 +177,12 @@ export function MessageList({
                     <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/70 [animation-delay:150ms]" />
                     <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/70 [animation-delay:300ms]" />
                   </span>
-                  {t("chat.thinking")}
+                  <span className="shrink-0">{t("chat.thinking")}</span>
+                  {liveThinking && <span className="min-w-0 truncate text-muted-foreground/80" title={liveThinking}>{liveThinking}</span>}
                 </div>
               ) : (
                 <>
-                  <WorkSteps tools={liveTools} content={liveText} live />
+                  <WorkSteps tools={liveTools} content={liveText} live thinking={liveThinking} />
                   {liveAnswer && <RichContent text={liveAnswer} streaming />}
                   <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-primary/70 align-text-bottom" aria-hidden />
                   {streamingTokenMetrics && (

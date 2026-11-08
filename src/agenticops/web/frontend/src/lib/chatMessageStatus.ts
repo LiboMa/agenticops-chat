@@ -4,7 +4,7 @@
  */
 import type { ChatMessage, ChatSession } from "@/api/types";
 
-const ERROR_CODES = new Set(["throttled", "model_unavailable", "context_too_long", "internal"]);
+const ERROR_CODES = new Set(["throttled", "model_unavailable", "context_too_long", "timeout", "max_tokens", "internal"]);
 
 export function messageStatusKey(m: Pick<ChatMessage, "role" | "dispatch_state" | "token_usage">): string | null {
   if (m.role !== "assistant") return null;

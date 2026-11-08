@@ -1255,5 +1255,13 @@
   "chat.attach.waitUpload": "上传完成后才能发送",
   "chat.attach.pages": "{n} 页",
   "nav.expand": "展开导航",
-  "chat.attach.page": "1 页"
+  "chat.attach.page": "1 页",
+  "chat.error.timeout": "模型在等待上限内没有返回内容。可以降低 effort 或换模型；管理员也可以在 Settings → 通用 → 模型连接 调高等待上限。",
+  "chat.error.max_tokens": "模型在思考时用完了输出上限（Max tokens），没能写出回答。可以在 Settings → 通用 → Agent 模型 调高 Main 的 Max tokens，或降低 effort。",
+  "chat.work.thinking": "正在思考",
+  "settings.modelRuntime.title": "模型连接",
+  "settings.modelRuntime.subtitle": "模型最多可以多久不返回内容，超过就断开这次回复",
+  "settings.modelRuntime.readTimeout": "等待上限（秒）",
+  "settings.modelRuntime.hint": "模型思考时会持续返回摘要，回复很少长时间没有内容；只有长回复因超时被断开时才需要调高。修改后，每个对话的下一轮都按新值。",
+  "settings.modelRuntime.resetConfirm": "等待上限恢复为 settings.yaml 中的默认值，此次修改会留审计记录。"
 }

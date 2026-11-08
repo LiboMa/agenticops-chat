@@ -113,8 +113,8 @@ export default function Chat() {
   // Metadata of the open session: also its name when it is not among the 50 listed (e.g. a shared link)
   const { data: sessionDetail } = useChatSession(selectedId);
   const { messages, fetchOlder, hasOlder, isFetchingOlder } = useChatMessages(selectedId);
-  const { streaming, streamingContent, toolCalls, tokenMetrics, error, attachmentDeliveries, sendMessage, cancel } =
-    useSessionStream(selectedId);
+  const { streaming, streamingContent, toolCalls, tokenMetrics, error, attachmentDeliveries, thinking, sendMessage,
+          cancel } = useSessionStream(selectedId);
   const [showSaveReport, setShowSaveReport] = useState(false);
   const currentSession = sessions?.find((s) => s.session_id === selectedId)
     ?? (sessionDetail?.session_id === selectedId ? sessionDetail : undefined);
@@ -418,6 +418,7 @@ export default function Chat() {
               onSuggestionPick={(text) => sendMessage(text)}
               onContextRefClick={setContextRef}
               pendingDeliveries={attachmentDeliveries}
+              streamingThinking={thinking}
               onRegenerate={(text) => { setStopped(false); void sendMessage(text); }}
               onSaveReport={currentSession ? () => setShowSaveReport(true) : undefined}
               readOnly={readOnly}
