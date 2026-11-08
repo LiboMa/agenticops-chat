@@ -70,7 +70,7 @@ export default function PlanDetail() {
           <span className="rounded bg-secondary px-1.5 py-0.5">{t(m.runKey)}</span>
         </div>
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <h1 className="text-2xl font-semibold text-foreground">{plan.title}</h1>
+          <h1 className="min-w-0 basis-full text-xl font-semibold text-foreground [overflow-wrap:anywhere] sm:flex-1 sm:basis-auto sm:text-2xl">{plan.title}</h1>
           <div className="flex gap-2">
             {m.actions.approve && <button className={`${btn} bg-primary text-primary-foreground hover:bg-primary-hover`} disabled={approveMut.isPending} onClick={() => { approveMut.reset(); setPinnedHash(plan.content_hash ?? ""); setOpen("approve"); }}>{t(copy.buttonKey)}</button>}
             {m.actions.reject && <button className={`${btn} border border-red-500/40 text-red-600`} disabled={rejectMut.isPending} onClick={() => { rejectMut.reset(); setOpen("reject"); }}>{t("issues.reject")}</button>}
