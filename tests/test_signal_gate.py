@@ -324,3 +324,58 @@ class TestGateDisabled:
         db_session.commit()
         d3 = _process(_sig())
         assert d3.disposition == "promoted"
+
+
+# ── Retention prune (2026-11-08) ──────────────────────────────────────
+# On the dev box the first signal after a restart deleted 5706 expired rows inside the gate's own transaction, under
+# _gate_lock; a chat read waiting on the database failed with "database is locked". The prune now runs in its own
+# short transactions, before the gate lock is taken.
+
+
+from agenticops.services import signal_gate  # noqa: E402  (the class below patches module state)
+
+
+class TestSignalPrune:
+    def _rows(self, session, old: int, new: int):
+        from agenticops.config import settings
+        past = datetime.now(timezone.utc) - timedelta(days=settings.signal_retention_days + 1)
+        session.add_all([AlertEvent(source="s", external_id=f"old{i}", severity="low", title="t", received_at=past)
+                         for i in range(old)] +
+                        [AlertEvent(source="s", external_id=f"new{i}", severity="low", title="t")
+                         for i in range(new)])
+        session.commit()
+
+    def test_deletes_only_rows_past_retention_one_batch_per_transaction(self, db_session, monkeypatch):
+        self._rows(db_session, old=5, new=2)
+        monkeypatch.setattr(signal_gate, "_last_prune_date", None)
+        monkeypatch.setattr(signal_gate, "_PRUNE_BATCH", 2)
+        import agenticops.models as models_mod
+        opened = []
+        real = models_mod.get_db_session
+
+        def counting():
+            opened.append(1)
+            return real()
+        monkeypatch.setattr(models_mod, "get_db_session", counting)
+
+        signal_gate._prune_old_signals()
+
+        db_session.expire_all()
+        left = {e.external_id for e in db_session.query(AlertEvent).all()}
+        assert left == {"new0", "new1"}
+        assert len(opened) == 3          # 2 + 2 + 1 rows, each batch its own transaction
+
+    def test_runs_once_per_day(self, db_session, monkeypatch):
+        self._rows(db_session, old=1, new=0)
+        monkeypatch.setattr(signal_gate, "_last_prune_date", None)
+        signal_gate._prune_old_signals()
+        self._rows(db_session, old=1, new=0)
+        signal_gate._prune_old_signals()
+        db_session.expire_all()
+        assert db_session.query(AlertEvent).count() == 1     # the second call is a no-op the same day
+
+    def test_process_signal_prunes_before_taking_the_gate_lock(self, db_session, gate_settings, monkeypatch):
+        held = []
+        monkeypatch.setattr(signal_gate, "_prune_old_signals", lambda: held.append(signal_gate._gate_lock.locked()))
+        _process(_sig())
+        assert held == [False]

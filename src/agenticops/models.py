@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 _engine = None
+# How long an SQLite connection waits for a lock (Python's default is 5 s). With WAL (init_db) readers never wait for
+# a writer; this covers two writers — 2026-11-08 on the dev box a 5706-row prune held the lock longer than 5 s.
+_SQLITE_BUSY_TIMEOUT_S = 30
 
 
 def get_engine():
@@ -38,7 +41,7 @@ def get_engine():
             _engine = create_engine(
                 settings.database_url,
                 echo=False,
-                connect_args={"check_same_thread": False},
+                connect_args={"check_same_thread": False, "timeout": _SQLITE_BUSY_TIMEOUT_S},
                 poolclass=NullPool,
             )
         else:
@@ -1780,6 +1783,23 @@ def _migrate_2_6_1(engine) -> None:
         _migrated_2_6_1_urls.add(key)
 
 
+def _use_wal(engine) -> None:
+    """Put a file-backed SQLite database in WAL mode (2026-11-08): readers no longer wait for a writer — under the
+    rollback journal a large change blocks every reader until it commits, and a chat turn failed with "database is
+    locked" while the Signal Gate's prune ran. The mode is stored in the database file, so setting it once at startup
+    holds for every later connection. A failure is logged, never fatal. WAL needs a local filesystem (not NFS/EFS);
+    a backup must use the online backup API (or include the -wal file), not a copy of the .db file alone."""
+    if engine.dialect.name != "sqlite" or engine.url.database in (None, "", ":memory:"):
+        return
+    try:
+        with engine.connect() as conn:
+            mode = conn.exec_driver_sql("PRAGMA journal_mode=WAL").scalar()
+        if str(mode).lower() != "wal":
+            logger.warning("SQLite journal mode is %s, not WAL — readers may wait for writers", mode)
+    except OperationalError:
+        logger.warning("Could not switch SQLite to WAL — readers may wait for writers", exc_info=True)
+
+
 def init_db(engine=None):
     """Initialize database and create all tables.
 
@@ -1792,6 +1812,8 @@ def init_db(engine=None):
     """
     if engine is None:
         engine = get_engine()
+
+    _use_wal(engine)
 
     # Migration: detect old rca_results schema and recreate
     insp = inspect(engine)
