@@ -185,6 +185,7 @@ All settings use `AIOPS_` env prefix. Key ones:
 | `bedrock_model_id_cheap` | `global.anthropic.claude-haiku-4-5-20251001-v1:0` | Economy tier (Haiku 4.5) — tier default for scan/detect/reporter (settings.yaml may raise to Sonnet) |
 | `bedrock_model_id_strong` | `global.anthropic.claude-opus-5-5` | Strong tier (Opus 5.5) — tier default for RCA/SRE |
 | `bedrock_max_tokens` | `16384` | Max output tokens |
+| `log_dir` | `<project>/logs` | Where the service's `backend.log` / `frontend.log` handlers write (`AIOPS_LOG_DIR`; a bootstrap path). `tests/conftest.py` points it at a temp dir: a test that starts the app's lifespan must never write, or rotate away, the running service's logs (it did, 2026-11-08) |
 | `model_runtime` | `{stream_read_timeout_seconds: 600}` | How long a model stream may send nothing before it is cut (60–3600 s; Strands' own default is 120 s). The yaml block is the default; admins override it at runtime (`PATCH /api/settings/model-runtime`, Settings → Model connection, stored in `runtime_settings`, audited) |
 | `bedrock_region` | `us-east-1` | AWS Bedrock region |
 | `database_url` | `sqlite:///...agenticops.db` | Database URL |

@@ -133,9 +133,10 @@ E2E 过程中发现 6 个问题，都已修复，每个都先写了失败的测�
 - 前端：vitest 71 个文件 / 780 个测试，`tsc` 0，构建通过。
 - 真实模型花费：诊断（两次重放 + 三组探测）约 3.3 美元，E2E 约 2.5 美元。
 
-本轮发现，未修复：
-- **测试覆盖服务日志。** 全量测试会把正在运行的服务的 `logs/backend.log` 覆盖成测试输出。这是老问题，导致 11-08 早上那段服务日志丢失。
-- **测试相互污染。** `test_session_history` 的数据库 mock 会污染之后才首次 import `web.app` 的测试。这也是老问题；全量按字母顺序跑时碰不到。
+本轮发现的测试问题，已修复（`dcc4aae`），修复后全量 7395 passed，只剩 4 个已知环境用例失败；真实 `logs/backend.log` 没有一行测试输出，也没有再轮转：
+- **测试覆盖服务日志。** 服务日志改为写到 `settings.log_dir`（默认 `<项目>/logs`，可用 `AIOPS_LOG_DIR` 覆盖），同一文件的处理器只挂一次；`tests/conftest.py` 把它指到临时目录。以前全量测试会把正在运行的服务的 `logs/backend.log` 轮转掉，11-08 早上那段服务日志就是这样丢的。
+- **测试相互污染。** `test_session_history` 在任何 mock 之前先 import `chat_dispatch`。原来它在 mock 期间被首次 import，留下了假的 `get_db_session`，导致之后的聊天测试失败。
+- **测试写进环境数据库。** `test_multi_cloud_api` 的账户接口原来写进 `AIOPS_DATABASE_URL` 指定的库，同一个库跑第二次就 409；现在用测试自己的临时库。
 
 ## 没验证的
 
