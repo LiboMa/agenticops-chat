@@ -4,6 +4,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useLocale } from "@/i18n/LocaleContext";
+import { formatFullDate } from "@/lib/formatDate";
 import {
   ModelRuntimeError, useModelRuntimeSettings, usePatchModelRuntime, useResetModelRuntime,
 } from "@/hooks/useModelRuntimeSettings";
@@ -72,7 +73,7 @@ export function ModelRuntimeCard() {
             {s.updated_by && (
               <span className="ml-auto text-[11px] text-muted-foreground">
                 {t("settings.chatUpload.updated").replace("{who}", s.updated_by)
-                  .replace("{when}", s.updated_at ? new Date(s.updated_at).toLocaleString() : "")}
+                  .replace("{when}", s.updated_at ? formatFullDate(s.updated_at) : "")}
               </span>
             )}
           </div>

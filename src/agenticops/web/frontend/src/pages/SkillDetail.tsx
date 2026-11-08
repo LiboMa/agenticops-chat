@@ -15,6 +15,7 @@ import {
   useImproveSkill,
 } from "@/hooks/useSkills";
 import { useReadOnly } from "@/hooks/useBootstrap";
+import { formatFullDate } from "@/lib/formatDate";
 
 /* -- Tab type ----------------------------------------------------- */
 
@@ -303,7 +304,7 @@ export default function SkillDetail() {
                     <span className="font-mono"> @{skill.source_ref.slice(0, 12)}</span>
                   )}
                   {skill.imported_at && (
-                    <> · {t("skills.importedAt")} {new Date(skill.imported_at).toLocaleString()}</>
+                    <> · {t("skills.importedAt")} {formatFullDate(skill.imported_at)}</>
                   )}
                 </p>
               )}

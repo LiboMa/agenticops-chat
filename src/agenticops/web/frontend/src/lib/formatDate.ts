@@ -39,14 +39,34 @@ export function parseApiDate(value: string | Date | null | undefined): Date | nu
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/** A timestamp, always shown in UTC and labelled so (MVP-2.8.0 S1). "-" for nothing. */
 export function formatShortDate(date: string | Date | null | undefined): string {
   const d = parseApiDate(date);
-  return d ? shortFormatter.format(d) : "-";
+  return d ? `${shortFormatter.format(d)} UTC` : "-";
 }
 
 export function formatFullDate(date: string | Date | null | undefined): string {
   const d = parseApiDate(date);
-  return d ? fullFormatter.format(d) : "-";
+  return d ? `${fullFormatter.format(d)} UTC` : "-";
+}
+
+/** The UTC calendar day of an instant, "YYYY-MM-DD" — day groupings and day filters use UTC days (MVP-2.8.0 S1).
+ *  "" for nothing. */
+export function utcDayKey(date: string | Date | null | undefined): string {
+  const d = parseApiDate(date);
+  return d ? d.toISOString().slice(0, 10) : "";
+}
+
+const dayFormatters: Record<"en" | "zh", Intl.DateTimeFormat> = {
+  en: new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }),
+  zh: new Intl.DateTimeFormat("zh-CN", { weekday: "short", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }),
+};
+
+/** A utcDayKey as a heading in the page language, labelled UTC. */
+export function formatUtcDay(key: string, locale: "en" | "zh"): string {
+  const d = new Date(`${key}T00:00:00Z`);
+  if (!key || Number.isNaN(d.getTime())) return key;
+  return locale === "zh" ? `${dayFormatters.zh.format(d)}（UTC）` : `${dayFormatters.en.format(d)} (UTC)`;
 }
 
 const timeFormatter = new Intl.DateTimeFormat("en-GB", {

@@ -6,6 +6,7 @@ import { Switch } from "@/components/ui/Switch";
 import { useLocale } from "@/i18n/LocaleContext";
 import { ConfigureModal } from "./ConfigureModal";
 import { buildConfigPayload, channelFields, appFields } from "@/lib/messagingFields";
+import { formatFullDate } from "@/lib/formatDate";
 import {
   useMessagingSchema, useMessagingApps, useMessagingChannels, useMessagingLogs,
   useUpsertApp, useDeleteApp, useUpsertChannel, useDeleteChannel, useToggleChannel, useTestChannel,
@@ -142,7 +143,7 @@ export function MessagingTab() {
                   <span className={`px-1.5 py-0.5 rounded font-semibold ${log.status === "sent" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{log.status}</span>
                   <span className="font-medium text-foreground">{log.channel_name}</span>
                   <span className="text-muted-foreground truncate flex-1">{log.subject}</span>
-                  <span className="text-muted-foreground/60">{new Date(log.sent_at).toLocaleString()}</span>
+                  <span className="text-muted-foreground/60">{formatFullDate(log.sent_at)}</span>
                 </div>
               ))}
               {!(logsQ.data ?? []).length && <p className="text-sm text-muted-foreground">No delivery logs yet.</p>}

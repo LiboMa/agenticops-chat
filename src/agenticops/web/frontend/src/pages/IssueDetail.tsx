@@ -600,7 +600,7 @@ function MergedAlertsSection({
           {displayed.map((alert, i) => (
             <div key={i} className="flex flex-wrap items-center gap-2 text-sm py-1.5 px-2 rounded bg-secondary">
               <span className="text-xs text-muted-foreground whitespace-nowrap font-mono">
-                {new Date(alert.timestamp).toLocaleString()}
+                {formatFullDate(alert.timestamp)}
               </span>
               <span className="text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded">
                 {alert.source}

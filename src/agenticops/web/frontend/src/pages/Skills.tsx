@@ -35,6 +35,7 @@ import type {
   SkillImportSourceResult,
 } from "@/api/types";
 import { useReadOnly } from "@/hooks/useBootstrap";
+import { formatFullDate } from "@/lib/formatDate";
 
 type Filter = "all" | "published" | "draft";
 
@@ -822,7 +823,7 @@ function ImprovementQueue() {
                   </div>
                   <p className="text-xs text-muted-foreground line-clamp-2">{r.improvement}</p>
                   <span className="text-xs text-muted-foreground mt-1 block">
-                    {new Date(r.created_at).toLocaleString()}
+                    {formatFullDate(r.created_at)}
                   </span>
                 </div>
               </div>

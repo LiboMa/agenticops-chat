@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, it, expect, vi } from "vitest";
-import { formatElapsed, formatFullDate, formatShortDate, formatUtcTime, parseApiDate } from "@/lib/formatDate";
+import { formatElapsed, formatFullDate, formatShortDate, formatUtcDay, formatUtcTime, parseApiDate, utcDayKey } from "@/lib/formatDate";
 
 // A naive timestamp only misparses when the local zone is not UTC, so pin a +08:00 zone:
 // these tests must also fail against a broken parser on a UTC machine.
@@ -37,23 +37,35 @@ describe("formatShortDate / formatFullDate", () => {
   it("format a naive datetime identically to the same string with Z", () => {
     expect(formatShortDate("2026-09-26T08:05:00")).toBe(formatShortDate("2026-09-26T08:05:00Z"));
     expect(formatFullDate("2026-09-26T08:05:00")).toBe(formatFullDate("2026-09-26T08:05:00Z"));
-    expect(formatShortDate("2026-09-26T08:05:00")).toBe("Sep 26, 08:05");
-    expect(formatFullDate("2026-09-26T08:05:00")).toBe("Sep 26, 2026, 08:05:00");
+    expect(formatShortDate("2026-09-26T08:05:00")).toBe("Sep 26, 08:05 UTC");
+    expect(formatFullDate("2026-09-26T08:05:00")).toBe("Sep 26, 2026, 08:05:00 UTC");
   });
   it("format microseconds and an explicit offset", () => {
-    expect(formatFullDate("2026-09-26T08:05:00.123456")).toBe("Sep 26, 2026, 08:05:00");
+    expect(formatFullDate("2026-09-26T08:05:00.123456")).toBe("Sep 26, 2026, 08:05:00 UTC");
     expect(formatFullDate("2026-09-26T16:05:00+08:00")).toBe(formatFullDate("2026-09-26T08:05:00Z"));
   });
   it("leave a Date input unchanged", () => {
     const d = new Date(Date.UTC(2026, 8, 26, 8, 5, 7));
-    expect(formatShortDate(d)).toBe("Sep 26, 08:05");
-    expect(formatFullDate(d)).toBe("Sep 26, 2026, 08:05:07");
+    expect(formatShortDate(d)).toBe("Sep 26, 08:05 UTC");
+    expect(formatFullDate(d)).toBe("Sep 26, 2026, 08:05:07 UTC");
   });
   it('return "-" for empty, null and unparseable input', () => {
     for (const bad of ["", null, "garbage"]) {
       expect(formatShortDate(bad)).toBe("-");
       expect(formatFullDate(bad)).toBe("-");
     }
+  });
+});
+
+describe("utcDayKey / formatUtcDay — report days are UTC days (MVP-2.8.0 S1)", () => {
+  it("keys an instant by its UTC date, not the browser's (+08:00 here, already the next day)", () => {
+    expect(utcDayKey("2026-11-07T16:30:00Z")).toBe("2026-11-07");
+    expect(utcDayKey("2026-11-07T16:30:00")).toBe("2026-11-07");
+    expect(utcDayKey(null)).toBe("");
+  });
+  it("formats a day key in the page language, labelled UTC", () => {
+    expect(formatUtcDay("2026-11-07", "en")).toBe("Sat, Nov 7, 2026 (UTC)");
+    expect(formatUtcDay("2026-11-07", "zh")).toBe("2026年11月7日周六（UTC）");
   });
 });
 

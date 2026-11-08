@@ -9,6 +9,7 @@ import { useCostSummary } from "@/hooks/useCostSummary";
 import { useRcaLocationStats } from "@/hooks/useRcaLocationStats";
 import { ANCHOR_STATUSES, LOCATION_STATUSES, ratePct } from "@/lib/locationStats";
 import type { AgentLogEntry } from "@/api/types";
+import { parseApiDate } from "@/lib/formatDate";
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis,
   Tooltip, Legend, PieChart, Pie, Cell,
@@ -37,9 +38,12 @@ function formatTokens(n: number): string {
   return `${(n / 1_000_000).toFixed(2)}M`;
 }
 
+const timeFmt = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: "UTC" });
+
+/** HH:MM:SS UTC — never the browser's zone (MVP-2.8.0 S1); a naive API time is UTC. */
 function formatTime(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const d = parseApiDate(iso);
+  return d ? `${timeFmt.format(d)} UTC` : "-";
 }
 
 /* ── RCA Location (GET /api/rca/location-stats) ─────────────────── */

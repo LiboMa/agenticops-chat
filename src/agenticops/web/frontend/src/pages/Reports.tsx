@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import type { Report } from "@/api/types";
+import { formatUtcDay, formatUtcTime, utcDayKey } from "@/lib/formatDate";
 
 const TYPE_COLORS: Record<string, string> = {
   daily: "bg-blue-100 text-blue-700",
@@ -32,16 +33,14 @@ export function plainSummary(s: string): string {
     .slice(0, 220);
 }
 
-/** Group reports by calendar day (local), newest day first; rows within a day newest first. */
+/** Group reports by UTC calendar day (`utcDayKey`, MVP-2.8.0 S1), newest day first; rows within a day newest first. */
 export function groupByDay(reports: Report[]): { day: string; rows: Report[] }[] {
   const groups = new Map<string, Report[]>();
   const sorted = [...reports].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
   for (const r of sorted) {
-    const day = new Date(r.created_at).toLocaleDateString(undefined, {
-      year: "numeric", month: "short", day: "numeric",
-    });
+    const day = utcDayKey(r.created_at);
     const bucket = groups.get(day);
     if (bucket) bucket.push(r);
     else groups.set(day, [r]);
@@ -58,7 +57,7 @@ const BADGE: Record<PaperState, string> = {
 };
 
 export default function Reports() {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const { data, isLoading, error, refetch } = useReports();
   const [search, setSearch] = useState("");
 
@@ -112,7 +111,7 @@ export default function Reports() {
             groups.map(({ day, rows }) => (
               <div key={day}>
                 <div className="px-5 py-1.5 bg-muted/50 border-y border-border/50 text-[11px] font-medium text-muted-foreground uppercase tracking-[0.08em] sticky top-0">
-                  {day}
+                  {formatUtcDay(day, locale)}
                   <span className="ml-2 normal-case tracking-normal text-muted-foreground/60">{rows.length}</span>
                 </div>
                 {rows.map((r) => (
@@ -145,7 +144,7 @@ export default function Reports() {
                       </div>
                     </div>
                     <span className="text-xs text-muted-foreground whitespace-nowrap mt-1">
-                      {new Date(r.created_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                      {formatUtcTime(r.created_at)}
                     </span>
                   </Link>
                 ))}
