@@ -113,7 +113,17 @@ def test_the_list_is_items_and_total(client):
     for n in range(3):
         _issue(f"i{n}")
     body = client.get("/api/health-issues?limit=2").json()
-    assert set(body) == {"items", "total"} and body["total"] == 3 and len(body["items"]) == 2
+    assert set(body) == {"items", "total", "next_cursor"} and body["total"] == 3 and len(body["items"]) == 2
+
+
+def test_a_paged_list_gives_the_next_cursor_and_none_on_the_last_page(client):
+    """Spec global constraint: a list returns {items, total}, a paged one adds next_cursor (S2 review)."""
+    for n in range(3):
+        _issue(f"i{n}")
+    first = client.get("/api/health-issues?limit=2").json()
+    assert first["next_cursor"] == "2"
+    last = client.get(f"/api/health-issues?limit=2&offset={first['next_cursor']}").json()
+    assert len(last["items"]) == 1 and last["next_cursor"] is None
 
 
 def test_each_row_says_who_it_waits_on_and_since_when(client):

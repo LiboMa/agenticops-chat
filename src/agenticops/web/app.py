@@ -2261,7 +2261,8 @@ def api_list_health_issues(
         acct_names = _build_account_name_map(session, issues)
         items = _with_waits(session, issues,
                             [HealthIssueResponse.from_issue(i, acct_names.get(i.account_id)) for i in issues])
-        return {"items": items, "total": total}
+        end = offset + len(issues)
+        return {"items": items, "total": total, "next_cursor": str(end) if issues and end < total else None}
 
 
 @app.get("/api/health-issues/view-counts")

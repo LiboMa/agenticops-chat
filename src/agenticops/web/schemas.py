@@ -1117,6 +1117,8 @@ class CommandAuditResponse(BaseModel):
 
 
 class HealthIssueListResponse(BaseModel):
-    """GET /api/health-issues (MVP-2.8.0 S2): one page and how many match in all."""
+    """GET /api/health-issues (MVP-2.8.0 S2): one page, how many match in all, and the next page's offset
+    (None on the last page) — the spec's {items, total} + next_cursor for a paged list."""
     items: List[HealthIssueResponse]
     total: int
+    next_cursor: Optional[str] = None
