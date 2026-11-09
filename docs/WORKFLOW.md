@@ -1155,6 +1155,15 @@ generate an inventory report for EC2
 # - Hourly critical-issue detection
 ```
 
+**Reading the Schedules page (2.8.0).** «Configuration» says whether a schedule is enabled; «Latest run» is
+its newest real run (running / retrying / succeeded / failed / not run yet) — the two are separate facts, so
+an enabled schedule that never ran says «not run yet», never «running». «Run times» are UTC. After **Run now**
+the schedule's page says «submitted» until the run record appears and refreshes while the run is live.
+
+**Reading any data module (2.8.0).** Every module says one of four things: loading, failed (with Retry), empty
+(only when the request succeeded and returned nothing), or its data. When a refresh fails, the last data stays
+on screen under «refresh failed — as of HH:MM UTC». A failed request is never shown as "no findings".
+
 ---
 
 ### Tutorial 11: Notification Channels & /send_to
