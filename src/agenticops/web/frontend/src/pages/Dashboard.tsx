@@ -65,7 +65,7 @@ export default function Dashboard() {
     { label: t("dashboard.accounts"), value: s.total_accounts, hot: false },
   ];
 
-  const openIssues = (anomalies.data ?? []).filter((a) => !CLOSED_STATUSES.has(a.status));
+  const openIssues = (anomalies.data?.items ?? []).filter((a) => !CLOSED_STATUSES.has(a.status));
 
   return (
     <div>

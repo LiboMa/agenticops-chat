@@ -72,6 +72,12 @@ export interface Signal {
 
 /** GET /api/health-issues/{id} (HealthIssueResponse) — IssueDetail's source; the legacy /issues shape drops
  *  trace_id and merged_alerts. */
+/** GET /api/health-issues (MVP-2.8.0 S2) */
+export interface HealthIssuePage {
+  items: HealthIssue[];
+  total: number;
+}
+
 export interface HealthIssue {
   id: number;
   resource_id: string;
@@ -98,6 +104,9 @@ export interface HealthIssue {
   anchor_status: AnchorStatus | null;
   anchor_candidates: { rule?: string | null; candidates?: { ref: number; account_id: number; reason: string }[] } | null;
   observed_at: string | null;
+  /** MVP-2.8.0 S2: who it waits on (work_phases) and since when — null when unknown */
+  waiting_on?: string | null;
+  waiting_since?: string | null;
   available_actions?: UiAction[]; // the detail route only (MVP-2.7.0 S4): "note"
 }
 

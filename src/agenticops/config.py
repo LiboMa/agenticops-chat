@@ -961,6 +961,11 @@ class Settings(BaseSettings):
         description="Days to retain Signal (alert_events) rows before background pruning",
     )
 
+    # Workbench (MVP-2.8.0 S2)
+    attention_long_wait_hours: int = Field(
+        default=24, ge=1,
+        description="A work item waiting on a person longer than this is in the Cases 'waiting long' view",
+    )
     # RCA Quality (MVP-2.2.0)
     rca_min_confidence_for_autofix: float = Field(
         default=0.6,

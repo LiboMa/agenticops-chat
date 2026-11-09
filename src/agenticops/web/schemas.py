@@ -316,6 +316,9 @@ class HealthIssueResponse(BaseModel):
     observed_at: Optional[datetime] = None
     # What the viewer may do here (MVP-2.7.0 S4: "note"), from ui_actions.route_allows — the detail route fills it
     available_actions: List[dict] = Field(default_factory=list)
+    # MVP-2.8.0 S2: who the issue waits on (work_phases) and since when (services/attention.issue_waits)
+    waiting_on: Optional[str] = None
+    waiting_since: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1104,3 +1107,9 @@ class CommandAuditResponse(BaseModel):
     change_request_id: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class HealthIssueListResponse(BaseModel):
+    """GET /api/health-issues (MVP-2.8.0 S2): one page and how many match in all."""
+    items: List[HealthIssueResponse]
+    total: int

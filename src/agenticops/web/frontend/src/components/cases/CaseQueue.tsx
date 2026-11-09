@@ -40,7 +40,7 @@ export function CaseQueue({ selectedId, wide }: { selectedId: number | null; wid
   const listRef = useRef<HTMLUListElement>(null);
 
   const set = (key: string, value: string) => setParams(queueParams(params, key, value), { replace: true });
-  const data: HealthIssue[] = issues.data ?? [];
+  const data: HealthIssue[] = issues.data?.items ?? [];
   const rows = data.slice(0, QUEUE_CAP).map((i) => issueRow(i, location.search));
   const filtered = ["status", "severity", "q", "sort"].some((k) => params.has(k));
 

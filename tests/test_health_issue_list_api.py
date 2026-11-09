@@ -38,7 +38,7 @@ def _issue(title, *, severity="high", status="open", source="manual", resource_i
 def _ids(client, qs):
     r = client.get(f"/api/health-issues{qs}")
     assert r.status_code == 200, r.text
-    return [row["id"] for row in r.json()]
+    return [row["id"] for row in r.json()["items"]]
 
 
 def test_scope_splits_ops_and_security(client):
@@ -82,7 +82,7 @@ def test_sort_orders(client):
 
 def test_rows_keep_the_full_issue_shape(client):
     _issue("x", metric_data={"resource_type": "EKS", "region": "ap-southeast-1"}, occurrences=4)
-    row = client.get("/api/health-issues").json()[0]
+    row = client.get("/api/health-issues").json()["items"][0]
     assert row["occurrence_count"] == 4 and row["metric_data"]["resource_type"] == "EKS"
     assert {"account_name", "anchor_status", "resource_ref"} <= set(row)
 
@@ -91,3 +91,67 @@ def test_limit_caps_at_the_max_list_limit(client):
     from agenticops.config import settings
     assert client.get(f"/api/health-issues?limit={settings.max_list_limit + 1}").status_code == 422
     assert client.get("/api/health-issues?limit=0").status_code == 422
+
+
+# ── MVP-2.8.0 S2: {items, total}, who each issue waits on and since when, quick views and their counts ─────────
+
+def _plan(issue_id, status, *, minutes_ago=30):
+    from agenticops.models import FixPlan, RCAResult
+    s = get_session()
+    try:
+        r = RCAResult(health_issue_id=issue_id, root_cause="x", confidence=0.9, critic_verdict="supported")
+        s.add(r); s.flush()
+        p = FixPlan(health_issue_id=issue_id, rca_result_id=r.id, risk_level="L1", title="p", summary="s", status=status)
+        s.add(p); s.flush()
+        p.updated_at = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
+        s.commit()
+    finally:
+        s.close()
+
+
+def test_the_list_is_items_and_total(client):
+    for n in range(3):
+        _issue(f"i{n}")
+    body = client.get("/api/health-issues?limit=2").json()
+    assert set(body) == {"items", "total"} and body["total"] == 3 and len(body["items"]) == 2
+
+
+def test_each_row_says_who_it_waits_on_and_since_when(client):
+    waiting = _issue("needs approval", status="fix_planned")
+    _plan(waiting, "pending_approval")
+    row = next(r for r in client.get("/api/health-issues").json()["items"] if r["id"] == waiting)
+    assert row["waiting_on"] == "approver" and row["waiting_since"]
+
+
+def test_views_mine_failed_and_long_wait(client, monkeypatch):
+    from agenticops.config import settings
+    monkeypatch.setattr(settings, "attention_long_wait_hours", 24)
+    fresh = _issue("fresh approval", status="fix_planned")
+    _plan(fresh, "pending_approval", minutes_ago=30)
+    stale = _issue("old approval", status="fix_planned")
+    _plan(stale, "pending_approval", minutes_ago=60 * 30)
+    _issue("nobody waits", status="investigating")
+    assert sorted(_ids(client, "?view=mine")) == sorted([fresh, stale])
+    assert _ids(client, "?view=long_wait") == [stale]
+    assert _ids(client, "?view=failed") == []
+    assert client.get("/api/health-issues?view=everything").status_code == 422
+
+
+def test_view_counts_match_each_views_total(client):
+    a = _issue("approval", status="fix_planned")
+    _plan(a, "pending_approval")
+    _issue("open", status="open")
+    _issue("sec", source="security_poll")
+    counts = client.get("/api/health-issues/view-counts?scope=all").json()
+    assert set(counts) == {"all", "mine", "failed", "long_wait"}
+    for view in ("all", "mine", "failed", "long_wait"):
+        total = client.get(f"/api/health-issues?scope=all&view={view}").json()["total"]
+        assert counts[view] == total, view
+    assert client.get("/api/health-issues/view-counts?scope=ops").json()["all"] == 2
+
+
+def test_the_count_and_list_handlers_are_plain_def():
+    import inspect
+    from agenticops.web import app as webapp
+    assert not inspect.iscoroutinefunction(webapp.api_list_health_issues)
+    assert not inspect.iscoroutinefunction(webapp.api_health_issue_view_counts)

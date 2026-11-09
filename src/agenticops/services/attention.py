@@ -317,3 +317,11 @@ def attention_page(actor, *, account_id: Optional[int] = None, reason: Optional[
         i["occurred_at"] = _iso(i["occurred_at"])
     return {"items": page, "total": len(items), "counts": counts,
             "next_cursor": str(offset + limit) if offset + limit < len(items) else None, "generated_at": _iso(now)}
+
+
+def issue_rows(actor, *, account_id: Optional[int] = None, now: Optional[datetime] = None) -> list[dict]:
+    """The actor's issue rows of the workbench, unsorted, `occurred_at` still a datetime — the Cases quick views
+    (mine / failed / waiting long) are subsets of these, so the queue and the workbench never disagree."""
+    now = now or datetime.now(timezone.utc)
+    with get_db_session() as s:
+        return _issue_items(s, actor, account_id, now)

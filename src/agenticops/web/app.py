@@ -2158,7 +2158,37 @@ async def api_trigger_issue_fix_plan(issue_id: int, actor: Actor = Depends(curre
 # ============================================================================
 
 
-@app.get("/api/health-issues", response_model=List[HealthIssueResponse])
+_ISSUE_VIEWS = ("all", "mine", "failed", "long_wait")
+
+
+def _issue_view_ids(actor, account_id, view):
+    """The issue ids of a Cases quick view (MVP-2.8.0 S2), None for `all`: subsets of the actor's workbench rows
+    (services/attention), so the queue and the workbench never disagree."""
+    if view == "all":
+        return None
+    from agenticops.services.attention import issue_rows
+    now = datetime.now(timezone.utc)
+    rows = issue_rows(actor, account_id=account_id, now=now)
+    if view == "failed":
+        rows = [r for r in rows if r["reason"] in ("execution_failed", "execution_not_started")]
+    elif view == "long_wait":
+        cutoff = now - timedelta(hours=settings.attention_long_wait_hours)
+        rows = [r for r in rows if r["occurred_at"] <= cutoff]
+    return [int(r["id"][1:]) for r in rows]   # every issue row's id is "I<issue id>"
+
+
+def _with_waits(session, issues, responses):
+    """Fill waiting_on / waiting_since from services/attention.issue_waits — one definition for every surface."""
+    from agenticops.services.attention import issue_waits
+    waits = issue_waits(session, issues, now=datetime.now(timezone.utc))
+    for issue, resp in zip(issues, responses):
+        w = waits.get(issue.id)
+        if w is not None:
+            resp.waiting_on, resp.waiting_since = w.phase.waiting_for, w.since
+    return responses
+
+
+@app.get("/api/health-issues", response_model=HealthIssueListResponse)
 def api_list_health_issues(
     severity: Optional[str] = None,
     status: Optional[str] = None,
@@ -2169,11 +2199,15 @@ def api_list_health_issues(
     scope: str = Query("all", pattern="^(ops|security|all)$"),
     q: Optional[str] = Query(None, max_length=200),
     sort: str = Query("newest", pattern="^(newest|oldest|severity)$"),
+    view: str = Query("all", pattern="^(all|mine|failed|long_wait)$"),
     limit: int = Query(default=settings.default_list_limit, ge=1, le=settings.max_list_limit),
     offset: int = Query(default=0, ge=0),
+    actor: Actor = Depends(current_actor),
 ):
     """List health issues (the Cases queue, MVP-2.7.0 S4): `scope` ops|security|all, `status` / `severity` one or a
-    comma list (422 on an unknown value), `q` = title / resource id / I#n, `sort` newest|oldest|severity."""
+    comma list (422 on an unknown value), `q` = title / resource id / I#n, `sort` newest|oldest|severity.
+    MVP-2.8.0 S2: `{items, total}`; `view` mine / failed / long_wait (subsets of the actor's workbench rows);
+    every row says who it waits on and since when."""
     import re
     from sqlalchemy import case
     from agenticops.models import VALID_ISSUE_STATUSES
@@ -2188,8 +2222,11 @@ def api_list_health_issues(
 
     statuses = _list(status, VALID_ISSUE_STATUSES, "status")
     severity_list = _list(severity, severities, "severity")
+    view_ids = _issue_view_ids(actor, account_id, view)
     with get_db_session() as session:
         query = session.query(HealthIssue)
+        if view_ids is not None:
+            query = query.filter(HealthIssue.id.in_(view_ids))
         if severity_list:
             query = query.filter(HealthIssue.severity.in_(severity_list))
         if statuses:
@@ -2219,9 +2256,32 @@ def api_list_health_issues(
         else:
             query = query.order_by(HealthIssue.detected_at.desc(), HealthIssue.id.desc())
 
+        total = query.order_by(None).count()
         issues = query.offset(offset).limit(limit).all()
         acct_names = _build_account_name_map(session, issues)
-        return [HealthIssueResponse.from_issue(i, acct_names.get(i.account_id)) for i in issues]
+        items = _with_waits(session, issues,
+                            [HealthIssueResponse.from_issue(i, acct_names.get(i.account_id)) for i in issues])
+        return {"items": items, "total": total}
+
+
+@app.get("/api/health-issues/view-counts")
+def api_health_issue_view_counts(
+    account_id: Optional[int] = Query(None),
+    scope: str = Query("all", pattern="^(ops|security|all)$"),
+    actor: Actor = Depends(current_actor),
+):
+    """How many issues each Cases quick view holds (MVP-2.8.0 S2), under the same scope and account as the list."""
+    out = {}
+    with get_db_session() as session:
+        for view in _ISSUE_VIEWS:
+            ids = _issue_view_ids(actor, account_id, view)
+            q = session.query(HealthIssue)
+            if ids is not None:
+                q = q.filter(HealthIssue.id.in_(ids))
+            if account_id is not None:
+                q = q.filter_by(account_id=account_id)
+            out[view] = issue_scope_filter(q, scope).count()
+    return out
 
 
 @app.get("/api/health-issues/{issue_id}", response_model=HealthIssueResponse)
@@ -2237,6 +2297,7 @@ def api_get_health_issue(issue_id: int, actor: Actor = Depends(current_actor)):
         if issue.account_id:
             acct_name = session.query(CloudAccount.name).filter_by(id=issue.account_id).scalar()
         resp = HealthIssueResponse.from_issue(issue, acct_name)
+        _with_waits(session, [issue], [resp])
         allowed, code = route_allows(actor, "issue.note", issue)
         resp.available_actions = [{"action": "note", "allowed": allowed, "reason_code": code, "effect": "update"}]
         return resp
