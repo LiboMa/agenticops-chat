@@ -156,6 +156,42 @@ E2E 过程中发现 6 个问题，都已修复，每个都先写了失败的测�
 | 全部 OpenAI 型号 × 四个档位 | PASS | 选择器里的 14 个 OpenAI 型号，乘以浅度 / 深度 / 超深 / 极限四档，都经真实的 `resolve_thinking_budget` → `thinking_fields_for_budget` → `bedrock_model_kwargs` 生成请求，直接调 Bedrock：56 / 56 成功 |
 | SQLite WAL | 本机无法验证切换 | 本机库原本就已是 WAL：设置存在库文件里，不清楚之前是谁设的，所以在本机看不到切换。开发机现在是回滚日志模式，部署后在那里验证 |
 
+## 追加：编辑账户不再丢掉已保存的密钥；账户的增删改写审计（2026-11-09）
+
+修复的是 11-09 的一次编辑：只改了 Agenticops-Global 的区域，就丢掉了它存着的访问密钥对，之后 34 个区域全部 AccessDenied。原因与修复见 `MVP-2.7.1-RELEASE.md`「编辑账户不再丢掉已保存的密钥」。
+
+验证在本机服务上做：
+- 用一次性的管理员账户 `e2e-admin5`，用完已停用。
+- 测试账户都是**停用**的，密钥是假的。
+- 数据库只用只读连接查看。
+- 本机的两个真实账户没有动：凭证的键不变，也没有它们的审计行。
+- 本机 `api_auth_enabled: false`，所以 Web 写入的审计行，actor 都是 `web:anonymous`，这是设计如此。登录用户记成 actor 这一点，由单元测试 `test_the_audit_rows_name_the_signed_in_user` 覆盖；部署到开发机后再看一次。
+
+| 场景 | 结果 | 证据 |
+|---|---|---|
+| 旧代码复现 | 复现（预期的失败） | 重启前的服务还是旧代码（11-08 23:30 启动）：<br>• 新建停用账户 `e2e-keys-old`（Role ARN + 假 AK/SK），`_encrypted` 存下了；<br>• 只改区域就保存，`_encrypted` 没了，也没有审计行，和 11-09 的现象一样 |
+| 新建 | PASS | 重建前端、重启服务后，新建 `e2e-keys`：<br>• `_encrypted` 存下了；<br>• 审计 `create`，`secrets: added` |
+| API 合并：补上表单没有的字段 | PASS | 像 chaos 客户端那样发 `PUT {"credentials": {"account_id", "kubeconfigs"}}`：<br>• 两个字段加上了；<br>• `_encrypted` 的 sha1 不变（`c585bd35f933`）；<br>• 审计 `secrets: kept` |
+| 只改区域（11-09 的操作） | PASS | 表单在密钥输入框下显示「Stored keys are kept — leave empty to keep them」。保存后：<br>• 区域变了；<br>• `_encrypted` 还是同一段密文（sha1 不变）；<br>• `account_id`、`kubeconfigs` 都在；<br>• 审计 `update`，`secrets: kept`，前后的区域都记下了。<br>![](images/account-keys-2026-11-09/stored-keys-kept.png) |
+| agent 工具 | PASS | 在对话里让 agent 调 `update_cloud_account(name, regions)`：<br>• 回答「Account 'e2e-keys' updated: regions.」；<br>• 密钥、密文和隐藏字段都不变；<br>• 审计 `via: agent_tool`，`secrets: kept` |
+| 删除已存的密钥 | PASS | 勾选「Remove the stored keys」后保存：<br>• `_encrypted` 没了；<br>• `role_arn`、`external_id`、`account_id`、`kubeconfigs` 都保留；<br>• 审计 `secrets: removed`。<br>![](images/account-keys-2026-11-09/remove-stored-keys.png) |
+| 切到 Access Keys Only | PASS | 切换后，表单里仍是已存的 `account_id`（原来一切换就清空）。填新的 AK/SK 保存：<br>• 类型变为 `static_keys`；<br>• `role_arn`、`external_id` 去掉了；<br>• 新密钥存下了，`account_id`、`kubeconfigs` 保留；<br>• 审计 `secrets: added` |
+| 删除 | PASS | 审计 `delete`，记下删除前的快照 |
+| 审计在界面上 | PASS | Settings → 审计日志 列出这 7 行（entity `account #3`、actor、`{"via", "secrets"}`）；7 行里找不到 4 个假密钥中的任何一个。<br>![](images/account-keys-2026-11-09/audit-log-tab.png) |
+| CLI | PASS | 对 API 建的停用账户 `e2e-cli` 跑真实的 `aiops update account … --regions … --role-arn …`：<br>• 密钥保留；<br>• 审计 `update`，actor `cli:malibo`，`via: cli`，`secrets: kept`；<br>• `aiops delete account e2e-cli --force` 记 `delete` |
+| 收尾 | — | • 截图用的 `e2e-keys-shot` 经 API 新建、删除（2 行审计）；<br>• 对话会话已删；<br>• `e2e-admin5` 已停用 |
+
+本轮闸门：
+- 后端全量：7524 passed · 99 skipped · 3 failed，3 个都是已知的本机环境问题（本机 `settings.yaml` 的模型配置 2 个，reporter 提示词里未提交的中文 1 个）。
+- 前端：vitest 72 个文件 / 791 个测试，`tsc` 0，在 `/tmp` 空目录里 `npm ci && npm run build` 通过。
+- 真实模型花费：一轮对话（Opus 5.5，一次工具调用）。
+
+**计划的一处更正。**计划把 CLI 写成「非目标：没有修改账户的 CLI 命令」，这是错的。实现时发现：
+- `aiops create|update|delete account` 和对话里的 `/account` 都会写账户；
+- `aiops init` 重新登记已有账户时，同样会整体替换凭证。
+
+按主人「增删改都写审计」的决定，CLI 也一并做了：都写审计，`aiops init` 改为合并。
+
 ## 没验证的
 
 - **移动端「拍照」菜单项。** 它只在 `pointer: coarse`（触屏）下出现，Playwright 调整窗口大小模拟不出触屏，需要在真机上看一下。

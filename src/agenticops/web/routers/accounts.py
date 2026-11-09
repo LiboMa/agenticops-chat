@@ -1,10 +1,17 @@
-"""Cloud account CRUD + connection-test API endpoints — extracted from app.py."""
+"""Cloud account CRUD + connection-test API endpoints — extracted from app.py.
+
+Create / update / delete write one audit row each (services/account_audit), in the same transaction as the change.
+They are plain `def`: an edit decrypts and re-encrypts credentials, a network call with the KMS backend."""
 
 from typing import List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from agenticops.audit.service import Actions
+from agenticops.auth.actor import Actor
 from agenticops.models import CloudAccount, get_db_session
+from agenticops.services import account_audit
+from agenticops.web.deps import current_actor
 from agenticops.web.schemas import AccountCreate, AccountResponse, AccountUpdate
 
 router = APIRouter()
@@ -31,7 +38,7 @@ async def api_get_account(account_id: int):
 
 
 @router.post("/api/accounts", response_model=AccountResponse, status_code=201)
-async def api_create_account(account: AccountCreate):
+def api_create_account(account: AccountCreate, actor: Actor = Depends(current_actor)):
     """Create a new cloud account. Credentials are encrypted at rest."""
     from sqlalchemy.exc import IntegrityError
     from agenticops.credentials.store import get_credential_store
@@ -61,12 +68,17 @@ async def api_create_account(account: AccountCreate):
             session.flush()
         except IntegrityError:
             raise HTTPException(status_code=409, detail=f"Account name '{account.name}' already exists")
+        account_audit.record(session, Actions.CREATE, db_account, actor, via="web",
+                             after=account_audit.snapshot(db_account),
+                             secrets=account_audit.secrets_change(None, db_account.credentials, account.credentials))
         return AccountResponse.model_validate(db_account)
 
 
 @router.put("/api/accounts/{account_id}", response_model=AccountResponse)
-async def api_update_account(account_id: int, account: AccountUpdate):
-    """Update an existing cloud account. Credentials re-encrypted on change."""
+def api_update_account(account_id: int, account: AccountUpdate, actor: Actor = Depends(current_actor)):
+    """Update an existing cloud account. `credentials` is merged into the stored ones
+    (credentials/store.merge_credentials): a secret left out or empty is kept — the response never shows one — and
+    `clear_secrets` removes them; a change of credential_source_type drops the previous method's own fields."""
     from sqlalchemy.exc import IntegrityError
     from agenticops.credentials.store import get_credential_store
     from agenticops.credentials.session_factory import get_session_factory
@@ -77,6 +89,8 @@ async def api_update_account(account_id: int, account: AccountUpdate):
             raise HTTPException(status_code=404, detail="Account not found")
 
         update_data = account.model_dump(exclude_unset=True)
+        incoming = update_data.pop("credentials", None)
+        clear_secrets = bool(update_data.pop("clear_secrets", False))
 
         # Check name uniqueness before applying
         new_name = update_data.get("name")
@@ -87,10 +101,14 @@ async def api_update_account(account_id: int, account: AccountUpdate):
             if conflict:
                 raise HTTPException(status_code=409, detail=f"Account name '{new_name}' already exists")
 
-        # Encrypt credentials if being updated
-        if "credentials" in update_data and update_data["credentials"]:
-            store = get_credential_store()
-            update_data["credentials"] = store.encrypt_credentials(update_data["credentials"])
+        before = account_audit.snapshot(db_account)
+        stored_before = dict(db_account.credentials or {})
+        new_type = update_data.get("credential_source_type")
+        switched_from = (db_account.credential_source_type
+                         if new_type and new_type != db_account.credential_source_type else None)
+        if incoming or clear_secrets or switched_from:
+            db_account.credentials = get_credential_store().merge_update(
+                stored_before, incoming, clear_secrets=clear_secrets, switched_from=switched_from)
 
         for key, value in update_data.items():
             setattr(db_account, key, value)
@@ -99,6 +117,9 @@ async def api_update_account(account_id: int, account: AccountUpdate):
             session.flush()
         except IntegrityError:
             raise HTTPException(status_code=409, detail=f"Account name '{new_name or db_account.name}' already exists")
+        account_audit.record(session, Actions.UPDATE, db_account, actor, via="web",
+                             before=before, after=account_audit.snapshot(db_account),
+                             secrets=account_audit.secrets_change(stored_before, db_account.credentials, incoming))
 
         # Invalidate session cache
         get_session_factory().invalidate(db_account.name)
@@ -106,7 +127,7 @@ async def api_update_account(account_id: int, account: AccountUpdate):
 
 
 @router.delete("/api/accounts/{account_id}", status_code=204)
-async def api_delete_account(account_id: int):
+def api_delete_account(account_id: int, actor: Actor = Depends(current_actor)):
     """Delete a cloud account and its associated resources."""
     from sqlalchemy.exc import IntegrityError
 
@@ -114,6 +135,7 @@ async def api_delete_account(account_id: int):
         db_account = session.query(CloudAccount).filter_by(id=account_id).first()
         if not db_account:
             raise HTTPException(status_code=404, detail="Account not found")
+        before = account_audit.snapshot(db_account)
         try:
             session.delete(db_account)
             session.flush()
@@ -122,6 +144,7 @@ async def api_delete_account(account_id: int):
                 status_code=409,
                 detail=f"Cannot delete account: it is still referenced by other records ({e.orig})",
             )
+        account_audit.record(session, Actions.DELETE, db_account, actor, via="web", before=before)
 
 
 @router.post("/api/accounts/{account_id}/test")

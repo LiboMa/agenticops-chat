@@ -15,6 +15,7 @@ import base64
 import json
 import logging
 import os
+import re
 import threading
 from abc import ABC, abstractmethod
 from typing import Any
@@ -23,6 +24,71 @@ logger = logging.getLogger(__name__)
 
 # Sentinel to detect encrypted credentials
 _ENCRYPTED_KEY = "_encrypted"
+
+# What a stored secret looks like on the way out: the API's redaction (web/schemas.AccountResponse) and the masks
+# list_cloud_accounts prints. An edit that sends one of them back means "unchanged", never a new value.
+REDACTED_VALUE = "***REDACTED***"
+_MASKED = re.compile(r"\*{4}.{0,4}")
+
+_SENSITIVE_NAMES = frozenset({
+    "access_key_id", "secret_access_key", "session_token",
+    "client_secret", "private_key", "private_key_id",
+    "app_secret", "bot_token", "app_token", "password",
+})
+
+# The fields a credential method owns. The AWS provider uses any of them it finds, whatever credential_source_type
+# says (a role_arn is assumed, a profile_name wins over keys), so switching away from the method drops them.
+_METHOD_FIELDS = {"assume_role": ("role_arn", "external_id"), "profile": ("profile_name",)}
+
+
+def is_sensitive_key(key: str) -> bool:
+    """A secret field: encrypted at rest, never shown, kept by an edit that does not give a new value."""
+    k = key.lower()
+    return k in _SENSITIVE_NAMES or any(part in k for part in ("secret", "key", "token", "password"))
+
+
+def _is_empty(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def _is_echo(value: Any) -> bool:
+    return isinstance(value, str) and (value == REDACTED_VALUE or bool(_MASKED.fullmatch(value)))
+
+
+def merge_credentials(current: dict | None, incoming: dict | None, *, clear_secrets: bool = False,
+                      switched_from: str | None = None) -> dict:
+    """Apply an edit to plaintext credentials (2026-11-09: a region edit replaced them and lost a key pair).
+
+    The edit form never sees a stored secret (the API redacts them), so a secret field is replaced only by a new,
+    non-empty value — empty or left out keeps it. A plain field is set by a value and deleted by "" or None. A field
+    the edit leaves out is kept (account_id, kubeconfigs: the form has no input for them). A redaction or mask sent
+    back changes nothing. `clear_secrets` removes every stored secret first; `switched_from` is the previous
+    credential_source_type when it changes, whose own fields are dropped before the edit applies.
+    """
+    merged = dict(current or {})
+    if clear_secrets:
+        merged = {k: v for k, v in merged.items() if not is_sensitive_key(k)}
+    for k in _METHOD_FIELDS.get(switched_from or "", ()):
+        merged.pop(k, None)
+    for k, v in (incoming or {}).items():
+        if k == _ENCRYPTED_KEY or _is_echo(v):
+            continue
+        if is_sensitive_key(k):
+            if not _is_empty(v):
+                merged[k] = v
+        elif _is_empty(v):
+            merged.pop(k, None)
+        else:
+            merged[k] = v
+    return merged
+
+
+def audit_view(stored: dict | None) -> dict:
+    """What an audit row may say about credentials as stored: the plain fields and whether a secret is stored —
+    never a secret value, never the encrypted blob."""
+    stored = stored or {}
+    return {"fields": {k: v for k, v in stored.items() if k != _ENCRYPTED_KEY and not is_sensitive_key(k)},
+            "stored_secrets": any(k == _ENCRYPTED_KEY or is_sensitive_key(k) for k in stored)}
 
 
 class EncryptionBackend(ABC):
@@ -182,15 +248,10 @@ class CredentialStore:
             return creds
 
         # Separate sensitive vs non-sensitive fields
-        sensitive_keys = {
-            "access_key_id", "secret_access_key", "session_token",
-            "client_secret", "private_key", "private_key_id",
-            "app_secret", "bot_token", "app_token", "password",
-        }
         sensitive = {}
         non_sensitive = {}
         for k, v in creds.items():
-            if k.lower() in sensitive_keys or "secret" in k.lower() or "key" in k.lower() or "token" in k.lower() or "password" in k.lower():
+            if is_sensitive_key(k):
                 sensitive[k] = v
             else:
                 non_sensitive[k] = v
@@ -229,6 +290,20 @@ class CredentialStore:
         result = {k: v for k, v in stored.items() if k != _ENCRYPTED_KEY}
         result.update(sensitive)
         return result
+
+    def merge_update(self, stored: dict | None, incoming: dict | None, *, clear_secrets: bool = False,
+                     switched_from: str | None = None) -> dict:
+        """Apply an edit to credentials as stored in the DB (rules: merge_credentials); returns them encrypted."""
+        current = self.decrypt_credentials(stored or {})
+        merged = merge_credentials(current, incoming, clear_secrets=clear_secrets, switched_from=switched_from)
+        secrets = {k: v for k, v in merged.items() if is_sensitive_key(k)}
+        if (secrets and _ENCRYPTED_KEY in (stored or {})
+                and secrets == {k: v for k, v in current.items() if is_sensitive_key(k)}):
+            # Every secret as it was: keep the stored ciphertext. The credential fingerprint (session cache key,
+            # private kubeconfig path) hashes the stored form, and a new ciphertext would move it on a region edit.
+            plain = {k: v for k, v in merged.items() if not is_sensitive_key(k)}
+            return {**plain, _ENCRYPTED_KEY: stored[_ENCRYPTED_KEY]}
+        return self.encrypt_credentials(merged)
 
     def is_encrypted(self, stored: dict) -> bool:
         """Check if credentials dict contains encrypted data."""

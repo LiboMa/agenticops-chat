@@ -746,6 +746,22 @@ def describe_report(report_id: int = typer.Argument(..., help="Report ID")):
 # ============================================================================
 
 
+def _account_snapshot(account) -> dict:
+    from agenticops.services import account_audit
+    return account_audit.snapshot(account)
+
+
+def _audit_account(session, action: str, account, *, before: dict | None = None,
+                   stored_before: dict | None = None) -> None:
+    """One audit row per CLI account write (services/account_audit), as the CLI user, in the command's session."""
+    from agenticops.auth.actor import cli_actor
+    from agenticops.services import account_audit
+    deleted = action == "delete"
+    account_audit.record(session, action, account, cli_actor(), via="cli", before=before,
+                         after=None if deleted else account_audit.snapshot(account),
+                         secrets=None if deleted else account_audit.secrets_change(stored_before, account.credentials))
+
+
 @create_app.command("account")
 def create_account(
     name: str = typer.Argument(..., help="Account name"),
@@ -781,6 +797,8 @@ def create_account(
             is_enabled=activate,
         )
         session.add(account)
+        session.flush()
+        _audit_account(session, "create", account)
         session.commit()
 
         console.print(f"[green]account/{name} created[/green]")
@@ -875,7 +893,9 @@ def delete_account(
             if not confirm:
                 raise typer.Exit(0)
 
+        before = _account_snapshot(account)
         session.delete(account)
+        _audit_account(session, "delete", account, before=before)
         session.commit()
         console.print(f"[green]account/{name} deleted[/green]")
 
@@ -931,6 +951,7 @@ def update_account(
             console.print(f"[red]Account '{name}' not found.[/red]")
             raise typer.Exit(1)
 
+        before, stored_before = _account_snapshot(account), dict(account.credentials or {})
         if role_arn or external_id is not None:
             creds = dict(account.credentials or {})
             if role_arn:
@@ -946,6 +967,7 @@ def update_account(
         if disable:
             account.is_enabled = False
 
+        _audit_account(session, "update", account, before=before, stored_before=stored_before)
         session.commit()
         console.print(f"[green]account/{name} updated[/green]")
 
@@ -1758,7 +1780,9 @@ def _slash_account(ctx: ChatContext, args: list) -> str:
             if account.is_enabled:
                 return f"[yellow]Account '{name}' is already active.[/yellow]"
 
+            before = _account_snapshot(account)
             account.is_enabled = True
+            _audit_account(session, "update", account, before=before, stored_before=account.credentials)
             session.commit()
             return f"[green]Account '{name}' is now active.[/green]"
 
@@ -1771,7 +1795,9 @@ def _slash_account(ctx: ChatContext, args: list) -> str:
             if not account.is_enabled:
                 return f"[yellow]Account '{name}' is already inactive.[/yellow]"
 
+            before = _account_snapshot(account)
             account.is_enabled = False
+            _audit_account(session, "update", account, before=before, stored_before=account.credentials)
             session.commit()
             return f"[yellow]Account '{name}' deactivated.[/yellow]"
 
@@ -1785,7 +1811,9 @@ def _slash_account(ctx: ChatContext, args: list) -> str:
             if "--force" not in args and "-f" not in args:
                 return f"[yellow]Are you sure? Use '/account delete {name} --force' to confirm.[/yellow]"
 
+            before = _account_snapshot(account)
             session.delete(account)
+            _audit_account(session, "delete", account, before=before)
             session.commit()
             return f"[green]Account '{name}' deleted.[/green]"
 

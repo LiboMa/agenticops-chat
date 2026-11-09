@@ -77,6 +77,18 @@ Web Dashboard ──────┘         │
    `AssumeRoleCredentialFetcher` + `DeferredRefreshableCredentials`,长任务自动续期,勿退回手搓静态 Session+TTL。
 6. **纵深校验**:`resolve_credentials` 在 `credentials.account_id` 存在时校验 `GetCallerIdentity().Account` 必须匹配,
    否则 fail-closed(防错号执行);未配置 `account_id` 则不校验(行为不变)。
+7. **编辑账户 = 合并,不是替换**(2026-11-09:一次只改区域的编辑把 Global 账户存着的密钥对整个替换掉,34 个区域全部
+   AccessDenied):`PUT /api/accounts/{id}` 与 agent 工具 `update_cloud_account` 都经 `CredentialStore.merge_update`
+   (规则在 `credentials/store.merge_credentials`)。密钥字段(`is_sensitive_key`,与加密同一条规则)只被新的非空值替换,
+   留空、不传、回传 `***REDACTED***` 或列表里的 `****xxxx` 掩码都保持不变;非密钥字段 `""` / `null` 删除;没传的字段保留
+   (`account_id`、`kubeconfigs`:表单没有它们的输入框);删除已存密钥只有 `clear_secrets`(API 字段 / 工具参数 /
+   表单「Remove the stored keys」)。`credential_source_type` 变了,就去掉旧方式自己的字段(assume_role 的 `role_arn` /
+   `external_id`,profile 的 `profile_name`)——AWS provider 只看字段在不在,不看类型。密钥没变时保留原密文:凭证指纹
+   (会话缓存 key、私有 kubeconfig 路径)按存储形态计算,重新加密会让它变。账户的增删改各写一条 `audit_logs`
+   (`services/account_audit`,与改动同一事务;记非密钥字段、是否存有密钥、`details.secrets` =
+   kept|replaced|added|removed|none、`via` = web|agent_tool|cli;从不记密钥值或密文):Web API、agent 工具,以及 CLI
+   (`aiops create|update|delete account`、对话里的 `/account activate|deactivate|delete`、`aiops init` 重新登记——它也走
+   `merge_update`)。
 
 ## Key Modules
 

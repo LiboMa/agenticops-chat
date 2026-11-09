@@ -9,6 +9,8 @@ from typing import Annotated, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from agenticops.credentials.store import REDACTED_VALUE  # an edit that sends it back keeps the stored value
+
 
 class AccountCreate(BaseModel):
     """Schema for creating a cloud account."""
@@ -29,6 +31,9 @@ class AccountUpdate(BaseModel):
     regions: Optional[List[str]] = None
     labels: Optional[dict] = None
     is_enabled: Optional[bool] = None
+    # Merged into the stored credentials (credentials/store.merge_credentials): a secret left out or empty is kept,
+    # so removing the stored secrets takes this flag. Never written onto the account itself.
+    clear_secrets: bool = False
 
 
 REDACTED_KEYS = {"client_secret", "access_key_secret", "secret_key", "service_account_key", "secret_access_key", "access_key_id", "session_token", "_encrypted"}
@@ -53,7 +58,7 @@ class AccountResponse(BaseModel):
     def redact_secrets(self):
         if self.credentials:
             self.credentials = {
-                k: "***REDACTED***" if k in REDACTED_KEYS else v
+                k: REDACTED_VALUE if k in REDACTED_KEYS else v
                 for k, v in self.credentials.items()
             }
         return self

@@ -8,6 +8,7 @@ Does NOT require AWS credentials — tests the orchestration layer only.
 """
 
 import json
+import threading
 import time
 import pytest
 from datetime import datetime
@@ -39,6 +40,13 @@ def test_db(tmp_path):
     orig_cases_dir = settings.cases_dir
     orig_kb_dir = settings.knowledge_base_dir
     orig_engine = models_mod._engine
+    orig_notifications = settings.notifications_enabled
+    orig_rag = settings.rag_pipeline_enabled
+
+    # Disable background services to prevent daemon threads from using the
+    # test DB engine after teardown (causes segfault in full-suite runs).
+    settings.notifications_enabled = False
+    settings.rag_pipeline_enabled = False
 
     # Dispose any lingering engine to avoid StaticPool cross-contamination
     if models_mod._engine is not None:
@@ -63,6 +71,11 @@ def test_db(tmp_path):
 
     session.close()
 
+    # Wait for any stray daemon threads that might still reference the engine
+    for t in threading.enumerate():
+        if t.name.startswith(("notify-", "post-resolution-", "pipeline-")):
+            t.join(timeout=5)
+
     # Dispose test engine before restoring
     if models_mod._engine is not None:
         models_mod._engine.dispose()
@@ -73,6 +86,8 @@ def test_db(tmp_path):
     settings.sops_dir = orig_sops_dir
     settings.cases_dir = orig_cases_dir
     settings.knowledge_base_dir = orig_kb_dir
+    settings.notifications_enabled = orig_notifications
+    settings.rag_pipeline_enabled = orig_rag
 
 
 @pytest.fixture
