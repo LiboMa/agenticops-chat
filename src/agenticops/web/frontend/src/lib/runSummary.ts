@@ -1,7 +1,6 @@
 import type { FixExecution, FixPlan } from "@/api/types";
 import { resultSummary } from "@/lib/issueDetail";
 import { planCounts, shortHash } from "@/lib/plans";
-import { postCheckRows } from "@/lib/postChecks";
 
 export type CheckState = "passed" | "failed" | "warning" | "pending";
 
@@ -15,7 +14,9 @@ export interface RunSummary {
   /** the plan's content still matches what was approved; null when the plan is unknown or its approval recorded no
    *  hash (approved before 2.6.1) — unknown is never «changed after approval», as in PlanView */
   matchesApproved: boolean | null;
-  /** one per declared post-check, from the server's binding: a check with no result is pending («待核对») */
+  /** one per DECLARED post-check, from the server's binding: a check with no result, a duplicate or a run whose
+   *  results carry no check_id is pending («待核对»). A stray result (undeclared / no check_id) is no line — the
+   *  status line's reason names it — so no box can send an id the server refuses (S2 review). */
   checks: { id: string | null; label: string; state: CheckState }[];
   warnings: string[];
 }
@@ -26,12 +27,13 @@ const STATE: Record<string, CheckState> = { pass: "passed", fail: "failed", warn
  *  each declared check's state and the warnings. `runPlan` = the plan `run.fix_plan_id` names (null if unknown). */
 export function runSummary(run: FixExecution, runPlan: FixPlan | null): RunSummary {
   const steps = resultSummary(run.step_results ?? []);
-  const { rows } = postCheckRows(run);
-  const checks = rows.map((r) => ({
-    id: r.label.startsWith("pc-") ? r.label : null,
-    label: r.title || r.label,
-    state: r.problem ? "pending" as CheckState : STATE[r.outcome ?? ""] ?? "pending",
-  }));
+  const checks = (run.post_check_binding ?? [])
+    .filter((b) => b.check_id && b.problem !== "undeclared" && b.problem !== "unbound")
+    .map((b) => ({
+      id: b.check_id,
+      label: b.check || b.check_id!,
+      state: b.problem ? "pending" as CheckState : STATE[b.result_status ?? ""] ?? "pending",
+    }));
   return {
     stepsDone: steps.pass,
     stepsTotal: runPlan ? planCounts(runPlan).steps : (run.step_results ?? []).length,

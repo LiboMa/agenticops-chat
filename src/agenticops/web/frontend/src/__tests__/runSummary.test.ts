@@ -62,6 +62,35 @@ describe("runSummary — the first screen's latest-run block (MVP-2.8.0 S2)", ()
 });
 
 
+describe("runSummary — only declared checks are lines (S2 review)", () => {
+  it("a result for an undeclared check is no line and no box — the box sent pc-4 and the server answered 422", () => {
+    const s = runSummary(run({
+      post_check_results: [{ check_id: "pc-1", status: "passed" }, { check_id: "pc-4", status: "passed" }],
+      post_check_binding: [
+        { check_id: "pc-1", check: "sg ok", result_status: "pass", results: 1, problem: null },
+        { check_id: "pc-4", check: null, result_status: "pass", results: 1, problem: "undeclared" },
+      ],
+    }), plan());
+    expect(s.checks).toEqual([{ id: "pc-1", label: "sg ok", state: "passed" }]);
+  });
+
+  it("results with no check_id (recorded before 2.7.0): every declared check is still a line, to check", () => {
+    const s = runSummary(run({
+      post_check_results: [{ status: "passed" }, { status: "passed" }],
+      post_check_binding: [
+        { check_id: "pc-1", check: "a", result_status: null, results: 0, problem: "missing" },
+        { check_id: "pc-2", check: "b", result_status: null, results: 0, problem: "missing" },
+        { check_id: null, check: null, result_status: "pass", results: 1, problem: "unbound" },
+        { check_id: null, check: null, result_status: "pass", results: 1, problem: "unbound" },
+      ],
+    }), plan({ post_checks: [{ check: "a" }, { check: "b" }] }));
+    expect(s.checks).toEqual([
+      { id: "pc-1", label: "a", state: "pending" },
+      { id: "pc-2", label: "b", state: "pending" },
+    ]);
+  });
+});
+
 describe("checksNeedingYouFirst — the first screen shows what needs a person before what passed (E2E finding)", () => {
   it("failed, then to check, then warnings, then passed; stable inside each", () => {
     const order = checksNeedingYouFirst([
