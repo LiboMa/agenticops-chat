@@ -1013,12 +1013,13 @@ Open `http://localhost:8000/app/` and sign in. **The workspace shell (MVP-2.7.0)
 - **To-do workbench** (`/app/inbox`, first entry of *Daily work*; MVP-2.8.0 S2): every item that waits on a person, longest wait first. Tabs — All, To approve, To accept, Failed (including «approved but not started»), To confirm (including «needs clarification») — each with its count. Search a title, a resource or a number (`I#12`, `12`). Each row says the item, its severity or risk, the resource · account · region, why it waits, and for how long (hover for the UTC time). On a wide screen (≥ 1280px) the queue sits beside the item's own page — decide there; on a narrower one the list and the item take turns and «← Back to the to-do list» returns to the same tab and scroll. **Split / Compact** switches the row density. When the item you are on has just been handled it says so and offers the next one. The tab, search, item and layout are in the URL, so a link opens the same view; the top bar's account scope applies. It lists only what *you* can do: a read-only account's workbench is empty.
 - **Account scope** (top bar, between «Needs your attention» and search; in the avatar menu on a phone; MVP-2.7.0 S4): pick one account (or All) and the issue queue, the Fix plans and Changes tabs, Resources and «Needs your attention» show only that account. A detail page shows its own record's account, so the scope is greyed there; pages it does not filter (overview, security, Galaxy, Chat, Settings) grey it out and say so. An old link with `?account=` / `?account_id=` sets the scope once and drops the parameter.
 - **Approvals say what they do**: «Approve & run» only when approving really queues the run (auto-fix and the executor on); otherwise «Approve», with a note that someone presses **Execute** afterwards. Every approval asks you to tick «I have reviewed this version, the target scope, the risks and the recovery checks» first.
-- **Sidebar** (regrouped in 2.8.0 S2): *Daily work* (To-do workbench, Chat, Issues, Plans & changes, Security,
-  Reports), then the collapsible *Operations* (Schedules, Resources, Settings) and *Administration* (Runtime
-  overview, Agent metrics, Skills, Galaxy) — the group holding the current page opens by itself; drag to reorder
-  inside a group. An order you saved before keeps its sequence; entries that changed group appear in their new
-  group, and the workbench comes first. Below 800px
-  the sidebar becomes a menu in the top bar.
+- **Sidebar** (regrouped by the owner in the 2.8.0 S2 rework): *Daily work* (To-do workbench, Chat, Issues, Plans &
+  changes, Security, Reports), the collapsible *Operations* (Runtime overview, Galaxy, Schedules, Resources, Agent
+  metrics, Skills), and *Administration* at the foot of the sidebar, never folded (Users — admins only — and
+  Settings, the last entry). The group holding the current page opens by itself; drag to reorder inside a group. A
+  group you can open nothing in is not shown (a read-only account has no Administration). An order you saved before
+  keeps its sequence; entries that changed group appear at their default place in their new group. Chat has the
+  same full sidebar as every page. Below 800px the sidebar becomes a menu in the top bar.
 - **Top bar**: breadcrumb, search (⌘K / Ctrl K), 中文 | English, and the avatar menu (account, theme, font
   size, Home & language, sign out). Preferences (home, language, open groups, last page) follow your account
   to other browsers (`GET /api/ui/bootstrap`, `GET`/`PATCH /api/users/me/preferences`, If-Match revisions);
@@ -1175,6 +1176,18 @@ then one line per declared check — failed, to check and warnings first. Before
 evidence: whether the root cause is located on a resource, the model's own confidence, the critic's conclusion and
 the human verdict — four separate lines, never one folded number. «Expand the check records and plan basis» opens the card underneath. A fix plan's page has the same
 latest-run block and, when its issue waits for acceptance, a «Go accept this run» link to the issue.
+
+**Managing users (2.8.0, admins).** **Administration → Users** (`/app/users`) lists every web account with its
+role (Admin, Writer, Viewer, Viewer who may view Settings), its state and its last sign-in (UTC). **New user** asks for
+a sign-in name, an optional display name and the role; the password is generated and shown once — copy it before
+closing. Each row offers what is allowed: change role, reset password (a new password shown once; the user's
+browsers sign out — your own reset keeps you signed in here), disable (their browsers sign out at once and their API
+keys are revoked; enabling again restores neither). You cannot disable or demote yourself, and the last active admin
+stays. Every change is in the audit log, never the password. `aiops users create / list / disable` still works.
+
+**Statistics in a chat answer (2.8.0).** Counts, comparisons, shares and trends come as one sentence plus a table —
+it costs fewer tokens. Ask for a chart («画个柱状图», "plot it") and the answer draws one; a flow, call chain or
+sequence of steps is drawn as a flowchart.
 
 **Accepting a run (2.8.0).** **Accept result** opens «Accept this run»: tick each check still to verify (no
 result, or a warning) and the overall confirmation; **Confirm acceptance** stays off until every box is ticked.
