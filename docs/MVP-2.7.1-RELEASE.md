@@ -20,6 +20,7 @@
 | 2.7.0 E2E 观察 | 第 1 条（SRE 越界）、第 2 条（回滚复现故障）、第 3 条（命令分类器 + 自动批准下限）、第 4 条（RCA 模型 id）、第 5 条（执行时长）**已修** | 已修（10-09） |
 | ChatGPT 风格的 Web Chat | 工作过程块（步骤、耗时、结果、过程话）+ 回答里的图表 / 流程图 + 输入框内附件 + 移动端（见下文「ChatGPT 风格的 Web Chat」） | **已做（11-07），E2E 通过，待主人验收** |
 | 模型流读超时 + 思考摘要 | 修复「分析 HTML」一连三轮回复失败：读超时进 DB 配置、5.x 思考摘要、两个新错误码（见下文「模型流读超时与思考摘要」） | **已做（11-08）** |
+| 编辑账户保留已存的密钥 + 账户审计 | 11-09 只改区域的编辑丢掉了 Global 账户的密钥：编辑改为合并、「Remove the stored keys」、增删改写审计（见下文「编辑账户不再丢掉已保存的密钥」） | **已做（11-09），待主人确认后推送** |
 | v2.7.0 之后 main 上的交付 | 只读账户、Strands 1.64、模型配置一致性、聊天附件、开发机 Node 22 等（PR #28–#37，见「随 rebase 带入的 main 交付」） | **已在 main，11-07 随 rebase 带入** |
 
 ---
@@ -391,6 +392,92 @@
   - GPT-6 Astra + 极限两轮对话（含工具调用）完成；
   - 选择器里 14 个 OpenAI 型号 × 4 个档位，56 / 56 成功。
 - **E2E 中发现并修正**：第一版按「OpenAI 都到 max」映射，gpt-oss + 极限被拒（"'reasoning_effort' value 'max' is not supported"）。之后逐档实测所有型号，改成按型号截断的表。
+
+## 编辑账户不再丢掉已保存的密钥；账户的增删改写审计（2026-11-09）
+
+### 起因
+
+11-09 02:3x（UTC），主人在 Settings → 账户 里给 Agenticops-Global 加了区域并保存。从 02:38:46 起，这个账户 34 个区域的扫描和安全轮询全部报 AccessDenied（共 216 次），对话里也用不了这个账户。
+
+### 实测
+
+- **开发机（只读查询）：**
+  - 账户的 `credentials` 只剩 `role_arn` 和 `external_id`，加密存放的访问密钥对（`_encrypted`）没了；
+  - `audit_logs` 里没有任何账户修改的记录；
+  - 部署前的备份里，这个账户还有 `_encrypted`。
+- **本机复现（旧代码）：**新建一个停用的测试账户，填 Role ARN 和假的 AK/SK；只改区域就保存，`_encrypted` 没了，也没有审计行。见 [`MVP-2.7.1-CHAT-E2E-REPORT.md`](MVP-2.7.1-CHAT-E2E-REPORT.md)「追加：编辑账户不再丢掉已保存的密钥」。
+
+### 原因
+
+1. **表单看不到已存的密钥。**API 把它们显示成 `***REDACTED***`，表单不填进输入框；不重新输入，提交的 `credentials` 里就只有 `role_arn` / `external_id`。
+2. **`PUT /api/accounts/{id}` 把整份凭证换成提交的内容**，原来的 `_encrypted` 就此丢失。
+3. **没了访问密钥，AWS provider 改用默认凭证链**（开发机的实例角色）去 AssumeRole；实例角色没有这个权限，于是全部 AccessDenied。
+4. **账户的增删改不写 `audit_logs`**，所以没有留下记录。
+
+同一个整体替换还会：
+- 每次编辑删掉表单没有输入框的 `account_id`（身份校验用）和 `kubeconfigs`；
+- 收到 `credentials: {}` 或 `null` 时清空全部凭证；
+- 把 GET 的返回原样 PUT 回去时，把 `***REDACTED***` 当成密文存下。
+
+agent 工具 `update_cloud_account` 也是整体替换。而且它在返回「Invalid source type」之前已经换掉了凭证，会话照样提交。`aiops init` 重新登记一个已有名字的账户时，同样把凭证整体换成 `account_id` / `role_arn` / `external_id`，丢掉已存的密钥和 `kubeconfigs`。
+
+### 修复
+
+- **编辑 = 合并（`credentials/store.merge_credentials`，经 `CredentialStore.merge_update`）。**Web API 和 agent 工具共用：
+  - 密钥字段（`is_sensitive_key`，和加密用同一条规则）只被新的非空值替换；留空、不传、回传 `***REDACTED***`，或回传 `list_cloud_accounts` 打印的 `****xxxx` 掩码，都保持不变；
+  - 非密钥字段：`""` 或 `null` 表示删除，有值就设置；
+  - 没传的字段一律保留（`account_id`、`kubeconfigs`）；
+  - 删除已存的密钥只有一种方式：`clear_secrets`；
+  - 密钥没变时保留原来的密文。凭证指纹（会话缓存 key、私有 kubeconfig 路径）按存储形态计算，重新加密会让它变，只改区域的编辑因此不会让会话和 kubeconfig 重建。
+- **切换凭证方式时，去掉旧方式自己的字段。**AWS provider 只看字段在不在，不看 `credential_source_type`：有 `role_arn` 就 AssumeRole，有 `profile_name` 就压过密钥。所以 `credential_source_type` 一变，就去掉 assume_role 的 `role_arn` / `external_id`，或 profile 的 `profile_name`。已存的密钥不随切换删除。
+- **审计（`services/account_audit`）：**
+  - 账户的新建、修改、删除各写一条 `audit_logs`，和改动在同一个事务里；
+  - 记录前后两份快照：非密钥字段，加上是否存有密钥；
+  - `details.secrets` 记密钥的去向（kept / replaced / added / removed / none），`details.via` 记来源（web / agent_tool / cli）；
+  - 从不记录密钥值或密文；
+  - actor 是会话里的用户；agent 工具用当前运行的 actor，没有运行上下文时记 `agent:unattributed`。
+- **CLI 的账户写入也写审计（`via: cli`，actor 为 `cli:<系统用户>`）：**`aiops create|update|delete account`、CLI 对话里的 `/account activate|deactivate|delete`；`aiops init` 重新登记已有账户时改为合并，已存的密钥和 `kubeconfigs` 保留。`aiops update account` 原本就是在原凭证上改字段，不会丢密钥，这次只加审计。
+- **账户的三个写接口改为普通 `def`。**编辑要解密、再加密，KMS 后端下这是网络调用。
+- **agent 工具 `update_cloud_account`：**
+  - 先校验所有参数，再改任何东西；
+  - 新参数 `clear_secrets='true'`；
+  - docstring 写明合并规则。
+- **表单（Settings → 账户，`lib/accountForm.buildAccountCredentials`）：**
+  - 编辑时只发这种方式有输入框的字段：清空的非密钥字段发 `""`；密钥只在输入了新值时才发；「Access Keys Only」方式还会发 `role_arn: ""` 和 `external_id: ""`；
+  - 账户存有密钥时，在密钥输入框下方显示「Stored keys are kept — leave empty to keep them」，并给一个「Remove the stored keys」勾选项（Assume Role 方式下的说明是「Use the platform identity instead」）；
+  - 切换凭证方式不再清空表单：原来那样会把已存的 `account_id` 清空，保存时就删掉了。
+- **已处理的数据（主人同意）：**
+  - 从部署前的备份恢复了 Global 账户的密钥，AssumeRole 恢复；
+  - 去掉了 17 个这个 AWS 账户没开通的区域（34 → 17）；
+  - 之后的资源扫描（03:37–03:44 UTC）`errors: 0`，Global 账户 1526 个资源。
+
+### 可达面
+
+| 面 | 本次 |
+|---|---|
+| CLI | 做：`aiops create|update|delete account`、对话里的 `/account activate|deactivate|delete` 写审计；`aiops init` 重新登记已有账户时合并、写审计（计划里写成「非目标：没有修改账户的 CLI 命令」，实现时发现写错了，按主人「增删改都写审计」的决定补上） |
+| Web API | 做：`PUT /api/accounts/{id}` 改为合并，新增 `clear_secrets`；新建、修改、删除各写一条 `audit_logs` |
+| Web UI | 做：编辑账户时显示「Stored keys are kept」和「Remove the stored keys」；只发送这种方式有输入框的字段。审计行出现在 Settings → 审计日志（无需改动，那一页读 `GET /api/audit`） |
+| Agent tool | 做：`update_cloud_account` 同样合并，新增 `clear_secrets`；`add_cloud_account` / `update_cloud_account` / `remove_cloud_account` 都写审计 |
+| Schedule | 非目标 |
+| Notification | 非目标 |
+
+### 验证
+
+- **后端全量**：7524 passed、99 skipped、3 failed。3 个失败和上一轮一样，都是本机环境造成的：本机 `settings.yaml` 的模型配置（2 个用例），reporter 提示词里一行未提交的中文（1 个）；DNS 误报这次通过了。新增的测试：凭证合并 23 条、账户接口 10 条、agent 工具 7 条、CLI 5 条，外加 vitest `accountForm` 8 条。
+- **前端**：vitest 72 个文件、791 条全部通过；`tsc --noEmit` 0 错误；在 `/tmp` 空目录里 `npm ci && npm run build` 通过。
+- **真实 E2E（本机）**：全部通过，见 [`MVP-2.7.1-CHAT-E2E-REPORT.md`](MVP-2.7.1-CHAT-E2E-REPORT.md)「追加：编辑账户不再丢掉已保存的密钥」：
+  - 先在旧代码上复现：只改区域，`_encrypted` 就没了；
+  - 新代码上只改区域：密文不变（sha1 相同），`account_id`、`kubeconfigs` 保留；
+  - agent 工具、「Remove the stored keys」、切到 Access Keys Only、删除，以及真实的 `aiops update|delete account` 都按规则执行，各写一条审计；
+  - Settings → 审计日志 列出这些行，没有一行含密钥值。
+- **实现中发现并补上**：计划里 CLI 写成「非目标」，实现时发现 CLI 有五处写账户，`aiops init` 也会整体替换凭证，已补上（见上文「修复」）。
+
+### 观察到但不在这次改
+
+- **开发机没有配置凭证加密的密钥**（没有 `AIOPS_MASTER_KEY` / `AIOPS_KMS_KEY_ID`），`_encrypted` 实际上只是 base64 编码。
+- **「Assume Role 不填密钥 = 用平台身份」与凭证铁律第 2 条的措辞冲突**：铁律写的是只有 `environment` 类型可以用默认凭证链。是否改成一个显式的选项，由主人决定。
+- **账户表单不校验区域是否已在 AWS 账户里开通**：这次的 17 个区域就是这样加进去的。
 
 ## 随 rebase 带入的 main 交付（2026-11-07）
 
