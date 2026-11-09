@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useLocale } from "@/i18n/LocaleContext";
 import { ApiError } from "@/api/client";
 import type { UserRow } from "@/api/types";
@@ -29,6 +29,9 @@ export default function Users() {
   const [editing, setEditing] = useState<UserRow | "new" | null>(null);
   const [shown, setShown] = useState<{ email: string; password: string; kind: "created" | "reset" } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // the button that started a create / reset flow: the one-time password dialog opens after another dialog or a
+  // confirm closed, so it hands focus back here explicitly (S2 rework E2E: it fell to <body>)
+  const flowOpener = useRef<HTMLElement | null>(null);
 
   const say = (e: unknown) => {
     const code = e instanceof ApiError ? e.code : undefined;
@@ -58,7 +61,7 @@ export default function Users() {
   };
 
   const actionButton = (u: UserRow, a: RowAction) => (
-    <button key={a} type="button" onClick={() => void act(u, a)}
+    <button key={a} type="button" onClick={(e) => { flowOpener.current = e.currentTarget; void act(u, a); }}
             className={`min-h-[32px] rounded-md border px-2.5 text-xs ${a === "disable"
               ? "border-status-danger/40 text-status-danger hover:bg-status-danger/5" : "border-border text-foreground hover:bg-accent"}`}>
       {t(`users.action.${a}`)}
@@ -85,7 +88,7 @@ export default function Users() {
           <h1 className="text-2xl font-semibold text-foreground">{t("users.title")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{t("users.intro")}</p>
         </div>
-        <button type="button" onClick={() => { setError(null); setEditing("new"); }}
+        <button type="button" onClick={(e) => { flowOpener.current = e.currentTarget; setError(null); setEditing("new"); }}
                 className="min-h-[40px] rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary-hover">
           ＋ {t("users.new")}
         </button>
@@ -176,7 +179,7 @@ export default function Users() {
                       }
                     }} />
       )}
-      {shown && <PasswordOnceDialog {...shown} onClose={() => setShown(null)} />}
+      {shown && <PasswordOnceDialog {...shown} onClose={() => setShown(null)} returnTo={flowOpener.current} />}
       {dialog}
     </div>
   );

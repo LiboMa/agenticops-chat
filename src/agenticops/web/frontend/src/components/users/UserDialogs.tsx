@@ -15,9 +15,15 @@ function useOpener() {
   );
 }
 
-function Frame({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+function Frame({ title, onClose, returnTo, children }: {
+  title: string; onClose: () => void; children: React.ReactNode;
+  /** where focus goes on close when the dialog was not opened by the focused element (the one-time password opens
+   *  after another dialog or a confirm closed — the flow's own button, S2 rework E2E) */
+  returnTo?: HTMLElement | null;
+}) {
   const { t } = useLocale();
-  const opener = useOpener();
+  const focused = useOpener();
+  const opener = { current: returnTo ?? focused.current };
   return (
     <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
       <Dialog.Portal>
@@ -103,13 +109,14 @@ export function RoleDialog({ user, busy, error, onSubmit, onClose }: {
 }
 
 /** A password shown this once (a new account or a reset), with Copy; closing forgets it. */
-export function PasswordOnceDialog({ email, password, kind, onClose }: {
-  email: string; password: string; kind: "created" | "reset"; onClose: () => void;
+export function PasswordOnceDialog({ email, password, kind, onClose, returnTo }: {
+  email: string; password: string; kind: "created" | "reset"; onClose: () => void; returnTo?: HTMLElement | null;
 }) {
   const { t } = useLocale();
   const [copied, setCopied] = useState<"yes" | "no" | null>(null);
   return (
-    <Frame title={t(kind === "created" ? "users.password.createdTitle" : "users.password.resetTitle").replace("{email}", email)} onClose={onClose}>
+    <Frame title={t(kind === "created" ? "users.password.createdTitle" : "users.password.resetTitle").replace("{email}", email)} onClose={onClose}
+           returnTo={returnTo}>
       <p className="mt-3 text-sm text-muted-foreground">{t(kind === "created" ? "users.password.intro" : "users.password.resetIntro")}</p>
       <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-dashed border-primary/40 bg-canvas px-3 py-2.5">
         <code className="select-all font-mono text-[15px] text-foreground [overflow-wrap:anywhere]">{password}</code>
