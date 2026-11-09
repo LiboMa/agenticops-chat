@@ -4,7 +4,8 @@ import {
 } from "recharts";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { QueryState } from "@/components/ui/QueryState";
-import { StatusText, type StatusTone } from "@/components/ui/StatusText";
+import { StatusText } from "@/components/ui/StatusText";
+import { reachView } from "@/lib/reachability";
 import { useLocale } from "@/i18n/LocaleContext";
 import {
   useAttackPaths, useSecurityFindings, useSecurityRecommendations,
@@ -18,11 +19,6 @@ const SEV_DOT: Record<string, string> = {
   low: "bg-blue-500 dark:bg-green-500",
 };
 
-const REACH_TONE: Record<string, StatusTone> = {
-  reachable: "danger",
-  undetermined: "warn",
-  not_reachable: "ok",
-};
 
 const noItems = (d: unknown[]) => d.length === 0;
 
@@ -39,11 +35,11 @@ export default function Security() {
   const refreshing = all.some((q) => q.isFetching);
   const refreshAll = () => all.forEach((q) => void q.refetch());
 
-  const reach = (r: string) => (
-    <StatusText tone={REACH_TONE[r] ?? "neutral"} className="text-xs">
-      {REACH_TONE[r] ? t(`security.reach.${r}`) : r}
-    </StatusText>
-  );
+  // lib/reachability: some findings carry an object here — never rendered raw (it blanked the app, S2 rework E2E)
+  const reach = (r: unknown) => {
+    const v = reachView(r);
+    return v && <StatusText tone={v.tone} className="text-xs">{v.key ? t(v.key) : v.text}</StatusText>;
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -131,7 +127,7 @@ export default function Security() {
               <div key={f.id} className="flex items-center gap-2 py-1.5 text-sm border-b border-border/50 last:border-0">
                 <span className={`block w-2 h-2 rounded-full ${SEV_DOT[f.severity] ?? "bg-muted-foreground"}`} />
                 <span className="flex-1 truncate">{f.title}</span>
-                {f.reachability && reach(f.reachability)}
+                {reach(f.reachability)}
                 <span className="text-xs text-muted-foreground">{f.status}</span>
               </div>
             ))}

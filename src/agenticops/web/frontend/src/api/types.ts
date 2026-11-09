@@ -1111,7 +1111,8 @@ export interface SecurityFindingItem {
   issue_type: string;
   detected_by: string;
   last_seen: string | null;
-  reachability: string | null;
+  /** a state word — or, on some findings, an evidence object (render through lib/reachability) */
+  reachability: string | Record<string, unknown> | null;
 }
 
 export interface SecurityRecommendationItem {
