@@ -443,7 +443,8 @@ function scheduleColumns(t: (k: string) => string): Column<Schedule>[] {
               <Badge className={meta?.badge ?? "bg-blue-100 text-blue-700"}>{meta?.label ?? r.pipeline_name}</Badge>
             </div>
             <div className="mt-0.5 text-xs text-muted-foreground">
-              {summary && <>{summary} · </>}
+              {summary}
+              {summary && r.cron_expression !== "@once" && " · "}
               {r.cron_expression !== "@once" && <span className="font-mono">{r.cron_expression}</span>}
             </div>
           </div>
