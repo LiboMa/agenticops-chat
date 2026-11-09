@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useLocale } from "@/i18n/LocaleContext";
 import { FONT_SIZES, useTheme, type FontSize } from "@/hooks/useTheme";
@@ -7,7 +7,6 @@ import { useAuth } from "@/hooks/useAuth";
 import { breadcrumbFor } from "@/lib/navGroups";
 import { savePreferences } from "@/lib/preferences";
 import { HomePrefsDialog, MobileNav } from "./Sidebar";
-import { AttentionDialog } from "./AttentionDialog";
 import { AccountScopeSelect, useAccountScope } from "./AccountScope";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useBootstrap, useReadOnly } from "@/hooks/useBootstrap";
@@ -32,7 +31,6 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
   const readOnly = useReadOnly();
   const scope = useAccountScope();
   const attention = useAttention(scope.accountId);
-  const [attentionOpen, setAttentionOpen] = useState(false);
   const resolving = pathname === "/app" || pathname === "/app/";  // the home resolver is deciding: say nothing yet
   const section = resolving ? "" : crumb.sectionKey ? t(crumb.sectionKey) : t("notFound.title");
 
@@ -60,14 +58,14 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
 
       <div className="flex shrink-0 items-center gap-3 max-[1100px]:gap-2">
         {boot.data?.features.attention && (
-          <button type="button" onClick={() => setAttentionOpen(true)}
-                  aria-label={attention.data ? `${t("attention.title")} ${attention.data.total}` : t("attention.title")}
-                  className="flex items-center gap-2 rounded-[5px] border border-primary/20 bg-card px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-selected max-[600px]:px-2">
+          <Link to="/app/inbox" aria-current={pathname === "/app/inbox" ? "page" : undefined}
+                aria-label={attention.data ? `${t("attention.title")} ${attention.data.total}` : t("attention.title")}
+                className="flex items-center gap-2 rounded-[5px] border border-primary/20 bg-card px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-selected max-[600px]:px-2">
             <span className="max-[1100px]:hidden">{t("attention.title")}</span>
             <b className="min-w-[20px] rounded-[4px] bg-selected px-1.5 text-center text-[11px] font-semibold">
               {attention.isLoading ? "…" : countLabel(attention.data?.total ?? 0)}
             </b>
-          </button>
+          </Link>
         )}
         {readOnly && (
           <span title={t("readOnly.hint")}
@@ -96,7 +94,6 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
         </div>
 
         <AvatarMenu />
-        <AttentionDialog open={attentionOpen} onOpenChange={setAttentionOpen} />
       </div>
     </header>
   );

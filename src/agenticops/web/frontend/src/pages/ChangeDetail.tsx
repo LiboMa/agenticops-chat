@@ -78,7 +78,11 @@ export default function ChangeDetail() {
   return <ChangeDetailView key={id} crId={Number(id)} />;
 }
 
-function ChangeDetailView({ crId }: { crId: number }) {
+/** One change request's page. `embedded`: the workbench's reading pane (one column, no way back — the queue is
+ *  beside it); `back`: how a full-screen pane returns to the queue (MVP-2.8.0 S2). */
+export function ChangeDetailView({ crId, embedded = false, back }: {
+  crId: number; embedded?: boolean; back?: { to: string };
+}) {
   const { t } = useLocale();
   const readOnly = useReadOnly();  // a viewer account: no write actions
   const settings = useSettings();
@@ -108,8 +112,8 @@ function ChangeDetailView({ crId }: { crId: number }) {
   });
 
   const backLink = (
-    <Link to="/app/plans?tab=changes" className="text-sm text-muted-foreground hover:text-foreground">
-      ← {t("nav.plans")}
+    <Link to={back?.to ?? "/app/plans?tab=changes"} className="text-sm text-muted-foreground hover:text-foreground">
+      ← {back ? t("inbox.back") : t("nav.plans")}
     </Link>
   );
   const notFoundNotice = (
@@ -248,7 +252,7 @@ function ChangeDetailView({ crId }: { crId: number }) {
 
   /* -- Render ------------------------------------------------------ */
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <div className={embedded ? "grid gap-6" : "grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]"}>
       <div className="space-y-4 min-w-0">
         <StatusLine
           refLabel={`C#${cr.id}`}
@@ -269,8 +273,8 @@ function ChangeDetailView({ crId }: { crId: number }) {
           menu={readOnly ? viewerActions(menu) : menu}
           error={error}
           onDismissError={() => { setMsg(null); act.reset(); }}
-          backTo="/app/plans?tab=changes"
-          backLabel={t("nav.plans")}
+          backTo={embedded ? undefined : back?.to ?? "/app/plans?tab=changes"}
+          backLabel={back ? t("inbox.back") : t("nav.plans")}
         />
 
         {cards.openable.length > 0 && (

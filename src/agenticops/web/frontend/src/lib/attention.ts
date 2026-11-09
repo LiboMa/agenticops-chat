@@ -7,8 +7,15 @@ export interface AttentionItem {
   id: string; ref: string; reason: AttentionReason | string; reason_detail: string | null; title: string;
   entity: { entity_type: string; entity_id: number; content_version: number | null };
   account_id: number | null; occurred_at: string; route: string; available_actions: UiAction[];
+  /** MVP-2.8.0 S2 — who it waits on (work_phases), severity (issues) / risk level (changes), its resource, region */
+  waiting_on?: string | null; severity?: string | null; risk_level?: string | null;
+  resource?: { ref: number; name: string | null; type: string; resource_id: string } | null; region?: string | null;
 }
-export interface AttentionPage { items: AttentionItem[]; total: number; next_cursor: string | null; generated_at: string }
+export interface AttentionPage {
+  items: AttentionItem[]; total: number; next_cursor: string | null; generated_at: string;
+  /** items per reason, after the scope and the search, before the reason filter (MVP-2.8.0 S2) */
+  counts?: Record<string, number>;
+}
 
 /** The hub's tab counts: rows whose object is a fix plan (approval, approved-but-not-started) → Fix plans; change rows
  *  → Changes. Counted over the items fetched (≤ 100). */

@@ -14,6 +14,7 @@ const Login = lazy(() => import("@/pages/Login"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Chat = lazy(() => import("@/pages/Chat"));
 const Cases = lazy(() => import("@/pages/Cases"));
+const Inbox = lazy(() => import("@/pages/Inbox"));
 const CasePlaceholder = lazy(() => import("@/pages/Cases").then((m) => ({ default: m.CasePlaceholder })));
 const CaseReading = lazy(() => import("@/pages/Cases").then((m) => ({ default: m.CaseReading })));
 const ChangeDetail = lazy(() => import("@/pages/ChangeDetail"));
@@ -93,6 +94,8 @@ export default function App() {
                 </Suspense>
               }
             />
+            {/* The to-do workbench (MVP-2.8.0 S2): the item in ?item=, so the queue never remounts */}
+            <Route path="inbox" element={<Suspense fallback={<Spinner />}><Inbox /></Suspense>} />
             {/* Cases (MVP-2.7.0 S4): a layout route, so the queue stays mounted while you move between cases */}
             <Route path="issues" element={<Suspense fallback={<Spinner />}><Cases /></Suspense>}>
               <Route index element={<Suspense fallback={<Spinner />}><CasePlaceholder /></Suspense>} />

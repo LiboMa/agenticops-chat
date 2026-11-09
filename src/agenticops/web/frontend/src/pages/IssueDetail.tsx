@@ -60,11 +60,13 @@ import { viewerActions } from "@/lib/permissions";
 
 /** `embedded`: the Cases split view's reading pane (one column, no way back — the queue is beside it). `back`: how
  *  a full-screen case returns to the queue (history back, or a link to the list under the same query). */
-export default function IssueDetail({ embedded = false, back }: {
+export default function IssueDetail({ embedded = false, back, issueId: givenId }: {
   embedded?: boolean; back?: { onBack?: () => void; to?: string };
+  /** the issue to show when it is not the route's :id (the workbench, MVP-2.8.0 S2) */
+  issueId?: number;
 } = {}) {
   const { id } = useParams<{ id: string }>();
-  const issueId = Number(id);
+  const issueId = givenId ?? Number(id);
   const { t } = useLocale();
   const readOnly = useReadOnly();  // a viewer account: no write actions
   const { isAuthenticated } = useAuth();
