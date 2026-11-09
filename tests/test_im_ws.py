@@ -9,12 +9,25 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+try:
+    import lark_oapi  # noqa: F401
+    _has_lark_oapi = True
+except ModuleNotFoundError:
+    _has_lark_oapi = False
+
+try:
+    import slack_sdk  # noqa: F401
+    _has_slack_sdk = True
+except ModuleNotFoundError:
+    _has_slack_sdk = False
+
 
 # ============================================================================
 # _build_agent_input — alert context builder
 # ============================================================================
 
 
+@pytest.mark.skipif(not _has_lark_oapi, reason="lark_oapi not installed")
 class TestBuildAgentInput:
     """Test _build_agent_input alert channel wrapping logic."""
 
@@ -105,6 +118,7 @@ class TestBuildAgentInput:
 # ============================================================================
 
 
+@pytest.mark.skipif(not _has_slack_sdk, reason="slack_sdk not installed")
 class TestSlackOnEvent:
     """Test Slack WS event handler filtering logic."""
 
@@ -229,6 +243,7 @@ class TestSlackOnEvent:
 # ============================================================================
 
 
+@pytest.mark.skipif(not _has_slack_sdk, reason="slack_sdk not installed")
 class TestSlackProcessAndReply:
     """Verify _process_and_reply alert wrapping behavior."""
 
@@ -417,6 +432,7 @@ class TestIMChatSessionManager:
 # ============================================================================
 
 
+@pytest.mark.skipif(not _has_slack_sdk, reason="slack_sdk not installed")
 class TestSlackMentionRegex:
     def test_strips_single(self):
         from agenticops.im.slack_ws import _MENTION_RE
@@ -435,6 +451,7 @@ class TestSlackMentionRegex:
         assert _MENTION_RE.sub("", "<@U12345ABC>  ").strip() == ""
 
 
+@pytest.mark.skipif(not _has_lark_oapi, reason="lark_oapi not installed")
 class TestFeishuMentionRegex:
     def test_strips_feishu_mention(self):
         from agenticops.im.feishu_ws import _MENTION_RE
