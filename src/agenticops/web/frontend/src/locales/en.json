@@ -1379,5 +1379,6 @@
   "workitem.evidence.verdictCorrect": "Human verdict: the diagnosis is right",
   "workitem.evidence.verdictIncorrect": "Human verdict: the diagnosis is wrong",
   "workitem.evidence.noVerdict": "No human verdict yet",
-  "workitem.evidence.confidence": "Model confidence {pct}%"
+  "workitem.evidence.confidence": "Model confidence {pct}%",
+  "plans.detail.goAccept": "Go accept this run"
 }

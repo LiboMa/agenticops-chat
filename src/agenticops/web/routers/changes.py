@@ -130,8 +130,11 @@ def api_get_change(cr_id: int, actor: Actor = Depends(current_actor)):
         snap["plans"] = [FixPlanResponse.model_validate(p).model_copy(update={"account_id": snap["account_id"]})
                          for p in plans]
         snap["executions"] = [FixExecutionResponse.model_validate(e) for e in executions]
-        snap["available_actions"] = change_actions(session.get(ChangeRequest, cr_id), actor,
-                                                   plan=cs.active_plan_for(session, cr_id))
+        cr_row = session.get(ChangeRequest, cr_id)
+        snap["available_actions"] = change_actions(cr_row, actor, plan=cs.active_plan_for(session, cr_id))
+        from agenticops.services.attention import change_waits
+        phase, since = change_waits([cr_row])[cr_id]
+        snap["waiting_on"], snap["waiting_since"] = phase.waiting_for, since
     snap["policy_decision"] = _last_policy_decision(cr_id)
     return snap
 

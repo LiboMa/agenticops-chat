@@ -144,6 +144,8 @@ def test_create_lists_and_detail(client):
     d = client.get(f"/api/changes/{body['id']}").json()
     assert d["plans"] == [] and d["executions"] == [] and d["target_hints"] == ["i-0abc"]
     assert client.get("/api/changes/9999").status_code == 404
+    # MVP-2.8.0 S2: who it waits on (work_phases.change_phase) and since when (its last update)
+    assert d["waiting_on"] == "requester" and d["waiting_since"]
 
 
 def test_create_records_the_api_source_for_api_key_callers(client):

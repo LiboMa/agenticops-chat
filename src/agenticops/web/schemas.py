@@ -1051,6 +1051,9 @@ class ChangeRequestResponse(BaseModel):
 
 
 class ChangeRequestDetail(ChangeRequestResponse):
+    # MVP-2.8.0 S2: who the change waits on (work_phases.change_phase) and since when (its last update)
+    waiting_on: Optional[str] = None
+    waiting_since: Optional[datetime] = None
     plans: List[FixPlanResponse] = Field(default_factory=list)
     executions: List[FixExecutionResponse] = Field(default_factory=list)
     # The LAST policy_decision pipeline event's decision (None before the review reached the policy engine)

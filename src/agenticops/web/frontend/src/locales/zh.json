@@ -1379,5 +1379,6 @@
   "workitem.evidence.verdictCorrect": "人工裁决：诊断正确",
   "workitem.evidence.verdictIncorrect": "人工裁决：诊断有误",
   "workitem.evidence.noVerdict": "还没有人工裁决",
-  "workitem.evidence.confidence": "模型置信度 {pct}%"
+  "workitem.evidence.confidence": "模型置信度 {pct}%",
+  "plans.detail.goAccept": "去验收这次执行"
 }

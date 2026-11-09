@@ -1211,6 +1211,9 @@ export interface ChangeStepsDiff {
 }
 
 export interface ChangeRequestDetail extends ChangeRequest {
+  /** MVP-2.8.0 S2: who it waits on and since when */
+  waiting_on?: string | null;
+  waiting_since?: string | null;
   plans: FixPlan[];
   executions: FixExecution[];
   policy_decision: Record<string, unknown> | null;

@@ -20,6 +20,8 @@ import { planDetailModel } from "@/lib/planDetailModel";
 import { planLabel, shortHash } from "@/lib/plans";
 import { newestFirst } from "@/lib/issueDetail";
 import { formatFullDate } from "@/lib/formatDate";
+import { RunSummaryBlock } from "@/components/workitem/WorkSummary";
+import { runSummary as summarizeRun } from "@/lib/runSummary";
 
 /** /app/plans/:id — a fix plan as an approver reads it (MVP-2.7.0 S3): where it comes from, what it changes and how
  *  it is checked, then the approval and its runs. A change plan lives on its change request. */
@@ -58,6 +60,8 @@ export default function PlanDetail() {
     if (await confirm(t("plans.executeConfirm"), { confirmText: t("issues.execute"), cancelText: t("common.cancel") })) executeMut.mutate(plan.id);
   };
   const btn = "rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50";
+  // MVP-2.8.0 S2: the latest run and what it waits for come before the plan's long text
+  const latestRun = (runs.data ?? [])[0] ?? null;
 
   return (
     <div className="mx-auto max-w-[960px] space-y-5">
@@ -85,6 +89,18 @@ export default function PlanDetail() {
         </p>
         {executeMut.error && <p role="alert" className="text-sm text-red-500">{executeMut.error.message}</p>}
       </header>
+
+      {latestRun && (
+        <section className="space-y-3 rounded-lg border border-border bg-card p-4">
+          <RunSummaryBlock summary={summarizeRun(latestRun, plan)} t={t} />
+          {latestRun.verification_status === "pending_acceptance" && plan.health_issue_id && (
+            <Link to={`/app/issues/${plan.health_issue_id}#accept`}
+                  className="inline-flex rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary-hover">
+              {t("plans.detail.goAccept")}
+            </Link>
+          )}
+        </section>
+      )}
 
       <PlanView plan={plan} t={t} hideHeader />
 

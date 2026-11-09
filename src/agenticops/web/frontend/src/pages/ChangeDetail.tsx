@@ -34,6 +34,10 @@ import { planCounts, planLabel, shortHash } from "@/lib/plans";
 import type { Account, ChangeRequestDetail } from "@/api/types";
 import { useReadOnly } from "@/hooks/useBootstrap";
 import { viewerActions } from "@/lib/permissions";
+import { RunSummaryBlock, WorkSummary } from "@/components/workitem/WorkSummary";
+import { runSummary as summarizeRun } from "@/lib/runSummary";
+import { waitLabel } from "@/lib/inbox";
+import { StatusText } from "@/components/ui/StatusText";
 
 // The dialog-driven actions; `useChanges` exports the discriminated `ChangeActionArgs`, not a `ChangeAction` alias,
 // so `action` is kept to this subset and branched on below to build a well-typed mutate() argument.
@@ -276,6 +280,30 @@ export function ChangeDetailView({ crId, embedded = false, back }: {
           backTo={embedded ? undefined : back?.to ?? "/app/plans?tab=changes"}
           backLabel={back ? t("inbox.back") : t("nav.plans")}
         />
+
+        <WorkSummary
+          steps={model.phase.phases.map((p) => ({ id: p.id, label: t(`workitem.phase.${p.id}`), state: p.state }))}
+          facts={{ owner: model.waitingKey ? t(model.waitingKey) : null, waiting: waitLabel(cr.waiting_since, Date.now(), t),
+                   plan: model.plan ? planLabel(model.plan, t) : null }}
+          expand={{ label: t("workitem.summary.expand"), onClick: () => {
+            const target: ChangePhaseId = model.latestRun ? (model.phase.current === "accept" ? "accept" : "run") : "plan";
+            cards.openCard(target); cards.scrollTo(target);
+          } }}
+          t={t}>
+          {model.latestRun
+            ? <RunSummaryBlock t={t} summary={summarizeRun(model.latestRun,
+                cr.plans.find((p) => p.id === model.latestRun!.fix_plan_id) ?? null)} />
+            : model.plan && (
+              <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span className="font-mono">{`Plan #${model.plan.id} · v${model.plan.plan_version || 1} · hash ${shortHash(model.plan.content_hash)}`}</span>
+                {model.plan.approved_hash && (
+                  <StatusText tone={model.plan.approved_hash === model.plan.content_hash ? "ok" : "danger"}>
+                    {t(model.plan.approved_hash === model.plan.content_hash ? "plan.hashMatches" : "plan.hashDrifted")}
+                  </StatusText>
+                )}
+              </p>
+            )}
+        </WorkSummary>
 
         {cards.openable.length > 0 && (
           <div className="flex justify-end">
