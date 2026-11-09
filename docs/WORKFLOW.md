@@ -1009,12 +1009,15 @@ Open `http://localhost:8000/app/` and sign in. **The workspace shell (MVP-2.7.0)
   nothing) — otherwise Chat. A full URL (a notification link, a bookmark) always opens exactly that page.
 - **Signed out?** Any page sends you to `/app/login?next=…` and back to the same page (query and hash
   included) after signing in; only same-origin `/app` pages are accepted as `next`.
-- **Needs your attention** (top bar, left of search; MVP-2.7.0 S3): the count of work items that wait on *you* — the same «Waiting for you / an approver / acceptance» the issue and change pages show, filtered by what you may do (your own change never asks you to approve it). Click it for one row per item; a row opens the place it is decided (a plan's page for an approval, the issue's or change's card otherwise). Nothing is approved from the list.
+- **Needs your attention** (top bar, left of search; MVP-2.7.0 S3, a link to the workbench since 2.8.0 S2): the count of work items that wait on *you* — the same «Waiting for you / an approver / acceptance» the issue and change pages show, filtered by what you may do (your own change never asks you to approve it). Click it to open the **to-do workbench** (`/app/inbox`, below). Nothing is approved from the list.
+- **To-do workbench** (`/app/inbox`, first entry of *Daily work*; MVP-2.8.0 S2): every item that waits on a person, longest wait first. Tabs — All, To approve, To accept, Failed (including «approved but not started»), To confirm (including «needs clarification») — each with its count. Search a title, a resource or a number (`I#12`, `12`). Each row says the item, its severity or risk, the resource · account · region, why it waits, and for how long (hover for the UTC time). On a wide screen (≥ 1280px) the queue sits beside the item's own page — decide there; on a narrower one the list and the item take turns and «← Back to the to-do list» returns to the same tab and scroll. **Split / Compact** switches the row density. When the item you are on has just been handled it says so and offers the next one. The tab, search, item and layout are in the URL, so a link opens the same view; the top bar's account scope applies.
 - **Account scope** (top bar, between «Needs your attention» and search; in the avatar menu on a phone; MVP-2.7.0 S4): pick one account (or All) and the issue queue, the Fix plans and Changes tabs, Resources and «Needs your attention» show only that account. A detail page shows its own record's account, so the scope is greyed there; pages it does not filter (overview, security, Galaxy, Chat, Settings) grey it out and say so. An old link with `?account=` / `?account_id=` sets the scope once and drops the parameter.
 - **Approvals say what they do**: «Approve & run» only when approving really queues the run (auto-fix and the executor on); otherwise «Approve», with a note that someone presses **Execute** afterwards. Every approval asks you to tick «I have reviewed this version, the target scope, the risks and the recovery checks» first.
-- **Sidebar**: *Daily work* (Chat, Issues, Reports), then the collapsible *Operations tools* (Plans & changes,
-  Resources, Schedules) and *Administration* (Runtime overview, Agent metrics, Skills, Galaxy, Security,
-  Settings) — the group holding the current page opens by itself; drag to reorder inside a group. Below 800px
+- **Sidebar** (regrouped in 2.8.0 S2): *Daily work* (To-do workbench, Chat, Issues, Plans & changes, Security,
+  Reports), then the collapsible *Operations* (Schedules, Resources, Settings) and *Administration* (Runtime
+  overview, Agent metrics, Skills, Galaxy) — the group holding the current page opens by itself; drag to reorder
+  inside a group. An order you saved before keeps its sequence; entries that changed group appear in their new
+  group, and the workbench comes first. Below 800px
   the sidebar becomes a menu in the top bar.
 - **Top bar**: breadcrumb, search (⌘K / Ctrl K), 中文 | English, and the avatar menu (account, theme, font
   size, Home & language, sign out). Preferences (home, language, open groups, last page) follow your account
@@ -1163,6 +1166,24 @@ the schedule's page says «submitted» until the run record appears and refreshe
 **Reading any data module (2.8.0).** Every module says one of four things: loading, failed (with Retry), empty
 (only when the request succeeded and returned nothing), or its data. When a refresh fails, the last data stays
 on screen under «refresh failed — as of HH:MM UTC». A failed request is never shown as "no findings".
+
+**Reading an issue, change or plan page (2.8.0).** Above the phase cards, the first screen says where the item
+stands (a step bar), who it waits on, for how long (only while someone waits) and which plan version. Once there
+is a run it shows the latest run first: steps done against *that run's* plan, «Plan #id · vN · hash» and whether
+the content still matches what was approved (nothing is said for a plan approved before hashes were recorded),
+then one line per declared check — failed, to check and warnings first. Before any run it shows the diagnosis
+evidence: whether the root cause is located on a resource, the human verdict, and the model's confidence, said
+separately. «Expand the check records and plan basis» opens the card underneath. A fix plan's page has the same
+latest-run block and, when its issue waits for acceptance, a «Go accept this run» link to the issue.
+
+**Accepting a run (2.8.0).** **Accept result** opens «Accept this run»: tick each check still to verify (no
+result, or a warning) and the overall confirmation; **Confirm acceptance** stays off until every box is ticked.
+The note is optional (without one the reason says how many items you checked). The ticked `pc-n` ids are
+recorded with the acceptance in the audit log. Rejecting keeps its own reason dialog.
+
+**Cases quick views (2.8.0).** Above the issue queue: All / Waiting on me / Failed / Waiting long (over
+`attention_long_wait_hours`, default 24), each with its count; each row says who the issue waits on and, when it
+is a person, for how long.
 
 ---
 
