@@ -69,6 +69,13 @@ export function waitLabel(sinceIso: string | null | undefined, now: number, t: (
   return t("inbox.wait.days").replace("{n}", String(Math.floor(hours / 24)));
 }
 
+/** The first screen's wait fact: a duration only while someone is waited on (the owner shown beside it) — a
+ *  completed change, or an issue nobody is waiting on, shows no «已等 N 天». */
+export function waitFact(owner: string | null, sinceIso: string | null | undefined, now: number,
+                         t: (k: string) => string): string | null {
+  return owner ? waitLabel(sinceIso, now, t) : null;
+}
+
 /** Whether the item in the URL is still in the queue: an item just approved or accepted leaves it ("gone") — the
  *  pane says so and offers the next one instead of going blank. */
 export function selectionState(items: { id: string }[], item: string | null): "selected" | "gone" | "none" {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import en from "@/locales/en.json";
 import zh from "@/locales/zh.json";
 import {
-  INBOX_TABS, inboxParams, inboxSearch, parseItem, selectionState, tabCount, tabReasons, waitLabel,
+  INBOX_TABS, inboxParams, inboxSearch, parseItem, selectionState, tabCount, tabReasons, waitFact, waitLabel,
 } from "@/lib/inbox";
 
 const tEn = (k: string) => (en as Record<string, string>)[k] ?? k;
@@ -71,5 +71,14 @@ describe("selectionState — the selected item may just have been handled", () =
     expect(selectionState(items, "C2")).toBe("selected");
     expect(selectionState(items, "I9")).toBe("gone");
     expect(selectionState(items, null)).toBe("none");
+  });
+});
+
+describe("waitFact — the first screen's «等待时长» belongs to whoever it waits on (E2E finding, C#2)", () => {
+  it("nobody waits (a completed change): no duration, never «已等 40 天»", () => {
+    expect(waitFact(null, "2026-10-01T00:00:00Z", NOW, tZh)).toBeNull();
+  });
+  it("someone waits: the duration since it started waiting", () => {
+    expect(waitFact("等你", "2026-11-09T09:00:00Z", NOW, tEn)).toBe(waitLabel("2026-11-09T09:00:00Z", NOW, tEn));
   });
 });

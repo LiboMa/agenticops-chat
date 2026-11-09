@@ -37,7 +37,7 @@ import { viewerActions } from "@/lib/permissions";
 import { RunSummaryBlock, WorkSummary } from "@/components/workitem/WorkSummary";
 import { AcceptDialog } from "@/components/workitem/AcceptDialog";
 import { runSummary as summarizeRun } from "@/lib/runSummary";
-import { waitLabel } from "@/lib/inbox";
+import { waitFact } from "@/lib/inbox";
 import { StatusText } from "@/components/ui/StatusText";
 
 // The dialog-driven actions; `useChanges` exports the discriminated `ChangeActionArgs`, not a `ChangeAction` alias,
@@ -284,7 +284,8 @@ export function ChangeDetailView({ crId, embedded = false, back }: {
 
         <WorkSummary
           steps={model.phase.phases.map((p) => ({ id: p.id, label: t(`workitem.phase.${p.id}`), state: p.state }))}
-          facts={{ owner: model.waitingKey ? t(model.waitingKey) : null, waiting: waitLabel(cr.waiting_since, Date.now(), t),
+          facts={{ owner: model.waitingKey ? t(model.waitingKey) : null,
+                   waiting: waitFact(model.waitingKey ? t(model.waitingKey) : null, cr.waiting_since, Date.now(), t),
                    plan: model.plan ? planLabel(model.plan, t) : null }}
           expand={{ label: t("workitem.summary.expand"), onClick: () => {
             const target: ChangePhaseId = model.latestRun ? (model.phase.current === "accept" ? "accept" : "run") : "plan";

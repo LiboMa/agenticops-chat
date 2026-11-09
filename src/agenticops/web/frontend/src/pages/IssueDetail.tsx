@@ -56,7 +56,7 @@ import { viewerActions } from "@/lib/permissions";
 import { DiagnosisEvidence, RunSummaryBlock, WorkSummary } from "@/components/workitem/WorkSummary";
 import { AcceptDialog } from "@/components/workitem/AcceptDialog";
 import { runSummary as summarizeRun } from "@/lib/runSummary";
-import { waitLabel } from "@/lib/inbox";
+import { waitFact } from "@/lib/inbox";
 
 /* ================================================================== */
 /*  Main component                                                     */
@@ -351,7 +351,8 @@ export default function IssueDetail({ embedded = false, back, issueId: givenId }
 
         <WorkSummary
           steps={m.phase.phases.map((p) => ({ id: p.id, label: t(`workitem.phase.${p.id}`), state: p.state }))}
-          facts={{ owner: m.waitingKey ? t(m.waitingKey) : null, waiting: waitLabel(a.waiting_since, Date.now(), t),
+          facts={{ owner: m.waitingKey ? t(m.waitingKey) : null,
+                   waiting: waitFact(m.waitingKey ? t(m.waitingKey) : null, a.waiting_since, Date.now(), t),
                    plan: m.plan ? planLabel(m.plan, t) : null }}
           expand={{ label: t("workitem.summary.expand"), onClick: () => {
             const target = m.latestRun ? (m.phase.current === "accept" ? "accept" : "run") : "diagnose";
