@@ -31,7 +31,7 @@ describe("migrateNavOrder", () => {
     const own = ["security", "galaxy", "reports", "chat", "issues", "schedules", "resources", "audit", "changes",
                  "dashboard", "agent-metrics", "skills"];
     expect(migrateNavOrder(own)).toEqual({
-      daily: ["security", "reports", "chat", "issues", "plans", "inbox"],
+      daily: ["inbox", "security", "reports", "chat", "issues", "plans"],   // the workbench first (spec; S2 review)
       tools: ["schedules", "resources", "settings"],
       administration: ["galaxy", "overview", "agent-metrics", "skills"],
     });

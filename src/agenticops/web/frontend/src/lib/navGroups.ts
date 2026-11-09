@@ -72,6 +72,8 @@ const same = (a: string[], b: string[]) => a.length === b.length && a.every((x, 
 /** The stored v1 order, into groups. The old sidebar saved its default order on first mount, so a stored
  *  order equal to the v1 default means "never reordered" → the new default groups. Otherwise each group keeps
  *  the user's relative order, and items the v1 list never had take their default place. */
+const FIRST = new Set(["inbox"]);
+
 export function migrateNavOrder(v1: unknown): NavOrder {
   const defaults = defaultOrder();
   if (!Array.isArray(v1) || !v1.every((x) => typeof x === "string")) return defaults;
@@ -83,8 +85,11 @@ export function migrateNavOrder(v1: unknown): NavOrder {
   const out = {} as NavOrder;
   for (const g of NAV_GROUPS) {
     const ids = g.items.map((i) => i.id);
-    // entries the v1 list never had (Settings, pinned at its foot) go last, where the user last saw them
-    out[g.id] = [...renamed.filter((id) => ids.includes(id)), ...ids.filter((id) => !renamed.includes(id))];
+    // entries the v1 list never had: the workbench first in daily work (spec, S2 review); Settings, pinned at the
+    // v1 foot, last — where the user last saw it
+    const added = ids.filter((id) => !renamed.includes(id));
+    out[g.id] = [...added.filter((id) => FIRST.has(id)), ...renamed.filter((id) => ids.includes(id)),
+                 ...added.filter((id) => !FIRST.has(id))];
   }
   return out;
 }
