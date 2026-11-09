@@ -24,6 +24,23 @@ describe("issueRow (list mode, R2)", () => {
   });
 });
 
+describe("issueRow — who it waits on, from the server (MVP-2.8.0 S2)", () => {
+  it("uses waiting_on / waiting_since when the list sends them; a person's wait has its start, the system's has none", () => {
+    const you = issueRow(anomaly({ status: "fix_planned", waiting_on: "approver", waiting_since: "2026-11-09T09:00:00Z" }));
+    expect(you.waitKey).toBe("workitem.wait.approver");
+    expect(you.waitSince).toBe("2026-11-09T09:00:00Z");
+    const executor = issueRow(anomaly({ status: "fix_approved", waiting_on: "executor", waiting_since: "2026-11-09T09:00:00Z" }));
+    expect(executor.waitKey).toBe("workitem.wait.executor");
+    expect(executor.waitSince).toBeNull();
+    const nobody = issueRow(anomaly({ status: "resolved", waiting_on: null, waiting_since: null }));
+    expect(nobody.waitKey).toBeNull();
+  });
+  it("an older server without the fields still gets the list-mode guess", () => {
+    expect(issueRow(anomaly({})).waitKey).toBe("workitem.wait.you");
+    expect(issueRow(anomaly({})).waitSince).toBeNull();
+  });
+});
+
 describe("changeRow", () => {
   it("C#1 failed: the dots end at the failed phase; next step copy-as-new is the wait text", () => {
     const r = changeRow({ id: 1, title: "E2E intake", status: "failed", review_verdict: "approved_for_planning",

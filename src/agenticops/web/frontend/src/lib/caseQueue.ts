@@ -17,15 +17,19 @@ export const ACTIVE_STATUSES: readonly IssueStatus[] = ISSUE_STATUSES.filter((s)
 export const STATUS_GROUPS = ["all", "active", "resolved", "dismissed"] as const;
 export const SEVERITY_CHOICES = ["critical", "high", "medium", "low"] as const;
 export const SORTS = ["newest", "oldest", "severity"] as const;
+/** MVP-2.8.0 S2: the queue's quick views — subsets of the workbench rows, counted by the server */
+export const QUICK_VIEWS = ["all", "mine", "failed", "long_wait"] as const;
+export type QuickView = (typeof QUICK_VIEWS)[number];
 type Sort = (typeof SORTS)[number];
 
-const DEFAULTS: Record<string, string> = { scope: "ops", sort: "newest", status: "all" };
+const DEFAULTS: Record<string, string> = { scope: "ops", sort: "newest", status: "all", view: "all" };
 
 export function queueFilters(params: URLSearchParams): HealthIssueFilters & { limit: number } {
   const status = params.get("status");
   const severity = params.get("severity");
   const sort = params.get("sort");
   const q = params.get("q")?.trim();
+  const view = params.get("view");
   return {
     scope: resolveIssueScope(params.get("scope")),
     ...(status === "active" ? { status: ACTIVE_STATUSES.join(",") }
@@ -33,6 +37,7 @@ export function queueFilters(params: URLSearchParams): HealthIssueFilters & { li
     ...(severity && (SEVERITY_CHOICES as readonly string[]).includes(severity) ? { severity } : {}),
     ...(q ? { q: q.slice(0, 200) } : {}),
     sort: sort && (SORTS as readonly string[]).includes(sort) ? (sort as Sort) : "newest",
+    ...(view && view !== "all" && (QUICK_VIEWS as readonly string[]).includes(view) ? { view: view as QuickView } : {}),
     limit: QUEUE_CAP + 1,
   };
 }

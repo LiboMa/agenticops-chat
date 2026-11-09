@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useHealthIssues } from "@/hooks/useHealthIssues";
+import { useIssueViewCounts } from "@/hooks/useIssueViewCounts";
+import { waitLabel } from "@/lib/inbox";
 import { useScopedAccountId } from "@/components/layout/AccountScope";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
 import { Spinner } from "@/components/ui/Spinner";
@@ -9,7 +11,7 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { ISSUE_SCOPES } from "@/lib/issueScope";
 import { issueRow } from "@/lib/workItems";
 import {
-  LAST_CASE_KEY, QUEUE_CAP, SEVERITY_CHOICES, SORTS, STATUS_GROUPS, capped, queueFilters, queueParams, rowState, scrollKey,
+  LAST_CASE_KEY, QUEUE_CAP, QUICK_VIEWS, SEVERITY_CHOICES, SORTS, STATUS_GROUPS, capped, queueFilters, queueParams, rowState, scrollKey,
 } from "@/lib/caseQueue";
 import type { HealthIssue } from "@/api/types";
 
@@ -34,7 +36,12 @@ export function CaseQueue({ selectedId, wide }: { selectedId: number | null; wid
   const location = useLocation();
   const [params, setParams] = useSearchParams();
   const filters = queueFilters(params);
-  const issues = useHealthIssues({ ...filters, account_id: useScopedAccountId() });
+  const accountId = useScopedAccountId();
+  const issues = useHealthIssues({ ...filters, account_id: accountId });
+  const viewCounts = useIssueViewCounts(filters.scope, accountId);
+  const view = filters.view ?? "all";
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const id = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(id); }, []);
   const [q, setQ] = useState(filters.q ?? "");
   useEffect(() => setQ(filters.q ?? ""), [filters.q]);  // back / forward changes the URL: the box follows
   const listRef = useRef<HTMLUListElement>(null);
@@ -42,7 +49,7 @@ export function CaseQueue({ selectedId, wide }: { selectedId: number | null; wid
   const set = (key: string, value: string) => setParams(queueParams(params, key, value), { replace: true });
   const data: HealthIssue[] = issues.data?.items ?? [];
   const rows = data.slice(0, QUEUE_CAP).map((i) => issueRow(i, location.search));
-  const filtered = ["status", "severity", "q", "sort"].some((k) => params.has(k));
+  const filtered = ["status", "severity", "q", "sort", "view"].some((k) => params.has(k));
 
   // Narrow: come back to where you were — once, then the saved position is spent
   useLayoutEffect(() => {
@@ -87,6 +94,16 @@ export function CaseQueue({ selectedId, wide }: { selectedId: number | null; wid
       </div>
 
       <div className="space-y-2">
+        <div role="group" aria-label={t("cases.views")} className="grid grid-cols-2 gap-1">
+          {QUICK_VIEWS.map((v) => (
+            <button key={v} type="button" aria-pressed={view === v} onClick={() => set("view", v)}
+                    className={`flex items-center justify-between rounded-md border px-2 py-1 text-xs ${view === v
+                      ? "border-primary/50 bg-selected font-semibold text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}>
+              <span>{t(`cases.view.${v}`)}</span>
+              <span className="tabular-nums">{viewCounts.data ? viewCounts.data[v] : "…"}</span>
+            </button>
+          ))}
+        </div>
         <div role="group" aria-label={t("workitem.filter.scope")} className="flex rounded-md border border-border p-0.5">
           {ISSUE_SCOPES.map((s) => (
             <button key={s} type="button" aria-pressed={filters.scope === s} onClick={() => set("scope", s)}
@@ -153,7 +170,11 @@ export function CaseQueue({ selectedId, wide }: { selectedId: number | null; wid
                         {[r.subtitle, t(r.statusKey)].filter(Boolean).join(" · ")}
                         {r.recurrence > 1 && ` · ×${r.recurrence}`}
                       </span>
-                      {r.waitKey && <span className="mt-0.5 block text-xs text-primary">{t(r.waitKey)}</span>}
+                      {r.waitKey && (
+                        <span className="mt-0.5 block text-xs text-primary">
+                          {t(r.waitKey)}{r.waitSince && ` · ${waitLabel(r.waitSince, now, t)}`}
+                        </span>
+                      )}
                     </Link>
                   </li>
                 );

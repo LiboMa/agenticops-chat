@@ -1352,5 +1352,10 @@
   "inbox.selectPrompt": "Pick an item to start.",
   "inbox.gone": "This one has been handled, or no longer waits on you.",
   "inbox.next": "Next",
-  "inbox.back": "Back to the workbench"
+  "inbox.back": "Back to the workbench",
+  "cases.views": "Quick views",
+  "cases.view.all": "All",
+  "cases.view.mine": "Waiting on me",
+  "cases.view.failed": "Run failed",
+  "cases.view.long_wait": "Waiting long"
 }

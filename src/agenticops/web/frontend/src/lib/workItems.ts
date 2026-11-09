@@ -11,6 +11,8 @@ export interface WorkItemRow {
   key: string; ref: string; href: string; title: string;
   subtitle: string | null; subtitleFull: string | null; // shortened for the row / untruncated for its tooltip
   statusKey: string; dots: PhaseView[]; waitKey: string | null; level: string | null;
+  /** MVP-2.8.0 S2: since when it has waited — only when it waits on a person (the system's waits carry no clock) */
+  waitSince: string | null;
   typeKey: string | null; // a change's type (standard / normal / emergency), shown with its risk
   recurrence: number;     // signals the Signal Gate merged into the issue; 1 = it happened once
   emphasis: RowEmphasis;
@@ -25,15 +27,21 @@ export function shortId(id: string): string {
 
 /** An issue list row. The list has no RCA or runs, so the wait comes from list-mode issuePhases (R2). `search` is
  *  the queue's query string, kept on the row link so selecting a case keeps the filters (MVP-2.7.0 S4). */
+const PEOPLE = new Set(["you", "approver", "requester", "acceptor"]);
+
 export function issueRow(a: HealthIssue, search = ""): WorkItemRow {
   const p = issuePhases({ status: a.status });
+  // MVP-2.8.0 S2: the server says who it waits on (work_phases with the plans, runs and RCA); an older server
+  // without the field keeps the list-mode guess
+  const waitingFor = a.waiting_on !== undefined ? a.waiting_on : p.waitingFor;
   const facts = issueFacts(a);
   const [type, id, region] = [facts.resourceType, a.resource_id, facts.region].map((x) => (isBlank(x) ? null : x));
   const closed = a.status === "resolved" || a.status === "dismissed";
   return { key: `I${a.id}`, ref: `I#${a.id}`, href: `/app/issues/${a.id}${search}`, title: a.title,
            subtitle: [type, id && shortId(id), region].filter(Boolean).join(" · ") || null,
            subtitleFull: [type, id, region].filter(Boolean).join(" · ") || null,
-           statusKey: `issues.status.${a.status}`, dots: p.phases, waitKey: p.waitingFor ? `workitem.wait.${p.waitingFor}` : null,
+           statusKey: `issues.status.${a.status}`, dots: p.phases, waitKey: waitingFor ? `workitem.wait.${waitingFor}` : null,
+           waitSince: waitingFor && PEOPLE.has(waitingFor) ? a.waiting_since ?? null : null,
            level: a.severity, typeKey: null, recurrence: a.occurrence_count ?? 1,
            emphasis: closed ? "closed" : a.severity === "critical" ? "critical" : null,
            account: a.account_name, time: a.detected_at };
@@ -49,6 +57,7 @@ export function changeRow(cr: ChangeRequest, accountName?: string | null): WorkI
            subtitle: sub, subtitleFull: sub,
            statusKey: `changes.status.${cr.status}`, dots: p.phases,
            waitKey: p.waitingFor ? `workitem.wait.${p.waitingFor}` : p.primary === "copyAsNew" ? "workitem.primary.copyAsNew" : null,
+           waitSince: null,
            level: cr.risk_level, typeKey: type ? `plans.changeType.${type}` : null, recurrence: 1,
            emphasis: p.terminal ? "closed" : null,
            account: accountName ?? null, time: cr.updated_at ?? cr.created_at };
@@ -74,7 +83,7 @@ export function fixPlanRow(p: FixPlan, accountName?: string | null): WorkItemRow
   return { key: `P${p.id}`, ref: `${planRef(p)} v${p.plan_version || 1}`, href: `/app/plans/${p.id}`, title: p.title,
            subtitle: [p.issue_title, rid && shortId(rid)].filter(Boolean).join(" · ") || null,
            subtitleFull: [p.issue_title, rid].filter(Boolean).join(" · ") || null,
-           statusKey: `plans.planStatus.${p.status}`, dots: planDots(p.status), waitKey: wait,
+           statusKey: `plans.planStatus.${p.status}`, dots: planDots(p.status), waitKey: wait, waitSince: null,
            level: p.risk_level, typeKey: null, recurrence: 1,
            emphasis: PLAN_TERMINAL_STATUSES.has(p.status) ? "closed" : null,
            account: accountName ?? null, time: p.updated_at ?? p.created_at };

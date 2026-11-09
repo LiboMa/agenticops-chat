@@ -1352,5 +1352,10 @@
   "inbox.selectPrompt": "选择一项开始处理。",
   "inbox.gone": "这项已经处理，或已不再等你。",
   "inbox.next": "下一项",
-  "inbox.back": "返回待办列表"
+  "inbox.back": "返回待办列表",
+  "cases.views": "快捷视图",
+  "cases.view.all": "全部",
+  "cases.view.mine": "待我处理",
+  "cases.view.failed": "执行失败",
+  "cases.view.long_wait": "长时间等待"
 }

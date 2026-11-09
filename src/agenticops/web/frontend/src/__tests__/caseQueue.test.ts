@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  ACTIVE_STATUSES, QUEUE_CAP, backTarget, capped, caseHref, queueFilters, queueParams, rowState, scrollKey, SPLIT_MIN_WIDTH,
+  ACTIVE_STATUSES, QUEUE_CAP, QUICK_VIEWS, backTarget, capped, caseHref, queueFilters, queueParams, rowState, scrollKey, SPLIT_MIN_WIDTH,
 } from "@/lib/caseQueue";
 
 const q = (s: string) => queueFilters(new URLSearchParams(s));
@@ -62,5 +62,17 @@ describe("rowState (review I1)", () => {
   it("only a narrow screen marks the navigation as from the queue — split-view selections never become a 'back' target", () => {
     expect(rowState(false)).toEqual({ fromQueue: true });
     expect(rowState(true)).toBeUndefined();
+  });
+});
+
+
+describe("quick views (MVP-2.8.0 S2)", () => {
+  it("all / waiting on me / failed / waiting long — the view goes to the server, the default stays out of the URL", () => {
+    expect(QUICK_VIEWS).toEqual(["all", "mine", "failed", "long_wait"]);
+    expect(queueFilters(new URLSearchParams("view=mine")).view).toBe("mine");
+    expect(queueFilters(new URLSearchParams("view=nope")).view).toBeUndefined();
+    expect(queueFilters(new URLSearchParams("")).view).toBeUndefined();
+    expect(queueParams(new URLSearchParams("view=mine"), "view", "all").toString()).toBe("");
+    expect(queueParams(new URLSearchParams(""), "view", "long_wait").toString()).toBe("view=long_wait");
   });
 });
