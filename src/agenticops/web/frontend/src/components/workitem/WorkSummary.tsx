@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { StatusText, type StatusTone } from "@/components/ui/StatusText";
 import type { PhaseState } from "@/lib/issuePhases";
-import type { RunSummary, CheckState } from "@/lib/runSummary";
+import { checksNeedingYouFirst, type RunSummary, type CheckState } from "@/lib/runSummary";
 
 const CHECK_TONE: Record<CheckState, StatusTone> = { passed: "ok", failed: "danger", warning: "warn", pending: "warn" };
 
@@ -78,9 +78,9 @@ export function RunSummaryBlock({ summary, t }: { summary: RunSummary; t: (k: st
       )}
       {summary.checks.length > 0 && (
         <ul className="divide-y divide-border rounded-md border border-border">
-          {summary.checks.map((c, i) => (
+          {checksNeedingYouFirst(summary.checks).map((c, i) => (
             <li key={`${c.id ?? "x"}-${i}`} className="flex items-start justify-between gap-3 px-3 py-2 text-sm">
-              <span className="min-w-0 [overflow-wrap:anywhere]">
+              <span className="min-w-0 truncate" title={c.label}>
                 {c.id && <span className="mr-1.5 font-mono text-xs text-muted-foreground">{c.id}</span>}{c.label}
               </span>
               <StatusText tone={CHECK_TONE[c.state]} className="shrink-0 text-xs">{t(`workitem.check.${c.state}`)}</StatusText>

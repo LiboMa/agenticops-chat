@@ -42,3 +42,11 @@ export function runSummary(run: FixExecution, runPlan: FixPlan | null): RunSumma
     warnings: checks.filter((c) => c.state === "warning").map((c) => c.label),
   };
 }
+
+const ORDER: Record<CheckState, number> = { failed: 0, pending: 1, warning: 2, passed: 3 };
+
+/** The checks a person must look at come first on the first screen (failed, to check, warnings), the passed ones
+ *  after — a long plan's passed checks must not push the one «待核对» below the fold. Stable inside each state. */
+export function checksNeedingYouFirst<T extends { state: CheckState }>(checks: T[]): T[] {
+  return checks.map((c, i) => [c, i] as const).sort((a, b) => ORDER[a[0].state] - ORDER[b[0].state] || a[1] - b[1]).map(([c]) => c);
+}

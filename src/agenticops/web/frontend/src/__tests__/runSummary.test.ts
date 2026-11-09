@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FixExecution, FixPlan } from "@/api/types";
-import { runSummary } from "@/lib/runSummary";
+import { checksNeedingYouFirst, runSummary } from "@/lib/runSummary";
 
 const plan = (over: Partial<FixPlan> = {}): FixPlan => ({
   id: 225, plan_kind: "fix", plan_version: 1, content_hash: "5a5e2e1c99", approved_hash: "5a5e2e1c99",
@@ -53,5 +53,17 @@ describe("runSummary — the first screen's latest-run block (MVP-2.8.0 S2)", ()
     expect(runSummary(run({ post_check_results: [], post_check_binding: [] }), plan({ post_checks: [] })).checks).toEqual([]);
     const s = runSummary(run(), null);
     expect(s).toMatchObject({ stepsDone: 8, stepsTotal: 8, planId: null, version: null, hash8: null, matchesApproved: null });
+  });
+});
+
+
+describe("checksNeedingYouFirst — the first screen shows what needs a person before what passed (E2E finding)", () => {
+  it("failed, then to check, then warnings, then passed; stable inside each", () => {
+    const order = checksNeedingYouFirst([
+      { id: "pc-1", label: "a", state: "passed" }, { id: "pc-2", label: "b", state: "warning" },
+      { id: "pc-3", label: "c", state: "passed" }, { id: "pc-4", label: "d", state: "pending" },
+      { id: "pc-5", label: "e", state: "failed" },
+    ]).map((c) => c.id);
+    expect(order).toEqual(["pc-5", "pc-4", "pc-2", "pc-1", "pc-3"]);
   });
 });
