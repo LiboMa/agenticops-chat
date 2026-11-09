@@ -352,18 +352,29 @@ export default function IssueDetail({ embedded = false, back, issueId: givenId }
         <WorkSummary
           steps={m.phase.phases.map((p) => ({ id: p.id, label: t(`workitem.phase.${p.id}`), state: p.state }))}
           facts={{ owner: m.waitingKey ? t(m.waitingKey) : null,
-                   waiting: waitFact(m.waitingKey ? t(m.waitingKey) : null, a.waiting_since, Date.now(), t),
+                   waiting: waitFact(a.waiting_on, a.waiting_since, Date.now(), t),
                    plan: m.plan ? planLabel(m.plan, t) : null }}
           expand={{ label: t("workitem.summary.expand"), onClick: () => {
             const target = m.latestRun ? (m.phase.current === "accept" ? "accept" : "run") : "diagnose";
             cards.openCard(target); cards.scrollTo(target);
           } }}
           t={t}>
-          {m.latestRun
+          {/* runs still loading or failed: say so — an issue waiting for acceptance must not show the
+              diagnosis block as if it had no run (S2 review) */}
+          {executions.isPending
+            ? <p className="text-sm text-muted-foreground">{t("workitem.summary.runsLoading")}</p>
+            : executions.isError && executions.data === undefined
+            ? <p role="alert" className="text-sm text-status-danger">
+                {t("workitem.summary.runsFailed")}
+                <button type="button" onClick={() => void executions.refetch()} className="ml-2 text-primary hover:underline">
+                  {t("common.retry")}
+                </button>
+              </p>
+            : m.latestRun
             ? <RunSummaryBlock t={t} summary={summarizeRun(m.latestRun,
                 (fixPlans.data ?? []).find((p) => p.id === m.latestRun!.fix_plan_id) ?? null)} />
-            : <DiagnosisEvidence t={t} anchorStatus={a.anchor_status} humanVerdict={rca.data?.human_verdict}
-                                 confidence={rca.data?.confidence} />}
+            : <DiagnosisEvidence t={t} anchorStatus={a.anchor_status} rca={rca.data}
+                                 rcaState={rca.isPending ? "loading" : rca.isError && rca.data === undefined ? "failed" : "ready"} />}
         </WorkSummary>
 
         {cards.openable.length > 0 && (

@@ -49,8 +49,14 @@ export default function Inbox() {
   const first = pages.data?.pages[0];
   const items: AttentionItem[] = pages.data?.pages.flatMap((p) => p.items) ?? [];
   const nameOf = (id: number | null) => (id == null ? null : accounts.data?.find((a) => a.id === id)?.name ?? null);
-  let state = selectionState(items, params.item);
-  if (state === "gone" && pages.hasNextPage) state = "selected";  // it may be on a page not loaded yet
+  // the ids this view has shown (decision + search + account): one that was here and has left is gone, even while
+  // more pages could be loaded (S2 review); a new view starts a new set
+  const viewKey = `${accountId ?? "all"}|${inboxSearch({ ...params, item: null, layout: "split" })}`;
+  const seen = useRef<{ key: string; ids: Set<string> }>({ key: viewKey, ids: new Set() });
+  if (seen.current.key !== viewKey) seen.current = { key: viewKey, ids: new Set() };
+  const ready = pages.status === "success";
+  const state = selectionState(items, params.item, { ready, hasMore: !!pages.hasNextPage, seen: seen.current.ids });
+  if (ready) for (const i of items) seen.current.ids.add(i.id);
   const target = parseItem(params.item);
   const nextItem = items.find((i) => i.id !== params.item) ?? null;
   const compact = params.layout === "compact";
@@ -75,6 +81,11 @@ export default function Inbox() {
       )}
       {state === "selected" && target?.kind === "change" && (
         <ChangeDetailView key={params.item!} crId={target.id} embedded={wide} back={wide ? undefined : { to: backTo }} />
+      )}
+      {state !== "selected" && !wide && params.item && (
+        <Link to={backTo} className="mb-3 inline-flex min-h-[44px] items-center text-sm text-primary hover:underline">
+          ← {t("inbox.back")}
+        </Link>
       )}
       {state !== "selected" && (
         <div role="status" className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border px-6 py-16 text-center text-sm text-muted-foreground">
@@ -146,7 +157,7 @@ export default function Inbox() {
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
           <input type="search" value={q} onChange={(e) => setQ(e.target.value)} aria-label={t("inbox.search")}
                  placeholder={t("inbox.search")}
-                 className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-sm sm:w-64" />
+                 className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-[16px] sm:w-64 sm:text-sm" />
           {wide && (
             <div role="group" aria-label={t("inbox.layout")} className="flex rounded-md border border-border p-0.5 text-xs">
               {(["split", "compact"] as const).map((l) => (

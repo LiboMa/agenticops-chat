@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { StatusText, type StatusTone } from "@/components/ui/StatusText";
 import type { PhaseState } from "@/lib/issuePhases";
 import { checksNeedingYouFirst, type RunSummary, type CheckState } from "@/lib/runSummary";
+import { diagnosisRows } from "@/lib/diagnosisEvidence";
 
 const CHECK_TONE: Record<CheckState, StatusTone> = { passed: "ok", failed: "danger", warning: "warn", pending: "warn" };
 
@@ -92,24 +93,15 @@ export function RunSummaryBlock({ summary, t }: { summary: RunSummary; t: (k: st
   );
 }
 
-/** Before any run: what the diagnosis rests on — the resource anchor, the human verdict and the model's confidence,
- *  each said apart (a model's confidence is never shown as the person's verdict). */
-export function DiagnosisEvidence({ anchorStatus, humanVerdict, confidence, t }: {
-  anchorStatus: string | null | undefined; humanVerdict: string | null | undefined; confidence: number | null | undefined;
+/** Before any run: what the diagnosis rests on — the resource anchor, the model's own confidence, the critic and the
+ *  human verdict, each its own line (`lib/diagnosisEvidence`; a model's confidence is never the person's verdict). */
+export function DiagnosisEvidence({ anchorStatus, rca, rcaState, t }: {
+  anchorStatus: string | null | undefined;
+  rca: Parameters<typeof diagnosisRows>[0]["rca"];
+  rcaState: "loading" | "failed" | "ready";
   t: (k: string) => string;
 }) {
-  const rows: { key: string; tone: StatusTone; text: string }[] = [
-    anchorStatus === "anchored"
-      ? { key: "anchor", tone: "ok", text: t("workitem.evidence.anchored") }
-      : { key: "anchor", tone: "warn", text: t("workitem.evidence.unanchored") },
-    humanVerdict === "correct" ? { key: "verdict", tone: "ok", text: t("workitem.evidence.verdictCorrect") }
-      : humanVerdict === "incorrect" ? { key: "verdict", tone: "danger", text: t("workitem.evidence.verdictIncorrect") }
-      : { key: "verdict", tone: "neutral", text: t("workitem.evidence.noVerdict") },
-  ];
-  if (typeof confidence === "number") {
-    rows.push({ key: "confidence", tone: "info",
-                text: t("workitem.evidence.confidence").replace("{pct}", String(Math.round(confidence * 100))) });
-  }
+  const rows = diagnosisRows({ anchorStatus, rca, rcaState }, t);
   return (
     <div className="space-y-2">
       <h3 className="text-sm font-semibold text-foreground">{t("workitem.evidence.title")}</h3>

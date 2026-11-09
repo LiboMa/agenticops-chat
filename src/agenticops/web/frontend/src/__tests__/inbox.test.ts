@@ -74,11 +74,32 @@ describe("selectionState — the selected item may just have been handled", () =
   });
 });
 
-describe("waitFact — the first screen's «等待时长» belongs to whoever it waits on (E2E finding, C#2)", () => {
+describe("waitFact — a duration only while a person is waited on (E2E C#2; S2 review)", () => {
   it("nobody waits (a completed change): no duration, never «已等 40 天»", () => {
     expect(waitFact(null, "2026-10-01T00:00:00Z", NOW, tZh)).toBeNull();
   });
-  it("someone waits: the duration since it started waiting", () => {
-    expect(waitFact("等你", "2026-11-09T09:00:00Z", NOW, tEn)).toBe(waitLabel("2026-11-09T09:00:00Z", NOW, tEn));
+  it("a system works (the executor, the SRE agent): no duration — a running fix never reads «等执行器 · 已等 2 天»", () => {
+    expect(waitFact("executor", "2026-11-07T12:00:00Z", NOW, tZh)).toBeNull();
+    expect(waitFact("sre_agent", "2026-11-07T12:00:00Z", NOW, tZh)).toBeNull();
+  });
+  it("a person (you, an approver, the requester, an acceptor): the duration since it started waiting", () => {
+    for (const who of ["you", "approver", "requester", "acceptor"]) {
+      expect(waitFact(who, "2026-11-09T09:00:00Z", NOW, tEn)).toBe(waitLabel("2026-11-09T09:00:00Z", NOW, tEn));
+    }
+  });
+});
+
+describe("selectionState with what the page knows (S2 review)", () => {
+  it("the list has not loaded, or it failed: the item is shown — never «already handled»", () => {
+    expect(selectionState([], "I12", { ready: false })).toBe("selected");
+  });
+  it("an item seen in this view that has left it is gone, even while more pages could be loaded", () => {
+    expect(selectionState([{ id: "I2" }], "I1", { ready: true, hasMore: true, seen: new Set(["I1", "I2"]) })).toBe("gone");
+  });
+  it("a deep link not seen yet while more pages exist may sit on a later page: shown", () => {
+    expect(selectionState([{ id: "I2" }], "I9", { ready: true, hasMore: true, seen: new Set(["I2"]) })).toBe("selected");
+  });
+  it("everything loaded and it is not there: gone", () => {
+    expect(selectionState([{ id: "I2" }], "I9", { ready: true, hasMore: false })).toBe("gone");
   });
 });

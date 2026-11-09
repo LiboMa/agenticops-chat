@@ -69,16 +69,26 @@ export function waitLabel(sinceIso: string | null | undefined, now: number, t: (
   return t("inbox.wait.days").replace("{n}", String(Math.floor(hours / 24)));
 }
 
-/** The first screen's wait fact: a duration only while someone is waited on (the owner shown beside it) — a
- *  completed change, or an issue nobody is waiting on, shows no «已等 N 天». */
-export function waitFact(owner: string | null, sinceIso: string | null | undefined, now: number,
+/** Who counts as a person waited on (services/work_phases.HUMAN); everyone else is a system at work. */
+export const WAITING_PEOPLE: ReadonlySet<string> = new Set(["you", "approver", "requester", "acceptor"]);
+
+/** The first screen's wait fact, from the server's `waiting_on`: a duration only while a PERSON is waited on, as the
+ *  Cases rows — a completed change shows none, and a run in flight never reads «等执行器 · 已等 2 天» (S2 review). */
+export function waitFact(waitingOn: string | null | undefined, sinceIso: string | null | undefined, now: number,
                          t: (k: string) => string): string | null {
-  return owner ? waitLabel(sinceIso, now, t) : null;
+  return waitingOn && WAITING_PEOPLE.has(waitingOn) ? waitLabel(sinceIso, now, t) : null;
 }
 
 /** Whether the item in the URL is still in the queue: an item just approved or accepted leaves it ("gone") — the
- *  pane says so and offers the next one instead of going blank. */
-export function selectionState(items: { id: string }[], item: string | null): "selected" | "gone" | "none" {
+ *  pane says so and offers the next one instead of going blank. `ready` = the list has loaded successfully, `seen` =
+ *  the ids this view has shown (an item seen and now missing is gone even while more pages exist — S2 review). */
+export function selectionState(
+  items: { id: string }[], item: string | null,
+  { ready = true, hasMore = false, seen }: { ready?: boolean; hasMore?: boolean; seen?: ReadonlySet<string> } = {},
+): "selected" | "gone" | "none" {
   if (!item) return "none";
-  return items.some((i) => i.id === item) ? "selected" : "gone";
+  if (items.some((i) => i.id === item)) return "selected";
+  if (!ready) return "selected";            // not loaded yet / the list failed: show the item, claim nothing about it
+  if (seen?.has(item)) return "gone";       // it was in this view and has left it: handled
+  return hasMore ? "selected" : "gone";     // a deep link not seen yet may sit on a page not loaded yet
 }

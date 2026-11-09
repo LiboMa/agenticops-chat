@@ -70,7 +70,7 @@ export function AcceptDialog({ summary, busy, error, onConfirm, onClose }: {
             <label className="mt-4 block text-xs font-medium text-muted-foreground" htmlFor="accept-note">{t("accept.dialog.note")}</label>
             <textarea id="accept-note" value={note} onChange={(e) => setNote(e.target.value)} maxLength={2000} rows={3}
                       placeholder={t("accept.dialog.notePlaceholder")}
-                      className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm" />
+                      className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-[16px] sm:text-sm" />
             {error && <p role="alert" className="mt-2 text-sm text-status-danger">{error}</p>}
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
               <span className="text-xs text-muted-foreground">{t("accept.dialog.binding")}</span>

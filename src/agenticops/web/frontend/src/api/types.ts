@@ -76,6 +76,8 @@ export interface Signal {
 export interface HealthIssuePage {
   items: HealthIssue[];
   total: number;
+  /** the next page's offset; null on the last page */
+  next_cursor?: string | null;
 }
 
 export interface HealthIssue {

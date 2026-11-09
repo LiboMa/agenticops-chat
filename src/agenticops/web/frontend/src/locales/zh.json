@@ -1390,5 +1390,10 @@
   "accept.dialog.note": "验收备注",
   "accept.dialog.notePlaceholder": "记录验收依据（可选）",
   "accept.dialog.binding": "验收绑定此计划版本及执行记录",
-  "accept.dialog.confirm": "确认验收"
+  "accept.dialog.confirm": "确认验收",
+  "workitem.evidence.rcaLoading": "正在读取诊断记录…",
+  "workitem.evidence.rcaFailed": "诊断记录加载失败，无法判断诊断依据",
+  "workitem.summary.runsLoading": "正在读取执行记录…",
+  "workitem.summary.runsFailed": "执行记录加载失败",
+  "cases.viewCountFailed": "数量加载失败"
 }
