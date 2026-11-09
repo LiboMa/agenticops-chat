@@ -32,10 +32,14 @@ export function useAcceptExecution() {
   const qc = useQueryClient();
   return useMutation({
     // the response is the updated execution row; callers rely on the invalidation below, not on it
-    mutationFn: ({ id, decision, reason }: { id: number; decision: "accepted" | "rejected"; reason: string }) =>
+    // confirmed_checks (MVP-2.8.0 S2): the declared checks the person ticked, recorded with the acceptance
+    mutationFn: ({ id, decision, reason, confirmed_checks }: {
+      id: number; decision: "accepted" | "rejected"; reason: string; confirmed_checks?: string[];
+    }) =>
       apiFetch<FixExecution>(
         `/fix-executions/${id}/accept`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision, reason }) },
+        { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ decision, reason, ...(confirmed_checks ? { confirmed_checks } : {}) }) },
       ),
     onSuccess: () => {
       // accepted resolves the issue; rejected returns it to root_cause_identified and disputes the RCA

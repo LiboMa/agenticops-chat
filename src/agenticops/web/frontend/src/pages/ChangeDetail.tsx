@@ -35,6 +35,7 @@ import type { Account, ChangeRequestDetail } from "@/api/types";
 import { useReadOnly } from "@/hooks/useBootstrap";
 import { viewerActions } from "@/lib/permissions";
 import { RunSummaryBlock, WorkSummary } from "@/components/workitem/WorkSummary";
+import { AcceptDialog } from "@/components/workitem/AcceptDialog";
 import { runSummary as summarizeRun } from "@/lib/runSummary";
 import { waitLabel } from "@/lib/inbox";
 import { StatusText } from "@/components/ui/StatusText";
@@ -386,7 +387,14 @@ export function ChangeDetailView({ crId, embedded = false, back }: {
         </section>
       </aside>
 
-      {pending && (
+      {pending && pending.action === "resolve-review" && pending.extra?.outcome === "completed" && model.latestRun && (
+        <AcceptDialog summary={summarizeRun(model.latestRun, cr.plans.find((p) => p.id === model.latestRun!.fix_plan_id) ?? null)}
+                      busy={act.isPending} error={act.error?.message ?? null} onClose={() => setPending(null)}
+                      onConfirm={({ reason, confirmedChecks }) => act.mutate(
+                        { id: cr.id, action: "resolve-review", body: { outcome: "completed", reason, confirmed_checks: confirmedChecks } },
+                        { onSuccess: () => setPending(null) })} />
+      )}
+      {pending && !(pending.action === "resolve-review" && pending.extra?.outcome === "completed" && model.latestRun) && (
         <ReasonDialog
           title={pending.title}
           description={pending.description}

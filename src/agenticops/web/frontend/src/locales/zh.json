@@ -1380,5 +1380,15 @@
   "workitem.evidence.verdictIncorrect": "人工裁决：诊断有误",
   "workitem.evidence.noVerdict": "还没有人工裁决",
   "workitem.evidence.confidence": "模型置信度 {pct}%",
-  "plans.detail.goAccept": "去验收这次执行"
+  "plans.detail.goAccept": "去验收这次执行",
+  "accept.checklist.pending": "已核对「{check}」的结果，确认符合预期。",
+  "accept.checklist.warning": "已查看「{check}」的警告，确认可以接受。",
+  "accept.checklist.overall": "已检查执行结果和警告，确认目标状态符合预期。",
+  "accept.checklist.reason": "已核对 {n} 项后验收",
+  "accept.dialog.title": "验收本次执行",
+  "accept.dialog.intro": "执行已完成。验收前，请确认下面各项人工核查结果。",
+  "accept.dialog.note": "验收备注",
+  "accept.dialog.notePlaceholder": "记录验收依据（可选）",
+  "accept.dialog.binding": "验收绑定此计划版本及执行记录",
+  "accept.dialog.confirm": "确认验收"
 }

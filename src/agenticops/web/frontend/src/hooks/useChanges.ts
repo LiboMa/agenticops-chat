@@ -44,7 +44,7 @@ export type ChangeActionArgs =
   | { id: number; action: "approve"; body: { reason: string; content_hash: string } }
   | { id: number; action: "reject" | "cancel"; body: { reason: string } }
   | { id: number; action: "clarify"; body: { message: string } }
-  | { id: number; action: "resolve-review"; body: { outcome: "completed" | "failed"; reason: string } }
+  | { id: number; action: "resolve-review"; body: { outcome: "completed" | "failed"; reason: string; confirmed_checks?: string[] } }
   | { id: number; action: "review" }
   | { id: number; action: "execute" };
 

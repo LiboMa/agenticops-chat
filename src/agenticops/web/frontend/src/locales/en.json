@@ -1380,5 +1380,15 @@
   "workitem.evidence.verdictIncorrect": "Human verdict: the diagnosis is wrong",
   "workitem.evidence.noVerdict": "No human verdict yet",
   "workitem.evidence.confidence": "Model confidence {pct}%",
-  "plans.detail.goAccept": "Go accept this run"
+  "plans.detail.goAccept": "Go accept this run",
+  "accept.checklist.pending": "I checked the result of «{check}» and it is as expected.",
+  "accept.checklist.warning": "I read the warning of «{check}» and it is acceptable.",
+  "accept.checklist.overall": "I checked the run's results and warnings; the target is in the expected state.",
+  "accept.checklist.reason": "Accepted after checking {n} items",
+  "accept.dialog.title": "Accept this run",
+  "accept.dialog.intro": "The run finished. Before accepting, confirm each check below.",
+  "accept.dialog.note": "Acceptance note",
+  "accept.dialog.notePlaceholder": "What you based it on (optional)",
+  "accept.dialog.binding": "The acceptance is bound to this plan version and run",
+  "accept.dialog.confirm": "Accept"
 }

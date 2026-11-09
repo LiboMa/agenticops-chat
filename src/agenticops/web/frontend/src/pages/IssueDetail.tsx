@@ -50,10 +50,11 @@ import { ISSUE_PHASES, type IssuePhaseId, type IssuePrimary } from "@/lib/issueP
 import { ISSUE_HASHES, legacyIssueTabHash } from "@/lib/workitemRoutes";
 import { toActivity } from "@/lib/activity";
 import { apiFetch } from "@/api/client";
-import type { FixExecution, HealthIssue, IssueStatus, MergedAlert } from "@/api/types";
+import type { FixExecution, FixPlan, HealthIssue, IssueStatus, MergedAlert } from "@/api/types";
 import { useReadOnly } from "@/hooks/useBootstrap";
 import { viewerActions } from "@/lib/permissions";
 import { DiagnosisEvidence, RunSummaryBlock, WorkSummary } from "@/components/workitem/WorkSummary";
+import { AcceptDialog } from "@/components/workitem/AcceptDialog";
 import { runSummary as summarizeRun } from "@/lib/runSummary";
 import { waitLabel } from "@/lib/inbox";
 
@@ -517,7 +518,8 @@ export default function IssueDetail({ embedded = false, back, issueId: givenId }
         </ReasonDialog>
       )}
       {m.pendingRun && acceptDecision && (
-        <AcceptanceDialog execution={m.pendingRun} decision={acceptDecision} onClose={() => setAcceptDecision(null)} />
+        <AcceptanceDialog execution={m.pendingRun} decision={acceptDecision} onClose={() => setAcceptDecision(null)}
+                          runPlan={(fixPlans.data ?? []).find((p) => p.id === m.pendingRun!.fix_plan_id) ?? null} />
       )}
       {dialog}
     </div>
@@ -529,19 +531,29 @@ export default function IssueDetail({ embedded = false, back, issueId: givenId }
 /* ================================================================== */
 
 /** Accept / reject a run pending acceptance; both need a reason, and the identity is the session's. */
-function AcceptanceDialog({ execution, decision, onClose }: {
+function AcceptanceDialog({ execution, runPlan, decision, onClose }: {
   execution: FixExecution;
+  runPlan: FixPlan | null;
   decision: "accepted" | "rejected";
   onClose: () => void;
 }) {
   const { t } = useLocale();
   const accept = useAcceptExecution();
+  // MVP-2.8.0 S2: accepting = ticking what you checked; rejecting keeps its required reason
+  if (decision === "accepted") {
+    return (
+      <AcceptDialog summary={summarizeRun(execution, runPlan)} busy={accept.isPending} error={accept.error?.message ?? null}
+                    onClose={onClose}
+                    onConfirm={({ reason, confirmedChecks }) => accept.mutate(
+                      { id: execution.id, decision, reason, confirmed_checks: confirmedChecks }, { onSuccess: onClose })} />
+    );
+  }
   return (
     <ReasonDialog
-      title={`${t(decision === "accepted" ? "verification.acceptTitle" : "verification.rejectTitle")} #${execution.id}`}
-      description={t(decision === "accepted" ? "verification.acceptHint" : "verification.rejectHint")}
-      confirmText={t(decision === "accepted" ? "workitem.primary.acceptResult" : "verification.reject")}
-      variant={decision === "rejected" ? "destructive" : "default"}
+      title={`${t("verification.rejectTitle")} #${execution.id}`}
+      description={t("verification.rejectHint")}
+      confirmText={t("verification.reject")}
+      variant="destructive"
       required
       busy={accept.isPending}
       error={accept.error?.message ?? null}
