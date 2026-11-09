@@ -154,7 +154,3 @@ export function breadcrumbFor(pathname: string): { sectionKey: string | null; ob
   return { sectionKey: hit.entry.labelKey, object: ref };
 }
 
-/** Pages that collapse the global sidebar to an icon rail (2026-11-07): Chat keeps the width for its chat list. */
-export function isRailRoute(pathname: string): boolean {
-  return pathname === "/app/chat" || pathname.startsWith("/app/chat/");
-}

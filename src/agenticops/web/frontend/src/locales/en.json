@@ -1256,7 +1256,6 @@
   "chat.attach.dropHint": "Drop to attach",
   "chat.attach.waitUpload": "Wait for the uploads to finish",
   "chat.attach.pages": "{n} pages",
-  "nav.expand": "Show the full menu",
   "chat.attach.page": "1 page",
   "chat.error.timeout": "The model sent nothing within the wait limit. Lower the effort or pick another model; an admin can raise the limit in Settings → General → Model connection.",
   "chat.error.max_tokens": "The model used its whole output allowance (Max tokens) while thinking and wrote no answer. Raise Main's Max tokens in Settings → General → Agent models, or lower the effort.",

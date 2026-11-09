@@ -30,6 +30,8 @@ import { apiFetch } from "@/api/client";
 import { currentUserId, userKey } from "@/lib/home";
 import { useReadOnly } from "@/hooks/useBootstrap";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { CHAT_LIST_DRAWER_MEDIA } from "@/lib/chatLayout";
+import { returnFocusTo } from "@/lib/focusReturn";
 import * as Dialog from "@radix-ui/react-dialog";
 
 // Per signed-in user: a shared browser must never reopen someone else's last conversation
@@ -120,11 +122,20 @@ export default function Chat() {
     ?? (sessionDetail?.session_id === selectedId ? sessionDetail : undefined);
 
   // Three-zone layout state
-  // 2026-11-07: the chat list is open by default on a wide screen (persisted); below 768px it is a drawer
+  // 2026-11-07: the chat list is open by default beside the chat (persisted). MVP-2.8.0 S2 rework: the page keeps
+  // the full sidebar, so the list is a drawer over the conversation below 768 px and at 801–1279 px
+  // (lib/chatLayout); `isMobile` (≤ 767 px) still docks the composer and sizes the touch targets
   const [flyoutOpen, setFlyoutOpen] = usePersistedState("aiops-chat-list-open", true);
   const isMobile = useMediaQuery("(max-width: 767px)");
+  const listAsDrawer = useMediaQuery(CHAT_LIST_DRAWER_MEDIA);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const toggleList = () => (isMobile ? setDrawerOpen(true) : setFlyoutOpen((prev) => !prev));
+  const drawerOpenerRef = useRef<HTMLElement | null>(null);
+  useEffect(() => { setDrawerOpen(false); }, [listAsDrawer]);   // a resize between modes never reopens it later
+  const toggleList = () => {
+    if (!listAsDrawer) { setFlyoutOpen((prev) => !prev); return; }
+    drawerOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setDrawerOpen(true);
+  };
   const [contextRef, setContextRef] = useState<ContextRef | null>(initialRef);
   // S5: the top bar shows the account this chat is bound to, locked — an open chat's own, or (before the first
   // message) the account of the issue / change it was asked about; a new free chat leaves the scope usable
@@ -223,13 +234,14 @@ export default function Chat() {
 
   return (
     <div ref={flyoutContainerRef} className="flex h-[calc(100dvh-var(--topbar-h))] -m-6">
-      {/* Below 768px the chat list is a drawer */}
-      {isMobile && (
+      {/* The chat list as a drawer (below 768 px, and 801–1279 px where it starts right of the sidebar) */}
+      {listAsDrawer && (
         <Dialog.Root open={drawerOpen} onOpenChange={setDrawerOpen}>
           <Dialog.Portal>
             <Dialog.Overlay className="fixed inset-0 z-50 bg-black/30" />
             <Dialog.Content aria-describedby={undefined}
-                            className="fixed inset-y-0 left-0 z-50 w-[85vw] max-w-[320px] bg-card shadow-xl outline-none animate-[slideInRight_0.2s_ease-out]">
+                            onCloseAutoFocus={(e) => returnFocusTo(drawerOpenerRef.current, e)}
+                            className="fixed inset-y-0 left-0 z-50 w-[85vw] max-w-[320px] bg-card shadow-xl outline-none animate-[slideInRight_0.2s_ease-out] min-[801px]:left-[166px] min-[1101px]:left-[200px]">
               <Dialog.Title className="sr-only">{t("chat.sessions")}</Dialog.Title>
               <SessionFlyout open={drawerOpen} selectedId={selectedId}
                              onSelect={(id) => { setDrawerOpen(false); handleSelectSession(id); }}
@@ -239,7 +251,7 @@ export default function Chat() {
         </Dialog.Root>
       )}
       {/* Left: Session Flyout (resizable) */}
-      {!isMobile && <>
+      {!listAsDrawer && <>
       <div
         style={{ width: flyoutOpen ? `${flyoutWidth}px` : 0 }}
         className={`flex-shrink-0 overflow-hidden ${flyoutDragging ? "" : "transition-[width] duration-200 ease-in-out"} ${flyoutOpen ? "" : "w-0"}`}

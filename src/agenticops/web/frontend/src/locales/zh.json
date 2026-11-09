@@ -1256,7 +1256,6 @@
   "chat.attach.dropHint": "放下即可添加",
   "chat.attach.waitUpload": "上传完成后才能发送",
   "chat.attach.pages": "{n} 页",
-  "nav.expand": "展开导航",
   "chat.attach.page": "1 页",
   "chat.error.timeout": "模型在等待上限内没有返回内容。可以降低 effort 或换模型；管理员也可以在 Settings → 通用 → 模型连接 调高等待上限。",
   "chat.error.max_tokens": "模型在思考时用完了输出上限（Max tokens），没能写出回答。可以在 Settings → 通用 → Agent 模型 调高 Main 的 Max tokens，或降低 effort。",

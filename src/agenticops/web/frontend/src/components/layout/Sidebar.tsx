@@ -30,18 +30,9 @@ function initialOrder(): NavOrder {
 
 /** The blue/white sidebar: daily work, the collapsible tools (the group holding the current page opens by itself,
  *  not saved; a group the user opens or closes is saved to their preferences), and administration at the foot. */
-export function Sidebar({ rail = false }: { rail?: boolean }) {
+export function Sidebar() {
   const { t } = useLocale();
   const { pathname } = useLocation();
-  // 2026-11-07: on Chat the sidebar is a 56px icon rail; «expand» opens the full sidebar over the page
-  const [railOpen, setRailOpen] = useState(false);
-  useEffect(() => { setRailOpen(false); }, [pathname]);
-  useEffect(() => {
-    if (!railOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setRailOpen(false); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [railOpen]);
   const boot = useBootstrap();
   const can = { settings: useCanViewSettings(), users: useCanManageUsers() };
   const stats = useStats();
@@ -74,49 +65,8 @@ export function Sidebar({ rail = false }: { rail?: boolean }) {
     if (next.length !== saved.length) void savePreferences({ nav_groups_open: next });  // only a real change is saved
   };
 
-  if (rail && !railOpen) {
-    return (
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[56px] flex-col items-center border-r border-border bg-card pb-3 pt-4 min-[801px]:flex">
-        <Link to="/app/chat" className="mb-4 flex h-9 w-9 items-center justify-center" aria-label="AgenticOps">
-          <img src={`${import.meta.env.BASE_URL}logo-icon.svg`} alt="" className="h-6 w-6" />
-        </Link>
-        <nav aria-label={t("nav.menu")} className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto">
-          {NAV_GROUPS.map((g, gi) => (
-            <div key={g.id} className={`flex flex-col items-center gap-1 ${gi > 0 ? "mt-1 border-t border-border pt-2" : ""}`}>
-              {order[g.id].map((id) => g.items.find((i) => i.id === id)!).filter(Boolean)
-                .filter((i) => navItemVisible(i.id, can)).map((item) => {
-                  const active = current?.entry.id === item.id;
-                  return (
-                    <Link key={item.id} to={item.to} title={t(item.labelKey)} aria-label={t(item.labelKey)}
-                          aria-current={active ? "page" : undefined}
-                          className={`relative flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${
-                            active ? "bg-selected text-primary" : "text-foreground/70 hover:bg-accent hover:text-foreground"}`}>
-                      <SvgIcon d={ICON_PATHS[item.icon]} className="h-[18px] w-[18px]" />
-                      {item.badge && hasOpenIssues && (
-                        <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500" aria-hidden="true" />
-                      )}
-                    </Link>
-                  );
-                })}
-            </div>
-          ))}
-        </nav>
-        <button type="button" onClick={() => setRailOpen(true)} title={t("nav.expand")} aria-label={t("nav.expand")}
-                className="mt-2 flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground">
-          <svg className="h-[18px] w-[18px]" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
-            <rect x="3" y="3.5" width="14" height="13" rx="2" /><path d="M8 3.5v13M11 8.5l2 1.5-2 1.5" />
-          </svg>
-        </button>
-      </aside>
-    );
-  }
-
   return (
-    <>
-    {rail && <div className="fixed inset-0 z-30 bg-black/20" onClick={() => setRailOpen(false)} aria-hidden="true" />}
-    <aside className={rail
-      ? "fixed inset-y-0 left-0 z-40 flex w-[200px] flex-col border-r border-border bg-card px-3 pb-3 pt-5 shadow-xl animate-[slideInRight_0.2s_ease-out]"
-      : "fixed inset-y-0 left-0 z-30 hidden w-[200px] flex-col border-r border-border bg-card px-3 pb-3 pt-5 min-[801px]:flex max-[1100px]:w-[166px] max-[1100px]:px-2"}>
+    <aside className="fixed inset-y-0 left-0 z-30 hidden w-[200px] flex-col border-r border-border bg-card px-3 pb-3 pt-5 min-[801px]:flex max-[1100px]:w-[166px] max-[1100px]:px-2">
       <Link to="/app/chat" className="mb-5 flex items-center gap-2.5 px-2 text-[18px] font-bold tracking-tight text-primary max-[1100px]:text-[15px]">
         <img src={`${import.meta.env.BASE_URL}logo-icon.svg`} alt="" className="h-6 w-6 shrink-0" />
         <span className="truncate">AgenticOps</span>
@@ -189,7 +139,6 @@ export function Sidebar({ rail = false }: { rail?: boolean }) {
         {boot.data?.version && <p className="px-2.5 pt-2 text-[10px] text-muted-foreground">v{boot.data.version}</p>}
       </div>
     </aside>
-    </>
   );
 }
 
