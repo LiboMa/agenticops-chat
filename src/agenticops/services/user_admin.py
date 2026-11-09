@@ -4,8 +4,8 @@
 - Passwords are generated here (`secrets.token_urlsafe(12)`, like the CLI), returned once, never stored in clear,
   never written to the audit trail.
 - Nobody disables or demotes themselves; the last active admin is never disabled or demoted.
-- Disabling ends every session of the user and revokes every API key (re-enabling brings neither back — keys are
-  re-issued, leftover sessions, e.g. after the CLI's disable, are cleared). Resetting a password ends the user's
+- Disabling ends every session of the user and revokes every API key; re-enabling brings neither back — it clears
+  what a CLI disable (which only flips is_active) left alive, and keys are re-issued. Resetting a password ends the user's
   sessions, except the caller's own current one when they reset their own (the new password must stay on screen).
 - Every change writes one audit row in the same transaction as the change.
 """
@@ -127,7 +127,10 @@ def update_user(user_id: int, *, role: Optional[str] = None, settings_view: Opti
             _audit(s, "user.disable", u, caller, old={"is_active": True}, new={"is_active": False})
         if enable:
             u.is_active = True
-            _end_sessions(s, u.id)        # a leftover from a disable that did not end them (the CLI's)
+            # what a disable that did not end them left behind (the CLI's only flips is_active): old sessions and
+            # API keys stay dead — keys are re-issued (S2 rework review)
+            _end_sessions(s, u.id)
+            s.execute(update(APIKey).where(APIKey.user_id == u.id).values(is_active=False))
             _audit(s, "user.enable", u, caller, old={"is_active": False}, new={"is_active": True})
         s.flush()
         return _row(u)

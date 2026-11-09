@@ -141,21 +141,32 @@ def test_nobody_disables_or_demotes_themselves(env):
         assert (r.status_code, r.json()["code"]) == (409, "self_change")
 
 
-def test_the_last_admin_stays_even_when_sign_in_is_off(env):
-    env.settings.api_auth_enabled = False      # (restored by the fixture's monkeypatch) roles are not enforced
+def test_the_service_keeps_the_last_admin(env):
+    """Defence in depth under the route's admin gate: whoever asks, the last active admin is never disabled or demoted
+    (service level — through the API the caller is itself an active admin)."""
+    from agenticops.services import user_admin
     sole, _ = _user("root", "admin")
-    _, writer = _user("ops", "writer")
-    for patch in ({"is_active": False}, {"role": "viewer"}):
-        r = env.client.patch(f"/api/users/{sole.id}", headers=H(writer), json=patch)
-        assert (r.status_code, r.json()["code"]) == (409, "last_admin")
+    someone = SimpleNamespace(id=999, email="nobody")
+    for kw in ({"is_active": False}, {"role": "viewer"}):
+        with pytest.raises(user_admin.UserAdminError) as e:
+            user_admin.update_user(sole.id, caller=someone, **kw)
+        assert (e.value.status, e.value.code) == (409, "last_admin")
 
 
-def test_with_sign_in_off_a_signed_in_user_manages_but_not_themselves(env):
+def test_with_sign_in_off_only_an_admin_manages_users_and_not_themselves(env):
+    """S2 rework review: with sign-in off a viewer could reset the admin's password, make itself admin and disable
+    the admin — all written to the DB, so it stayed the admin once sign-in was turned on. The gate is the caller's
+    own is_admin in both modes (the web always signs in)."""
     env.settings.api_auth_enabled = False
-    _user("root", "admin")
-    me, tok = _user("ops", "writer")
-    assert env.client.get("/api/users", headers=H(tok)).status_code == 200
-    r = env.client.patch(f"/api/users/{me.id}", headers=H(tok), json={"is_active": False})
+    root, root_tok = _user("root", "admin")
+    view, view_tok = _user("view", "viewer")
+    _, writer = _user("ops", "writer")
+    assert env.client.get("/api/users", headers=H(writer)).status_code == 403
+    assert env.client.post(f"/api/users/{root.id}/reset-password", headers=H(view_tok)).status_code == 403
+    assert env.client.patch(f"/api/users/{view.id}", headers=H(view_tok), json={"role": "admin"}).status_code == 403
+    assert env.client.patch(f"/api/users/{root.id}", headers=H(view_tok), json={"is_active": False}).status_code == 403
+    assert env.client.get("/api/users", headers=H(root_tok)).status_code == 200
+    r = env.client.patch(f"/api/users/{root.id}", headers=H(root_tok), json={"is_active": False})
     assert (r.status_code, r.json()["code"]) == (409, "self_change")
 
 
@@ -173,6 +184,23 @@ def test_disable_ends_sessions_and_keys_and_enable_brings_neither_back(env):
     r = env.client.patch(f"/api/users/{ops.id}", headers=H(tok), json={"is_active": True})
     assert r.status_code == 200 and r.json()["is_active"] is True
     assert AuthService.validate_api_key(key) is None and _sessions(ops.id) == 0
+
+
+def test_enabling_after_a_cli_disable_does_not_revive_api_keys(env):
+    """S2 rework review: `aiops users disable` only flips is_active (keys and sessions stay); the web enable must
+    still leave every old key revoked and every old session gone."""
+    from agenticops.auth import AuthService
+    from agenticops.auth.models import User
+    from agenticops.models import get_db_session
+    _, tok = _user("root", "admin")
+    ops, ops_tok = _user("ops", "writer")
+    key = AuthService.create_api_key(user_id=ops.id, name="ci", permissions=["read"])
+    with get_db_session() as s:                  # what the CLI's disable does
+        s.query(User).filter_by(id=ops.id).one().is_active = False
+    assert AuthService.validate_api_key(key) is None
+    r = env.client.patch(f"/api/users/{ops.id}", headers=H(tok), json={"is_active": True})
+    assert r.status_code == 200
+    assert AuthService.validate_api_key(key) is None and AuthService.validate_session(ops_tok) is None
 
 
 # ── reset password ──────────────────────────────────────────────────────────────────────────────────────────
