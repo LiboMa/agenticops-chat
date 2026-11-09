@@ -65,7 +65,7 @@ import { waitLabel } from "@/lib/inbox";
 /** `embedded`: the Cases split view's reading pane (one column, no way back — the queue is beside it). `back`: how
  *  a full-screen case returns to the queue (history back, or a link to the list under the same query). */
 export default function IssueDetail({ embedded = false, back, issueId: givenId }: {
-  embedded?: boolean; back?: { onBack?: () => void; to?: string };
+  embedded?: boolean; back?: { onBack?: () => void; to?: string; label?: string };
   /** the issue to show when it is not the route's :id (the workbench, MVP-2.8.0 S2) */
   issueId?: number;
 } = {}) {
@@ -339,7 +339,7 @@ export default function IssueDetail({ embedded = false, back, issueId: givenId }
           errorActionLabel={actionError ? undefined : t("common.retry")}
           backTo={embedded ? undefined : back?.to ?? (back?.onBack ? undefined : "/app/issues")}
           onBack={embedded ? undefined : back?.onBack}
-          backLabel={t("nav.issues")}
+          backLabel={back?.label ?? t("nav.issues")}
         />
         {actionInfo && (
           <div className="flex items-start gap-3 p-3 rounded-lg bg-primary/10 border border-primary/20 text-sm text-primary">

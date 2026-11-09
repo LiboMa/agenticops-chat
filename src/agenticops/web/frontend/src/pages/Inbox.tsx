@@ -70,7 +70,8 @@ export default function Inbox() {
   const pane = (
     <div ref={paneRef} className={wide && !compact ? "min-h-0 overflow-y-auto pr-1" : ""}>
       {state === "selected" && target?.kind === "issue" && (
-        <IssueDetail key={params.item!} issueId={target.id} embedded={wide} back={wide ? undefined : { to: backTo }} />
+        <IssueDetail key={params.item!} issueId={target.id} embedded={wide}
+                     back={wide ? undefined : { to: backTo, label: t("inbox.back") }} />
       )}
       {state === "selected" && target?.kind === "change" && (
         <ChangeDetailView key={params.item!} crId={target.id} embedded={wide} back={wide ? undefined : { to: backTo }} />
