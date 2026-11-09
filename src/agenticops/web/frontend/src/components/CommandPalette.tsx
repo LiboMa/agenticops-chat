@@ -2,6 +2,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useMemo, useId } from "re
 import * as Dialog from "@radix-ui/react-dialog";
 import { useNavigate } from "react-router-dom";
 import { useSearch } from "@/hooks/useSearch";
+import { isComposingKey } from "@/lib/composerKeys";
 import { useLocale } from "@/i18n/LocaleContext";
 import type { SearchResultItem } from "@/api/types";
 
@@ -103,6 +104,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
+    if (isComposingKey(e.nativeEvent)) return; // an IME candidate key, not the palette's
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setSelectedIndex((i) => (flatResults.length ? (i + 1) % flatResults.length : 0));

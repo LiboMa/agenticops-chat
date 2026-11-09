@@ -9,6 +9,8 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import type { Report } from "@/api/types";
 import { formatUtcDay, formatUtcTime, utcDayKey } from "@/lib/formatDate";
+import { queryView } from "@/lib/queryState";
+import { StaleNotice } from "@/components/ui/QueryState";
 
 const TYPE_COLORS: Record<string, string> = {
   daily: "bg-blue-100 text-blue-700",
@@ -58,7 +60,9 @@ const BADGE: Record<PaperState, string> = {
 
 export default function Reports() {
   const { t, locale } = useLocale();
-  const { data, isLoading, error, refetch } = useReports();
+  const reportsQ = useReports();
+  const { data, refetch } = reportsQ;
+  const listView = queryView(reportsQ, () => false);
   const [search, setSearch] = useState("");
 
   const groups = useMemo(() => {
@@ -76,12 +80,13 @@ export default function Reports() {
 
   const total = groups.reduce((s, g) => s + g.rows.length, 0);
 
-  if (isLoading) return <Spinner label={t("common.loading")} />;
-  if (error)
-    return <ErrorBanner message={error.message} onRetry={() => refetch()} actionLabel={t("common.retry")} />;
+  if (listView.kind === "loading") return <Spinner label={t("common.loading")} />;
+  if (listView.kind === "error")
+    return <ErrorBanner message={`${t("common.state.failed")} · ${reportsQ.error?.message ?? ""}`} onRetry={() => refetch()} actionLabel={t("common.retry")} />;
 
   return (
     <div className="space-y-6">
+      {listView.stale && <StaleNotice asOf={listView.asOf} onRetry={() => void refetch()} />}
       <Card>
         <CardHeader className="flex-wrap gap-3">
           <div>

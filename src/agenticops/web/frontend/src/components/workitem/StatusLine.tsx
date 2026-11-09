@@ -110,7 +110,7 @@ export function StatusLine({
               {waiting && <p className="text-sm text-muted-foreground">{waiting}</p>}
             </div>
             {(primary || items.length > 0) && (
-              <div ref={menuRef} className="relative ml-auto shrink-0 whitespace-nowrap flex items-center gap-2">
+              <div ref={menuRef} className="relative flex w-full shrink-0 items-center justify-end gap-2 whitespace-nowrap sm:ml-auto sm:w-auto">
                 {primary && (
                   <button
                     onClick={primary.run}

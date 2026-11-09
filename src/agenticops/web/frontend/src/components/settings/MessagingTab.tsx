@@ -3,6 +3,7 @@ import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Switch } from "@/components/ui/Switch";
+import { QueryState } from "@/components/ui/QueryState";
 import { useLocale } from "@/i18n/LocaleContext";
 import { ConfigureModal } from "./ConfigureModal";
 import { buildConfigPayload, channelFields, appFields } from "@/lib/messagingFields";
@@ -136,9 +137,10 @@ export function MessagingTab() {
       <Card>
         <CardHeader><h2 className="text-base font-semibold text-foreground">Delivery Logs</h2></CardHeader>
         <CardBody>
-          {logsQ.isLoading ? <Spinner /> : (
+          <QueryState query={logsQ} isEmpty={(d) => d.length === 0} emptyText={t("messaging.noLogs")} onRetry={() => void logsQ.refetch()}>
+            {(logs) => (
             <div className="space-y-1.5">
-              {(logsQ.data ?? []).slice(0, 20).map((log) => (
+              {logs.slice(0, 20).map((log) => (
                 <div key={log.id} className="flex items-center gap-2 text-xs p-2 border border-border rounded-lg">
                   <span className={`px-1.5 py-0.5 rounded font-semibold ${log.status === "sent" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{log.status}</span>
                   <span className="font-medium text-foreground">{log.channel_name}</span>
@@ -146,9 +148,9 @@ export function MessagingTab() {
                   <span className="text-muted-foreground/60">{formatFullDate(log.sent_at)}</span>
                 </div>
               ))}
-              {!(logsQ.data ?? []).length && <p className="text-sm text-muted-foreground">No delivery logs yet.</p>}
             </div>
-          )}
+            )}
+          </QueryState>
         </CardBody>
       </Card>
 

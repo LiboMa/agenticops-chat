@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shouldSend } from "@/lib/composerKeys";
+import { isComposingKey, shouldSend } from "@/lib/composerKeys";
 
 const k = (o = {}) => ({ key: "Enter", shiftKey: false, metaKey: false, ctrlKey: false, isComposing: false, ...o });
 
@@ -29,5 +29,16 @@ describe("fileDragAction — a dropped file never navigates away from the chat",
   it("a text-selection drag is left alone", () => {
     expect(fileDragAction(["text/plain"], false)).toEqual({ prevent: false, accept: false });
     expect(fileDragAction(undefined, false)).toEqual({ prevent: false, accept: false });
+  });
+});
+
+describe("isComposingKey — an input method is composing (MVP-2.8.0 S1, the search palette)", () => {
+  it("is true while composing, or for Safari's keyCode 229", () => {
+    expect(isComposingKey({ isComposing: true })).toBe(true);
+    expect(isComposingKey({ isComposing: false, keyCode: 229 })).toBe(true);
+  });
+  it("is false for an ordinary key", () => {
+    expect(isComposingKey({ isComposing: false, keyCode: 13 })).toBe(false);
+    expect(isComposingKey({ isComposing: false })).toBe(false);
   });
 });

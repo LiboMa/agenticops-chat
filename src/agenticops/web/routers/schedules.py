@@ -190,7 +190,7 @@ async def api_run_schedule(schedule_id: int, background_tasks: BackgroundTasks):
 
 
 @router.get("/api/schedules/{schedule_id}/executions", response_model=List[ScheduleExecutionResponse])
-async def api_list_schedule_executions(
+def api_list_schedule_executions(
     schedule_id: int,
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = Query(default=0, ge=0),

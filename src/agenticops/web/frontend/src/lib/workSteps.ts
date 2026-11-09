@@ -62,8 +62,9 @@ export type StepStatus = "running" | "ok" | "error" | "unknown";
 
 /** A step's state in words (MVP-2.8.0 S1): the result decides ok / error; a finished step stored without an
  *  outcome (pre-S5 history) is unknown — never shown as a success. */
-export function stepStatus(tool: ToolStep): StepStatus {
-  if (tool.status === "running") return "running";
+export function stepStatus(tool: ToolStep, opts: { live?: boolean } = {}): StepStatus {
+  // a step stored as running belongs to a turn that failed or was cut off: once the turn is not live, unknown
+  if (tool.status === "running") return opts.live === false ? "unknown" : "running";
   if (tool.outcome === "ok") return "ok";
   if (tool.outcome === "error") return "error";
   return "unknown";

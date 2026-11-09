@@ -91,3 +91,9 @@ def test_the_list_handler_is_plain_def():
     """A DB read in an async def blocks the one event loop (MVP-2.7.0 S1)."""
     from agenticops.web.routers.schedules import api_list_schedules
     assert not inspect.iscoroutinefunction(api_list_schedules)
+
+
+def test_the_run_history_handler_is_plain_def():
+    """ScheduleDetail polls the run history every 3 s while a run is live (S1): never a DB read on the event loop."""
+    from agenticops.web.routers.schedules import api_list_schedule_executions
+    assert not inspect.iscoroutinefunction(api_list_schedule_executions)

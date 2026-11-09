@@ -34,14 +34,16 @@ describe("cronSummary — a cron expression in words", () => {
     expect(cronSummary("*/10 * * * *", tEn)).toBe("Every 10 minutes");
     expect(cronSummary("0 * * * *", tEn)).toBe("Hourly at :00");
     expect(cronSummary("30 2 * * *", tEn)).toBe("Daily at 02:30");
-    expect(cronSummary("0 9 * * 1", tEn)).toBe("Weekly, Monday 09:00");
   });
   it("says them in Chinese", () => {
     expect(cronSummary("@once", tZh)).toBe("一次性");
     expect(cronSummary("*/10 * * * *", tZh)).toBe("每 10 分钟");
     expect(cronSummary("0 * * * *", tZh)).toBe("每小时第 00 分");
     expect(cronSummary("30 2 * * *", tZh)).toBe("每天 02:30");
-    expect(cronSummary("0 9 * * 1", tZh)).toBe("每周一 09:00");
+  });
+  it("names no weekday: the scheduler reads cron's day-of-week off by one today (Mon=0), so any weekday sentence could be wrong", () => {
+    expect(cronSummary("0 9 * * 1", tEn)).toBeNull();
+    expect(cronSummary("0 0 * * 1", tZh)).toBeNull();
   });
   it("returns null for a shape it does not read, so the page shows only the expression", () => {
     expect(cronSummary("0 9 1-7 * 1", tEn)).toBeNull();

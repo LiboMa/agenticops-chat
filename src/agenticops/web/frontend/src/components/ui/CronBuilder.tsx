@@ -1,3 +1,4 @@
+import { formatShortDate, parseApiDate } from "@/lib/formatDate";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { cn } from "@/lib/cn";
 import {
@@ -63,7 +64,7 @@ const PRESET_ICONS: Record<CronPreset["icon"], LucideIcon> = {
 /* ------------------------------------------------------------------ */
 
 function relativeTime(iso: string): string {
-  const d = new Date(iso);
+  const d = parseApiDate(iso) ?? new Date(NaN);
   const now = new Date();
   const diffMs = d.getTime() - now.getTime();
   if (diffMs < 0) return "now";
@@ -410,17 +411,9 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
               <Timer className="h-3.5 w-3.5 text-muted-foreground mt-0.5 shrink-0" />
               <div className="flex flex-wrap gap-x-4 gap-y-1">
                 {preview.next_runs.map((r, i) => {
-                  const d = new Date(r);
-                  const fmt = new Intl.DateTimeFormat(undefined, {
-                    month: "short",
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: false,
-                  });
                   return (
                     <span key={i} className="text-xs text-muted-foreground whitespace-nowrap">
-                      <span className="font-medium text-foreground">{fmt.format(d)}</span>
+                      <span className="font-medium text-foreground">{formatShortDate(r)}</span>
                       <span className="ml-1 text-[10px] opacity-60">({relativeTime(r)})</span>
                     </span>
                   );

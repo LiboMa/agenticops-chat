@@ -7,6 +7,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { formatFullDate } from "@/lib/formatDate";
 import { StatusText, type StatusTone } from "@/components/ui/StatusText";
+import { QueryState } from "@/components/ui/QueryState";
 import { runState, type RunKind } from "@/lib/scheduleRows";
 import { useLocale } from "@/i18n/LocaleContext";
 import { PIPELINE_META } from "./Schedules";
@@ -257,9 +258,9 @@ export default function ScheduleDetail() {
           <h2 className="text-xl font-semibold text-foreground mb-4">
             Execution History
           </h2>
-          {executions.isLoading ? (
-            <Spinner label="Loading executions..." />
-          ) : executions.data && executions.data.length > 0 ? (
+          <QueryState query={executions} isEmpty={(d) => d.length === 0} emptyText={t("schedules.noRuns")}
+                      onRetry={() => void executions.refetch()}>
+            {(runs) => (
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -285,7 +286,7 @@ export default function ScheduleDetail() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {executions.data.map((ex) => {
+                  {runs.map((ex) => {
                     const agentOutput = (ex.result as Record<string, unknown>)?.agent_output as string | undefined;
                     const presignedUrl = (ex.result as Record<string, unknown>)?.presigned_url as string | undefined;
                     const isExpanded = expandedExec === ex.id;
@@ -348,9 +349,8 @@ export default function ScheduleDetail() {
                 </tbody>
               </table>
             </div>
-          ) : (
-            <p className="text-muted-foreground text-sm">No executions yet.</p>
-          )}
+            )}
+          </QueryState>
         </CardBody>
       </Card>
     </div>

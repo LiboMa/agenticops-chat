@@ -24,7 +24,7 @@ export function runState(last: Pick<ScheduleLastExecution, "status"> | null | un
 const pad = (v: string) => v.padStart(2, "0");
 const isNum = (v: string) => /^\d{1,2}$/.test(v);
 
-/** A cron expression in words for the common shapes (every N minutes, hourly, daily, weekly, one-off); null for
+/** A cron expression in words for the common shapes (every N minutes, hourly, daily, one-off); null for
  *  anything else — the page then shows only the expression, never a wrong sentence. Times are the scheduler's (UTC). */
 export function cronSummary(expr: string, t: (k: string) => string): string | null {
   if (expr.trim() === "@once") return t("schedules.cron.once");
@@ -39,8 +39,7 @@ export function cronSummary(expr: string, t: (k: string) => string): string | nu
   if (!isNum(hour)) return null;
   const time = `${pad(hour)}:${pad(minute)}`;
   if (dow === "*") return t("schedules.cron.daily").replace("{time}", time);
-  if (/^[0-6]$/.test(dow)) {
-    return t("schedules.cron.weekly").replace("{day}", t(`schedules.dow.${dow}`)).replace("{time}", time);
-  }
+  // No weekday sentence: the scheduler matches cron's day-of-week against Python's weekday() (Monday = 0), so a
+  // "* * 1" job runs on Tuesdays today — naming a day here could be wrong (owner's call to fix the scheduler).
   return null;
 }

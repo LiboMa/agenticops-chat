@@ -41,7 +41,7 @@ export function WorkSteps({ tools, content, live, thinking }: Props) {
       </button>
       {open && (
         <ol className="relative ml-[5px] mt-1.5 space-y-1.5 border-l border-border pl-4">
-          {timeline.map((item, i) => <Row key={i} item={item} />)}
+          {timeline.map((item, i) => <Row key={i} item={item} live={!!live} />)}
           {live && thinking && (
             <li className="relative truncate text-muted-foreground/80" title={thinking}>
               <span className="absolute -left-[21.5px] top-[5px] flex h-[11px] w-[11px] items-center justify-center rounded-full bg-background">
@@ -58,9 +58,9 @@ export function WorkSteps({ tools, content, live, thinking }: Props) {
 
 const STEP_TONE: Record<StepStatus, StatusTone> = { running: "info", ok: "ok", error: "danger", unknown: "neutral" };
 
-function StatusDot({ tool }: { tool: ToolStep }) {
+function StatusDot({ tool, live }: { tool: ToolStep; live: boolean }) {
   const base = "absolute -left-[21.5px] top-[5px] flex h-[11px] w-[11px] items-center justify-center rounded-full bg-background";
-  const status = stepStatus(tool);
+  const status = stepStatus(tool, { live });
   if (status === "running") {
     return <span className={base}><span className="h-[9px] w-[9px] animate-spin rounded-full border-[1.5px] border-primary border-t-transparent" /></span>;
   }
@@ -68,7 +68,7 @@ function StatusDot({ tool }: { tool: ToolStep }) {
   return <span className={base}><span className={`h-[7px] w-[7px] rounded-full ${tone}`} /></span>;
 }
 
-function Row({ item }: { item: TimelineItem }) {
+function Row({ item, live }: { item: TimelineItem; live: boolean }) {
   const { t } = useLocale();
   const [showResult, setShowResult] = useState(false);
   if (item.kind === "text") {
@@ -76,11 +76,11 @@ function Row({ item }: { item: TimelineItem }) {
   }
   const tool = item.tool;
   const key = toolLabelKey(tool.name);
-  const status = stepStatus(tool);
+  const status = stepStatus(tool, { live });
   const failed = status === "error";
   return (
     <li className="relative">
-      <StatusDot tool={tool} />
+      <StatusDot tool={tool} live={live} />
       <button type="button" disabled={!tool.result_preview} onClick={() => setShowResult((v) => !v)}
               className="flex w-full min-w-0 items-baseline gap-2 text-left disabled:cursor-default">
         <span className={`shrink-0 ${failed ? "text-red-600 dark:text-red-400" : "text-foreground"}`}>

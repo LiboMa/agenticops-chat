@@ -1297,14 +1297,6 @@
   "schedules.cron.everyMinutes": "Every {n} minutes",
   "schedules.cron.hourly": "Hourly at :{m}",
   "schedules.cron.daily": "Daily at {time}",
-  "schedules.cron.weekly": "Weekly, {day} {time}",
-  "schedules.dow.0": "Sunday",
-  "schedules.dow.1": "Monday",
-  "schedules.dow.2": "Tuesday",
-  "schedules.dow.3": "Wednesday",
-  "schedules.dow.4": "Thursday",
-  "schedules.dow.5": "Friday",
-  "schedules.dow.6": "Saturday",
   "schedules.col.task": "Task and schedule",
   "schedules.col.config": "Configuration",
   "schedules.col.lastRun": "Latest run",
@@ -1335,5 +1327,7 @@
   "common.edit": "Edit",
   "schedules.run.submitted": "Submitted — waiting for the run record",
   "schedules.run.submitFailed": "Couldn't submit",
-  "schedules.runNow": "Run now"
+  "schedules.runNow": "Run now",
+  "schedules.noRuns": "No runs yet.",
+  "messaging.noLogs": "No delivery logs yet."
 }

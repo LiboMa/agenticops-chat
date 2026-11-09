@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/Badge";
 import { Switch } from "@/components/ui/Switch";
 import { formatElapsed, formatShortDate } from "@/lib/formatDate";
 import { StatusText, type StatusTone } from "@/components/ui/StatusText";
+import { StaleNotice } from "@/components/ui/QueryState";
+import { queryView } from "@/lib/queryState";
 import { cronSummary, runState, type RunKind } from "@/lib/scheduleRows";
 import { useLocale } from "@/i18n/LocaleContext";
 import {
@@ -248,8 +250,9 @@ function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: Fo
               <input value={accountName} onChange={(e) => setAccountName(e.target.value)} placeholder="optional" className={inputCls} />
             </div>
             <div className="flex items-center gap-2 pb-2 select-none">
+              <span id="schedule-enabled-label" className="text-xs font-medium text-muted-foreground">Enabled</span>
               <Switch checked={isEnabled} onCheckedChange={setIsEnabled} labelledBy="schedule-enabled-label" />
-              <span id="schedule-enabled-label" className="text-xs text-muted-foreground">{isEnabled ? "On" : "Off"}</span>
+              <span aria-hidden className="text-xs text-muted-foreground">{isEnabled ? "On" : "Off"}</span>
             </div>
           </div>
 
@@ -519,7 +522,9 @@ export default function Schedules() {
   const { t } = useLocale();
   const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const navigate = useNavigate();
-  const { data: schedules, isLoading, error } = useSchedules();
+  const schedulesQ = useSchedules();
+  const schedules = schedulesQ.data;
+  const listView = queryView(schedulesQ, () => false);
   const createMut = useCreateSchedule();
   const updateMut = useUpdateSchedule();
   const deleteMut = useDeleteSchedule();
@@ -543,11 +548,15 @@ export default function Schedules() {
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
-  if (isLoading) return <Spinner />;
-  if (error) return <ErrorBanner message={(error as Error).message} />;
+  if (listView.kind === "loading") return <Spinner label={t("common.loading")} />;
+  if (listView.kind === "error") {
+    return <ErrorBanner message={`${t("common.state.failed")} · ${(schedulesQ.error as Error).message}`}
+                        onRetry={() => void schedulesQ.refetch()} actionLabel={t("common.retry")} />;
+  }
 
   return (
     <>
+      {listView.stale && <StaleNotice asOf={listView.asOf} onRetry={() => void schedulesQ.refetch()} />}
       <Card>
         <CardHeader className="flex-wrap gap-3">
           <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">

@@ -1297,14 +1297,6 @@
   "schedules.cron.everyMinutes": "每 {n} 分钟",
   "schedules.cron.hourly": "每小时第 {m} 分",
   "schedules.cron.daily": "每天 {time}",
-  "schedules.cron.weekly": "每周{day} {time}",
-  "schedules.dow.0": "日",
-  "schedules.dow.1": "一",
-  "schedules.dow.2": "二",
-  "schedules.dow.3": "三",
-  "schedules.dow.4": "四",
-  "schedules.dow.5": "五",
-  "schedules.dow.6": "六",
   "schedules.col.task": "任务与运行方式",
   "schedules.col.config": "配置",
   "schedules.col.lastRun": "最近执行",
@@ -1335,5 +1327,7 @@
   "common.edit": "编辑",
   "schedules.run.submitted": "已提交，等待执行记录",
   "schedules.run.submitFailed": "提交失败",
-  "schedules.runNow": "立即运行"
+  "schedules.runNow": "立即运行",
+  "schedules.noRuns": "还没有执行记录。",
+  "messaging.noLogs": "还没有发送记录。"
 }

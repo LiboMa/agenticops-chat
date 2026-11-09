@@ -93,3 +93,11 @@ describe("stepStatus — a step says its state in words (MVP-2.8.0 S1)", () => {
     expect(stepStatus(T({ outcome: "unknown" }))).toBe("unknown");
   });
 });
+
+describe("stepStatus — a stored step left running (review finding, MVP-2.8.0 S1)", () => {
+  it("is unknown once the turn is no longer live — a failed or interrupted turn stored it as running", () => {
+    expect(stepStatus(T({ status: "running" }), { live: false })).toBe("unknown");
+    expect(stepStatus(T({ status: "running" }), { live: true })).toBe("running");
+    expect(stepStatus(T({ status: "running" }))).toBe("running");
+  });
+});
