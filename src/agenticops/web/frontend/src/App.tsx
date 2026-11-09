@@ -8,7 +8,7 @@ import { queryClient } from "@/queryClient";
 import { Spinner } from "@/components/ui/Spinner";
 import { getAuthToken } from "@/api/client";
 import { hubRedirect } from "@/lib/plans";
-import { useCanViewSettings } from "@/hooks/useBootstrap";
+import { useCanManageUsers, useCanViewSettings } from "@/hooks/useBootstrap";
 
 const Login = lazy(() => import("@/pages/Login"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
@@ -34,10 +34,17 @@ const SkillDetail = lazy(() => import("@/pages/SkillDetail"));
 const Galaxy = lazy(() => import("@/pages/Galaxy"));
 const Security = lazy(() => import("@/pages/Security"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
+const Users = lazy(() => import("@/pages/Users"));
 
 /** Settings is all configuration: a viewer whose account may not view it gets the not-found page. */
 function SettingsGate({ children }: { children: React.ReactNode }) {
   return useCanViewSettings() ? <>{children}</> : <NotFound />;
+}
+
+/** MVP-2.8.0 S2 rework: user management is an admin's (lib/permissions.canManageUsers); anyone else gets the 404
+ *  page, as Settings does — the API refuses them anyway. */
+function UsersGate({ children }: { children: React.ReactNode }) {
+  return useCanManageUsers() ? <>{children}</> : <NotFound />;
 }
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -150,6 +157,14 @@ export default function App() {
               element={
                 <Suspense fallback={<Spinner />}>
                   <SettingsGate><Settings /></SettingsGate>
+                </Suspense>
+              }
+            />
+            <Route
+              path="users"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <UsersGate><Users /></UsersGate>
                 </Suspense>
               }
             />

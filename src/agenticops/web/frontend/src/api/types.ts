@@ -1399,3 +1399,17 @@ export interface RcaLocationStats {
   anchor_status_counts: Record<AnchorStatus, number>;
   location_status_counts: Record<LocationStatus, number>;
 }
+
+// ── Users (MVP-2.8.0 S2 rework): GET/POST/PATCH /api/users ───────────────────────────────────────────────
+export type UserRole = "admin" | "writer" | "viewer";
+export interface UserRow {
+  id: number;
+  email: string;
+  name: string | null;
+  role: UserRole;
+  /** a viewer who may view Settings read-only */
+  settings_view: boolean;
+  is_active: boolean;
+  last_login_at: string | null;
+  created_at: string | null;
+}
