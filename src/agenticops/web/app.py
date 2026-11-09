@@ -396,6 +396,8 @@ from agenticops.web.routers import upload_settings as _upload_settings_router  #
 app.include_router(_upload_settings_router.router)
 from agenticops.web.routers import model_runtime_settings as _model_runtime_router  # 2026-11-08: model stream read timeout
 app.include_router(_model_runtime_router.router)
+from agenticops.web.routers import users as _users_router  # MVP-2.8.0 S2 rework: admins manage web accounts
+app.include_router(_users_router.router)
 
 # Chat session manager
 _chat_sessions = ChatSessionManager()

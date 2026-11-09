@@ -1127,3 +1127,41 @@ class HealthIssueListResponse(BaseModel):
     items: List[HealthIssueResponse]
     total: int
     next_cursor: Optional[str] = None
+
+
+# ── Users (MVP-2.8.0 S2 rework): admins manage web accounts ─────────────────────────────────────────────────
+
+UserRoleName = Literal["admin", "writer", "viewer"]
+
+
+class UserRow(BaseModel):
+    id: int
+    email: str
+    name: Optional[str] = None
+    role: UserRoleName
+    settings_view: bool = False
+    is_active: bool
+    last_login_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+
+class UserCreateBody(BaseModel):
+    email: str = Field(..., max_length=255)          # an empty / blank name is the service's 422 invalid_email
+    name: Optional[str] = Field(None, max_length=100)
+    role: UserRoleName
+    settings_view: bool = False                      # a viewer's «may view Settings read-only»
+
+
+class UserPatchBody(BaseModel):
+    role: Optional[UserRoleName] = None
+    settings_view: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+
+class UserCreatedResponse(BaseModel):
+    user: UserRow
+    password: str                                    # shown once; never stored in clear, never audited
+
+
+class PasswordResetResponse(BaseModel):
+    password: str
