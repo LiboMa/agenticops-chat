@@ -794,7 +794,8 @@ def test_accepting_a_change_goes_through_resolve_review(db, decision, terminal, 
     _save_change(cr_id, plan_id, ex_id)
     with patch.object(cs, "resolve_review", wraps=cs.resolve_review) as resolve:
         out = vf.accept_execution(ex_id, actor=BOB, decision=decision, reason="looked at it")
-    resolve.assert_called_once_with(cr_id, actor=BOB, outcome=terminal, reason="looked at it")
+    resolve.assert_called_once_with(cr_id, actor=BOB, outcome=terminal, reason="looked at it",
+                                    confirmed_checks=None)   # MVP-2.8.0 S2: passed through
     assert out == {"execution_id": ex_id, "decision": decision, "kind": "change", "status": terminal}
     assert _fresh(ChangeRequest, cr_id).status == terminal
     ex = _fresh(FixExecution, ex_id)
@@ -995,3 +996,68 @@ def test_the_api_pairs_each_run_with_its_own_plans_checks(db, quiet):
     _save_change(cr_id, change_plan, change_ex, post=[OK])
     shown = client.get(f"/api/changes/{cr_id}").json()["executions"][0]["post_check_binding"]
     assert [(b["check_id"], b["problem"], b["result_status"]) for b in shown] == [("pc-1", None, "pass")]
+
+
+# ── MVP-2.8.0 S2: the checks a person ticked go with the acceptance ─────────────────────────────────────────────
+
+def _last_audit(db):
+    from agenticops.audit.models import AuditLog
+    db.expire_all()
+    return db.query(AuditLog).order_by(AuditLog.id.desc()).first()
+
+
+def _pending_with_a_check(db):
+    issue_id, plan_id, _ = _fix(db, post_checks=(CHECK,))
+    _save(plan_id, post=[])          # no result for pc-1 → pending acceptance
+    return issue_id, _only_execution(plan_id).id
+
+
+def test_the_ticked_checks_are_recorded_with_the_acceptance(db, quiet):
+    _, ex_id = _pending_with_a_check(db)
+    vf.accept_execution(ex_id, actor=BOB, decision="accepted", reason="checked", confirmed_checks=["pc-1"])
+    row = _last_audit(db)
+    assert row.action == "execution.accepted" and row.details["confirmed_checks"] == ["pc-1"]
+
+
+def test_an_undeclared_check_id_is_422_and_nothing_is_written(db, quiet):
+    issue_id, ex_id = _pending_with_a_check(db)
+    with pytest.raises(vf.AcceptanceInvalid, match="pc-9"):
+        vf.accept_execution(ex_id, actor=BOB, decision="accepted", reason="r", confirmed_checks=["pc-1", "pc-9"])
+    assert _fresh(FixExecution, ex_id).verification_status == PENDING
+    assert _fresh(HealthIssue, issue_id).status == "fix_executed"
+
+
+def test_an_acceptance_without_the_list_still_works(db, quiet):
+    _, ex_id = _pending_with_a_check(db)
+    vf.accept_execution(ex_id, actor=BOB, decision="accepted", reason="r")
+    assert "confirmed_checks" not in (_last_audit(db).details or {})
+
+
+def test_a_change_review_records_the_ticked_checks_and_refuses_an_undeclared_one(db, quiet):
+    cr_id, plan_id, ex_id = _change(db)
+    _save_change(cr_id, plan_id, ex_id, post=[])
+    with pytest.raises(cs.ChangeValidationError, match="pc-7"):
+        cs.resolve_review(cr_id, actor=BOB, outcome="completed", reason="r", confirmed_checks=["pc-7"])
+    assert _fresh(ChangeRequest, cr_id).status == "needs_review"
+    cs.resolve_review(cr_id, actor=BOB, outcome="completed", reason="r", confirmed_checks=["pc-1"])
+    event = db.query(PipelineEvent).filter_by(event_type="change_review_resolved").order_by(PipelineEvent.id.desc()).first()
+    assert json.loads(event.detail)["confirmed_checks"] == ["pc-1"]
+
+
+def test_the_api_takes_confirmed_checks_and_the_accept_route_is_plain_def(db, quiet):
+    import inspect
+    from agenticops.web import app as webapp
+    from agenticops.web import deps
+    assert not inspect.iscoroutinefunction(webapp.api_accept_execution)
+    _, ex_id = _pending_with_a_check(db)
+    webapp.app.dependency_overrides[deps.current_actor] = lambda: BOB
+    try:
+        c = TestClient(webapp.app)
+        bad = c.post(f"/api/fix-executions/{ex_id}/accept", json={"decision": "accepted", "reason": "r",
+                                                                   "confirmed_checks": ["drop table"]})
+        assert bad.status_code == 422
+        ok = c.post(f"/api/fix-executions/{ex_id}/accept", json={"decision": "accepted", "reason": "r",
+                                                                  "confirmed_checks": ["pc-1"]})
+        assert ok.status_code == 200, ok.text
+    finally:
+        webapp.app.dependency_overrides.clear()

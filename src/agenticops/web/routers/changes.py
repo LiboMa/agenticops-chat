@@ -173,7 +173,8 @@ def api_execute_change(cr_id: int, actor: Actor = Depends(current_actor)):
 
 @router.post("/{cr_id}/resolve-review", response_model=ChangeRequestResponse)
 def api_resolve_review(cr_id: int, body: ChangeResolveReviewBody, actor: Actor = Depends(current_actor)):
-    return _call(cs.resolve_review, cr_id, actor=actor, outcome=body.outcome, reason=body.reason)
+    return _call(cs.resolve_review, cr_id, actor=actor, outcome=body.outcome, reason=body.reason,
+                 confirmed_checks=body.confirmed_checks)
 
 
 @router.get("/{cr_id}/timeline", response_model=List[ChangeTimelineEntry])

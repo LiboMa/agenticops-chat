@@ -206,7 +206,15 @@ def evaluate(execution_status: str, post_checks, post_check_results=None, step_r
     return PASSED, "all post-checks passed"
 
 
-def accept_execution(execution_id: int, *, actor: Actor, decision: str, reason: str) -> dict:
+def undeclared_checks(post_checks, confirmed) -> list[str]:
+    """The ids in `confirmed` that the plan does not declare (MVP-2.8.0 S2) — an acceptance may only name checks
+    the approved plan has, pc-1 … pc-n."""
+    known = set(check_ids(post_checks))
+    return [c for c in confirmed or () if c not in known]
+
+
+def accept_execution(execution_id: int, *, actor: Actor, decision: str, reason: str,
+                     confirmed_checks: Optional[list[str]] = None) -> dict:
     """A human's verdict on an execution pending acceptance: `accepted` or `rejected`, with a reason.
 
     Identity is the caller's authenticated actor. Authorized as the approval of the plan's kind
@@ -243,15 +251,19 @@ def accept_execution(execution_id: int, *, actor: Actor, decision: str, reason: 
         if execution.verification_status != PENDING:
             raise AcceptanceError(f"Execution #{execution_id} is not pending acceptance "
                                   f"(verification: {execution.verification_status or 'none'})")
+        unknown = undeclared_checks(plan.post_checks, confirmed_checks)
+        if unknown:
+            raise AcceptanceInvalid(f"{', '.join(unknown)} is not a declared check of plan #{plan.id}")
         if cr_id is None:
-            status = _accept_fix(session, execution, plan, actor=actor, decision=decision, reason=reason)
+            status = _accept_fix(session, execution, plan, actor=actor, decision=decision, reason=reason,
+                                 confirmed_checks=confirmed_checks)
     finally:
         session.close()
     if cr_id is not None:
         from agenticops.services import change_service as cs
         try:
             snap = cs.resolve_review(cr_id, actor=actor, outcome="completed" if decision == "accepted" else "failed",
-                                     reason=reason)
+                                     reason=reason, confirmed_checks=confirmed_checks)
         except cs.ChangeError as e:
             err = AcceptanceError(str(e))
             err.status_code = e.status_code
@@ -260,7 +272,8 @@ def accept_execution(execution_id: int, *, actor: Actor, decision: str, reason: 
     return {"execution_id": execution_id, "decision": decision, "kind": "fix", "status": status}
 
 
-def _accept_fix(session, execution, plan, *, actor: Actor, decision: str, reason: str) -> str:
+def _accept_fix(session, execution, plan, *, actor: Actor, decision: str, reason: str,
+                confirmed_checks: Optional[list[str]] = None) -> str:
     """Stamp the execution and move its issue from fix_executed, in one transaction; returns the issue status."""
     from agenticops.audit.service import Actions, AuditService, EntityTypes
     from sqlalchemy import func
@@ -298,7 +311,8 @@ def _accept_fix(session, execution, plan, *, actor: Actor, decision: str, reason
         if decision == "rejected" else None
     action = Actions.EXECUTION_ACCEPTED if decision == "accepted" else Actions.EXECUTION_REJECTED
     AuditService.log(action, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key, user_id=actor.user_id,
-                     details={"execution_id": execution.id, "health_issue_id": issue_id, "reason": reason},
+                     details={"execution_id": execution.id, "health_issue_id": issue_id, "reason": reason,
+                              **({"confirmed_checks": list(confirmed_checks)} if confirmed_checks is not None else {})},
                      old_values={"verification_status": PENDING, "issue_status": "fix_executed"},
                      new_values={"verification_status": PASSED if decision == "accepted" else FAILED,
                                  "issue_status": target}, session=session)

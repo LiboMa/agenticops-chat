@@ -516,6 +516,8 @@ class ExecutionAcceptBody(BaseModel):
     """A human's verdict on an execution pending acceptance; the identity is the authenticated session."""
     decision: str = Field(..., pattern="^(accepted|rejected)$")
     reason: str = Field(..., min_length=1, max_length=2000)
+    # MVP-2.8.0 S2: the declared checks (pc-n) the person ticked in the acceptance dialog; recorded with it
+    confirmed_checks: Optional[List[Annotated[str, Field(pattern=r"^pc-\d{1,3}$")]]] = Field(None, max_length=50)
 
 
 # ============================================================================
@@ -1073,6 +1075,8 @@ class ChangeClarifyBody(BaseModel):
 class ChangeResolveReviewBody(BaseModel):
     outcome: str = Field(..., pattern="^(completed|failed)$")
     reason: str = Field(..., min_length=1, max_length=2000)
+    # MVP-2.8.0 S2: the declared checks (pc-n) the person ticked in the acceptance dialog; recorded with it
+    confirmed_checks: Optional[List[Annotated[str, Field(pattern=r"^pc-\d{1,3}$")]]] = Field(None, max_length=50)
 
 
 class ChangeTimelineEntry(BaseModel):

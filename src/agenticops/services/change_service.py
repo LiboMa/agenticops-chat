@@ -1245,8 +1245,12 @@ def on_execution_result(fix_plan_id: int, execution_status: str, *, post_check_r
     return snap
 
 
-def resolve_review(cr_id: int, *, actor: Actor, outcome: str, reason: str) -> dict:
-    """Human verdict on a needs_review change. A redo is a NEW change request — no re-run edge."""
+def resolve_review(cr_id: int, *, actor: Actor, outcome: str, reason: str,
+                   confirmed_checks: Optional[list] = None) -> dict:
+    """Human verdict on a needs_review change. A redo is a NEW change request — no re-run edge.
+    MVP-2.8.0 S2: `confirmed_checks` = the declared checks (pc-n) the person ticked; recorded with the verdict,
+    refused (422, nothing written) when the run's plan does not declare one of them."""
+    from agenticops.services.verification import undeclared_checks
     _require_enabled()
     reason = _require_reason(reason)
     if outcome not in ("completed", "failed"):
@@ -1256,23 +1260,30 @@ def resolve_review(cr_id: int, *, actor: Actor, outcome: str, reason: str) -> di
         _check(actor, "change.approve", subject=cr)
         if cr.status != "needs_review":
             raise ChangeStateError(f"ChangeRequest #{cr_id} is '{cr.status}', not needs_review")
-        if not _claim(s, cr_id, "needs_review", outcome):
-            raise ChangeStateError(f"ChangeRequest #{cr_id} {_LOST_CLAIM}")
-        _transition(cr, outcome)
         # The human verdict is also the acceptance of the run it reviewed (one transaction with the terminal)
         pending = (s.query(FixExecution).join(FixPlan, FixExecution.fix_plan_id == FixPlan.id)
                    .filter(FixPlan.change_request_id == cr_id, FixExecution.verification_status == PENDING)
                    .order_by(FixExecution.id.desc()).first())
+        if confirmed_checks is not None:
+            run_plan = s.get(FixPlan, pending.fix_plan_id) if pending is not None else None
+            unknown = undeclared_checks(run_plan.post_checks if run_plan is not None else [], confirmed_checks)
+            if unknown:
+                raise ChangeValidationError(f"{', '.join(unknown)} is not a declared check of this change's run")
+        if not _claim(s, cr_id, "needs_review", outcome):
+            raise ChangeStateError(f"ChangeRequest #{cr_id} {_LOST_CLAIM}")
+        _transition(cr, outcome)
         if pending is not None:
             pending.verification_status = PASSED if outcome == "completed" else FAILED
             pending.accepted_by, pending.accepted_at, pending.acceptance_note = (
                 actor.key, datetime.now(timezone.utc), reason)
         action = Actions.CHANGE_COMPLETED if outcome == "completed" else Actions.CHANGE_FAILED
+        ticked = {"confirmed_checks": list(confirmed_checks)} if confirmed_checks is not None else {}
         _audit(s, action, cr, actor, details={"reason": reason, "resolved_by_human": True,
-                                              "execution_id": pending.id if pending is not None else None},
+                                              "execution_id": pending.id if pending is not None else None, **ticked},
                old_status="needs_review", new_status=outcome)
         snap = to_dict(cr)
-    _event(cr_id, "change_review_resolved", "execution", outcome, detail={"reason": reason}, actor=actor.key, trace_id=snap["trace_id"])
+    _event(cr_id, "change_review_resolved", "execution", outcome, detail={"reason": reason, **ticked},
+           actor=actor.key, trace_id=snap["trace_id"])
     try:
         notify_change_result(snap, outcome)
     except Exception:
