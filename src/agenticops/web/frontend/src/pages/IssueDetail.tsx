@@ -53,6 +53,9 @@ import { apiFetch } from "@/api/client";
 import type { FixExecution, HealthIssue, IssueStatus, MergedAlert } from "@/api/types";
 import { useReadOnly } from "@/hooks/useBootstrap";
 import { viewerActions } from "@/lib/permissions";
+import { DiagnosisEvidence, RunSummaryBlock, WorkSummary } from "@/components/workitem/WorkSummary";
+import { runSummary as summarizeRun } from "@/lib/runSummary";
+import { waitLabel } from "@/lib/inbox";
 
 /* ================================================================== */
 /*  Main component                                                     */
@@ -344,6 +347,22 @@ export default function IssueDetail({ embedded = false, back, issueId: givenId }
                     className="shrink-0 leading-none hover:opacity-70">×</button>
           </div>
         )}
+
+        <WorkSummary
+          steps={m.phase.phases.map((p) => ({ id: p.id, label: t(`workitem.phase.${p.id}`), state: p.state }))}
+          facts={{ owner: m.waitingKey ? t(m.waitingKey) : null, waiting: waitLabel(a.waiting_since, Date.now(), t),
+                   plan: m.plan ? planLabel(m.plan, t) : null }}
+          expand={{ label: t("workitem.summary.expand"), onClick: () => {
+            const target = m.latestRun ? (m.phase.current === "accept" ? "accept" : "run") : "diagnose";
+            cards.openCard(target); cards.scrollTo(target);
+          } }}
+          t={t}>
+          {m.latestRun
+            ? <RunSummaryBlock t={t} summary={summarizeRun(m.latestRun,
+                (fixPlans.data ?? []).find((p) => p.id === m.latestRun!.fix_plan_id) ?? null)} />
+            : <DiagnosisEvidence t={t} anchorStatus={a.anchor_status} humanVerdict={rca.data?.human_verdict}
+                                 confidence={rca.data?.confidence} />}
+        </WorkSummary>
 
         {cards.openable.length > 0 && (
           <div className="flex justify-end">
