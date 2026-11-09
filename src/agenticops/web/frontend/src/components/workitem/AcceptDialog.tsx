@@ -1,14 +1,16 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useLocale } from "@/i18n/LocaleContext";
 import { StatusText } from "@/components/ui/StatusText";
 import { acceptReason, canAccept, checklistItems, confirmedIds } from "@/lib/acceptChecklist";
+import { returnFocusTo } from "@/lib/focusReturn";
 import type { RunSummary } from "@/lib/runSummary";
 
 /** Accept a run by ticking what you checked (MVP-2.8.0 S2, design «验收本次执行»): the plan version and whether it
  *  still matches its approval, one box per check still to verify plus one overall confirmation, an optional note.
  *  Confirm stays off until every box is ticked; the ticked declared ids go with the acceptance. Rejecting keeps
- *  its own reason dialog. Radix: slide-in, ESC, focus kept inside and returned. */
+ *  its own reason dialog. Radix: slide-in, ESC, focus kept inside; focus goes back to the button that opened it
+ *  (mounted on open, so the element focused at the first render is the opener). */
 export function AcceptDialog({ summary, busy, error, onConfirm, onClose }: {
   summary: RunSummary;
   busy: boolean;
@@ -20,6 +22,10 @@ export function AcceptDialog({ summary, busy, error, onConfirm, onClose }: {
   const items = checklistItems(summary, t);
   const [ticked, setTicked] = useState<Set<number>>(new Set());
   const [note, setNote] = useState("");
+  const openerRef = useRef<HTMLElement | null>(
+    typeof document !== "undefined" && document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+      ? document.activeElement : null,
+  );
   const toggle = (i: number) => setTicked((prev) => {
     const next = new Set(prev);
     if (next.has(i)) next.delete(i); else next.add(i);
@@ -31,7 +37,8 @@ export function AcceptDialog({ summary, busy, error, onConfirm, onClose }: {
       <Dialog.Portal>
         {/* centred by the overlay, not by a translate: the slideInRight keyframe owns `transform` */}
         <Dialog.Overlay className="fixed inset-0 z-50 grid items-start justify-items-center overflow-y-auto bg-black/30 px-4 pt-[12vh]">
-          <Dialog.Content className="w-[min(560px,100%)] rounded-lg border border-border bg-card p-5 shadow-xl animate-[slideInRight_0.2s_ease-out]">
+          <Dialog.Content onCloseAutoFocus={(e) => returnFocusTo(openerRef.current, e)}
+                          className="w-[min(560px,100%)] rounded-lg border border-border bg-card p-5 shadow-xl animate-[slideInRight_0.2s_ease-out]">
             <div className="flex items-start justify-between gap-3">
               <Dialog.Title className="text-lg font-semibold text-foreground">{t("accept.dialog.title")}</Dialog.Title>
               <Dialog.Close aria-label={t("common.close")} className="rounded px-2 text-lg text-muted-foreground hover:text-foreground">×</Dialog.Close>
