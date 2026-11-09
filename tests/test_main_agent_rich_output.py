@@ -68,3 +68,14 @@ def test_other_builders_stay_plain():
     root = pathlib.Path(__file__).resolve().parents[1] / "src" / "agenticops"
     for p in ["scheduler/scheduler.py", "im/session_manager.py", "cli/main.py"]:
         assert "rich_output" not in (root / p).read_text(encoding="utf-8")
+
+
+def test_stats_default_to_a_table_and_charts_only_on_request():
+    """MVP-2.8.0 S2 rework (owner 2026-11-09): statistics default to a sentence + a markdown table (fewer tokens);
+    a chart only when the user asks for one; flows stay mermaid flowcharts; never ASCII-art charts."""
+    from agenticops.agents.main_agent import RICH_OUTPUT_PROMPT
+    low = RICH_OUTPUT_PROMPT.lower()
+    assert "markdown table" in low
+    assert "only when the user" in low
+    assert "```chart" in RICH_OUTPUT_PROMPT and "```mermaid" in RICH_OUTPUT_PROMPT and "ASCII" in RICH_OUTPUT_PROMPT
+    assert not any("一" <= c <= "鿿" for c in RICH_OUTPUT_PROMPT) and len(RICH_OUTPUT_PROMPT) < 1500

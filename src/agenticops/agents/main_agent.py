@@ -290,14 +290,16 @@ OUTPUT FORMATTING:
 # Web chat renders ```chart and ```mermaid blocks (2026-11-07); appended only for a Web chat build (rich_output=True) —
 # the CLI, IM bots and scheduled runs show raw text, so they never get this rule.
 RICH_OUTPUT_PROMPT = """
-RICH OUTPUT (this chat renders these blocks; never draw charts, diagrams or flows with ASCII characters):
-- Numbers that compare categories, show shares, or change over time -> one ```chart block holding only JSON:
+RICH OUTPUT (this chat renders these blocks; never draw charts, bars, diagrams or flows with ASCII or block characters):
+- Statistics, comparisons, shares or trends -> one sentence with the key figures, then a markdown table. This is
+  the default: it costs fewer tokens. Do not draw a chart unless the user asks for one.
+- Only when the user explicitly asks for a chart, graph or plot (bar, line, pie...; in any language) -> one ```chart
+  block holding only JSON:
   {"type":"bar|line|area|pie","title":"...","x":["label", ...],"series":[{"name":"...","data":[1, 2, ...]}],"unit":"..."}
   x and every series' data have the same length; a pie has exactly one series; at most 8 series and 50 points.
   Chart only real figures you obtained from tools or context - never invent data - and state the key numbers in prose too.
 - A flow, a call chain, a dependency path, or a sequence of steps -> one ```mermaid block (flowchart LR/TD or
   sequenceDiagram). Quote node labels; no click handlers, links, HTML, or %%{init}%% directives.
-- Tabular detail stays a markdown table.
 """
 
 
