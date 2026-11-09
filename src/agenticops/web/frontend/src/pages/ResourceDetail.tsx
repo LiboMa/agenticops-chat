@@ -68,12 +68,13 @@ export default function ResourceDetail() {
           </div>
         </div>
 
-        <div className="flex border-b px-5">
+        {/* the tabs scroll sideways on a phone instead of widening the page (S2 rework E2E: 120 px at 320) */}
+        <div className="flex overflow-x-auto border-b px-5">
           {tabs.map((t) => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+              className={`shrink-0 whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
                 tab === t.key
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"

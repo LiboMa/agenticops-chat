@@ -492,9 +492,9 @@ function CostDashboard() {
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="flex-wrap gap-2">
         <h2 className="text-lg font-semibold text-foreground">Cost & Tokens</h2>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <div className="flex gap-1 bg-secondary rounded-lg p-1">
             {COST_PERIODS.map((p) => (
               <button

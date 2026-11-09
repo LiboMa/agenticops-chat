@@ -281,9 +281,9 @@ export default function SkillDetail() {
       {/* Header card */}
       <Card>
         <CardBody>
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <div className="flex items-center gap-3">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-3">
                 <h1 className="text-2xl font-semibold text-foreground">{skill.name}</h1>
                 {skill.is_draft ? (
                   <Badge className="bg-amber-100 text-amber-700">Draft</Badge>
@@ -309,7 +309,7 @@ export default function SkillDetail() {
                 </p>
               )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {!readOnly && (
                 <button
                   onClick={() => setShowImprove(true)}

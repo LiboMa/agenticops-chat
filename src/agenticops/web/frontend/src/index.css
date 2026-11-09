@@ -173,6 +173,8 @@ input:focus, select:focus, textarea:focus {
 .report-content .md-ol { @apply list-decimal list-inside text-sm space-y-1 mb-4 ml-2; }
 .report-content .md-hr { @apply my-6; }
 .report-content .md-code { @apply px-1.5 py-0.5 text-xs font-mono rounded; background: hsl(var(--muted)); color: hsl(var(--foreground)); }
+/* inline code wherever markdown renders it: a long token breaks instead of widening the page (S2 rework E2E: skill detail at 320 px) */
+.md-code { overflow-wrap: anywhere; }
 .report-content .md-pre {
   @apply p-4 text-xs font-mono overflow-x-auto mb-4 leading-relaxed rounded-lg;
   background-color: #1e1e2e;
