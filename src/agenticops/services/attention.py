@@ -209,6 +209,10 @@ def _issue_items(s, actor, account_id, now) -> list[dict]:
                 continue
             actions = [_update(phase.primary)]
         else:
+            # the «you» steps — a verdict on the RCA, a new plan, a note — all need the issue-level write flag
+            # (issue.note): a viewer is never handed a step it cannot take (S2 review)
+            if not ua.strictly_allowed(actor, "issue.note", issue):
+                continue
             actions = [_update(phase.primary)]
         res = resources.get(issue.resource_ref) if issue.resource_ref else None
         if res is not None and res.account_id != issue.account_id:

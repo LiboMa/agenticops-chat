@@ -345,3 +345,16 @@ def test_a_stale_resource_ref_of_another_account_shows_no_resource(db):
     s.commit(); s.close()
     row = _row(ADMIN, f"I{iid}")
     assert row["resource"] is None and row["region"] is None
+
+
+def test_the_you_steps_need_the_write_flag(db):
+    """S2 review: a «you» row (a verdict on a low-confidence RCA, a new plan after a failed run) is something a
+    viewer cannot do — its workbench, top-bar count and Cases «mine» never list it."""
+    low, _ = _issue("root_cause_identified", rca=0.3)
+    failed, _ = _issue("root_cause_identified", plan="failed", run=("failed", None))
+    assert {f"I{low}", f"I{failed}"} <= {i["id"] for i in _items(ADMIN)}
+    assert _items(READER) == []
+    viewer = Actor("user", "vera", 5, ("read",), read_only=True)
+    page = att.attention_page(viewer, now=NOW)
+    assert page["items"] == [] and page["total"] == 0 and page["counts"] == {}
+    assert att.issue_rows(viewer, now=NOW) == []
