@@ -1427,7 +1427,7 @@
   "users.action.enable": "重新启用",
   "users.count": "{n} 个用户",
   "users.selfNote": "你自己这一行不能停用、不能降级",
-  "users.authOff": "当前未开启接口认证：所有已登录的人都按管理员处理，身份限制不生效。",
+  "users.authOff": "当前未开启接口认证：其他页面的身份限制不生效；用户管理仍然只对管理员开放。",
   "users.empty": "还没有用户。",
   "users.emptyFiltered": "没有符合条件的用户。",
   "users.dialog.createTitle": "新建用户",

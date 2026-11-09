@@ -1427,7 +1427,7 @@
   "users.action.enable": "Enable",
   "users.count": "{n} users",
   "users.selfNote": "You cannot disable or demote yourself",
-  "users.authOff": "API sign-in is off: everyone signed in is treated as an admin and roles are not enforced.",
+  "users.authOff": "API sign-in is off: roles are not enforced on the other pages; user management stays admins-only.",
   "users.empty": "No users yet.",
   "users.emptyFiltered": "No users match.",
   "users.dialog.createTitle": "New user",

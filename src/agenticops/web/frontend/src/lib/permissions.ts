@@ -14,10 +14,11 @@ export function canViewSettings(boot: BootLike): boolean {
   return !isReadOnly(boot) || !!boot?.user?.can_view_settings;
 }
 
-/** User management (MVP-2.8.0 S2 rework) is an admin's when sign-in is on; with it off every signed-in person is
- *  treated as an admin (roles are not enforced), as the server's `/api/users` does. */
+/** User management (MVP-2.8.0 S2 rework) is the signed-in user's own admin flag, with sign-in on or off — as the
+ *  server's `/api/users` (review: with it off a viewer could take the admin over, and that persisted). Fails closed
+ *  until bootstrap has loaded, so a non-admin never sees the entry or the page flash. */
 export function canManageUsers(boot: BootLike): boolean {
-  return !boot?.auth_enabled || !!boot.user?.is_admin;
+  return !!boot?.user?.is_admin;
 }
 
 /** The only navigation entries ever hidden: Settings and Users, each by who may open it. */

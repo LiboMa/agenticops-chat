@@ -34,12 +34,16 @@ describe("navItemVisible", () => {
 });
 
 describe("canManageUsers (S2 rework)", () => {
-  it("an admin when sign-in is on; everyone signed in when it is off (roles are not enforced then)", () => {
+  it("the signed-in user's own admin flag, with sign-in on or off (review: with it off a viewer took the admin over)", () => {
     expect(canManageUsers({ auth_enabled: true, user: { is_admin: true } })).toBe(true);
+    expect(canManageUsers({ auth_enabled: false, user: { is_admin: true } })).toBe(true);
     expect(canManageUsers({ auth_enabled: true, user: { is_admin: false } })).toBe(false);
+    expect(canManageUsers({ auth_enabled: false, user: { is_admin: false } })).toBe(false);
     expect(canManageUsers({ auth_enabled: true, user: { is_admin: false, read_only: true } })).toBe(false);
     expect(canManageUsers({ auth_enabled: true, user: null })).toBe(false);
-    expect(canManageUsers({ auth_enabled: false, user: { is_admin: false } })).toBe(true);
+  });
+  it("fails closed until bootstrap has loaded (a viewer saw «用户管理» and «新建用户» flash)", () => {
+    expect(canManageUsers(undefined)).toBe(false);
   });
 });
 

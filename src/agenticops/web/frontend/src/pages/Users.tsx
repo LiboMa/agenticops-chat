@@ -103,12 +103,12 @@ export default function Users() {
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("users.search")} aria-label={t("users.search")}
                className="min-w-[180px] flex-1 rounded-lg border border-border bg-card px-3 py-2 text-[16px] sm:text-sm" />
         <select value={role} onChange={(e) => setRole(e.target.value as RoleFilter)} aria-label={t("users.filter.role")}
-                className="rounded-lg border border-border bg-card px-3 py-2 text-sm">
+                className="rounded-lg border border-border bg-card px-3 py-2 text-[16px] sm:text-sm">
           <option value="all">{t("users.filter.allRoles")}</option>
           {(["admin", "writer", "viewer"] as const).map((r) => <option key={r} value={r}>{t(`users.role.${r}`)}</option>)}
         </select>
         <select value={status} onChange={(e) => setStatus(e.target.value as StatusFilter)} aria-label={t("users.filter.status")}
-                className="rounded-lg border border-border bg-card px-3 py-2 text-sm">
+                className="rounded-lg border border-border bg-card px-3 py-2 text-[16px] sm:text-sm">
           <option value="all">{t("users.filter.allStatus")}</option>
           <option value="active">{t("users.status.active")}</option>
           <option value="disabled">{t("users.status.disabled")}</option>
@@ -179,7 +179,9 @@ export default function Users() {
                       }
                     }} />
       )}
-      {shown && <PasswordOnceDialog {...shown} onClose={() => setShown(null)} returnTo={flowOpener.current} />}
+      {/* closing forgets the password: the dialog's state and the mutations' cached results (S2 rework review) */}
+      {shown && <PasswordOnceDialog {...shown} returnTo={flowOpener.current}
+                                    onClose={() => { setShown(null); create.reset(); reset.reset(); }} />}
       {dialog}
     </div>
   );

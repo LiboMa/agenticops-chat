@@ -15,8 +15,10 @@ function useOpener() {
   );
 }
 
-function Frame({ title, onClose, returnTo, children }: {
+function Frame({ title, onClose, returnTo, keepOnOutside = false, children }: {
   title: string; onClose: () => void; children: React.ReactNode;
+  /** a click outside does not close it (the one-time password: a stray click lost its only copy — S2 rework review) */
+  keepOnOutside?: boolean;
   /** where focus goes on close when the dialog was not opened by the focused element (the one-time password opens
    *  after another dialog or a confirm closed — the flow's own button, S2 rework E2E) */
   returnTo?: HTMLElement | null;
@@ -30,6 +32,7 @@ function Frame({ title, onClose, returnTo, children }: {
         {/* centred by the overlay, not by a translate: the slideInRight keyframe owns `transform` */}
         <Dialog.Overlay className="fixed inset-0 z-50 grid items-start justify-items-center overflow-y-auto bg-black/30 px-4 pt-[12vh]">
           <Dialog.Content aria-describedby={undefined} onCloseAutoFocus={(e) => returnFocusTo(opener.current, e)}
+                          onPointerDownOutside={keepOnOutside ? (e) => e.preventDefault() : undefined}
                           className="w-[min(440px,100%)] rounded-lg border border-border bg-card p-5 shadow-xl animate-[slideInRight_0.2s_ease-out]">
             <div className="flex items-start justify-between gap-3">
               <Dialog.Title className="text-lg font-semibold text-foreground [overflow-wrap:anywhere]">{title}</Dialog.Title>
@@ -116,7 +119,7 @@ export function PasswordOnceDialog({ email, password, kind, onClose, returnTo }:
   const [copied, setCopied] = useState<"yes" | "no" | null>(null);
   return (
     <Frame title={t(kind === "created" ? "users.password.createdTitle" : "users.password.resetTitle").replace("{email}", email)} onClose={onClose}
-           returnTo={returnTo}>
+           returnTo={returnTo} keepOnOutside>
       <p className="mt-3 text-sm text-muted-foreground">{t(kind === "created" ? "users.password.intro" : "users.password.resetIntro")}</p>
       <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-dashed border-primary/40 bg-canvas px-3 py-2.5">
         <code className="select-all font-mono text-[15px] text-foreground [overflow-wrap:anywhere]">{password}</code>
