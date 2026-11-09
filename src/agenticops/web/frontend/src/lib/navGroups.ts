@@ -1,7 +1,8 @@
 import { moveId, reorderNavIds } from "@/lib/navOrder";
 
-/** The sidebar of the blue/white workspace (MVP-2.7.0 S2): daily work always open, two collapsible groups.
- *  Group ids are the preferences contract's (`nav_groups_open`: tools / administration). */
+/** The sidebar of the blue/white workspace (MVP-2.7.0 S2; regrouped by the owner in the MVP-2.8.0 S2 rework):
+ *  daily work always open, the collapsible tools, and administration pinned at the sidebar's foot, never folded.
+ *  Group ids are the preferences contract's (`nav_groups_open`: tools / administration — the latter no longer folds). */
 export type GroupId = "daily" | "tools" | "administration";
 export type CollapsibleGroup = Exclude<GroupId, "daily">;
 
@@ -18,13 +19,17 @@ export interface NavEntry {
 export interface NavGroup {
   id: GroupId;
   labelKey: string;
+  /** folds behind its heading (only the tools) */
+  collapsible: boolean;
+  /** sits at the foot of the sidebar's scroll area (administration: users and settings, settings last) */
+  bottom: boolean;
   items: NavEntry[];
 }
 
 export const NAV_GROUPS: NavGroup[] = [
   {
     // MVP-2.8.0 S2: the design's daily work — the workbench first, then the pages a person works in every day
-    id: "daily", labelKey: "nav.group.daily", items: [
+    id: "daily", labelKey: "nav.group.daily", collapsible: false, bottom: false, items: [
       { id: "inbox", to: "/app/inbox", icon: "inbox", labelKey: "nav.inbox" },
       { id: "chat", to: "/app/chat", icon: "chat", labelKey: "nav.chat" },
       { id: "issues", to: "/app/issues", icon: "clock", labelKey: "nav.issues", badge: true, owns: ["/app/signals"] },
@@ -35,18 +40,21 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    id: "tools", labelKey: "nav.group.tools", items: [
+    // S2 rework: the owner's order — overview, Galaxy, schedules, resources — then agent metrics and skills
+    id: "tools", labelKey: "nav.group.tools", collapsible: true, bottom: false, items: [
+      { id: "overview", to: "/app/overview", icon: "grid", labelKey: "nav.overview" },
+      { id: "galaxy", to: "/app/galaxy", icon: "galaxy", labelKey: "nav.galaxy" },
       { id: "schedules", to: "/app/schedules", icon: "calendar", labelKey: "nav.schedules" },
       { id: "resources", to: "/app/resources", icon: "server", labelKey: "nav.resources" },
-      { id: "settings", to: "/app/settings", icon: "cog", labelKey: "nav.settings" },
+      { id: "agent-metrics", to: "/app/agent-metrics", icon: "barchart", labelKey: "nav.agentMetrics" },
+      { id: "skills", to: "/app/skills", icon: "puzzle", labelKey: "nav.skills" },
     ],
   },
   {
-    id: "administration", labelKey: "nav.group.administration", items: [
-      { id: "overview", to: "/app/overview", icon: "grid", labelKey: "nav.overview" },
-      { id: "agent-metrics", to: "/app/agent-metrics", icon: "barchart", labelKey: "nav.agentMetrics" },
-      { id: "skills", to: "/app/skills", icon: "puzzle", labelKey: "nav.skills" },
-      { id: "galaxy", to: "/app/galaxy", icon: "galaxy", labelKey: "nav.galaxy" },
+    // S2 rework: users (admins only) and settings, settings the very last entry of the sidebar
+    id: "administration", labelKey: "nav.group.administration", collapsible: false, bottom: true, items: [
+      { id: "users", to: "/app/users", icon: "users", labelKey: "nav.users" },
+      { id: "settings", to: "/app/settings", icon: "cog", labelKey: "nav.settings" },
     ],
   },
 ];

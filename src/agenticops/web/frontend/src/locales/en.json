@@ -1395,5 +1395,6 @@
   "workitem.evidence.rcaFailed": "The diagnosis could not be loaded, so what it rests on is unknown",
   "workitem.summary.runsLoading": "Loading the runs…",
   "workitem.summary.runsFailed": "The runs could not be loaded",
-  "cases.viewCountFailed": "Count failed to load"
+  "cases.viewCountFailed": "Count failed to load",
+  "nav.users": "Users"
 }

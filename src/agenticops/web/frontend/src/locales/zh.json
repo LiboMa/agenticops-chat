@@ -1395,5 +1395,6 @@
   "workitem.evidence.rcaFailed": "诊断记录加载失败，无法判断诊断依据",
   "workitem.summary.runsLoading": "正在读取执行记录…",
   "workitem.summary.runsFailed": "执行记录加载失败",
-  "cases.viewCountFailed": "数量加载失败"
+  "cases.viewCountFailed": "数量加载失败",
+  "nav.users": "用户管理"
 }

@@ -2,12 +2,16 @@ import { describe, it, expect } from "vitest";
 import { NAV_GROUPS, V1_DEFAULT, breadcrumbFor, defaultOrder, entryForPath, migrateNavOrder, moveWithinGroup, normalizeOrder } from "@/lib/navGroups";
 
 describe("NAV_GROUPS — the blue/white sidebar", () => {
-  it("MVP-2.8.0 S2: daily work = workbench, chat, issues, plans & changes, security, reports; every old entry kept", () => {
+  it("MVP-2.8.0 S2 rework (owner 2026-11-09): tools hold overview, Galaxy, schedules, resources, agent metrics and skills; administration only users and settings; every old entry kept", () => {
     expect(NAV_GROUPS.map((g) => [g.id, g.items.map((i) => i.id)])).toEqual([
       ["daily", ["inbox", "chat", "issues", "plans", "security", "reports"]],
-      ["tools", ["schedules", "resources", "settings"]],
-      ["administration", ["overview", "agent-metrics", "skills", "galaxy"]],
+      ["tools", ["overview", "galaxy", "schedules", "resources", "agent-metrics", "skills"]],
+      ["administration", ["users", "settings"]],
     ]);
+    expect(NAV_GROUPS.map((g) => [g.id, g.collapsible, g.bottom])).toEqual([
+      ["daily", false, false], ["tools", true, false], ["administration", false, true],
+    ]);
+    expect(NAV_GROUPS[2].items[0]).toMatchObject({ id: "users", to: "/app/users", icon: "users", labelKey: "nav.users" });
     expect(NAV_GROUPS[0].items[0]).toMatchObject({ id: "inbox", to: "/app/inbox", icon: "inbox" });
     const all = NAV_GROUPS.flatMap((g) => g.items.map((i) => i.id));
     const renamed: Record<string, string> = { dashboard: "overview", changes: "plans", audit: "plans" };  // S3 merged changes + audit
@@ -32,8 +36,8 @@ describe("migrateNavOrder", () => {
                  "dashboard", "agent-metrics", "skills"];
     expect(migrateNavOrder(own)).toEqual({
       daily: ["inbox", "security", "reports", "chat", "issues", "plans"],   // the workbench first (spec; S2 review)
-      tools: ["schedules", "resources", "settings"],
-      administration: ["galaxy", "overview", "agent-metrics", "skills"],
+      tools: ["galaxy", "schedules", "resources", "overview", "agent-metrics", "skills"],
+      administration: ["users", "settings"],   // neither was in the v1 list: default places
     });
   });
 });
@@ -48,9 +52,21 @@ describe("normalizeOrder / moveWithinGroup", () => {
                     administration: ["galaxy", "security", "overview", "agent-metrics", "skills", "settings"] };
     expect(normalizeOrder(saved)).toEqual({
       daily: ["inbox", "reports", "chat", "issues", "plans", "security"],
-      tools: ["schedules", "resources", "settings"],
-      administration: ["galaxy", "overview", "agent-metrics", "skills"],
+      tools: ["overview", "galaxy", "schedules", "resources", "agent-metrics", "skills"],
+      administration: ["users", "settings"],
     });
+  });
+  it("S2 rework: an order saved during S2 — entries that changed group take their default places, the rest keep the user's order", () => {
+    const s2Default = { daily: ["inbox", "chat", "issues", "plans", "security", "reports"],
+                        tools: ["schedules", "resources", "settings"],
+                        administration: ["overview", "agent-metrics", "skills", "galaxy"] };
+    expect(normalizeOrder(s2Default)).toEqual(defaultOrder());
+    const dragged = { ...s2Default, tools: ["resources", "schedules", "settings"] };
+    // reorderNavIds: a missing entry goes right after the nearest entry before it in the default order
+    expect(normalizeOrder(dragged).tools).toEqual(["overview", "galaxy", "resources", "agent-metrics", "skills", "schedules"]);
+    const all = Object.values(normalizeOrder(dragged)).flat();
+    expect(new Set(all).size).toBe(all.length);   // every entry exactly once
+    expect(all.length).toBe(NAV_GROUPS.flatMap((g) => g.items).length);
   });
   it("old change paths belong to Plans & changes, with the right reference", () => {
     expect(entryForPath("/app/changes/3")?.entry.id).toBe("plans");
@@ -65,8 +81,8 @@ describe("normalizeOrder / moveWithinGroup", () => {
     expect(normalizeOrder(undefined)).toEqual(defaultOrder());
   });
   it("moves only inside one group", () => {
-    const o = moveWithinGroup(defaultOrder(), "tools", "settings", "schedules");
-    expect(o.tools).toEqual(["settings", "schedules", "resources"]);
+    const o = moveWithinGroup(defaultOrder(), "tools", "skills", "overview");
+    expect(o.tools).toEqual(["skills", "overview", "galaxy", "schedules", "resources", "agent-metrics"]);
     expect(o.daily).toEqual(defaultOrder().daily);
   });
 });
@@ -75,8 +91,9 @@ describe("entryForPath", () => {
   it.each([
     ["/app/chat/abc", "daily", "chat"], ["/app/issues/5", "daily", "issues"], ["/app/signals", "daily", "issues"],
     ["/app/changes/3", "daily", "plans"], ["/app/plans/9", "daily", "plans"], ["/app/resources/12", "tools", "resources"],
-    ["/app/inbox", "daily", "inbox"], ["/app/security", "daily", "security"], ["/app/settings", "tools", "settings"],
-    ["/app/overview", "administration", "overview"], ["/app/skills/linux-admin", "administration", "skills"],
+    ["/app/inbox", "daily", "inbox"], ["/app/security", "daily", "security"], ["/app/settings", "administration", "settings"],
+    ["/app/overview", "tools", "overview"], ["/app/skills/linux-admin", "tools", "skills"], ["/app/galaxy", "tools", "galaxy"],
+    ["/app/users", "administration", "users"],
   ])("%s → %s / %s", (path, group, id) => {
     expect(entryForPath(path)).toMatchObject({ group, entry: { id } });
   });
@@ -98,15 +115,5 @@ describe("breadcrumbFor", () => {
   it("a malformed escape is shown as typed, not thrown (it would blank the app)", () => {
     expect(breadcrumbFor("/app/issues/%")).toEqual({ sectionKey: "nav.issues", object: "I#%" });
     expect(breadcrumbFor("/app/skills/%E0")).toEqual({ sectionKey: "nav.skills", object: "%E0" });
-  });
-});
-
-import { isRailRoute } from "@/lib/navGroups";
-describe("isRailRoute (2026-11-07: Chat gets the icon rail)", () => {
-  it("chat routes only", () => {
-    expect(isRailRoute("/app/chat")).toBe(true);
-    expect(isRailRoute("/app/chat/abc")).toBe(true);
-    expect(isRailRoute("/app/chats")).toBe(false);
-    expect(isRailRoute("/app/issues")).toBe(false);
   });
 });

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch, getAuthToken } from "@/api/client";
 import { currentUserId, type Home } from "@/lib/home";
-import { canViewSettings, isReadOnly } from "@/lib/permissions";
+import { canManageUsers, canViewSettings, isReadOnly } from "@/lib/permissions";
 import type { UploadPolicy } from "@/lib/attachments";
 
 export interface UiPreferences {
@@ -51,4 +51,9 @@ export function useReadOnly(): boolean {
 /** Whether Settings is offered (writers; a viewer only with settings_read — then read-only). */
 export function useCanViewSettings(): boolean {
   return canViewSettings(useBootstrap().data);
+}
+
+/** MVP-2.8.0 S2 rework: the Users page and its sidebar entry (`lib/permissions.canManageUsers`). */
+export function useCanManageUsers(): boolean {
+  return canManageUsers(useBootstrap().data);
 }

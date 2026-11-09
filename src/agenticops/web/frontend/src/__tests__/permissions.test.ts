@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canViewSettings, isReadOnly, navItemVisible, viewerActions } from "@/lib/permissions";
+import { canManageUsers, canViewSettings, isReadOnly, navItemVisible, viewerActions } from "@/lib/permissions";
 
 describe("isReadOnly", () => {
   it("is a signed-in viewer only", () => {
@@ -22,12 +22,24 @@ describe("canViewSettings", () => {
 });
 
 describe("navItemVisible", () => {
-  it("hides only Settings, and only when it may not be viewed", () => {
-    expect(navItemVisible("settings", false)).toBe(false);
-    expect(navItemVisible("settings", true)).toBe(true);
-    for (const id of ["chat", "issues", "reports", "plans", "resources", "schedules", "galaxy", "security"]) {
-      expect(navItemVisible(id, false)).toBe(true);
+  it("hides Settings when it may not be viewed and Users when they may not be managed; nothing else", () => {
+    expect(navItemVisible("settings", { settings: false, users: true })).toBe(false);
+    expect(navItemVisible("settings", { settings: true, users: false })).toBe(true);
+    expect(navItemVisible("users", { settings: true, users: false })).toBe(false);
+    expect(navItemVisible("users", { settings: false, users: true })).toBe(true);
+    for (const id of ["chat", "issues", "reports", "plans", "resources", "schedules", "galaxy", "security", "skills"]) {
+      expect(navItemVisible(id, { settings: false, users: false })).toBe(true);
     }
+  });
+});
+
+describe("canManageUsers (S2 rework)", () => {
+  it("an admin when sign-in is on; everyone signed in when it is off (roles are not enforced then)", () => {
+    expect(canManageUsers({ auth_enabled: true, user: { is_admin: true } })).toBe(true);
+    expect(canManageUsers({ auth_enabled: true, user: { is_admin: false } })).toBe(false);
+    expect(canManageUsers({ auth_enabled: true, user: { is_admin: false, read_only: true } })).toBe(false);
+    expect(canManageUsers({ auth_enabled: true, user: null })).toBe(false);
+    expect(canManageUsers({ auth_enabled: false, user: { is_admin: false } })).toBe(true);
   });
 });
 

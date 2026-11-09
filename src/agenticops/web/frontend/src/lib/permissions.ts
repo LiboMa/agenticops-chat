@@ -2,7 +2,7 @@
  *  (403, code `read_only`); the UI only stops offering them. */
 type BootLike = {
   auth_enabled?: boolean;
-  user?: { read_only?: boolean; can_view_settings?: boolean } | null;
+  user?: { read_only?: boolean; can_view_settings?: boolean; is_admin?: boolean } | null;
 } | undefined;
 
 export function isReadOnly(boot: BootLike): boolean {
@@ -14,9 +14,17 @@ export function canViewSettings(boot: BootLike): boolean {
   return !isReadOnly(boot) || !!boot?.user?.can_view_settings;
 }
 
-/** Settings is the only navigation entry ever hidden. */
-export function navItemVisible(id: string, settingsVisible: boolean): boolean {
-  return id !== "settings" || settingsVisible;
+/** User management (MVP-2.8.0 S2 rework) is an admin's when sign-in is on; with it off every signed-in person is
+ *  treated as an admin (roles are not enforced), as the server's `/api/users` does. */
+export function canManageUsers(boot: BootLike): boolean {
+  return !boot?.auth_enabled || !!boot.user?.is_admin;
+}
+
+/** The only navigation entries ever hidden: Settings and Users, each by who may open it. */
+export function navItemVisible(id: string, can: { settings: boolean; users: boolean }): boolean {
+  if (id === "settings") return can.settings;
+  if (id === "users") return can.users;
+  return true;
 }
 
 /** On a work item's status line a viewer keeps only what navigates (Ask Agent); every other action writes. */

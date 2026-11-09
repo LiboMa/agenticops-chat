@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import * as Dialog from "@radix-ui/react-dialog";
 import { usePersistedState } from "@/hooks/usePersistedState";
 import { useStats } from "@/hooks/useStats";
-import { useBootstrap, useCanViewSettings } from "@/hooks/useBootstrap";
+import { useBootstrap, useCanManageUsers, useCanViewSettings } from "@/hooks/useBootstrap";
 import { navItemVisible } from "@/lib/permissions";
 import { useLocale } from "@/i18n/LocaleContext";
 import {
@@ -28,8 +28,8 @@ function initialOrder(): NavOrder {
   }
 }
 
-/** The blue/white sidebar: daily work, then two collapsible groups; the group holding the current page opens
- *  by itself (not saved), a group the user opens or closes is saved to their preferences. */
+/** The blue/white sidebar: daily work, the collapsible tools (the group holding the current page opens by itself,
+ *  not saved; a group the user opens or closes is saved to their preferences), and administration at the foot. */
 export function Sidebar({ rail = false }: { rail?: boolean }) {
   const { t } = useLocale();
   const { pathname } = useLocation();
@@ -43,7 +43,7 @@ export function Sidebar({ rail = false }: { rail?: boolean }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [railOpen]);
   const boot = useBootstrap();
-  const settingsVisible = useCanViewSettings();
+  const can = { settings: useCanViewSettings(), users: useCanManageUsers() };
   const stats = useStats();
   const hasOpenIssues = (stats.data?.open_anomalies ?? 0) > 0;
 
@@ -84,7 +84,7 @@ export function Sidebar({ rail = false }: { rail?: boolean }) {
           {NAV_GROUPS.map((g, gi) => (
             <div key={g.id} className={`flex flex-col items-center gap-1 ${gi > 0 ? "mt-1 border-t border-border pt-2" : ""}`}>
               {order[g.id].map((id) => g.items.find((i) => i.id === id)!).filter(Boolean)
-                .filter((i) => navItemVisible(i.id, settingsVisible)).map((item) => {
+                .filter((i) => navItemVisible(i.id, can)).map((item) => {
                   const active = current?.entry.id === item.id;
                   return (
                     <Link key={item.id} to={item.to} title={t(item.labelKey)} aria-label={t(item.labelKey)}
@@ -122,14 +122,17 @@ export function Sidebar({ rail = false }: { rail?: boolean }) {
         <span className="truncate">AgenticOps</span>
       </Link>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* a flex column, so the bottom group (administration) sits at the foot — after everything when the list scrolls */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {NAV_GROUPS.map((g) => {
-          const collapsible = g.id !== "daily";
+          const collapsible = g.collapsible;
           const open = !collapsible || isOpen(g.id as CollapsibleGroup);
           const items = order[g.id].map((id) => g.items.find((i) => i.id === id)!).filter(Boolean)
-            .filter((i) => navItemVisible(i.id, settingsVisible));
+            .filter((i) => navItemVisible(i.id, can));
+          if (items.length === 0) return null;   // a group with nothing this person may open is not shown
           return (
-            <section key={g.id} className={collapsible ? "border-t border-border py-3" : "mb-5"}>
+            <section key={g.id} className={g.bottom ? "mt-auto border-t border-border pt-3"
+              : collapsible ? "border-t border-border py-3" : "mb-5"}>
               {collapsible ? (
                 <button type="button" onClick={() => toggle(g.id as CollapsibleGroup)} aria-expanded={open}
                         className="flex w-full items-center justify-between rounded px-[11px] py-1 text-[11px] text-muted-foreground hover:text-foreground">
@@ -269,7 +272,7 @@ export function MobileNav() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const current = entryForPath(pathname)?.entry;
-  const settingsVisible = useCanViewSettings();
+  const can = { settings: useCanViewSettings(), users: useCanManageUsers() };
   return (
     <select
       aria-label={t("nav.menu")}
@@ -278,12 +281,14 @@ export function MobileNav() {
       className="min-w-[110px] max-w-[150px] rounded-[5px] border border-border bg-card px-2 py-1.5 text-xs min-[801px]:hidden"
     >
       <option value="" disabled>{current ? t(current.labelKey) : t("nav.menu")}</option>
-      {NAV_GROUPS.map((g) => (
-        <optgroup key={g.id} label={t(g.labelKey)}>
-          {g.items.filter((i) => navItemVisible(i.id, settingsVisible))
-            .map((i) => <option key={i.id} value={i.to}>{t(i.labelKey)}</option>)}
-        </optgroup>
-      ))}
+      {NAV_GROUPS.map((g) => {
+        const items = g.items.filter((i) => navItemVisible(i.id, can));
+        return items.length === 0 ? null : (   // an empty optgroup is skipped, as in the sidebar
+          <optgroup key={g.id} label={t(g.labelKey)}>
+            {items.map((i) => <option key={i.id} value={i.to}>{t(i.labelKey)}</option>)}
+          </optgroup>
+        );
+      })}
     </select>
   );
 }
