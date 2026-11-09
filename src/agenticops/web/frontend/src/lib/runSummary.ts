@@ -12,7 +12,8 @@ export interface RunSummary {
   planId: number | null;
   version: number | null;
   hash8: string | null;
-  /** the plan's content still matches what was approved; null when the plan is unknown */
+  /** the plan's content still matches what was approved; null when the plan is unknown or its approval recorded no
+   *  hash (approved before 2.6.1) — unknown is never «changed after approval», as in PlanView */
   matchesApproved: boolean | null;
   /** one per declared post-check, from the server's binding: a check with no result is pending («待核对») */
   checks: { id: string | null; label: string; state: CheckState }[];
@@ -37,7 +38,7 @@ export function runSummary(run: FixExecution, runPlan: FixPlan | null): RunSumma
     planId: runPlan?.id ?? null,
     version: runPlan ? runPlan.plan_version || 1 : null,
     hash8: runPlan?.content_hash ? shortHash(runPlan.content_hash) : null,
-    matchesApproved: runPlan ? !!runPlan.approved_hash && runPlan.approved_hash === runPlan.content_hash : null,
+    matchesApproved: runPlan?.approved_hash ? runPlan.approved_hash === runPlan.content_hash : null,
     checks,
     warnings: checks.filter((c) => c.state === "warning").map((c) => c.label),
   };

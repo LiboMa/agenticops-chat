@@ -49,6 +49,11 @@ describe("runSummary — the first screen's latest-run block (MVP-2.8.0 S2)", ()
     expect(runSummary(run(), plan({ content_hash: "ffffffff00" })).matchesApproved).toBe(false);
   });
 
+  it("a plan approved before hashes were recorded: unknown, never «changed after approval» (E2E finding, C#2)", () => {
+    expect(runSummary(run(), plan({ approved_hash: null })).matchesApproved).toBeNull();
+    expect(runSummary(run(), plan({ approved_hash: "" })).matchesApproved).toBeNull();
+  });
+
   it("no post-checks: no check lines; no plan: the steps come from the run alone", () => {
     expect(runSummary(run({ post_check_results: [], post_check_binding: [] }), plan({ post_checks: [] })).checks).toEqual([]);
     const s = runSummary(run(), null);
