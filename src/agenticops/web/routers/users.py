@@ -1,9 +1,10 @@
 """/api/users — admins manage web accounts (MVP-2.8.0 S2 rework; rules in services/user_admin).
 
-Who may: an admin when sign-in is on (an API key must carry `admin` too), always enforced — RBAC shadow mode never
-widens it. With sign-in off every signed-in person is treated as an admin, but "yourself" is still the user the
-Bearer token names, so nobody disables or demotes themselves in either mode (web/deps.require_authenticated_user
-resolves it in both). Plain `def` handlers: the work is blocking DB I/O.
+Who may: a user whose own row is an admin (an API key must carry `admin` too), in BOTH sign-in modes — RBAC shadow
+mode never widens it. With sign-in off the rest of the API treats everyone as an admin, but these writes persist
+into the DB: a viewer that could reset the admin's password or promote itself would still be the admin once sign-in
+is turned on (S2 rework review). The web always signs in, so the caller's row is always known
+(web/deps.require_authenticated_user resolves the Bearer token in both modes). Plain `def` handlers.
 """
 import hashlib
 from typing import List
@@ -11,7 +12,6 @@ from typing import List
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from agenticops.config import settings
 from agenticops.services import user_admin
 from agenticops.web.deps import require_authenticated_user
 from agenticops.web.schemas import (PasswordResetResponse, UserCreateBody, UserCreatedResponse, UserPatchBody,
@@ -21,7 +21,7 @@ router = APIRouter(tags=["users"])
 
 
 async def users_admin(request: Request):
-    return await require_authenticated_user(request, admin=settings.api_auth_enabled)
+    return await require_authenticated_user(request, admin=True)
 
 
 def _refused(e: user_admin.UserAdminError) -> JSONResponse:
