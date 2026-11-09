@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useId } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useMemo, useId } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useNavigate } from "react-router-dom";
 import { useSearch } from "@/hooks/useSearch";
@@ -57,6 +57,13 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     const timer = setTimeout(() => setDebouncedQuery(query), 300);
     return () => clearTimeout(timer);
   }, [query]);
+
+  // Radix gives focus back to its Dialog.Trigger on close; the palette opens from a top-bar button or ⌘K, so it keeps
+  // the opener itself — captured in a layout effect, before the dialog's focus scope moves focus into the input.
+  const openerRef = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (open) openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -172,6 +179,10 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
         <Dialog.Overlay className="fixed inset-0 z-50 grid items-start justify-items-center overflow-y-auto bg-black/40 px-4 pt-[20vh]">
         <Dialog.Content
           onOpenAutoFocus={(e) => { e.preventDefault(); inputRef.current?.focus(); }}
+          onCloseAutoFocus={(e) => {
+            const opener = openerRef.current;
+            if (opener?.isConnected && opener !== document.body) { e.preventDefault(); opener.focus(); }
+          }}
           onKeyDown={handleKeyDown}
           className="w-full max-w-lg overflow-hidden rounded-xl border border-border bg-background shadow-2xl animate-[slideInRight_0.2s_ease-out]"
         >
