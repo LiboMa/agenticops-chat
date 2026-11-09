@@ -317,10 +317,13 @@ export interface AccountCreate {
 export interface AccountUpdate {
   name?: string;
   credential_source_type?: CredentialSourceType;
+  /** Merged into the stored credentials: a secret left out or empty is kept, a plain field sent as "" is deleted. */
   credentials?: Record<string, unknown>;
   regions?: string[];
   labels?: Record<string, string>;
   is_enabled?: boolean;
+  /** Remove every stored secret (access keys, tokens) — the only way an edit drops one. */
+  clear_secrets?: boolean;
 }
 
 export interface AvailableProfiles {

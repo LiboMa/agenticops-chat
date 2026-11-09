@@ -6,6 +6,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Badge } from "@/components/ui/Badge";
 import { formatShortDate } from "@/lib/formatDate";
+import { buildAccountCredentials, hasStoredSecrets } from "@/lib/accountForm";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useScanFocus } from "@/hooks/useScanFocus";
 import { useSettings, useUpdateSettings } from "@/hooks/useSettings";
@@ -187,6 +188,9 @@ function AccountFormModal({
     }
   }
   const [creds, setCreds] = useState<Record<string, string>>(initialCreds);
+  // The API never returns a stored secret (it shows it redacted) and keeps one an edit leaves empty
+  const storedSecrets = isEdit && hasStoredSecrets(initial?.credentials);
+  const [clearSecrets, setClearSecrets] = useState(false);
 
   const envQ = useEnvironmentInfo();
 
@@ -203,25 +207,13 @@ function AccountFormModal({
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const regionList = regions.split(",").map((r) => r.trim()).filter(Boolean);
-
-    const credentials: Record<string, unknown> = {};
-    if (sourceType === "assume_role") {
-      if (creds.role_arn) credentials.role_arn = creds.role_arn;
-      if (creds.external_id) credentials.external_id = creds.external_id;
-      // Optional base AK/SK for cross-partition AssumeRole
-      if (creds.access_key_id) credentials.access_key_id = creds.access_key_id;
-      if (creds.secret_access_key) credentials.secret_access_key = creds.secret_access_key;
-    } else if (sourceType === "static_keys") {
-      for (const f of fields) {
-        const val = creds[f.key]?.trim();
-        if (val) {
-          credentials[f.key] = f.key === "service_account_key" ? JSON.parse(val) : val;
-        }
-      }
-    }
+    const credentials = buildAccountCredentials({ method: sourceType as "assume_role" | "static_keys", fields, values: creds, isEdit });
 
     if (isEdit) {
-      onSave({ name, credential_source_type: sourceType, credentials, regions: regionList, is_enabled: isEnabled } as AccountUpdate);
+      onSave({
+        name, credential_source_type: sourceType, credentials, regions: regionList, is_enabled: isEnabled,
+        ...(clearSecrets ? { clear_secrets: true } : {}),
+      } as AccountUpdate);
     } else {
       onSave({ name, provider, credential_source_type: sourceType, credentials, regions: regionList, is_enabled: isEnabled } as AccountCreate);
     }
@@ -274,7 +266,7 @@ function AccountFormModal({
                     name="sourceType"
                     value={opt.value}
                     checked={sourceType === opt.value}
-                    onChange={() => { setSourceType(opt.value); setCreds({}); }}
+                    onChange={() => setSourceType(opt.value)}
                     className="mt-0.5"
                   />
                   <div>
@@ -299,7 +291,9 @@ function AccountFormModal({
               </div>
               <div className="pt-2 border-t border-dashed border-border">
                 <p className="text-xs text-muted-foreground mb-2">
-                  Base credentials for AssumeRole (leave empty to use platform default — Task Role / IRSA / Instance Profile):
+                  {storedSecrets
+                    ? "Base credentials for AssumeRole:"
+                    : "Base credentials for AssumeRole (leave empty to use platform default — Task Role / IRSA / Instance Profile):"}
                 </p>
                 <div className="space-y-2">
                   <div>
@@ -310,6 +304,10 @@ function AccountFormModal({
                     <label className="block text-sm font-medium text-foreground mb-1">Secret Access Key (optional)</label>
                     <input type="password" value={creds.secret_access_key ?? ""} onChange={(e) => setCreds({ ...creds, secret_access_key: e.target.value })} placeholder="Encrypted at rest" className={inputClass} />
                   </div>
+                  {storedSecrets && (
+                    <StoredKeys remove={clearSecrets} onRemove={setClearSecrets}
+                      removeHint="Use the platform identity instead (Task Role / IRSA / Instance Profile)" />
+                  )}
                 </div>
               </div>
             </div>
@@ -342,6 +340,10 @@ function AccountFormModal({
                   )}
                 </div>
               ))}
+              {storedSecrets && (
+                <StoredKeys remove={clearSecrets} onRemove={setClearSecrets}
+                  removeHint="Only the keys typed above are saved" />
+              )}
             </div>
           )}
 
@@ -358,6 +360,24 @@ function AccountFormModal({
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+/** An edited account that stores secrets: they are kept unless retyped, or removed on purpose. */
+function StoredKeys({ remove, onRemove, removeHint }: {
+  remove: boolean; onRemove: (remove: boolean) => void; removeHint: string;
+}) {
+  return (
+    <div className="p-2 rounded-lg bg-secondary text-xs text-muted-foreground space-y-1.5">
+      <p>{remove ? "The stored keys are removed when you save." : "Stored keys are kept — leave empty to keep them."}</p>
+      <label className="flex items-start gap-2 cursor-pointer">
+        <input type="checkbox" checked={remove} onChange={(e) => onRemove(e.target.checked)} className="mt-0.5 rounded border-border" />
+        <span>
+          <span className="text-foreground">Remove the stored keys</span>
+          <span className="block">{removeHint}</span>
+        </span>
+      </label>
     </div>
   );
 }
