@@ -829,8 +829,13 @@ def _validate_account(
 
 
 def _register_account(details: dict) -> None:
-    """Register account in DB (idempotent — skip if account_id exists)."""
+    """Register account in DB (idempotent — an existing name is updated). The given role fields are merged into the
+    stored credentials (credentials/store.merge_credentials), so stored keys and kubeconfigs stay. Audited as the CLI
+    user (services/account_audit)."""
+    from agenticops.auth.actor import cli_actor
+    from agenticops.credentials.store import get_credential_store
     from agenticops.models import CloudAccount, get_db_session
+    from agenticops.services import account_audit
 
     with get_db_session() as session:
         existing = (
@@ -840,12 +845,16 @@ def _register_account(details: dict) -> None:
         )
         if existing:
             console.print(f"    [dim]Account {details['account_id']} already registered, updating.[/dim]")
-            existing.credentials = {
+            before, stored_before = account_audit.snapshot(existing), dict(existing.credentials or {})
+            existing.credentials = get_credential_store().merge_update(stored_before, {
                 "account_id": details["account_id"],
                 "role_arn": details["role_arn"],
                 "external_id": details.get("external_id", ""),
-            }
+            })
             existing.regions = details["regions"]
+            account_audit.record(session, "update", existing, cli_actor(), via="cli", before=before,
+                                 after=account_audit.snapshot(existing),
+                                 secrets=account_audit.secrets_change(stored_before, existing.credentials))
             return
 
         account = CloudAccount(
@@ -860,6 +869,9 @@ def _register_account(details: dict) -> None:
             is_enabled=True,
         )
         session.add(account)
+        session.flush()
+        account_audit.record(session, "create", account, cli_actor(), via="cli", after=account_audit.snapshot(account),
+                             secrets=account_audit.secrets_change(None, account.credentials))
 
 
 def _auto_register_caller(region: str) -> int:

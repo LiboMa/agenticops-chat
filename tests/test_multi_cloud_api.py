@@ -162,3 +162,160 @@ def test_delete_account(client):
     assert resp.status_code == 204
     resp = client.get(f"/api/accounts/{account_id}")
     assert resp.status_code == 404
+
+
+# ── An edit keeps what the form cannot see; account changes are audited (2026-11-09) ──
+
+import json
+
+ROLE = "arn:aws:iam::111122223333:role/AgenticOpsRole"
+AK, SK = "AKIAEXAMPLEOLD12345", "old-secret-access-key-value"
+
+
+@pytest.fixture
+def store(monkeypatch):
+    from agenticops.credentials import store as store_mod
+    s = store_mod.CredentialStore(store_mod.LocalKeyBackend("account-api-test-key"))
+    monkeypatch.setattr(store_mod, "_store_instance", s)
+    return s
+
+
+def _row(account_id):
+    with get_db_session() as db:
+        a = db.query(CloudAccount).filter_by(id=account_id).one()
+        return dict(a.credentials or {}), list(a.regions or []), a.credential_source_type
+
+
+def _audit_rows(account_id):
+    from agenticops.audit.models import AuditLog
+    with get_db_session() as db:
+        rows = (db.query(AuditLog).filter_by(entity_type="account", entity_id=str(account_id))
+                .order_by(AuditLog.id).all())
+        return [{"action": r.action, "actor": r.actor, "user_id": r.user_id, "name": r.entity_name,
+                 "details": r.details, "old": r.old_values, "new": r.new_values} for r in rows]
+
+
+def _create_global(client):
+    resp = client.post("/api/accounts", json={
+        "name": "global", "provider": "aws", "credential_source_type": "assume_role",
+        "credentials": {"role_arn": ROLE, "external_id": "ext-1", "account_id": "111122223333",
+                        "access_key_id": AK, "secret_access_key": SK},
+        "regions": ["us-east-1"], "is_enabled": False})
+    assert resp.status_code == 201
+    return resp.json()["id"]
+
+
+def test_a_region_edit_keeps_the_stored_keys(client, store):
+    # exactly the body the Settings form sent on 2026-11-09: the form never sees the stored keys
+    aid = _create_global(client)
+    resp = client.put(f"/api/accounts/{aid}", json={
+        "name": "global", "credential_source_type": "assume_role",
+        "credentials": {"role_arn": ROLE, "external_id": "ext-1"},
+        "regions": ["us-east-1", "eu-west-1"], "is_enabled": False})
+    assert resp.status_code == 200
+    creds, regions, _ = _row(aid)
+    assert "_encrypted" in creds
+    plain = store.decrypt_credentials(creds)
+    assert (plain["access_key_id"], plain["secret_access_key"]) == (AK, SK)
+    assert plain["account_id"] == "111122223333"  # no input for it in assume_role mode: kept
+    assert regions == ["us-east-1", "eu-west-1"]
+
+
+def test_an_empty_or_null_credentials_body_changes_nothing(client, store):
+    aid = _create_global(client)
+    before = store.decrypt_credentials(_row(aid)[0])
+    for body in ({"credentials": {}}, {"credentials": None}):
+        assert client.put(f"/api/accounts/{aid}", json=body).status_code == 200
+        assert store.decrypt_credentials(_row(aid)[0]) == before
+
+
+def test_the_redacted_response_sent_back_changes_nothing(client, store):
+    aid = _create_global(client)
+    shown = client.get(f"/api/accounts/{aid}").json()
+    assert shown["credentials"]["_encrypted"] == "***REDACTED***"
+    assert client.put(f"/api/accounts/{aid}", json={"credentials": shown["credentials"]}).status_code == 200
+    plain = store.decrypt_credentials(_row(aid)[0])
+    assert (plain["access_key_id"], plain["secret_access_key"]) == (AK, SK)
+
+
+def test_a_new_secret_replaces_only_itself(client, store):
+    aid = _create_global(client)
+    assert client.put(f"/api/accounts/{aid}", json={"credentials": {"secret_access_key": "new-secret"}}).status_code == 200
+    plain = store.decrypt_credentials(_row(aid)[0])
+    assert (plain["access_key_id"], plain["secret_access_key"]) == (AK, "new-secret")
+
+
+def test_clear_secrets_removes_the_stored_keys(client, store):
+    aid = _create_global(client)
+    resp = client.put(f"/api/accounts/{aid}", json={"clear_secrets": True})
+    assert resp.status_code == 200
+    assert _row(aid)[0] == {"role_arn": ROLE, "external_id": "ext-1", "account_id": "111122223333"}
+    assert "***REDACTED***" not in resp.text
+
+
+def test_switching_to_access_keys_drops_the_role(client, store):
+    aid = _create_global(client)
+    assert client.put(f"/api/accounts/{aid}", json={
+        "credential_source_type": "static_keys",
+        "credentials": {"access_key_id": "AKIANEW", "secret_access_key": "new", "account_id": "111122223333"},
+    }).status_code == 200
+    creds, _, source = _row(aid)
+    plain = store.decrypt_credentials(creds)
+    assert source == "static_keys"
+    assert "role_arn" not in plain and "external_id" not in plain
+    assert (plain["access_key_id"], plain["secret_access_key"]) == ("AKIANEW", "new")
+
+
+def test_the_update_response_still_redacts(client, store):
+    aid = _create_global(client)
+    resp = client.put(f"/api/accounts/{aid}", json={"regions": ["us-west-2"]})
+    assert AK not in resp.text and SK not in resp.text
+    assert resp.json()["credentials"]["_encrypted"] == "***REDACTED***"
+
+
+def test_create_update_delete_are_audited_without_a_secret(client, store):
+    aid = _create_global(client)
+    blob = _row(aid)[0]["_encrypted"]
+    client.put(f"/api/accounts/{aid}", json={"credentials": {"role_arn": ROLE}, "regions": ["us-east-1", "eu-west-1"]})
+    client.put(f"/api/accounts/{aid}", json={"credentials": {"secret_access_key": "new-secret"}})
+    client.put(f"/api/accounts/{aid}", json={"clear_secrets": True})
+    assert client.delete(f"/api/accounts/{aid}").status_code == 204
+
+    rows = _audit_rows(aid)
+    assert [r["action"] for r in rows] == ["create", "update", "update", "update", "delete"]
+    assert {r["actor"] for r in rows} == {"web:anonymous"}
+    assert {r["name"] for r in rows} == {"global"}
+    assert [r["details"].get("secrets") for r in rows] == ["added", "kept", "replaced", "removed", None]
+    assert {r["details"]["via"] for r in rows} == {"web"}
+    created, regions_edit, _, cleared, deleted = rows
+    assert created["new"]["credentials"] == {"role_arn": ROLE, "external_id": "ext-1", "account_id": "111122223333"}
+    assert created["new"]["stored_secrets"] is True
+    assert (regions_edit["old"]["regions"], regions_edit["new"]["regions"]) == (["us-east-1"], ["us-east-1", "eu-west-1"])
+    assert (cleared["old"]["stored_secrets"], cleared["new"]["stored_secrets"]) == (True, False)
+    assert deleted["old"]["name"] == "global" and deleted["new"] is None
+    text = json.dumps(rows)
+    for secret in (AK, SK, "new-secret", blob):
+        assert secret not in text
+
+
+def test_a_refused_delete_writes_no_audit_row(client, store):
+    aid = _create_global(client)
+    from sqlalchemy.exc import IntegrityError
+    with patch("sqlalchemy.orm.Session.delete", side_effect=IntegrityError("DELETE", {}, Exception("fk"))):
+        assert client.delete(f"/api/accounts/{aid}").status_code == 409
+    assert [r["action"] for r in _audit_rows(aid)] == ["create"]
+
+
+def test_the_audit_rows_name_the_signed_in_user(client, store):
+    # with api_auth_enabled the session's user is the actor (web/deps.current_actor), never the request body
+    from agenticops.auth.actor import Actor
+    from agenticops.web import deps
+    from agenticops.web.app import app
+    app.dependency_overrides[deps.current_actor] = lambda: Actor("user", "alice@example.com", 7, ("read", "write"))
+    try:
+        aid = _create_global(client)
+        client.put(f"/api/accounts/{aid}", json={"regions": ["us-west-2"]})
+        client.delete(f"/api/accounts/{aid}")
+    finally:
+        app.dependency_overrides.pop(deps.current_actor, None)
+    assert {(r["actor"], r["user_id"]) for r in _audit_rows(aid)} == {("user:alice@example.com", 7)}
