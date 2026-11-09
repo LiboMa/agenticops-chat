@@ -892,7 +892,7 @@
   "home.restoreNotice": "The item you last had open no longer exists, or you can no longer access it.",
   "home.dismiss": "Dismiss",
   "nav.group.daily": "Daily work",
-  "nav.group.tools": "Operations tools",
+  "nav.group.tools": "Operations",
   "nav.group.administration": "Administration",
   "nav.overview": "Runtime overview",
   "nav.openIssues": "Open issues",
@@ -1329,5 +1329,6 @@
   "schedules.run.submitFailed": "Couldn't submit",
   "schedules.runNow": "Run now",
   "schedules.noRuns": "No runs yet.",
-  "messaging.noLogs": "No delivery logs yet."
+  "messaging.noLogs": "No delivery logs yet.",
+  "nav.inbox": "Workbench"
 }

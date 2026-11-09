@@ -8,7 +8,7 @@ export type Home = "resume" | "chat" | "issues" | "reports";
 // tests/fixtures/ui_last_route_cases.json pins both.
 const ROUTES = [
   /^\/app\/(chat|issues|reports|changes|plans|resources|schedules|skills)(\/[A-Za-z0-9][A-Za-z0-9_-]{0,99})?$/,
-  /^\/app\/(audit|overview|agent-metrics|galaxy|security|settings|signals)$/,
+  /^\/app\/(audit|overview|agent-metrics|galaxy|security|settings|signals|inbox)$/,
 ];
 
 export function allowedRoute(route: unknown): route is string {

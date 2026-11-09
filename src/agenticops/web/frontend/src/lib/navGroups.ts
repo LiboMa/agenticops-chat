@@ -23,18 +23,22 @@ export interface NavGroup {
 
 export const NAV_GROUPS: NavGroup[] = [
   {
+    // MVP-2.8.0 S2: the design's daily work — the workbench first, then the pages a person works in every day
     id: "daily", labelKey: "nav.group.daily", items: [
+      { id: "inbox", to: "/app/inbox", icon: "inbox", labelKey: "nav.inbox" },
       { id: "chat", to: "/app/chat", icon: "chat", labelKey: "nav.chat" },
       { id: "issues", to: "/app/issues", icon: "clock", labelKey: "nav.issues", badge: true, owns: ["/app/signals"] },
+      // MVP-2.7.0 S3: Changes and Audit are tabs of Plans & changes; their old paths still belong here
+      { id: "plans", to: "/app/plans", icon: "clipboard", labelKey: "nav.plans", owns: ["/app/changes", "/app/audit"] },
+      { id: "security", to: "/app/security", icon: "shield", labelKey: "nav.security" },
       { id: "reports", to: "/app/reports", icon: "file", labelKey: "nav.reports" },
     ],
   },
   {
     id: "tools", labelKey: "nav.group.tools", items: [
-      // MVP-2.7.0 S3: Changes and Audit are tabs of Plans & changes; their old paths still belong here
-      { id: "plans", to: "/app/plans", icon: "clipboard", labelKey: "nav.plans", owns: ["/app/changes", "/app/audit"] },
-      { id: "resources", to: "/app/resources", icon: "server", labelKey: "nav.resources" },
       { id: "schedules", to: "/app/schedules", icon: "calendar", labelKey: "nav.schedules" },
+      { id: "resources", to: "/app/resources", icon: "server", labelKey: "nav.resources" },
+      { id: "settings", to: "/app/settings", icon: "cog", labelKey: "nav.settings" },
     ],
   },
   {
@@ -43,8 +47,6 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: "agent-metrics", to: "/app/agent-metrics", icon: "barchart", labelKey: "nav.agentMetrics" },
       { id: "skills", to: "/app/skills", icon: "puzzle", labelKey: "nav.skills" },
       { id: "galaxy", to: "/app/galaxy", icon: "galaxy", labelKey: "nav.galaxy" },
-      { id: "security", to: "/app/security", icon: "shield", labelKey: "nav.security" },
-      { id: "settings", to: "/app/settings", icon: "cog", labelKey: "nav.settings" },
     ],
   },
 ];
@@ -74,7 +76,9 @@ export function migrateNavOrder(v1: unknown): NavOrder {
   const defaults = defaultOrder();
   if (!Array.isArray(v1) || !v1.every((x) => typeof x === "string")) return defaults;
   const normalized = reorderNavIds(v1 as string[], V1_DEFAULT, V1_RENAMES);
-  if (same(normalized, V1_DEFAULT)) return defaults;
+  // never reordered = the v1 default, wherever the old "plans" entry put changes / audit (both are now "plans")
+  const merged = (ids: string[]) => ids.filter((id) => id !== "changes" && id !== "audit");
+  if (same(merged(normalized), merged(V1_DEFAULT))) return defaults;
   const renamed = [...new Set(normalized.map((id) => V1_TO_V2[id] ?? id))];
   const out = {} as NavOrder;
   for (const g of NAV_GROUPS) {

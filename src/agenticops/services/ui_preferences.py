@@ -25,7 +25,7 @@ FIELDS = tuple(DEFAULTS)
 # The frontend keeps the same list (lib/home.ts); tests/fixtures/ui_last_route_cases.json pins both.
 _ROUTES = (
     re.compile(r"/app/(chat|issues|reports|changes|plans|resources|schedules|skills)(/[A-Za-z0-9][A-Za-z0-9_-]{0,99})?"),
-    re.compile(r"/app/(audit|overview|agent-metrics|galaxy|security|settings|signals)"),
+    re.compile(r"/app/(audit|overview|agent-metrics|galaxy|security|settings|signals|inbox)"),
 )
 
 

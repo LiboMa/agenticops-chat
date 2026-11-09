@@ -2,12 +2,13 @@ import { describe, it, expect } from "vitest";
 import { NAV_GROUPS, V1_DEFAULT, breadcrumbFor, defaultOrder, entryForPath, migrateNavOrder, moveWithinGroup, normalizeOrder } from "@/lib/navGroups";
 
 describe("NAV_GROUPS — the blue/white sidebar", () => {
-  it("daily work, operations tools, administration; every old entry kept, Settings joins administration", () => {
+  it("MVP-2.8.0 S2: daily work = workbench, chat, issues, plans & changes, security, reports; every old entry kept", () => {
     expect(NAV_GROUPS.map((g) => [g.id, g.items.map((i) => i.id)])).toEqual([
-      ["daily", ["chat", "issues", "reports"]],
-      ["tools", ["plans", "resources", "schedules"]],
-      ["administration", ["overview", "agent-metrics", "skills", "galaxy", "security", "settings"]],
+      ["daily", ["inbox", "chat", "issues", "plans", "security", "reports"]],
+      ["tools", ["schedules", "resources", "settings"]],
+      ["administration", ["overview", "agent-metrics", "skills", "galaxy"]],
     ]);
+    expect(NAV_GROUPS[0].items[0]).toMatchObject({ id: "inbox", to: "/app/inbox", icon: "inbox" });
     const all = NAV_GROUPS.flatMap((g) => g.items.map((i) => i.id));
     const renamed: Record<string, string> = { dashboard: "overview", changes: "plans", audit: "plans" };  // S3 merged changes + audit
     for (const old of V1_DEFAULT) expect(all).toContain(renamed[old] ?? old);
@@ -30,30 +31,42 @@ describe("migrateNavOrder", () => {
     const own = ["security", "galaxy", "reports", "chat", "issues", "schedules", "resources", "audit", "changes",
                  "dashboard", "agent-metrics", "skills"];
     expect(migrateNavOrder(own)).toEqual({
-      daily: ["reports", "chat", "issues"],
-      tools: ["schedules", "resources", "plans"],
-      administration: ["security", "galaxy", "overview", "agent-metrics", "skills", "settings"],
+      daily: ["security", "reports", "chat", "issues", "plans", "inbox"],
+      tools: ["schedules", "resources", "settings"],
+      administration: ["galaxy", "overview", "agent-metrics", "skills"],
     });
   });
 });
 
 describe("normalizeOrder / moveWithinGroup", () => {
   it("a v2 order saved with changes + audit keeps the merged entry where changes was", () => {
-    expect(normalizeOrder({ tools: ["schedules", "changes", "resources", "audit"] }).tools).toEqual(["schedules", "plans", "resources"]);
+    expect(normalizeOrder({ daily: ["chat", "changes", "issues", "audit"] }).daily)
+      .toEqual(["inbox", "chat", "plans", "security", "reports", "issues"]);
+  });
+  it("MVP-2.8.0 S2: a v2 order saved before the move — plans and security join daily work, settings joins the tools, the workbench comes first, the user's own order stays", () => {
+    const saved = { daily: ["reports", "chat", "issues"], tools: ["schedules", "plans", "resources"],
+                    administration: ["galaxy", "security", "overview", "agent-metrics", "skills", "settings"] };
+    expect(normalizeOrder(saved)).toEqual({
+      daily: ["inbox", "reports", "chat", "issues", "plans", "security"],
+      tools: ["schedules", "resources", "settings"],
+      administration: ["galaxy", "overview", "agent-metrics", "skills"],
+    });
   });
   it("old change paths belong to Plans & changes, with the right reference", () => {
     expect(entryForPath("/app/changes/3")?.entry.id).toBe("plans");
+    expect(entryForPath("/app/inbox")?.entry.id).toBe("inbox");
     expect(breadcrumbFor("/app/changes/3")).toEqual({ sectionKey: "nav.plans", object: "C#3" });
     expect(breadcrumbFor("/app/plans/12")).toEqual({ sectionKey: "nav.plans", object: "#12" });
     expect(breadcrumbFor("/app/audit")).toEqual({ sectionKey: "nav.plans", object: null });
   });
   it("fills entries added since the order was saved and drops ones that are gone", () => {
-    expect(normalizeOrder({ daily: ["reports", "gone", "chat"] }).daily).toEqual(["reports", "chat", "issues"]);
+    expect(normalizeOrder({ daily: ["reports", "gone", "chat"] }).daily)
+      .toEqual(["inbox", "reports", "chat", "issues", "plans", "security"]);
     expect(normalizeOrder(undefined)).toEqual(defaultOrder());
   });
   it("moves only inside one group", () => {
-    const o = moveWithinGroup(defaultOrder(), "tools", "schedules", "plans");
-    expect(o.tools).toEqual(["schedules", "plans", "resources"]);
+    const o = moveWithinGroup(defaultOrder(), "tools", "settings", "schedules");
+    expect(o.tools).toEqual(["settings", "schedules", "resources"]);
     expect(o.daily).toEqual(defaultOrder().daily);
   });
 });
@@ -61,7 +74,8 @@ describe("normalizeOrder / moveWithinGroup", () => {
 describe("entryForPath", () => {
   it.each([
     ["/app/chat/abc", "daily", "chat"], ["/app/issues/5", "daily", "issues"], ["/app/signals", "daily", "issues"],
-    ["/app/changes/3", "tools", "plans"], ["/app/plans/9", "tools", "plans"], ["/app/resources/12", "tools", "resources"],
+    ["/app/changes/3", "daily", "plans"], ["/app/plans/9", "daily", "plans"], ["/app/resources/12", "tools", "resources"],
+    ["/app/inbox", "daily", "inbox"], ["/app/security", "daily", "security"], ["/app/settings", "tools", "settings"],
     ["/app/overview", "administration", "overview"], ["/app/skills/linux-admin", "administration", "skills"],
   ])("%s → %s / %s", (path, group, id) => {
     expect(entryForPath(path)).toMatchObject({ group, entry: { id } });

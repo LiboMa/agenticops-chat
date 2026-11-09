@@ -18,7 +18,8 @@
     "/app/settings",
     "/app/signals",
     "/app/plans",
-    "/app/plans/12"
+    "/app/plans/12",
+    "/app/inbox"
   ],
   "reject": [
     "",
@@ -38,6 +39,7 @@
     "/app/issues/%2e%2e",
     "/app\\issues",
     "/APP/issues",
-    "/app/plans?tab=audit"
+    "/app/plans?tab=audit",
+    "/app/inbox/3"
   ]
 }
