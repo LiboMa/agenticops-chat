@@ -224,7 +224,7 @@ def test_the_endpoint_shape_and_validation(db):
     try:
         c = TestClient(app)
         body = c.get("/api/ui/attention").json()
-        assert set(body) == {"items", "total", "next_cursor", "generated_at"} and body["total"] == 1
+        assert set(body) == {"items", "total", "next_cursor", "generated_at", "counts"} and body["total"] == 1
         assert c.get("/api/ui/attention?limit=0").status_code == 422
         assert c.get("/api/ui/attention?cursor=abc").status_code == 422
     finally:
@@ -249,3 +249,99 @@ def test_a_not_started_plan_row_counts_toward_the_fix_plans_tab(db):
     assert row["reason"] == "execution_not_started"
     assert (row["entity"]["entity_type"], row["entity"]["entity_id"]) == ("fix_plan", pid)
     assert row["route"] == f"/app/issues/{iid}#run"
+
+
+# ── MVP-2.8.0 S2: the workbench's fields, filters, sort and counts ──────────────────────────────────────────────
+
+def _anchor(iid, *, name="web-01", rtype="EC2", region="us-west-2", resource_id="i-abc"):
+    from agenticops.models import CloudResource
+    s = get_session()
+    try:
+        r = CloudResource(account_id=1, provider="aws", region=region, resource_type=rtype, resource_id=resource_id,
+                          name=name, raw_data={})
+        s.add(r); s.flush()
+        s.query(HealthIssue).filter_by(id=iid).update({"resource_ref": r.id, "severity": "high", "account_id": 1})
+        s.commit()
+        return r.id
+    finally:
+        s.close()
+
+
+def test_a_row_carries_severity_resource_region_and_who_it_waits_on(db):
+    iid, _ = _issue("fix_planned", plan="pending_approval")
+    ref = _anchor(iid)
+    row = _row(ADMIN, f"I{iid}")
+    assert row["severity"] == "high" and row["risk_level"] is None
+    assert row["resource"] == {"ref": ref, "name": "web-01", "type": "EC2", "resource_id": "i-abc"}
+    assert row["region"] == "us-west-2"
+    assert row["waiting_on"] == "approver"
+    cid = _change("planned", requested_by="user:alice")
+    crow = _row(BOB, f"C{cid}")
+    assert crow["risk_level"] == "L1" and crow["severity"] is None and crow["waiting_on"] == "approver"
+
+
+def test_reason_filter_keeps_the_counts_of_every_reason(db):
+    appr, _ = _issue("fix_planned", plan="pending_approval")
+    acc, _ = _issue("fix_executed", plan="executed", run=("succeeded", "pending_acceptance"))
+    page = att.attention_page(ADMIN, now=NOW, reason=["approval_required"])
+    assert [i["id"] for i in page["items"]] == [f"I{appr}"] and page["total"] == 1
+    assert page["counts"] == {"approval_required": 1, "verification_required": 1}
+
+
+def test_search_by_ref_number_or_resource_name(db):
+    iid, _ = _issue("fix_planned", plan="pending_approval", title="Disk full")
+    other, _ = _issue("fix_planned", plan="pending_approval", title="Other")
+    _anchor(iid, name="db-primary", resource_id="i-9f")
+    for q in (f"I#{iid}", str(iid), "db-primary", "disk", "I-9F"):
+        ids = [i["id"] for i in att.attention_page(ADMIN, now=NOW, q=q)["items"]]
+        assert f"I{iid}" in ids and f"I{other}" not in ids, q
+
+
+def test_waiting_longest_comes_first_by_default(db):
+    newer, p1 = _issue("fix_planned", plan="pending_approval")
+    older, p2 = _issue("fix_planned", plan="pending_approval")
+    s = get_session()
+    s.query(FixPlan).filter_by(id=p1).update({"updated_at": NOW - timedelta(minutes=5)})
+    s.query(FixPlan).filter_by(id=p2).update({"updated_at": NOW - timedelta(hours=3)})
+    s.commit(); s.close()
+    assert [i["id"] for i in _items(ADMIN)][:2] == [f"I{older}", f"I{newer}"]
+    assert [i["id"] for i in _items(ADMIN, sort="newest")][:2] == [f"I{newer}", f"I{older}"]
+
+
+def test_issue_waits_gives_every_issue_its_phase_and_since(db):
+    approved, pid = _issue("fix_approved", plan="approved")   # waits on the executor: not a human row
+    s = get_session()
+    try:
+        issue = s.query(HealthIssue).filter_by(id=approved).one()
+        waits = att.issue_waits(s, [issue], now=NOW)
+    finally:
+        s.close()
+    w = waits[approved]
+    assert w.phase.sub in ("notQueued", "executing") and w.since is not None
+
+
+def test_the_endpoint_takes_reason_q_and_sort_and_refuses_an_unknown_reason(db):
+    from agenticops.web import deps
+    from agenticops.web.app import app
+    from agenticops.web.routers import ui as ui_router
+    _issue("fix_planned", plan="pending_approval")
+    app.dependency_overrides[deps.current_actor] = lambda: ADMIN
+    app.dependency_overrides[ui_router.signed_in_user] = lambda: SimpleNamespace(id=3)
+    try:
+        c = TestClient(app)
+        assert c.get("/api/ui/attention?reason=approval_required&q=t&sort=severity").status_code == 200
+        assert c.get("/api/ui/attention?reason=nope").status_code == 422
+        assert c.get("/api/ui/attention?sort=random").status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_a_stale_resource_ref_of_another_account_shows_no_resource(db):
+    """SQLite does not enforce ON DELETE SET NULL: a ref may point at a row another account now uses (health_overlay)."""
+    iid, _ = _issue("fix_planned", plan="pending_approval")
+    _anchor(iid)
+    s = get_session()
+    s.query(HealthIssue).filter_by(id=iid).update({"account_id": 2})
+    s.commit(); s.close()
+    row = _row(ADMIN, f"I{iid}")
+    assert row["resource"] is None and row["region"] is None

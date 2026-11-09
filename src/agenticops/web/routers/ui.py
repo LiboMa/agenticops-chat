@@ -7,7 +7,7 @@ says what this deployment can do; it never carries a secret or connector configu
 
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Response
+from fastapi import HTTPException, APIRouter, Depends, Header, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -143,8 +143,17 @@ async def api_update_preferences(response: Response, data: PreferencesUpdate, us
 @router.get("/api/ui/attention")
 def api_ui_attention(account_id: Optional[int] = Query(None, ge=1), limit: int = Query(25, ge=1, le=100),
                      cursor: Optional[str] = Query(None, pattern=r"^\d{1,6}$"),
+                     reason: Optional[str] = Query(None, max_length=200),
+                     q: Optional[str] = Query(None, max_length=200),
+                     sort: str = Query("waiting_longest", pattern="^(waiting_longest|newest|severity)$"),
                      actor: Actor = Depends(current_actor), _user=Depends(signed_in_user)) -> dict:
     """Work that waits on this actor (contract workspace-ui-1 AttentionPage, plus `ref` / `reason_detail` and the
-    reasons review_required / execution_not_started). Plain def: it is DB work (S1 rule)."""
+    reasons review_required / execution_not_started). MVP-2.8.0 S2: `reason` (comma list) / `q` / `sort`, and each
+    item's severity / risk level / resource / region / waiting_on, `counts` per reason. Plain def: DB work (S1)."""
     from agenticops.services.attention import attention_page
-    return attention_page(actor, account_id=account_id, limit=limit, offset=int(cursor or 0))
+    reasons = [r for r in (reason or "").split(",") if r] or None
+    try:
+        return attention_page(actor, account_id=account_id, reason=reasons, q=q, sort=sort, limit=limit,
+                              offset=int(cursor or 0))
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
