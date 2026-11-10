@@ -21,8 +21,11 @@ export function confirmedIds(items: ChecklistItem[], ticked: ReadonlySet<number>
   return items.flatMap((item, i) => (item.id && ticked.has(i) ? [item.id] : []));
 }
 
-/** The acceptance's reason (the API needs 1–2000 characters): the person's note, else what was checked. */
-export function acceptReason(note: string, checked: number, t: (k: string) => string): string {
+/** The acceptance's reason (the API needs 1–2000 characters): the person's note, else what was checked — the
+ *  declared checks only (the overall confirmation carries no id), and with none, the overall confirmation in words. */
+export function acceptReason(note: string, items: ChecklistItem[], t: (k: string) => string): string {
   const own = note.trim().slice(0, 2000);
-  return own || t("accept.checklist.reason").replace("{n}", String(checked));
+  if (own) return own;
+  const checks = items.filter((item) => item.id !== null).length;
+  return checks > 0 ? t("accept.checklist.reason").replace("{n}", String(checks)) : t("accept.checklist.reasonOverall");
 }

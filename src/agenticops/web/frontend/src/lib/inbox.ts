@@ -14,6 +14,17 @@ const REASONS: Record<Exclude<InboxTab, "all">, string[]> = {
   confirm: ["review_required", "clarification_required"],
 };
 
+/** The decision tabs' keyboard (S2 leftover; WAI-ARIA tabs): ←/→ move and wrap, Home / End go to the ends;
+ *  any other key is not the tab bar's (null). */
+export function nextTab<T extends string>(tabs: readonly T[], current: T, key: string): T | null {
+  const i = Math.max(0, tabs.indexOf(current));
+  if (key === "ArrowRight") return tabs[(i + 1) % tabs.length];
+  if (key === "ArrowLeft") return tabs[(i - 1 + tabs.length) % tabs.length];
+  if (key === "Home") return tabs[0];
+  if (key === "End") return tabs[tabs.length - 1];
+  return null;
+}
+
 export function tabReasons(tab: InboxTab): string[] | null {
   return tab === "all" ? null : REASONS[tab];
 }

@@ -12,7 +12,7 @@ import { ChangeDetailView } from "@/pages/ChangeDetail";
 import { SPLIT_MEDIA } from "@/lib/caseQueue";
 import { formatUtcTime } from "@/lib/formatDate";
 import {
-  INBOX_TABS, inboxParams, inboxSearch, parseItem, selectionState, tabCount, tabReasons, type InboxParams, type InboxTab,
+  INBOX_TABS, inboxParams, inboxSearch, nextTab, parseItem, selectionState, tabCount, tabReasons, type InboxParams, type InboxTab,
 } from "@/lib/inbox";
 import type { AttentionItem } from "@/lib/attention";
 
@@ -105,7 +105,8 @@ export default function Inbox() {
   if (!wide && params.item) return pane;
 
   const queue = (
-    <div className={wide && !compact ? "flex min-h-0 flex-col gap-3" : "space-y-3"}>
+    <div id="inbox-queue" role="tabpanel" aria-labelledby={`inbox-tab-${params.decision}`}
+         className={wide && !compact ? "flex min-h-0 flex-col gap-3" : "space-y-3"}>
       <QueryState query={pages} isEmpty={(d) => d.pages.every((p) => p.items.length === 0)}
                   emptyText={params.q || params.decision !== "all" ? t("inbox.emptyFiltered") : t("inbox.empty")}
                   onRetry={() => void pages.refetch()}>
@@ -142,11 +143,20 @@ export default function Inbox() {
       </header>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div role="tablist" aria-label={t("nav.inbox")} className="flex flex-wrap gap-1 border-b border-border">
+        {/* WAI-ARIA tabs (S2 leftover): one tab stop, ←/→ / Home / End move and select, the queue is the panel */}
+        <div role="tablist" aria-label={t("nav.inbox")} className="flex flex-wrap gap-1 border-b border-border"
+             onKeyDown={(e) => {
+               const next = nextTab(INBOX_TABS, params.decision, e.key);
+               if (!next) return;
+               e.preventDefault();
+               go({ decision: next, item: null });
+               document.getElementById(`inbox-tab-${next}`)?.focus();
+             }}>
           {INBOX_TABS.map((tab) => {
             const active = params.decision === tab;
             return (
-              <button key={tab} type="button" role="tab" aria-selected={active} onClick={() => go({ decision: tab, item: null })}
+              <button key={tab} id={`inbox-tab-${tab}`} type="button" role="tab" aria-selected={active}
+                      aria-controls="inbox-queue" tabIndex={active ? 0 : -1} onClick={() => go({ decision: tab, item: null })}
                       className={`-mb-px border-b-2 px-3 py-2 text-sm ${active ? "border-primary font-medium text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
                 {t(TAB_KEYS[tab])}
                 <span className="ml-1.5 tabular-nums text-xs opacity-80">{first ? tabCount(first.counts, tab) : "…"}</span>

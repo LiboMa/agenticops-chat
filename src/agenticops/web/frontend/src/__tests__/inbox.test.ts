@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import en from "@/locales/en.json";
 import zh from "@/locales/zh.json";
 import {
-  INBOX_TABS, inboxParams, inboxSearch, parseItem, selectionState, tabCount, tabReasons, waitFact, waitLabel,
+  INBOX_TABS, inboxParams, inboxSearch, nextTab, parseItem, selectionState, tabCount, tabReasons, waitFact, waitLabel,
 } from "@/lib/inbox";
 
 const tEn = (k: string) => (en as Record<string, string>)[k] ?? k;
@@ -101,5 +101,18 @@ describe("selectionState with what the page knows (S2 review)", () => {
   });
   it("everything loaded and it is not there: gone", () => {
     expect(selectionState([{ id: "I2" }], "I9", { ready: true, hasMore: false })).toBe("gone");
+  });
+});
+
+describe("the decision tabs take the keyboard (S2 leftover)", () => {
+  it("arrows move and wrap, Home / End go to the ends, any other key is not ours", () => {
+    expect(nextTab(INBOX_TABS, "all", "ArrowRight")).toBe("approval");
+    expect(nextTab(INBOX_TABS, "confirm", "ArrowRight")).toBe("all");
+    expect(nextTab(INBOX_TABS, "all", "ArrowLeft")).toBe("confirm");
+    expect(nextTab(INBOX_TABS, "failed", "ArrowLeft")).toBe("acceptance");
+    expect(nextTab(INBOX_TABS, "failed", "Home")).toBe("all");
+    expect(nextTab(INBOX_TABS, "approval", "End")).toBe("confirm");
+    expect(nextTab(INBOX_TABS, "all", "Enter")).toBeNull();
+    expect(nextTab(INBOX_TABS, "all", "ArrowDown")).toBeNull();
   });
 });

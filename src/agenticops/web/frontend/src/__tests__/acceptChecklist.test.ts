@@ -30,9 +30,15 @@ describe("the acceptance checklist (MVP-2.8.0 S2)", () => {
     expect(confirmedIds(items, new Set([1]))).toEqual([]);
   });
   it("a note is the reason; without one the reason says what was checked (the API needs 1–2000 chars)", () => {
-    expect(acceptReason("  looked at the console ", 2, t)).toBe("looked at the console");
-    expect(acceptReason("", 2, t)).toBe(t("accept.checklist.reason").replace("{n}", "2"));
-    expect(acceptReason("x".repeat(2500), 1, t)).toHaveLength(2000);
+    const two = checklistItems(summary([
+      { id: "pc-1", label: "a", state: "pending" }, { id: "pc-2", label: "b", state: "warning" },
+    ]), t);
+    expect(acceptReason("  looked at the console ", two, t)).toBe("looked at the console");
+    expect(acceptReason("x".repeat(2500), two, t)).toHaveLength(2000);
+    // the count is the checks, never the overall confirmation after them (S2 leftover: two checks read «3»)
+    expect(acceptReason("", two, t)).toBe(t("accept.checklist.reason").replace("{n}", "2"));
+    // no check to verify: no «0 items», the overall confirmation in words
+    expect(acceptReason("", checklistItems(summary([]), t), t)).toBe(t("accept.checklist.reasonOverall"));
   });
 });
 

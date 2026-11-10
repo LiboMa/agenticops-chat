@@ -5,6 +5,7 @@ import { useApproveFixPlan, useExecuteFixPlan, useFixPlan, useRejectFixPlan } fr
 import { useFixExecutions } from "@/hooks/useFixExecutions";
 import { useEntityAudit } from "@/hooks/useEntityAudit";
 import { useAccounts } from "@/hooks/useAccounts";
+import { useReadOnly } from "@/hooks/useBootstrap";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { ApiError } from "@/api/client";
 import { PlanView } from "@/components/plans/PlanView";
@@ -33,6 +34,7 @@ export default function PlanDetail() {
   const q = useFixPlan(id, pollMs);
   const runs = useFixExecutions(id, pollMs);
   const accounts = useAccounts();
+  const readOnly = useReadOnly();
   const nextPoll = q.data ? planDetailModel(q.data, runs.data).pollMs : false;
   useEffect(() => setPollMs(nextPoll), [nextPoll]);
   const audit = useEntityAudit("fix_plan", id);
@@ -93,7 +95,8 @@ export default function PlanDetail() {
       {latestRun && (
         <section className="space-y-3 rounded-lg border border-border bg-card p-4">
           <RunSummaryBlock summary={summarizeRun(latestRun, plan)} t={t} />
-          {latestRun.verification_status === "pending_acceptance" && plan.health_issue_id && (
+          {/* a viewer cannot accept, so the page does not send one there (S2 leftover) */}
+          {latestRun.verification_status === "pending_acceptance" && plan.health_issue_id && !readOnly && (
             <Link to={`/app/issues/${plan.health_issue_id}#accept`}
                   className="inline-flex rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary-hover">
               {t("plans.detail.goAccept")}

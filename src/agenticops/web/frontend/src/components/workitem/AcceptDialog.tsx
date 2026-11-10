@@ -75,7 +75,7 @@ export function AcceptDialog({ summary, busy, error, onConfirm, onClose }: {
             <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
               <span className="text-xs text-muted-foreground">{t("accept.dialog.binding")}</span>
               <button type="button" disabled={!ready}
-                      onClick={() => onConfirm({ reason: acceptReason(note, items.length, t), confirmedChecks: confirmedIds(items, ticked) })}
+                      onClick={() => onConfirm({ reason: acceptReason(note, items, t), confirmedChecks: confirmedIds(items, ticked) })}
                       className="min-h-[40px] rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-50">
                 {t("accept.dialog.confirm")}
               </button>
