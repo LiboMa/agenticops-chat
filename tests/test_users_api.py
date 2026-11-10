@@ -252,4 +252,4 @@ def test_every_change_is_audited_and_never_the_password(env):
 def test_the_routes_are_plain_def():
     from agenticops.web.routers import users
     endpoints = [r.endpoint for r in users.router.routes]
-    assert len(endpoints) == 8 and not any(inspect.iscoroutinefunction(e) for e in endpoints)   # + 3 key routes + delete
+    assert len(endpoints) == 9 and not any(inspect.iscoroutinefunction(e) for e in endpoints)   # + 4 key routes + delete

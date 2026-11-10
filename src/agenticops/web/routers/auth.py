@@ -11,6 +11,7 @@ from agenticops.web.schemas import (
     APIKeyCreate,
     APIKeyCreatedResponse,
     APIKeyResponse,
+    APIKeyRotate,
     LoginRequest,
     LoginResponse,
     PasswordChangeRequest,
@@ -107,6 +108,19 @@ def api_create_api_key(request_data: APIKeyCreate, user=Depends(_session_user)):
     try:
         row, key = api_keys.create_key(user, name=request_data.name, permissions=request_data.permissions,
                                        expires_days=request_data.expires_days, caller=user)
+    except api_keys.ApiKeyError as e:
+        return _key_refused(e)
+    return {**row, "key": key}
+
+
+@router.post("/api/api-keys/{key_id}/rotate", response_model=APIKeyCreatedResponse, status_code=201)
+def api_rotate_api_key(key_id: int, body: APIKeyRotate, user=Depends(_session_user)):
+    """Update one of the signed-in user's keys (MVP-2.8.0): a new key under the same name, the old one dead at once;
+    the new full key is in this response only."""
+    from agenticops.services import api_keys
+    try:
+        row, key = api_keys.rotate_key(key_id, owner_id=user.id, permissions=body.permissions,
+                                       expires_days=body.expires_days, caller=user, by_admin=False)
     except api_keys.ApiKeyError as e:
         return _key_refused(e)
     return {**row, "key": key}

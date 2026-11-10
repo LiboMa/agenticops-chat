@@ -178,11 +178,11 @@ def test_keys_are_audited_and_never_the_key(env):
 def test_the_key_routes_are_plain_def():
     from agenticops.web.routers import auth as auth_router
     from agenticops.web.routers import users as users_router
-    names = {"api_create_api_key", "api_list_api_keys", "api_revoke_api_key", "api_change_password"}
+    names = {"api_create_api_key", "api_list_api_keys", "api_revoke_api_key", "api_change_password", "api_rotate_api_key"}
     eps = {r.endpoint.__name__: r.endpoint for r in auth_router.router.routes if r.endpoint.__name__ in names}
     assert set(eps) == names and not any(inspect.iscoroutinefunction(e) for e in eps.values())
     uk = [r.endpoint for r in users_router.router.routes if "api-keys" in r.path]
-    assert len(uk) == 3 and not any(inspect.iscoroutinefunction(e) for e in uk)   # list, revoke, issue
+    assert len(uk) == 4 and not any(inspect.iscoroutinefunction(e) for e in uk)   # list, revoke, issue, rotate
 
 
 # ── an admin issues a key for someone (MVP-2.8.0 user management, owner 2026-11-10) ───────────────────────
@@ -251,3 +251,90 @@ def test_only_a_signed_in_admin_issues_keys(env):
     admin_key = AuthService.create_api_key(user_id=root.id, name="admin", permissions=["read", "write", "admin"])
     r = _issue(env, admin_key, ops.id)
     assert (r.status_code, r.json()["detail"]["code"]) == (403, "session_required")
+
+
+# ── rotate: a new key under the same name, the old one dead at once (MVP-2.8.0, owner 2026-11-10) ─────────
+
+
+def _rotate(env, tok, key_id, user_id=None, **body):
+    path = f"/api/users/{user_id}/api-keys/{key_id}/rotate" if user_id else f"/api/api-keys/{key_id}/rotate"
+    return env.client.post(path, headers=H(tok), json={"permissions": ["read"], "expires_days": 30, **body})
+
+
+def test_rotate_kills_the_old_key_at_once_and_keeps_the_name(env):
+    ops, tok = _user("ops")
+    old = _create(env, tok, name="Claude Code", permissions=["read", "write"]).json()
+    r = _rotate(env, tok, old["id"], permissions=["read", "write"], expires_days=90)
+    assert r.status_code == 201, r.text
+    new = r.json()
+    assert new["name"] == "Claude Code" and new["id"] != old["id"] and new["key"] != old["key"]
+    assert env.client.get("/api/health-issues?limit=1", headers=H(old["key"])).status_code == 401
+    assert env.client.get("/api/health-issues?limit=1", headers=H(new["key"])).status_code == 200
+    listed = env.client.get("/api/api-keys", headers=H(tok)).json()
+    assert [(k["id"], k["name"], k["permissions"]) for k in listed] == [(new["id"], "Claude Code", ["read", "write"])]
+
+
+def test_a_refused_rotation_leaves_the_old_key_alive(env):
+    from agenticops.auth import AuthService
+    _, view = _user("view", "viewer")
+    old = _create(env, view).json()
+    r = _rotate(env, view, old["id"], permissions=["read", "write"])
+    assert (r.status_code, r.json()["detail"]["code"]) == (403, "scope_exceeds_role")
+    assert AuthService.validate_api_key(old["key"]) is not None
+    for bad in ({"expires_days": 0}, {"permissions": ["write"]}):
+        assert _rotate(env, view, old["id"], **bad).status_code == 422
+    assert AuthService.validate_api_key(old["key"]) is not None
+
+
+def test_a_viewer_rotates_its_own_read_key(env):
+    _, view = _user("view", "viewer")
+    old = _create(env, view).json()
+    r = _rotate(env, view, old["id"])                 # through APIAuthMiddleware: the viewer allowlist lets it in
+    assert r.status_code == 201, r.text
+    assert r.json()["permissions"] == ["read"]
+
+
+def test_rotating_twice_or_someone_elses_is_a_404(env):
+    _, a = _user("a")
+    _, b = _user("b")
+    old = _create(env, a).json()
+    assert _rotate(env, b, old["id"]).status_code == 404
+    assert _rotate(env, a, old["id"]).status_code == 201
+    r = _rotate(env, a, old["id"])
+    assert (r.status_code, r.json()["detail"]["code"]) == (404, "not_found")
+
+
+def test_rotate_needs_a_session(env):
+    from agenticops.auth import AuthService
+    root, _ = _user("root", "admin")
+    ops, tok = _user("ops")
+    old = _create(env, tok).json()
+    rw = AuthService.create_api_key(user_id=ops.id, name="rw", permissions=["read", "write"])
+    admin_key = AuthService.create_api_key(user_id=root.id, name="admin", permissions=["read", "write", "admin"])
+    for key, uid in ((rw, None), (admin_key, ops.id)):
+        r = _rotate(env, key, old["id"], user_id=uid)
+        assert (r.status_code, r.json()["detail"].get("code")) == (403, "session_required"), r.text
+
+
+def test_an_admin_rotates_within_the_users_role(env):
+    _, root = _user("root", "admin")
+    view, view_tok = _user("view", "viewer")
+    old = _create(env, view_tok).json()
+    r = _rotate(env, root, old["id"], user_id=view.id, permissions=["read", "write"])
+    assert (r.status_code, r.json()["detail"]["code"]) == (403, "scope_exceeds_role")
+    r = _rotate(env, root, old["id"], user_id=view.id)
+    assert r.status_code == 201 and r.json()["name"] == old["name"]
+
+
+def test_the_audit_shows_one_rotation(env):
+    from agenticops.audit.models import AuditLog
+    from agenticops.models import get_db_session
+    _, tok = _user("ops")
+    old = _create(env, tok).json()
+    new = _rotate(env, tok, old["id"]).json()
+    with get_db_session() as s:
+        rows = s.query(AuditLog).filter_by(entity_type="api_key").order_by(AuditLog.id).all()[-2:]
+        assert [(r.action, r.entity_id) for r in rows] == [("api_key.revoke", str(old["id"])), ("api_key.rotate", str(new["id"]))]
+        assert rows[0].details["rotated_to"] == new["id"] and rows[1].details["rotated_from"] == old["id"]
+        dumped = json.dumps([[r.details, r.old_values, r.new_values] for r in rows])
+    assert old["key"] not in dumped and new["key"] not in dumped

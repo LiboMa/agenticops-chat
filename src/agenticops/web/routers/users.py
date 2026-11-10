@@ -14,8 +14,8 @@ from fastapi.responses import JSONResponse
 
 from agenticops.services import user_admin
 from agenticops.web.deps import require_session_user
-from agenticops.web.schemas import (APIKeyCreate, APIKeyCreatedResponse, APIKeyResponse, PasswordResetResponse,
-                                    UserCreateBody, UserCreatedResponse, UserPatchBody, UserRow)
+from agenticops.web.schemas import (APIKeyCreate, APIKeyCreatedResponse, APIKeyResponse, APIKeyRotate,
+                                    PasswordResetResponse, UserCreateBody, UserCreatedResponse, UserPatchBody, UserRow)
 
 router = APIRouter(tags=["users"])
 
@@ -62,6 +62,19 @@ def api_create_user_api_key(user_id: int, body: APIKeyCreate, caller=Depends(use
     try:
         owner = api_keys.issuable_owner(user_id)
         row, key = api_keys.create_key(owner, name=body.name, permissions=body.permissions,
+                                       expires_days=body.expires_days, caller=caller, by_admin=True)
+    except api_keys.ApiKeyError as e:
+        return _refused(e)
+    return {**row, "key": key}
+
+
+@router.post("/api/users/{user_id}/api-keys/{key_id}/rotate", response_model=APIKeyCreatedResponse, status_code=201)
+def api_rotate_user_api_key(user_id: int, key_id: int, body: APIKeyRotate, caller=Depends(users_admin)):
+    """An admin updates someone's key (MVP-2.8.0): a new key under the same name within that person's role, the old
+    one dead at once; the new key is shown to the admin once."""
+    from agenticops.services import api_keys
+    try:
+        row, key = api_keys.rotate_key(key_id, owner_id=user_id, permissions=body.permissions,
                                        expires_days=body.expires_days, caller=caller, by_admin=True)
     except api_keys.ApiKeyError as e:
         return _refused(e)

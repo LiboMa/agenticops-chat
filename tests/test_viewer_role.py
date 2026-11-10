@@ -61,6 +61,7 @@ def test_settings_are_visible_to_writers_and_to_a_viewer_with_settings_read():
     ("POST", "/api/graph/vpc/vpc-0abc123/dependency-chain"), ("POST", "/api/graph/vpc/vpc-0abc123/change-simulation"),
     ("GET", "/api/settings"), ("GET", "/api/health-issues/5"), ("get", "/api/accounts"),
     ("POST", "/api/api-keys"), ("DELETE", "/api/api-keys/1"),     # MVP-2.8.0: its own read-only keys
+    ("POST", "/api/api-keys/1/rotate"),                           # ... and updates one (a new read-only key)
 ])
 def test_reads_and_the_allowlisted_writes_pass(method, path):
     assert viewer_may(method, path)
@@ -133,7 +134,7 @@ def test_the_walk_covers_the_app_and_every_allowlist_entry_is_a_real_route():
         # 2026-11-07: a viewer attaches files to its own chats (the service touches only its own uploads)
         ("POST", "/api/chat/attachments"), ("DELETE", "/api/chat/attachments/x1"),
         # MVP-2.8.0 (owner): a viewer issues and revokes its own read-only API keys
-        ("POST", "/api/api-keys"), ("DELETE", "/api/api-keys/x1"),
+        ("POST", "/api/api-keys"), ("DELETE", "/api/api-keys/x1"), ("POST", "/api/api-keys/x1/rotate"),
     }
 
 

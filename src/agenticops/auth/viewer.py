@@ -34,6 +34,7 @@ _ALLOWED: tuple[tuple[str, re.Pattern], ...] = tuple(
         # MVP-2.8.0: a viewer issues and revokes its OWN read-only API keys (services/api_keys enforces both)
         ("POST", r"/api/api-keys"),
         ("DELETE", rf"/api/api-keys/{_SEG}"),
+        ("POST", rf"/api/api-keys/{_SEG}/rotate"),     # update = a new read-only key, the old one revoked
         # in-memory analysis over read-only describes — nothing is written or changed
         ("POST", rf"/api/graph/vpc/{_SEG}/dependency-chain"),
         ("POST", rf"/api/graph/vpc/{_SEG}/change-simulation"),

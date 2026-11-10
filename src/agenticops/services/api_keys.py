@@ -13,7 +13,7 @@ its successor.
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, update
 
 from agenticops.auth.models import APIKey, User
 from agenticops.models import get_db_session
@@ -62,9 +62,9 @@ def list_keys(user_id: int) -> list[dict]:
         return [_row(k) for k in rows]          # active and expired; a revoked (deleted) key is no longer listed
 
 
-def create_key(user, *, name: str, permissions, expires_days: Optional[int], caller,
-               by_admin: bool = False) -> tuple[dict, str]:
-    from agenticops.auth.service import generate_api_key
+def _checked(user, name: str, permissions, expires_days: Optional[int]) -> tuple[str, list[str], Optional[int]]:
+    """The one set of key rules (create and rotate): a name, ["read"] or ["read","write"] within the owner's role,
+    an expiry of 1–3650 days or none."""
     name = (name or "").strip()
     if not 1 <= len(name) <= NAME_MAX:
         raise ApiKeyError(422, "invalid_name", f"a key name has 1–{NAME_MAX} characters")
@@ -75,14 +75,48 @@ def create_key(user, *, name: str, permissions, expires_days: Optional[int], cal
         raise ApiKeyError(403, "scope_exceeds_role", "a read-only account issues read-only keys")
     if expires_days is not None and not 1 <= int(expires_days) <= EXPIRY_MAX_DAYS:
         raise ApiKeyError(422, "invalid_expiry", f"a key expires in 1–{EXPIRY_MAX_DAYS} days, or never")
+    return name, sorted(wanted, key=["read", "write"].index), (int(expires_days) if expires_days else None)
+
+
+def _new_key(user_id: int, name: str, scope: list[str], expires_days: Optional[int]) -> tuple[APIKey, str]:
+    from agenticops.auth.service import generate_api_key
     key, key_hash = generate_api_key()
+    return APIKey(user_id=user_id, name=name, key_hash=key_hash, key_prefix=key[:12], permissions=scope,
+                  is_active=True, expires_at=_now() + timedelta(days=expires_days) if expires_days else None), key
+
+
+def create_key(user, *, name: str, permissions, expires_days: Optional[int], caller,
+               by_admin: bool = False) -> tuple[dict, str]:
+    name, scope, expires_days = _checked(user, name, permissions, expires_days)
     with get_db_session() as s:
-        k = APIKey(user_id=user.id, name=name, key_hash=key_hash, key_prefix=key[:12],
-                   permissions=sorted(wanted, key=["read", "write"].index), is_active=True,
-                   expires_at=_now() + timedelta(days=int(expires_days)) if expires_days else None)
+        k, key = _new_key(user.id, name, scope, expires_days)
         s.add(k)
         s.flush()
         _audit(s, "api_key.create", k, caller, by_admin=by_admin)
+        return _row(k), key
+
+
+def rotate_key(key_id: int, *, owner_id: int, permissions, expires_days: Optional[int], caller,
+               by_admin: bool) -> tuple[dict, str]:
+    """«更新密钥» (MVP-2.8.0, owner 2026-11-10): a new key under the same name, the old one revoked in the same
+    transaction. Everything is checked before the old key is touched, so a refused rotation leaves it working; the
+    revoke is a compare-and-set, so two rotations of one key cannot both succeed. Two audit rows naming each other."""
+    with get_db_session() as s:
+        owner = s.query(User).filter(User.id == owner_id, User.deleted_at.is_(None), User.is_active.is_(True)).first()
+        old = s.query(APIKey).filter_by(id=key_id, user_id=owner_id, is_active=True).first()
+        if owner is None or old is None:
+            raise ApiKeyError(404, "not_found", f"API key {key_id} not found")
+        name, scope, expires_days = _checked(owner, old.name, permissions, expires_days)
+        claimed = s.execute(update(APIKey).where(APIKey.id == key_id, APIKey.user_id == owner_id,
+                                                 APIKey.is_active.is_(True)).values(is_active=False)).rowcount
+        if claimed != 1:
+            raise ApiKeyError(404, "not_found", f"API key {key_id} not found")
+        k, key = _new_key(owner_id, name, scope, expires_days)
+        s.add(k)
+        s.flush()
+        s.refresh(old)
+        _audit(s, "api_key.revoke", old, caller, by_admin=by_admin, rotated_to=k.id)
+        _audit(s, "api_key.rotate", k, caller, by_admin=by_admin, rotated_from=old.id)
         return _row(k), key
 
 

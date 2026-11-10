@@ -920,6 +920,13 @@ class APIKeyCreate(BaseModel):
     expires_days: Optional[int] = None
 
 
+class APIKeyRotate(BaseModel):
+    """«更新密钥» (MVP-2.8.0): the new key's access and expiry, chosen again. Both required — a missing expiry is never
+    read as «never expires»."""
+    permissions: List[str]
+    expires_days: Optional[int] = Field(...)
+
+
 class APIKeyResponse(BaseModel):
     """Schema for API key response."""
     id: int
