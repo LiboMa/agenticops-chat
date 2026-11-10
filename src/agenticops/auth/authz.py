@@ -8,6 +8,7 @@ check(actor, permission, subject) evaluates config/rbac.yaml:
                                                      admin (e.g. only the requester or an admin may cancel/clarify)
              - deny_actor_kind_when_risk_in        — an actor kind may not act above a risk ceiling
              - deny_actor_kind                     — an actor kind may never hold the permission (needs no subject)
+             - deny_via_api_key                    — a request that came through an API key may never hold it
              The two field rules need identities, so both are skipped for the anonymous `web` actor
              (api_auth_enabled=false). EVERY rule bearing on the permission is evaluated and an
              `enforce: always` deny wins over a shadow deny and over a missing matrix flag. A subject-reading
@@ -38,7 +39,7 @@ PERMISSIONS = (
 )
 
 _RULE_TYPES = {"actor_must_differ_from_field", "actor_must_match_field_unless_admin", "deny_actor_kind_when_risk_in",
-               "deny_actor_kind"}
+               "deny_actor_kind", "deny_via_api_key"}
 _TOP_LEVEL_KEYS = {"version", "permissions", "subjects", "rules"}
 _RULE_KEYS = {"name", "type", "permission", "field", "actor_kind", "risk_levels", "enforce"}
 _ACTOR_KINDS = ("agent", "cli", "im", "user", "web", "webhook")  # the six kinds of auth/actor.py
@@ -67,6 +68,9 @@ DEFAULT_POLICY: dict = {
         {"name": "no-webhook-approve-or-execute",
          "permission": ["plan.approve", "change.approve", "plan.execute", "change.execute"],
          "type": "deny_actor_kind", "actor_kind": "webhook", "enforce": "always"},
+        {"name": "no-api-key-human-decisions",
+         "permission": ["plan.approve", "plan.reject", "plan.execute", "change.approve", "change.reject", "change.execute"],
+         "type": "deny_via_api_key", "enforce": "always"},
     ],
 }
 
@@ -150,6 +154,11 @@ class RbacPolicy:
             if rtype == "deny_actor_kind":
                 if actor.kind == rule.get("actor_kind"):
                     denies.append((f"{actor.kind} actors may never {permission}", name, always))
+                continue
+            if rtype == "deny_via_api_key":   # MVP-2.8.0: approve / reject / run / accept are a signed-in person's
+                if getattr(actor, "via_api_key", False):
+                    denies.append((f"human_session_required: an API key may never {permission} — use a signed-in "
+                                   f"session", name, always))
                 continue
             if rtype in ("actor_must_differ_from_field", "actor_must_match_field_unless_admin") and actor.kind == "web":
                 # Both field rules are only evaluable between IDENTIFIED actors; the anonymous web actor
@@ -240,6 +249,9 @@ def validate_rbac(data: Any) -> list[str]:
         if rtype == "deny_actor_kind_when_risk_in":
             if not rule.get("risk_levels") or not _is_str_list(rule.get("risk_levels")):
                 errors.append(f"{label}: 'risk_levels' (non-empty list of strings) is required")
+        if rtype == "deny_via_api_key":
+            errors.extend(f"{label}: {key!r} does not apply to deny_via_api_key" for key in ("actor_kind", "field", "risk_levels")
+                          if key in rule)
         if rtype == "deny_actor_kind" and "risk_levels" in rule:
             errors.append(f"{label}: 'risk_levels' does not apply to deny_actor_kind (did you mean "
                           f"deny_actor_kind_when_risk_in?)")

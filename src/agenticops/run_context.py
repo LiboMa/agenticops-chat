@@ -34,6 +34,7 @@ class RunContext:
     execution_id: Optional[int] = None        # the queued FixExecution an ExecutorService run is closing
     bound_account_id: Optional[int] = None     # a change run/review may touch ONLY this account id (resolver fails closed on any other)
     read_only: bool = False                    # a viewer's turn: every CLI tool refuses non-readonly commands (auth/viewer)
+    via_api_key: bool = False                  # the request / chat turn came through an API key (no human decisions)
     # Facts the code knows and the model does not (2.7.0 E2E observations 4 / 5): what its save tool records
     model_id: Optional[str] = None             # the model rca_agent built its agent with → RCAResult.model_id
     run_started_at: Optional[datetime] = None  # when executor_agent began this run → the run's measured duration_ms

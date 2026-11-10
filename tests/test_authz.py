@@ -257,7 +257,8 @@ class TestCheck:
             with pytest.raises(AuthzDenied) as ei:
                 check(via_key, "plan.approve", subject=plan)
             check(via_session, "plan.approve", subject=plan)  # unchanged
-        assert "write" in ei.value.reason and ei.value.actor == "user:admin"
+        # MVP-2.8.0: the always-enforced no-api-key-human-decisions rule wins over the missing write flag
+        assert "human_session_required" in ei.value.reason and ei.value.actor == "user:admin"
         assert log.call_count == 1 and log.call_args.kwargs["action"] == "authz.denied"
 
     def test_current_actor_stamps_intersected_permissions_on_run_context(self):

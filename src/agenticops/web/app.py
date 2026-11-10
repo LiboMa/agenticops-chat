@@ -4695,7 +4695,8 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
         set_run_context(RunContext(actor=_actor.key, actor_user_id=_actor.user_id,
                                    actor_permissions=_actor.permissions, trace_id=_chat_trace_id,
                                    agent_name="main", chat_session_id=session_id,
-                                   bound_account_id=bound_account_id, read_only=_actor.read_only))
+                                   bound_account_id=bound_account_id, read_only=_actor.read_only,
+                                   via_api_key=_actor.via_api_key))
         _chat_start_time = time.monotonic()
         accumulated = ""
         tool_calls = []
@@ -5093,6 +5094,11 @@ class APIAuthMiddleware(BaseHTTPMiddleware):
         # and chats: every other write is refused here, before routing (auth/viewer.py).
         from agenticops.auth.viewer import is_viewer, read_only_detail, viewer_may
         if is_viewer(user) and not viewer_may(request.method, path):
+            return JSONResponse(status_code=403, content={"detail": read_only_detail()})
+        # MVP-2.8.0: a key without "write" is a viewer for this request, whatever the owner's role or rbac_enforce
+        api_key = getattr(request.state, "api_key", None)
+        if api_key is not None and "write" not in (getattr(api_key, "permissions", None) or ()) \
+                and not viewer_may(request.method, path):
             return JSONResponse(status_code=403, content={"detail": read_only_detail()})
         return await call_next(request)
 

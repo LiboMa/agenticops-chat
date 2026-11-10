@@ -148,12 +148,26 @@ def test_a_viewer_is_refused_every_write_outside_the_allowlist(gate, who):
     assert refused > 100
 
 
-@pytest.mark.parametrize("who", ["writer", "admin", "admin_read_key"])
-def test_writers_admins_and_api_keys_are_never_stopped_by_it(gate, who):
-    """API-key scope semantics are unchanged: an admin's read-scoped key passes the middleware as before."""
+@pytest.mark.parametrize("who", ["writer", "admin"])
+def test_writers_and_admins_are_never_stopped_by_it(gate, who):
     for method, template, path in _mutating_api_routes():
         r = gate.client.request(method, path, headers=gate.tokens[who])
         assert (r.status_code, r.text) == (200, "passed"), (who, method, template)
+
+
+def test_a_read_scoped_key_is_a_viewer_for_its_request(gate):
+    """MVP-2.8.0 (owner: a read-only key really is read-only): an admin's read-scoped key is refused every write a
+    viewer is refused — before, it passed the middleware and RBAC shadow mode let its writes through."""
+    from agenticops.web.app import _PUBLIC_PATHS
+    refused = 0
+    for method, template, path in _mutating_api_routes():
+        r = gate.client.request(method, path, headers=gate.tokens["admin_read_key"])
+        if viewer_may(method, path) or path in _PUBLIC_PATHS:
+            assert (r.status_code, r.text) == (200, "passed"), (method, template)
+        else:
+            assert (r.status_code, r.json()) == (403, READ_ONLY_BODY), (method, template)
+            refused += 1
+    assert refused > 100
 
 
 def test_a_viewer_still_reads(gate):
@@ -396,8 +410,10 @@ def test_the_read_only_flag_comes_from_the_users_row_and_travels_in_the_run_cont
     viewer = SimpleNamespace(id=9, email="viewer", permissions=["read"])
     writer = SimpleNamespace(id=1, email="w", permissions=["read", "write"])
     assert actor_from_request(SimpleNamespace(state=SimpleNamespace(user=viewer))).read_only is True
-    key = SimpleNamespace(permissions=["read"])  # a read-scoped key does not make a writer a viewer
-    assert actor_from_request(SimpleNamespace(state=SimpleNamespace(user=writer, api_key=key))).read_only is False
+    key = SimpleNamespace(permissions=["read"])  # MVP-2.8.0: a read-scoped key makes its request read-only
+    assert actor_from_request(SimpleNamespace(state=SimpleNamespace(user=writer, api_key=key))).read_only is True
+    rw = SimpleNamespace(permissions=["read", "write"])
+    assert actor_from_request(SimpleNamespace(state=SimpleNamespace(user=writer, api_key=rw))).read_only is False
     with run_context(actor="user:viewer", actor_user_id=9, actor_permissions=("read",), read_only=True):
         assert actor_from_run_context(get_run_context()).read_only is True
 

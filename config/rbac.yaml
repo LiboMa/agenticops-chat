@@ -11,6 +11,7 @@
 #                                                      has admin (ownership: only the requester or an admin may act)
 #                deny_actor_kind_when_risk_in        — actor.kind == actor_kind and subject.risk_level in risk_levels
 #                deny_actor_kind                     — actor.kind == actor_kind (no subject needed)
+#                deny_via_api_key                    — the request came through an API key (no subject needed)
 #              The two field rules are skipped for the anonymous web actor (they need identities).
 #              `enforce: always` makes a rule bite even in shadow mode (rbac_enforce=false).
 #              Every rule bearing on a permission is evaluated and an `enforce: always` deny wins over a
@@ -67,3 +68,10 @@ rules:
     actor_kind: webhook
     enforce: always
     # an external system may open a change (POST /api/changes/intake) but never approve or run one
+
+  - name: no-api-key-human-decisions
+    permission: [plan.approve, plan.reject, plan.execute, change.approve, change.reject, change.execute]
+    type: deny_via_api_key
+    enforce: always
+    # MVP-2.8.0: a third-party app or coding agent holding a user's API key never approves, rejects, runs or accepts
+    # a plan or change (acceptance and review resolution check plan.approve / change.approve) — a signed-in person does
