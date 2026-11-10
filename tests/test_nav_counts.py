@@ -187,3 +187,20 @@ def test_the_endpoint_shape_and_plain_def(db):
         app.dependency_overrides.clear()
     ep = [r.endpoint for r in ui_router.router.routes if getattr(r, "path", "") == "/api/ui/nav-counts"]
     assert len(ep) == 1 and not inspect.iscoroutinefunction(ep[0])
+
+
+def test_a_deleted_schedule_never_counts(db):
+    """Final review (Important 1): deleting a schedule leaves its runs behind (no cascade), and the sidebar's red number
+    counted the orphans forever — nothing could clear it. A count is about schedules that exist, as the page is."""
+    from agenticops.scheduler.scheduler import Schedule
+    from agenticops.web.app import app
+    _schedule("gone", ["failed"])
+    _schedule("stays", ["completed"])
+    s = get_session()
+    try:
+        gone = s.query(Schedule).filter_by(name="gone").one().id
+    finally:
+        s.close()
+    assert _counts(ADMIN)["schedules_failed"] == 1
+    assert TestClient(app).delete(f"/api/schedules/{gone}").status_code == 204
+    assert _counts(ADMIN)["schedules_failed"] == 0

@@ -62,9 +62,13 @@ class ScheduleExecution(Base):
 
 
 def latest_executions(session) -> dict[int, "ScheduleExecution"]:
-    """Each schedule's newest run, by schedule id — one grouped query (GET /api/schedules, the sidebar's count)."""
+    """Each existing schedule's newest run, by schedule id — one grouped query (GET /api/schedules, the sidebar's
+    count). A deleted schedule's runs stay in the table (no cascade) and never count: the sidebar's red number counted
+    them forever (MVP-2.8.0 final review)."""
     from sqlalchemy import func, select
-    newest = session.query(func.max(ScheduleExecution.id)).group_by(ScheduleExecution.schedule_id).subquery()
+    newest = (session.query(func.max(ScheduleExecution.id))
+              .filter(ScheduleExecution.schedule_id.in_(select(Schedule.id)))
+              .group_by(ScheduleExecution.schedule_id).subquery())
     return {e.schedule_id: e for e in session.query(ScheduleExecution).filter(ScheduleExecution.id.in_(select(newest)))}
 
 
