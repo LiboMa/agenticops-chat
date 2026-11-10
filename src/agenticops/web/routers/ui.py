@@ -145,7 +145,7 @@ def api_ui_attention(account_id: Optional[int] = Query(None, ge=1), limit: int =
                      cursor: Optional[str] = Query(None, pattern=r"^\d{1,6}$"),
                      reason: Optional[str] = Query(None, max_length=200),
                      q: Optional[str] = Query(None, max_length=200),
-                     sort: str = Query("waiting_longest", pattern="^(waiting_longest|newest|severity)$"),
+                     sort: str = Query("waiting_longest", pattern="^(waiting_longest|newest|severity|decision)$"),
                      actor: Actor = Depends(current_actor), _user=Depends(signed_in_user)) -> dict:
     """Work that waits on this actor (contract workspace-ui-1 AttentionPage, plus `ref` / `reason_detail` and the
     reasons review_required / execution_not_started). MVP-2.8.0 S2: `reason` (comma list) / `q` / `sort`, and each

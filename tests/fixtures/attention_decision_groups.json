@@ -1,0 +1,12 @@
+{
+  "_comment": "MVP-2.8.0: the «在等我» tab of Issues groups the to-do items by the decision they need. One table for both sides: services/attention.DECISION_OF (pytest) and lib/inbox groupOf (vitest) must both agree with it.",
+  "groups": ["approval", "acceptance", "failed", "confirm"],
+  "reasons": {
+    "approval_required": "approval",
+    "verification_required": "acceptance",
+    "execution_failed": "failed",
+    "execution_not_started": "failed",
+    "review_required": "confirm",
+    "clarification_required": "confirm"
+  }
+}

@@ -358,3 +358,68 @@ def test_the_you_steps_need_the_write_flag(db):
     page = att.attention_page(viewer, now=NOW)
     assert page["items"] == [] and page["total"] == 0 and page["counts"] == {}
     assert att.issue_rows(viewer, now=NOW) == []
+
+
+# ── «在等我» (MVP-2.8.0): the to-do items grouped by the decision they need ──────────────────────────────────
+
+DECISIONS = json.loads((Path(__file__).parent / "fixtures" / "attention_decision_groups.json").read_text())
+
+
+def test_every_reason_has_a_decision_group():
+    assert att.DECISION_GROUPS == tuple(DECISIONS["groups"])
+    assert att.DECISION_OF == DECISIONS["reasons"]
+    assert set(att.DECISION_OF) == att.REASONS
+
+
+def test_decision_sort_groups_then_longest_wait(db):
+    s = get_session()
+    acc, _ = _issue("fix_executed", plan="executed", run=("succeeded", "pending_acceptance"))
+    failed, _ = _issue("root_cause_identified", plan="failed", run=("failed", None))
+    low, _ = _issue("root_cause_identified", rca=0.3)
+    new_ap, p_new = _issue("fix_planned", plan="pending_approval")
+    old_ap, p_old = _issue("fix_planned", plan="pending_approval")
+    s.query(FixPlan).filter_by(id=p_new).update({"updated_at": NOW - timedelta(minutes=5)})
+    s.query(FixPlan).filter_by(id=p_old).update({"updated_at": NOW - timedelta(hours=3)})
+    s.commit(); s.close()
+    clar = _change("needs_clarification", requested_by="user:root")
+    rows = _items(ADMIN, sort="decision", limit=50)
+    order = [i["id"] for i in rows]
+    assert order.index(f"I{old_ap}") < order.index(f"I{new_ap}")          # approval: the longest wait first
+    groups = [att.DECISION_OF[i["reason"]] for i in rows]
+    assert groups == sorted(groups, key=att.DECISION_GROUPS.index)           # approval < acceptance < failed < confirm
+    assert {f"I{acc}", f"I{failed}", f"I{low}", f"C{clar}"} <= set(order)
+
+
+def test_decision_pages_only_append_to_the_last_group(db):
+    for _ in range(3):
+        _issue("fix_planned", plan="pending_approval")
+    _issue("fix_executed", plan="executed", run=("succeeded", "pending_acceptance"))
+    _issue("root_cause_identified", plan="failed", run=("failed", None))
+    _issue("root_cause_identified", rca=0.3)
+    every = _items(ADMIN, sort="decision", limit=50)
+    pages, cursor = [], 0
+    while True:
+        page = att.attention_page(ADMIN, now=NOW, sort="decision", limit=2, offset=cursor)
+        pages.append(page["items"])
+        if page["next_cursor"] is None:
+            break
+        cursor = int(page["next_cursor"])
+    assert [i["id"] for p in pages for i in p] == [i["id"] for i in every]
+    rank = lambda i: att.DECISION_GROUPS.index(att.DECISION_OF[i["reason"]])
+    for before, after in zip(pages, pages[1:]):
+        assert rank(after[0]) >= rank(before[-1])
+
+
+def test_the_endpoint_takes_sort_decision(db):
+    from agenticops.web import deps
+    from agenticops.web.app import app
+    from agenticops.web.routers import ui as ui_router
+    _issue("fix_planned", plan="pending_approval")
+    app.dependency_overrides[deps.current_actor] = lambda: ADMIN
+    app.dependency_overrides[ui_router.signed_in_user] = lambda: SimpleNamespace(id=3)
+    try:
+        c = TestClient(app)
+        assert c.get("/api/ui/attention?sort=decision").status_code == 200
+        assert c.get("/api/ui/attention?sort=x").status_code == 422
+    finally:
+        app.dependency_overrides.clear()

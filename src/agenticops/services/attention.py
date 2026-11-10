@@ -84,7 +84,16 @@ def _item(rid, ref, entity, reason, detail, title, account_id, occurred, route, 
 
 
 REASONS = frozenset(r for r, _d, _a in (*ISSUE_ROWS.values(), *CHANGE_ROWS.values()))
-SORTS = ("waiting_longest", "newest", "severity")
+SORTS = ("waiting_longest", "newest", "severity", "decision")
+# MVP-2.8.0: the «在等我» tab of Issues groups the items by the decision they need, in this order; the web client's
+# lib/inbox groupOf must agree (shared fixture tests/fixtures/attention_decision_groups.json)
+DECISION_GROUPS = ("approval", "acceptance", "failed", "confirm")
+DECISION_OF = {
+    "approval_required": "approval",
+    "verification_required": "acceptance",
+    "execution_failed": "failed", "execution_not_started": "failed",
+    "review_required": "confirm", "clarification_required": "confirm",
+}
 _SEV_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 _RISK_RANK = {"L3": 1, "L2": 2, "L1": 3, "L0": 3}
 
@@ -285,6 +294,8 @@ def _matches(item: dict, q: str) -> bool:
 
 
 def _sort_key(sort: str):
+    if sort == "decision":    # by group, then the longest wait first: pages only ever append to the last group
+        return lambda i: (DECISION_GROUPS.index(DECISION_OF[i["reason"]]), i["occurred_at"], i["id"])
     if sort == "newest":
         return lambda i: (-i["occurred_at"].timestamp(), i["id"])
     if sort == "severity":
@@ -298,16 +309,14 @@ def attention_page(actor, *, account_id: Optional[int] = None, reason: Optional[
                    now: Optional[datetime] = None) -> dict:
     """The actor's work items. `counts` = items per reason after the account scope and the search, before the
     reason filter — so a workbench tab's number does not move with the selected tab. Sort: the longest wait first
-    (default), newest, or severity (a change ranks by its risk level)."""
+    (default), newest, severity (a change ranks by its risk level), or decision (grouped as DECISION_GROUPS, then
+    the longest wait first)."""
     if reason and not set(reason) <= REASONS:
         raise ValueError(f"unknown reason {sorted(set(reason) - REASONS)}; expected one of {sorted(REASONS)}")
     if sort not in SORTS:
         raise ValueError(f"unknown sort {sort!r}; expected one of {list(SORTS)}")
     now = now or datetime.now(timezone.utc)
-    with get_db_session() as s:
-        items = _issue_items(s, actor, account_id, now)
-        if settings.change_management_enabled:
-            items += _change_items(s, actor, account_id)
+    items = attention_items(actor, account_id=account_id, now=now)
     if q:
         items = [i for i in items if _matches(i, q)]
     counts: dict[str, int] = {}
@@ -321,6 +330,18 @@ def attention_page(actor, *, account_id: Optional[int] = None, reason: Optional[
         i["occurred_at"] = _iso(i["occurred_at"])
     return {"items": page, "total": len(items), "counts": counts,
             "next_cursor": str(offset + limit) if offset + limit < len(items) else None, "generated_at": _iso(now)}
+
+
+def attention_items(actor, *, account_id: Optional[int] = None, now: Optional[datetime] = None) -> list[dict]:
+    """Every work item waiting on the actor (issues, and changes when change management is on), unsorted, before any
+    search or reason filter, `occurred_at` still a datetime — one source for the to-do list and its counts
+    (services/nav_counts)."""
+    now = now or datetime.now(timezone.utc)
+    with get_db_session() as s:
+        items = _issue_items(s, actor, account_id, now)
+        if settings.change_management_enabled:
+            items += _change_items(s, actor, account_id)
+    return items
 
 
 def issue_rows(actor, *, account_id: Optional[int] = None, now: Optional[datetime] = None) -> list[dict]:
