@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { UserRow } from "@/api/types";
-import { filterUsers, roleKey, rowActions } from "@/lib/users";
+import { fillRefusal, filterUsers, keysLabel, lastActiveAdminId, roleKey, rowActions } from "@/lib/users";
+import zh from "@/locales/zh.json";
 
 const row = (over: Partial<UserRow> = {}): UserRow => ({
   id: 2, email: "ops-lin", name: "Lin Yue", role: "writer", settings_view: false, is_active: true,
@@ -37,15 +38,36 @@ describe("filterUsers — search and the two filters, in the browser", () => {
   });
 });
 
-describe("rowActions — what each row offers", () => {
-  it("yourself: only reset your password (never disable or demote yourself)", () => {
-    expect(rowActions(row({ id: 7, role: "admin" }), 7)).toEqual(["reset"]);
+describe("rowActions — one row of icons: the credentials, then the account (MVP-2.8.0 user management)", () => {
+  const none = { lastActiveAdmin: false };
+  it("yourself: your password and your keys, never your own account", () => {
+    expect(rowActions(row({ id: 7, role: "admin" }), 7, none)).toEqual({ credential: ["reset", "newKey"], account: [] });
   });
-  it("a disabled user: only enable", () => {
-    expect(rowActions(row({ is_active: false }), 1)).toEqual(["enable"]);
+  it("anyone else: password and keys, then role, disable, delete", () => {
+    expect(rowActions(row(), 1, none)).toEqual({ credential: ["reset", "newKey"], account: ["role", "disable", "delete"] });
+    expect(rowActions(row(), null, none)).toEqual({ credential: ["reset", "newKey"], account: ["role", "disable", "delete"] });
   });
-  it("anyone else: change role, reset password, disable", () => {
-    expect(rowActions(row(), 1)).toEqual(["role", "reset", "disable"]);
-    expect(rowActions(row(), null)).toEqual(["role", "reset", "disable"]);
+  it("a disabled user: no credentials (they cannot sign in), enable or delete", () => {
+    expect(rowActions(row({ is_active: false }), 1, none)).toEqual({ credential: [], account: ["enable", "delete"] });
+  });
+  it("the last active admin: never demoted, disabled or deleted", () => {
+    expect(rowActions(row({ role: "admin" }), 1, { lastActiveAdmin: true })).toEqual({ credential: ["reset", "newKey"], account: [] });
+  });
+  it("the last active admin is the one active admin", () => {
+    const rows = [row({ id: 1, role: "admin" }), row({ id: 2, role: "admin", is_active: false }), row({ id: 3 })];
+    expect(lastActiveAdminId(rows)).toBe(1);
+    expect(lastActiveAdminId([...rows, row({ id: 4, role: "admin" })])).toBeNull();
+  });
+});
+
+describe("the «API 密钥» column and worded refusals", () => {
+  const t = (k: string) => (zh as Record<string, string>)[k] ?? k;
+  it("«无» or the active count", () => {
+    expect(keysLabel(0, t)).toBe(t("users.keys.none"));
+    expect(keysLabel(3, t)).toContain("3");
+  });
+  it("a refusal that names the change requests in the way", () => {
+    expect(fillRefusal("还有 {refs} 在等他", { refs: ["C#3", "C#5"] })).toBe("还有 C#3, C#5 在等他");
+    expect(fillRefusal("没有占位", undefined)).toBe("没有占位");
   });
 });

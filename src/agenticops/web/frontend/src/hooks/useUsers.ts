@@ -68,3 +68,41 @@ export function useRevokeUserKey() {
     onSuccess: invalidate,
   });
 }
+
+/** An admin issues a key for someone (MVP-2.8.0): the key is shown to the admin once (gcTime 0). */
+export function createUserKeyOptions(qc: QueryClient) {
+  return {
+    // a secret shown once: dropped from the mutation cache as soon as the page resets it (closing its dialog)
+    gcTime: 0,
+    mutationFn: ({ userId, ...body }: { userId: number; name: string; permissions: string[]; expires_days: number | null }) =>
+      apiFetch<ApiKeyRow & { key: string }>(`/users/${userId}/api-keys`, { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  };
+}
+
+/** An admin updates someone's key: a new key under the same name, the old one dead at once (gcTime 0). */
+export function rotateUserKeyOptions(qc: QueryClient) {
+  return {
+    gcTime: 0,
+    mutationFn: ({ userId, keyId, ...body }: { userId: number; keyId: number; permissions: string[]; expires_days: number | null }) =>
+      apiFetch<ApiKeyRow & { key: string }>(`/users/${userId}/api-keys/${keyId}/rotate`, { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  };
+}
+
+export function useCreateUserKey() {
+  return useMutation(createUserKeyOptions(useQueryClient()));
+}
+
+export function useRotateUserKey() {
+  return useMutation(rotateUserKeyOptions(useQueryClient()));
+}
+
+/** Delete a user (soft; services/user_admin.delete_user) — 409 self_change / last_admin / has_open_requests. */
+export function useDeleteUser() {
+  const invalidate = useInvalidate();
+  return useMutation({
+    mutationFn: (id: number) => apiFetch<void>(`/users/${id}`, { method: "DELETE" }),
+    onSuccess: invalidate,
+  });
+}

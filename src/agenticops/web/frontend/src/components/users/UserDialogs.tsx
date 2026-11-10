@@ -99,3 +99,31 @@ export function PasswordOnceDialog({ email, password, kind, onClose, returnTo }:
     </Frame>
   );
 }
+
+/** Delete a user (MVP-2.8.0, owner 2026-11-10): says what goes at once, what stays (and that who may see it does not
+ *  change), that the sign-in name is never used again, and that it cannot be undone. A refusal (their change requests
+ *  still waiting on them, the last admin) shows inside the dialog. */
+export function DeleteUserDialog({ user, busy, error, onConfirm, onClose }: {
+  user: UserRow; busy: boolean; error: string | null; onConfirm: () => void; onClose: () => void;
+}) {
+  const { t } = useLocale();
+  const who = user.name || user.email;
+  return (
+    <Frame title={t("users.delete.title").replace("{who}", who)} onClose={onClose}>
+      <ul className="mt-3 space-y-1.5 text-sm text-foreground">
+        <li>{t("users.delete.goes")}</li>
+        <li>{t("users.delete.stays")}</li>
+        <li>{t("users.delete.name").replace("{email}", user.email)}</li>
+      </ul>
+      <p className="mt-3 text-sm font-medium text-status-danger">{t("users.delete.final")}</p>
+      {error && <p role="alert" className="mt-3 rounded-md border border-status-danger/40 bg-status-danger/5 px-3 py-2 text-sm text-status-danger">{error}</p>}
+      <div className="mt-4 flex flex-wrap justify-end gap-2 border-t border-border pt-3">
+        <button type="button" onClick={onClose} className="min-h-[40px] rounded-lg border border-border px-4 text-sm hover:bg-accent">{t("common.cancel")}</button>
+        <button type="button" disabled={busy} onClick={onConfirm}
+                className="min-h-[40px] rounded-lg bg-status-danger px-4 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">
+          {t("users.delete.ok")}
+        </button>
+      </div>
+    </Frame>
+  );
+}

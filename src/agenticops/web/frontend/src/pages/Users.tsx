@@ -3,14 +3,19 @@ import { useLocale } from "@/i18n/LocaleContext";
 import { ApiError } from "@/api/client";
 import type { UserRow } from "@/api/types";
 import { useBootstrap } from "@/hooks/useBootstrap";
-import { useCreateUser, useResetPassword, useUpdateUser, useUsers } from "@/hooks/useUsers";
+import { useCreateUser, useDeleteUser, useResetPassword, useUpdateUser, useUsers } from "@/hooks/useUsers";
 import { QueryState } from "@/components/ui/QueryState";
 import { StatusText } from "@/components/ui/StatusText";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
-import { PasswordOnceDialog, RoleDialog } from "@/components/users/UserDialogs";
-import { UserKeysDialog } from "@/components/users/UserKeysDialog";
+import { DeleteUserDialog, PasswordOnceDialog, RoleDialog } from "@/components/users/UserDialogs";
+import { IssueKeyFlow, UserKeysDialog } from "@/components/users/UserKeysDialog";
+import { IconButton } from "@/components/ui/IconButton";
+import { KeyPlusIcon } from "@/components/apikeys/KeyPlusIcon";
+import { Ban, RectangleEllipsis, Trash2, UserCheck, UserCog } from "lucide-react";
 import { formatShortDate } from "@/lib/formatDate";
-import { filterUsers, roleKey, rowActions, type RoleFilter, type RowAction, type StatusFilter } from "@/lib/users";
+import {
+  fillRefusal, filterUsers, keysLabel, lastActiveAdminId, roleKey, rowActions, type RoleFilter, type RowAction, type StatusFilter,
+} from "@/lib/users";
 
 /** User management (MVP-2.8.0 S2 rework, owner 2026-11-09): admins see every web account and create one (the
  *  password shown once), change its role, disable / enable it and reset its password. The server is the boundary
@@ -23,6 +28,7 @@ export default function Users() {
   const create = useCreateUser();
   const update = useUpdateUser();
   const reset = useResetPassword();
+  const del = useDeleteUser();
   const { confirm, dialog } = useConfirm();
   const [q, setQ] = useState("");
   const [role, setRole] = useState<RoleFilter>("all");
@@ -31,6 +37,11 @@ export default function Users() {
   const [shown, setShown] = useState<{ email: string; password: string; kind: "created" | "reset" } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [keysOf, setKeysOf] = useState<UserRow | null>(null);
+  const [keyFlow, setKeyFlow] = useState<UserRow | null>(null);
+  const [deleting, setDeleting] = useState<UserRow | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  // a deleted user's row is gone: focus comes back to «＋ 新建用户»
+  const newUserButton = useRef<HTMLButtonElement | null>(null);
   // the button that started a create / reset flow: the one-time password dialog opens after another dialog or a
   // confirm closed, so it hands focus back here explicitly (S2 rework E2E: it fell to <body>)
   const flowOpener = useRef<HTMLElement | null>(null);
@@ -39,13 +50,15 @@ export default function Users() {
     const code = e instanceof ApiError ? e.code : undefined;
     const key = code ? `users.error.${code}` : "";
     const worded = key ? t(key) : key;
-    return worded && worded !== key ? worded
+    return worded && worded !== key ? fillRefusal(worded, e instanceof ApiError ? e.data : undefined)
       : t("users.error.generic").replace("{detail}", e instanceof Error ? e.message : String(e));
   };
 
   const act = async (u: UserRow, a: RowAction) => {
     setError(null);
     if (a === "role") { setEditing(u); return; }
+    if (a === "newKey") { setKeyFlow(u); return; }
+    if (a === "delete") { setDeleteError(null); del.reset(); setDeleting(u); return; }
     if (a === "enable") { update.mutate({ id: u.id, is_active: true }, { onError: (e) => setError(say(e)) }); return; }
     if (a === "disable") {
       if (!(await confirm(t("users.confirm.disable").replace("{email}", u.email),
@@ -62,13 +75,28 @@ export default function Users() {
     });
   };
 
-  const actionButton = (u: UserRow, a: RowAction) => (
-    <button key={a} type="button" onClick={(e) => { flowOpener.current = e.currentTarget; void act(u, a); }}
-            className={`min-h-[32px] rounded-md border px-2.5 text-xs ${a === "disable"
-              ? "border-status-danger/40 text-status-danger hover:bg-status-danger/5" : "border-border text-foreground hover:bg-accent"}`}>
-      {t(`users.action.${a}`)}
-    </button>
+  // one row of icon buttons (MVP-2.8.0, owner): the credentials, a divider, then the account; each says what it does
+  // — and to whom — on hover / focus and to a screen reader
+  const ICONS: Record<RowAction, JSX.Element> = {
+    reset: <RectangleEllipsis className="h-4 w-4" aria-hidden="true" />, newKey: <KeyPlusIcon />,
+    role: <UserCog className="h-4 w-4" aria-hidden="true" />, disable: <Ban className="h-4 w-4" aria-hidden="true" />,
+    enable: <UserCheck className="h-4 w-4" aria-hidden="true" />, delete: <Trash2 className="h-4 w-4" aria-hidden="true" />,
+  };
+  const iconButton = (u: UserRow, a: RowAction) => (
+    <IconButton key={a} label={t(`users.icon.${a}`).replace("{who}", u.name || u.email)} icon={ICONS[a]}
+                tone={a === "disable" || a === "delete" ? "danger" : "default"}
+                onClick={(e) => { flowOpener.current = e.currentTarget; void act(u, a); }} />
   );
+  const actionRow = (u: UserRow, rows: UserRow[]) => {
+    const { credential, account } = rowActions(u, meId, { lastActiveAdmin: lastActiveAdminId(rows) === u.id });
+    return (
+      <div className="flex flex-wrap items-center justify-end gap-1.5">
+        {credential.map((a) => iconButton(u, a))}
+        {credential.length > 0 && account.length > 0 && <span aria-hidden="true" className="mx-1 h-6 w-px bg-border" />}
+        {account.map((a) => iconButton(u, a))}
+      </div>
+    );
+  };
   const lastLogin = (u: UserRow) => (u.last_login_at ? formatShortDate(u.last_login_at) : t("users.neverSignedIn"));
   const who = (u: UserRow) => (
     <div className="min-w-0">
@@ -79,16 +107,13 @@ export default function Users() {
       {u.name && <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">{u.email}</p>}
     </div>
   );
-  // «API Key N» (MVP-2.8.0): the user's active, unexpired keys; opens the list of all of them
-  const keysButton = (u: UserRow) => {
-    const n = u.active_api_keys ?? 0;
-    return (
-      <button type="button" onClick={() => setKeysOf(u)} aria-label={t("users.keys.open").replace("{who}", u.name || u.email)}
-              className="min-h-[32px] rounded-md border border-border px-2.5 text-xs text-foreground hover:bg-accent">
-        {t("users.keys.label").replace("{n}", n > 0 ? String(n) : t("users.keys.none"))}
-      </button>
-    );
-  };
+  // «API 密钥» (MVP-2.8.0): «N 个有效 ▸» or «无»; opens the user's keys (issue, update, delete)
+  const keysButton = (u: UserRow) => (
+    <button type="button" onClick={() => setKeysOf(u)} aria-label={t("users.keys.open").replace("{who}", u.name || u.email)}
+            className="min-h-[32px] rounded-md border border-border px-2.5 text-xs text-foreground hover:bg-accent">
+      {keysLabel(u.active_api_keys ?? 0, t)}
+    </button>
+  );
   const state = (u: UserRow) => (
     <StatusText tone={u.is_active ? "ok" : "neutral"}>{t(u.is_active ? "users.status.active" : "users.status.disabled")}</StatusText>
   );
@@ -100,7 +125,7 @@ export default function Users() {
           <h1 className="text-2xl font-semibold text-foreground">{t("users.title")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{t("users.intro")}</p>
         </div>
-        <button type="button" onClick={(e) => { flowOpener.current = e.currentTarget; setError(null); setEditing("new"); }}
+        <button ref={newUserButton} type="button" onClick={(e) => { flowOpener.current = e.currentTarget; setError(null); setEditing("new"); }}
                 className="min-h-[40px] rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary-hover">
           ＋ {t("users.new")}
         </button>
@@ -154,7 +179,7 @@ export default function Users() {
                         <td className="px-4 py-3">{state(u)}</td>
                         <td className="px-4 py-3 text-xs text-muted-foreground">{lastLogin(u)}</td>
                         <td className="px-4 py-3">{keysButton(u)}</td>
-                        <td className="px-4 py-3"><div className="flex flex-wrap justify-end gap-1.5">{rowActions(u, meId).map((a) => actionButton(u, a))}</div></td>
+                        <td className="px-4 py-3">{actionRow(u, rows)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -165,7 +190,7 @@ export default function Users() {
                   <li key={u.id} className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm">
                     <div className="flex items-start justify-between gap-2">{who(u)}{state(u)}</div>
                     <p className="text-xs text-muted-foreground">{t(roleKey(u))} · {t("users.col.lastLogin")} {lastLogin(u)}</p>
-                    <div className="flex flex-wrap gap-1.5">{keysButton(u)}{rowActions(u, meId).map((a) => actionButton(u, a))}</div>
+                    <div className="flex flex-wrap items-center justify-between gap-2">{keysButton(u)}{actionRow(u, rows)}</div>
                   </li>
                 ))}
               </ul>
@@ -197,6 +222,15 @@ export default function Users() {
       {shown && <PasswordOnceDialog {...shown} returnTo={flowOpener.current}
                                     onClose={() => { setShown(null); create.reset(); reset.reset(); }} />}
       {keysOf && <UserKeysDialog user={keysOf} onClose={() => setKeysOf(null)} />}
+      {keyFlow && <IssueKeyFlow user={keyFlow} returnTo={flowOpener.current} onClose={() => setKeyFlow(null)} />}
+      {deleting && (
+        <DeleteUserDialog user={deleting} busy={del.isPending} error={deleteError}
+                          onClose={() => { setDeleting(null); setDeleteError(null); }}
+                          onConfirm={() => del.mutate(deleting.id, {
+                            onSuccess: () => { setDeleting(null); requestAnimationFrame(() => newUserButton.current?.focus()); },
+                            onError: (e) => setDeleteError(say(e)),
+                          })} />
+      )}
       {dialog}
     </div>
   );

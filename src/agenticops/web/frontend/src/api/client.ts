@@ -8,6 +8,8 @@ export class ApiError extends Error {
     message: string,
     /** the contract's UiError code when the server sent one (MVP-2.7.0 S6) */
     public code?: string,
+    /** the whole UiError object (MVP-2.8.0: a refusal may name what is in the way, e.g. `refs`) */
+    public data?: Record<string, unknown>,
   ) {
     super(message);
     this.name = "ApiError";
@@ -88,7 +90,8 @@ export async function apiFetch<T>(
     const d = body.detail;
     // the contract's UiError ({detail, code}) keeps its code (MVP-2.7.0 S6); anything else reads as before
     if (d && typeof d === "object" && !Array.isArray(d) && typeof (d as { detail?: unknown }).detail === "string") {
-      throw new ApiError(res.status, (d as { detail: string }).detail, (d as { code?: string }).code);
+      throw new ApiError(res.status, (d as { detail: string }).detail, (d as { code?: string }).code,
+                         d as Record<string, unknown>);
     }
     throw new ApiError(res.status, formatErrorDetail(body.detail ?? body.error ?? res.statusText));
   }
