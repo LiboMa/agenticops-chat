@@ -1413,4 +1413,19 @@ export interface UserRow {
   is_active: boolean;
   last_login_at: string | null;
   created_at: string | null;
+  /** active, unexpired API keys (MVP-2.8.0) */
+  active_api_keys?: number;
+}
+
+// ── API keys (MVP-2.8.0): GET/POST/DELETE /api/api-keys, GET/DELETE /api/users/{id}/api-keys ────────────────────
+export interface ApiKeyRow {
+  id: number;
+  name: string;
+  /** the first 12 characters — the full key is shown once, at creation */
+  key_prefix: string;
+  permissions: string[];
+  is_active: boolean;
+  last_used_at: string | null;
+  expires_at: string | null;
+  created_at: string | null;
 }

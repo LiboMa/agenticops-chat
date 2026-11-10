@@ -1,50 +1,11 @@
-import { useRef, useState } from "react";
-import * as Dialog from "@radix-ui/react-dialog";
+import { useState } from "react";
 import { useLocale } from "@/i18n/LocaleContext";
 import type { UserRole, UserRow } from "@/api/types";
 import { copyText } from "@/lib/clipboard";
-import { returnFocusTo } from "@/lib/focusReturn";
+import { ModalFrame as Frame } from "@/components/ui/ModalFrame";
 
 /** The user management page's dialogs (MVP-2.8.0 S2 rework). Radix: slide-in, ESC, focus kept inside; mounted on
  *  open, so the element focused at the first render is the opener and gets focus back (lib/focusReturn). */
-
-function useOpener() {
-  return useRef<HTMLElement | null>(
-    typeof document !== "undefined" && document.activeElement instanceof HTMLElement && document.activeElement !== document.body
-      ? document.activeElement : null,
-  );
-}
-
-function Frame({ title, onClose, returnTo, keepOnOutside = false, children }: {
-  title: string; onClose: () => void; children: React.ReactNode;
-  /** a click outside does not close it (the one-time password: a stray click lost its only copy — S2 rework review) */
-  keepOnOutside?: boolean;
-  /** where focus goes on close when the dialog was not opened by the focused element (the one-time password opens
-   *  after another dialog or a confirm closed — the flow's own button, S2 rework E2E) */
-  returnTo?: HTMLElement | null;
-}) {
-  const { t } = useLocale();
-  const focused = useOpener();
-  const opener = { current: returnTo ?? focused.current };
-  return (
-    <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <Dialog.Portal>
-        {/* centred by the overlay, not by a translate: the slideInRight keyframe owns `transform` */}
-        <Dialog.Overlay className="fixed inset-0 z-50 grid items-start justify-items-center overflow-y-auto bg-black/30 px-4 pt-[12vh]">
-          <Dialog.Content aria-describedby={undefined} onCloseAutoFocus={(e) => returnFocusTo(opener.current, e)}
-                          onPointerDownOutside={keepOnOutside ? (e) => e.preventDefault() : undefined}
-                          className="w-[min(440px,100%)] rounded-lg border border-border bg-card p-5 shadow-xl animate-[slideInRight_0.2s_ease-out]">
-            <div className="flex items-start justify-between gap-3">
-              <Dialog.Title className="text-lg font-semibold text-foreground [overflow-wrap:anywhere]">{title}</Dialog.Title>
-              <Dialog.Close aria-label={t("common.close")} className="rounded px-2 text-lg text-muted-foreground hover:text-foreground">×</Dialog.Close>
-            </div>
-            {children}
-          </Dialog.Content>
-        </Dialog.Overlay>
-      </Dialog.Portal>
-    </Dialog.Root>
-  );
-}
 
 const ROLES: UserRole[] = ["admin", "writer", "viewer"];
 const field = "mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-[16px] sm:text-sm";

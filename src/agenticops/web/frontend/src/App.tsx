@@ -35,6 +35,7 @@ const Galaxy = lazy(() => import("@/pages/Galaxy"));
 const Security = lazy(() => import("@/pages/Security"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 const Users = lazy(() => import("@/pages/Users"));
+const ApiKeys = lazy(() => import("@/pages/ApiKeys"));
 
 /** Settings is all configuration: a viewer whose account may not view it gets the not-found page. */
 function SettingsGate({ children }: { children: React.ReactNode }) {
@@ -157,6 +158,14 @@ export default function App() {
               element={
                 <Suspense fallback={<Spinner />}>
                   <SettingsGate><Settings /></SettingsGate>
+                </Suspense>
+              }
+            />
+            <Route
+              path="account/api-keys"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <ApiKeys />
                 </Suspense>
               }
             />
