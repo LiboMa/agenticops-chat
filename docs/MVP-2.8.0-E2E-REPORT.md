@@ -314,3 +314,12 @@
 | 问题 | 修复前 | 修复后 | 提交 |
 |---|---|---|---|
 | 删除用户后焦点丢了 | 焦点落在 `<body>`：Radix 关闭对话框时把焦点还给被删那一行的「删除」按钮（那时这一行还在），列表刷新后这一行没了 | 删除成功后先让对话框知道焦点该去「＋ 新建用户」，下一次渲染再关闭；取消和 ESC 仍回到那一行的按钮（`focusReturn.test` 的 `closeFocusTarget` 先失败、再通过） | `638ce63` |
+
+### 整个分支评审之后的修复（2026-11-11）
+
+修复后重启了 :8001（重启前通知了 peer），前端重新构建。
+
+| 问题 | 修复前 | 修复后 |
+|---|---|---|
+| 侧栏「定时任务」的红色数字算上了已删除的任务 | 副本库：`nav-counts` 的 `schedules_failed` 是 8，有 7 个已删除的任务还留着运行记录 | 3，和 `GET /api/schedules` 里最后一次运行失败的 3 个任务（`resource-scan`、`k8s-discovery`、`cost-expense-monthly-report`）一致；侧栏「定时任务 3 个最近一次失败」（`test_a_deleted_schedule_never_counts` 先失败、再通过） |
+| 直接打开问题时「在等我」显示成选中 | 打开 `/app/issues/6`：「在等我」被选中，下面的列表却是「全部」 | 「全部 106」被选中，右边是 I#6；直接打开 `/app/issues` 仍然是「在等我」（`caseQueue.test` 的 `listView` 先失败、再通过）<br>![](images/mvp-2.8.0-credentials-sidebar-e2e/issue-deeplink-1440.jpg) |
