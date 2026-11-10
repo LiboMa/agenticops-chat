@@ -1009,17 +1009,23 @@ Open `http://localhost:8000/app/` and sign in. **The workspace shell (MVP-2.7.0)
   nothing) — otherwise Chat. A full URL (a notification link, a bookmark) always opens exactly that page.
 - **Signed out?** Any page sends you to `/app/login?next=…` and back to the same page (query and hash
   included) after signing in; only same-origin `/app` pages are accepted as `next`.
-- **Needs your attention** (top bar, left of search; MVP-2.7.0 S3, a link to the workbench since 2.8.0 S2): the count of work items that wait on *you* — the same «Waiting for you / an approver / acceptance» the issue and change pages show, filtered by what you may do (your own change never asks you to approve it). Click it to open the **to-do workbench** (`/app/inbox`, below). Nothing is approved from the list.
-- **To-do workbench** (`/app/inbox`, first entry of *Daily work*; MVP-2.8.0 S2): every item that waits on a person, longest wait first. Tabs — All, To approve, To accept, Failed (including «approved but not started»), To confirm (including «needs clarification») — each with its count; the tab bar is one keyboard stop, ←/→ move between tabs, Home / End go to the first / last. Search a title, a resource or a number (`I#12`, `12`). Each row says the item, its severity or risk, the resource · account · region, why it waits, and for how long (hover for the UTC time). On a wide screen (≥ 1280px) the queue sits beside the item's own page — decide there; on a narrower one the list and the item take turns and «← Back to the to-do list» returns to the same tab and scroll. **Split / Compact** switches the row density. When the item you are on has just been handled it says so and offers the next one. The tab, search, item and layout are in the URL, so a link opens the same view; the top bar's account scope applies. It lists only what *you* can do: a read-only account's workbench is empty.
+- **Needs your attention** (top bar, left of search; MVP-2.7.0 S3, a link since 2.8.0 S2): the count of work items that wait on *you* — the same «Waiting for you / an approver / acceptance» the issue and change pages show, filtered by what you may do (your own change never asks you to approve it). It is the same number as the sidebar's on Issues. Click it to open **Issues · Waiting on me** (below). Nothing is approved from the list.
+- **Issues · Waiting on me** (`/app/issues`, its first tab; the to-do workbench of 2.8.0 S2 merged into Issues on 2026-11-10): every item that waits on *you* — issues and changes — grouped by the decision it needs: *To approve*, *To accept*, *Failed* (including «approved but not started»), *To confirm* (including «needs clarification»); each group heading has its count, the longest wait comes first in each, and 50 load at a time («Load more»). The tabs beside it are *All*, *Failed* and *Waiting long* (issues only), each with its count. Search a title, a resource or a number (`I#12`, `12`). Each row says the item (a change carries `C#n`), its severity or risk, the resource · account · region, why it waits, and for how long (hover for the UTC time). On a wide screen (≥ 1280px) the list sits beside the item's own page — an issue's or a change's — decide there; on a narrower one the list and the item take turns and «← Back to «Waiting on me»» returns to the same search and scroll. When the item you are on has just been handled it says so and offers the next one. The tab, search and item are in the URL (`?view=waiting&item=I12` / `C3`), so a link opens the same view; the top bar's account scope applies. It lists only what *you* can do: a read-only account opens Issues on *All*, and its *Waiting on me* says it has nothing to do. Old workbench links (`/app/inbox`, with or without a search or an item) open here.
 - **Account scope** (top bar, between «Needs your attention» and search; in the avatar menu on a phone; MVP-2.7.0 S4): pick one account (or All) and the issue queue, the Fix plans and Changes tabs, Resources and «Needs your attention» show only that account. A detail page shows its own record's account, so the scope is greyed there; pages it does not filter (overview, security, Galaxy, Chat, Settings) grey it out and say so. An old link with `?account=` / `?account_id=` sets the scope once and drops the parameter.
 - **Approvals say what they do**: «Approve & run» only when approving really queues the run (auto-fix and the executor on); otherwise «Approve», with a note that someone presses **Execute** afterwards. Every approval asks you to tick «I have reviewed this version, the target scope, the risks and the recovery checks» first.
-- **Sidebar** (regrouped by the owner in the 2.8.0 S2 rework): *Daily work* (To-do workbench, Chat, Issues, Plans &
-  changes, Security, Reports), the collapsible *Operations* (Runtime overview, Galaxy, Schedules, Resources, Agent
+- **Sidebar** (regrouped by the owner in the 2.8.0 S2 rework; numbers and hints since 2026-11-10): *Daily work* (Issues,
+  Chat, Plans & changes, Security, Reports), the collapsible *Operations* (Runtime overview, Galaxy, Schedules, Resources, Agent
   metrics, Skills), and *Administration* at the foot of the sidebar, never folded (Users — admins only — and
   Settings, the last entry). The group holding the current page opens by itself; drag to reorder inside a group. A
   group you can open nothing in is not shown (a read-only account has no Administration). An order you saved before
-  keeps its sequence; entries that changed group appear at their default place in their new group. Chat has the
-  same full sidebar as every page. Below 800px the sidebar becomes a menu in the top bar.
+  keeps its sequence; entries that changed group appear at their default place in their new group, and Issues takes
+  the old workbench's place. Chat has the same full sidebar as every page. Below 800px the sidebar becomes a menu in
+  the top bar. An entry shows at most one number: Issues — what waits on you (red when a critical issue is among
+  them; it follows the account scope), Security — open high and critical findings, Schedules — schedules whose latest
+  run failed (red), Skills — drafts waiting for review. No number means nothing to do; when the numbers cannot be
+  fetched the entry says «Numbers unavailable right now» instead of showing 0, and a read-only account sees no numbers. Hovering,
+  focusing or being on an entry shows a hint line under its name («132 waiting on you, 36 critical»), which a screen
+  reader reads too. A folded *Operations* keeps a red number beside its heading.
 - **Top bar**: breadcrumb, search (⌘K / Ctrl K), 中文 | English, and the avatar menu (account, theme, font
   size, Home & language, sign out). Preferences (home, language, open groups, last page) follow your account
   to other browsers (`GET /api/ui/bootstrap`, `GET`/`PATCH /api/users/me/preferences`, If-Match revisions);
@@ -1181,13 +1187,21 @@ read-only account, which cannot accept).
 **Managing users (2.8.0, admins).** **Administration → Users** (`/app/users`) lists every web account with its
 role (Admin, Writer, Viewer, Viewer who may view Settings), its state and its last sign-in (UTC). **New user** asks for
 a sign-in name, an optional display name and the role; the password is generated and shown once — copy it before
-closing. Each row offers what is allowed: change role, reset password (a new password shown once; the user's
-browsers sign out — your own reset keeps you signed in here), disable (their browsers sign out at once and their API
-keys are revoked; enabling again restores neither). You cannot disable or demote yourself, and the last active admin
-stays. Every change is in the audit log, never the password. `aiops users create / list / disable` still works.
+closing. Each row has one line of icon buttons (hover or focus one for what it does — the same words a screen
+reader says): first password and keys — **reset password** (a new password shown once; the user's browsers sign out —
+your own reset keeps you signed in here) and **issue a key** — then the account — **change role**, **disable** (their
+browsers sign out at once and their API keys are revoked; **re-enable** restores neither) and **delete user**. You
+cannot disable, demote or delete yourself, and the last active admin stays. Every change is in the audit log, never
+the password. `aiops users create / list / disable` still works.
 Each row's **API keys: N** (active, unexpired keys; «none» at 0) opens the user's keys — name, prefix, access, last
-use, expiry, state — and revokes an active one after a confirm; an admin never creates a key for someone else and
-never sees a full key.
+use, expiry, state — where you **issue** one for them, **update** one (a new key under the same name, the old one dead
+at once) or **delete** one. A key you issue is never above that person's role (a read-only account gets read-only
+keys) and is shown to you once, like a reset password; a listed key never shows in full.
+**Delete user** says what goes and what stays before you confirm: sign-in, every session, every API key and unsent
+attachments end at once; their chats, reports and audit records stay, and who may see them does not change; the
+sign-in name can never be used again (a new user with it is refused). It is refused while a change request waits on
+them (a draft, one needing clarification, or one under review) and names it — cancel those first, or disable the
+account instead. It cannot be undone.
 
 **API keys for apps and coding agents (2.8.0).** Avatar menu → **API keys** (`/app/account/api-keys`), for every
 signed-in person. **New API key** asks for a name, the access — *Read only* (see issues, plans, resources and
@@ -1199,8 +1213,9 @@ key is shown **once**, with Copy and an example:
 curl -H "Authorization: Bearer aiops_…" https://<your-site>/api/health-issues?limit=5
 ```
 
-The list shows each key's prefix, access, created / last used / expiry (UTC) and state (active / expired / revoked);
-**Revoke** takes effect at once, and disabling an account voids its keys. Whatever its access, a key never
+The list shows each active key's prefix, access, created / last used / expiry (UTC) and state (active / expired);
+**Update** issues a new key under the same name (choose the access and expiry again) and the old one stops at once;
+**Delete** takes effect at once; disabling or deleting an account voids its keys. Whatever its access, a key never
 approves, rejects, deletes, runs or accepts a plan or change — not even through the agent in a chat it started (the
 403 says `code: human_session_required`) — and never creates or revokes keys, changes a password or manages users:
 do those signed in. *Still open (owner's decision): a read-write key's chat can use the writer tools that reach the
