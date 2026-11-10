@@ -61,6 +61,13 @@ class ScheduleExecution(Base):
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
+def latest_executions(session) -> dict[int, "ScheduleExecution"]:
+    """Each schedule's newest run, by schedule id — one grouped query (GET /api/schedules, the sidebar's count)."""
+    from sqlalchemy import func, select
+    newest = session.query(func.max(ScheduleExecution.id)).group_by(ScheduleExecution.schedule_id).subquery()
+    return {e.schedule_id: e for e in session.query(ScheduleExecution).filter(ScheduleExecution.id.in_(select(newest)))}
+
+
 # ============================================================================
 # Cron Parser
 # ============================================================================

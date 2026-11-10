@@ -22,6 +22,15 @@ def _latest_snapshots(session) -> list[SecuritySnapshot]:
     return list(snaps.values())
 
 
+def open_high_findings() -> int:
+    """Open security findings of high or critical severity (MVP-2.8.0: the sidebar's «安全» number)."""
+    with get_db_session() as session:
+        return (session.query(HealthIssue)
+                .filter(HealthIssue.detected_by.in_(_SECURITY_DETECTORS))
+                .filter(HealthIssue.status.in_(OPEN_ISSUE_STATUSES))
+                .filter(HealthIssue.severity.in_(("critical", "high"))).count())
+
+
 def security_summary() -> dict:
     with get_db_session() as session:
         rows = (session.query(HealthIssue)

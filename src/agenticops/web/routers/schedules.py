@@ -28,16 +28,11 @@ ERROR_SUMMARY_CHARS = 200
 @router.get("/api/schedules", response_model=List[ScheduleResponse])
 def api_list_schedules():
     """List all schedules, each with its newest run (MVP-2.8.0 S1): one grouped query, not one per schedule."""
-    from sqlalchemy import func
-
-    from agenticops.scheduler.scheduler import Schedule, ScheduleExecution
+    from agenticops.scheduler.scheduler import Schedule, latest_executions
 
     with get_db_session() as session:
         schedules = session.query(Schedule).order_by(Schedule.created_at.desc()).all()
-        newest = (session.query(func.max(ScheduleExecution.id))
-                  .group_by(ScheduleExecution.schedule_id).subquery())
-        latest = {e.schedule_id: e for e in
-                  session.query(ScheduleExecution).filter(ScheduleExecution.id.in_(select(newest)))}
+        latest = latest_executions(session)
         out = []
         for s in schedules:
             resp = ScheduleResponse.model_validate(s)

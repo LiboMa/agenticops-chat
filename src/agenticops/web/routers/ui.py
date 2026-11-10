@@ -157,3 +157,13 @@ def api_ui_attention(account_id: Optional[int] = Query(None, ge=1), limit: int =
                               offset=int(cursor or 0))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/api/ui/nav-counts")
+def api_ui_nav_counts(account_id: Optional[int] = Query(None, ge=1), actor: Actor = Depends(current_actor),
+                      _user=Depends(signed_in_user)) -> dict:
+    """The sidebar's numbers in one request (MVP-2.8.0 direction A; services/nav_counts): the to-do total from the
+    same source as /api/ui/attention (and its critical issues), open high / critical security findings, failed
+    schedules, skill drafts. A viewer gets none; a count that fails is null, never 0. Plain def: DB work."""
+    from agenticops.services.nav_counts import nav_counts
+    return nav_counts(actor, account_id=account_id)
