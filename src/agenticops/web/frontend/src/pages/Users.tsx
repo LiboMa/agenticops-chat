@@ -8,6 +8,7 @@ import { QueryState } from "@/components/ui/QueryState";
 import { StatusText } from "@/components/ui/StatusText";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { PasswordOnceDialog, RoleDialog } from "@/components/users/UserDialogs";
+import { UserKeysDialog } from "@/components/users/UserKeysDialog";
 import { formatShortDate } from "@/lib/formatDate";
 import { filterUsers, roleKey, rowActions, type RoleFilter, type RowAction, type StatusFilter } from "@/lib/users";
 
@@ -29,6 +30,7 @@ export default function Users() {
   const [editing, setEditing] = useState<UserRow | "new" | null>(null);
   const [shown, setShown] = useState<{ email: string; password: string; kind: "created" | "reset" } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [keysOf, setKeysOf] = useState<UserRow | null>(null);
   // the button that started a create / reset flow: the one-time password dialog opens after another dialog or a
   // confirm closed, so it hands focus back here explicitly (S2 rework E2E: it fell to <body>)
   const flowOpener = useRef<HTMLElement | null>(null);
@@ -77,6 +79,16 @@ export default function Users() {
       {u.name && <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">{u.email}</p>}
     </div>
   );
+  // «API Key N» (MVP-2.8.0): the user's active, unexpired keys; opens the list of all of them
+  const keysButton = (u: UserRow) => {
+    const n = u.active_api_keys ?? 0;
+    return (
+      <button type="button" onClick={() => setKeysOf(u)} aria-label={t("users.keys.open").replace("{who}", u.name || u.email)}
+              className="min-h-[32px] rounded-md border border-border px-2.5 text-xs text-foreground hover:bg-accent">
+        {t("users.keys.label").replace("{n}", n > 0 ? String(n) : t("users.keys.none"))}
+      </button>
+    );
+  };
   const state = (u: UserRow) => (
     <StatusText tone={u.is_active ? "ok" : "neutral"}>{t(u.is_active ? "users.status.active" : "users.status.disabled")}</StatusText>
   );
@@ -130,6 +142,7 @@ export default function Users() {
                       <th className="px-4 py-2 font-medium">{t("users.col.role")}</th>
                       <th className="px-4 py-2 font-medium">{t("users.col.status")}</th>
                       <th className="px-4 py-2 font-medium">{t("users.col.lastLogin")}</th>
+                      <th className="px-4 py-2 font-medium">{t("users.col.keys")}</th>
                       <th className="px-4 py-2"><span className="sr-only">{t("users.col.actions")}</span></th>
                     </tr>
                   </thead>
@@ -140,6 +153,7 @@ export default function Users() {
                         <td className="px-4 py-3"><span className="rounded border border-border px-1.5 py-0.5 text-xs">{t(roleKey(u))}</span></td>
                         <td className="px-4 py-3">{state(u)}</td>
                         <td className="px-4 py-3 text-xs text-muted-foreground">{lastLogin(u)}</td>
+                        <td className="px-4 py-3">{keysButton(u)}</td>
                         <td className="px-4 py-3"><div className="flex flex-wrap justify-end gap-1.5">{rowActions(u, meId).map((a) => actionButton(u, a))}</div></td>
                       </tr>
                     ))}
@@ -151,7 +165,7 @@ export default function Users() {
                   <li key={u.id} className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm">
                     <div className="flex items-start justify-between gap-2">{who(u)}{state(u)}</div>
                     <p className="text-xs text-muted-foreground">{t(roleKey(u))} · {t("users.col.lastLogin")} {lastLogin(u)}</p>
-                    <div className="flex flex-wrap gap-1.5">{rowActions(u, meId).map((a) => actionButton(u, a))}</div>
+                    <div className="flex flex-wrap gap-1.5">{keysButton(u)}{rowActions(u, meId).map((a) => actionButton(u, a))}</div>
                   </li>
                 ))}
               </ul>
@@ -182,6 +196,7 @@ export default function Users() {
       {/* closing forgets the password: the dialog's state and the mutations' cached results (S2 rework review) */}
       {shown && <PasswordOnceDialog {...shown} returnTo={flowOpener.current}
                                     onClose={() => { setShown(null); create.reset(); reset.reset(); }} />}
+      {keysOf && <UserKeysDialog user={keysOf} onClose={() => setKeysOf(null)} />}
       {dialog}
     </div>
   );

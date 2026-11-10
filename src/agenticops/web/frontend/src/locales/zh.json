@@ -1509,5 +1509,13 @@
   "apiKeys.error.invalid_expiry": "有效期要在 1–3650 天之间，或永不过期。",
   "apiKeys.error.not_found": "这个 Key 已不存在，请刷新。",
   "apiKeys.error.session_required": "管理 API Key 要用登录会话，不能用 API Key。",
-  "apiKeys.error.generic": "操作失败：{detail}"
+  "apiKeys.error.generic": "操作失败：{detail}",
+  "users.col.keys": "API Key",
+  "users.keys.label": "API Key {n}",
+  "users.keys.none": "无",
+  "users.keys.open": "查看 {who} 的 API Key",
+  "users.keys.title": "{who} 的 API Key",
+  "users.keys.empty": "这个用户没有 API Key。",
+  "users.keys.note": "可以撤销别人的 Key，但不能替别人新建，也看不到完整的 Key。",
+  "users.keys.confirm": "撤销 {who} 的「{name}」？用它的应用会立即失去访问。"
 }

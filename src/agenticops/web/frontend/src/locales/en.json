@@ -1509,5 +1509,13 @@
   "apiKeys.error.invalid_expiry": "A key expires in 1–3650 days, or never.",
   "apiKeys.error.not_found": "This key no longer exists — reload.",
   "apiKeys.error.session_required": "Manage API keys from a signed-in session, not with an API key.",
-  "apiKeys.error.generic": "The change failed: {detail}"
+  "apiKeys.error.generic": "The change failed: {detail}",
+  "users.col.keys": "API keys",
+  "users.keys.label": "API keys: {n}",
+  "users.keys.none": "none",
+  "users.keys.open": "View {who}'s API keys",
+  "users.keys.title": "{who}'s API keys",
+  "users.keys.empty": "This user has no API keys.",
+  "users.keys.note": "You can revoke someone's keys, but not create one for them or see a full key.",
+  "users.keys.confirm": "Revoke {who}'s «{name}»? Apps using it lose access at once."
 }
