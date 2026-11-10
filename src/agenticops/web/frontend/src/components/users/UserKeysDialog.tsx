@@ -9,7 +9,8 @@ import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { KeyList } from "@/components/apikeys/KeyList";
 
 /** An admin's view of one user's API keys (MVP-2.8.0, owner 2026-11-10): every key with its state, Revoke on the
- *  active ones after a confirm. An admin never creates a key for someone else and never sees a full key. */
+ *  active ones after a confirm. An admin may issue a key for someone (never above their role) and sees that key
+ *  once, like a reset password; a listed key never shows in full. */
 export function UserKeysDialog({ user, onClose }: { user: UserRow; onClose: () => void }) {
   const { t } = useLocale();
   const keys = useUserKeys(user.id);

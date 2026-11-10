@@ -1518,6 +1518,6 @@
   "users.keys.open": "查看 {who} 的 API Key",
   "users.keys.title": "{who} 的 API Key",
   "users.keys.empty": "这个用户没有 API Key。",
-  "users.keys.note": "可以撤销别人的 Key，但不能替别人新建，也看不到完整的 Key。",
+  "users.keys.note": "可以替别人生成、更新或删除密钥（不会超过他的身份）；新密钥只显示一次，列表里看不到完整的密钥。",
   "users.keys.confirm": "撤销 {who} 的「{name}」？用它的应用会立即失去访问。"
 }

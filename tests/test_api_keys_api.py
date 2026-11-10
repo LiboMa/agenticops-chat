@@ -65,7 +65,7 @@ def test_create_list_revoke_and_the_key_is_shown_once(env):
     assert key not in json.dumps(listed)
     assert env.client.delete(f"/api/api-keys/{body['id']}", headers=H(tok)).status_code == 204
     assert AuthService.validate_api_key(key) is None
-    assert env.client.get("/api/api-keys", headers=H(tok)).json()[0]["is_active"] is False
+    assert env.client.get("/api/api-keys", headers=H(tok)).json() == []   # a deleted (revoked) key leaves the list
 
 
 def test_scope_is_read_or_read_write_never_more_than_the_owner(env):
@@ -128,7 +128,7 @@ def test_an_admin_lists_and_revokes_someone_elses_keys(env):
     rows = {u["email"]: u for u in env.client.get("/api/users", headers=H(root)).json()}
     assert rows["ops"]["active_api_keys"] == 1 and rows["root"]["active_api_keys"] == 0
     keys = env.client.get(f"/api/users/{ops.id}/api-keys", headers=H(root)).json()
-    assert sorted(k["name"] for k in keys) == ["expired", "live", "old"]
+    assert sorted(k["name"] for k in keys) == ["expired", "live"]       # the revoked «old» is no longer listed
     assert live["key"] not in json.dumps(keys)
     assert env.client.delete(f"/api/users/{ops.id}/api-keys/{live['id']}", headers=H(root)).status_code == 204
     assert AuthService.validate_api_key(live["key"]) is None
@@ -182,4 +182,72 @@ def test_the_key_routes_are_plain_def():
     eps = {r.endpoint.__name__: r.endpoint for r in auth_router.router.routes if r.endpoint.__name__ in names}
     assert set(eps) == names and not any(inspect.iscoroutinefunction(e) for e in eps.values())
     uk = [r.endpoint for r in users_router.router.routes if "api-keys" in r.path]
-    assert len(uk) == 2 and not any(inspect.iscoroutinefunction(e) for e in uk)
+    assert len(uk) == 3 and not any(inspect.iscoroutinefunction(e) for e in uk)   # list, revoke, issue
+
+
+# ── an admin issues a key for someone (MVP-2.8.0 user management, owner 2026-11-10) ───────────────────────
+
+
+def _issue(env, admin_tok, user_id, **body):
+    return env.client.post(f"/api/users/{user_id}/api-keys", headers=H(admin_tok),
+                           json={"name": "for you", "permissions": ["read"], "expires_days": 90, **body})
+
+
+def test_revoked_keys_leave_both_lists(env):
+    _, root = _user("root", "admin")
+    ops, ops_tok = _user("ops")
+    keep = _create(env, ops_tok, name="keep").json()
+    gone = _create(env, ops_tok, name="gone").json()
+    env.client.delete(f"/api/api-keys/{gone['id']}", headers=H(ops_tok))
+    assert [k["name"] for k in env.client.get("/api/api-keys", headers=H(ops_tok)).json()] == ["keep"]
+    assert [k["id"] for k in env.client.get(f"/api/users/{ops.id}/api-keys", headers=H(root)).json()] == [keep["id"]]
+
+
+def test_an_admin_issues_a_key_that_belongs_to_the_user(env):
+    from agenticops.audit.models import AuditLog
+    from agenticops.auth import AuthService
+    from agenticops.models import get_db_session
+    _, root = _user("root", "admin")
+    ops, _ = _user("ops")
+    r = _issue(env, root, ops.id, permissions=["read", "write"])
+    assert r.status_code == 201, r.text
+    key = r.json()["key"]
+    owner = AuthService.validate_api_key(key)
+    assert owner is not None and owner[0].id == ops.id
+    with get_db_session() as s:
+        row = s.query(AuditLog).filter_by(action="api_key.create").one()
+        assert row.user_email == "root" and row.details["owner_id"] == ops.id and row.details["by_admin"] is True
+        dumped = json.dumps([row.details, row.old_values, row.new_values, row.entity_name])
+    assert key not in dumped
+
+
+def test_an_admin_cannot_exceed_the_users_role(env):
+    _, root = _user("root", "admin")
+    viewer, _ = _user("view", "viewer")
+    ops, _ = _user("ops")
+    r = _issue(env, root, viewer.id, permissions=["read", "write"])
+    assert (r.status_code, r.json()["detail"]["code"]) == (403, "scope_exceeds_role")
+    r = _issue(env, root, ops.id, permissions=["read", "write", "admin"])
+    assert (r.status_code, r.json()["detail"]["code"]) == (422, "invalid_scope")
+
+
+def test_no_key_for_a_disabled_or_deleted_user(env):
+    _, root = _user("root", "admin")
+    off, _ = _user("off")
+    gone, _ = _user("gone")
+    env.client.patch(f"/api/users/{off.id}", headers=H(root), json={"is_active": False})
+    env.client.delete(f"/api/users/{gone.id}", headers=H(root))
+    r = _issue(env, root, off.id)
+    assert (r.status_code, r.json()["detail"]["code"]) == (409, "user_inactive")
+    r = _issue(env, root, gone.id)
+    assert (r.status_code, r.json()["detail"]["code"]) == (404, "not_found")
+
+
+def test_only_a_signed_in_admin_issues_keys(env):
+    from agenticops.auth import AuthService
+    root, _ = _user("root", "admin")
+    ops, ops_tok = _user("ops")
+    assert _issue(env, ops_tok, root.id).status_code == 403
+    admin_key = AuthService.create_api_key(user_id=root.id, name="admin", permissions=["read", "write", "admin"])
+    r = _issue(env, admin_key, ops.id)
+    assert (r.status_code, r.json()["detail"]["code"]) == (403, "session_required")

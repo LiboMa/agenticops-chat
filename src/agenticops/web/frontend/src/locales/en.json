@@ -1518,6 +1518,6 @@
   "users.keys.open": "View {who}'s API keys",
   "users.keys.title": "{who}'s API keys",
   "users.keys.empty": "This user has no API keys.",
-  "users.keys.note": "You can revoke someone's keys, but not create one for them or see a full key.",
+  "users.keys.note": "You can issue, update or delete someone's keys (never above their role); a new key is shown once, and a listed key never in full.",
   "users.keys.confirm": "Revoke {who}'s «{name}»? Apps using it lose access at once."
 }

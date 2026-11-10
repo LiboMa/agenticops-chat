@@ -14,8 +14,8 @@ from fastapi.responses import JSONResponse
 
 from agenticops.services import user_admin
 from agenticops.web.deps import require_session_user
-from agenticops.web.schemas import (APIKeyResponse, PasswordResetResponse, UserCreateBody, UserCreatedResponse,
-                                    UserPatchBody, UserRow)
+from agenticops.web.schemas import (APIKeyCreate, APIKeyCreatedResponse, APIKeyResponse, PasswordResetResponse,
+                                    UserCreateBody, UserCreatedResponse, UserPatchBody, UserRow)
 
 router = APIRouter(tags=["users"])
 
@@ -52,6 +52,20 @@ def api_list_user_api_keys(user_id: int, caller=Depends(users_admin)):
     if not api_keys.owner_exists(user_id):
         return _refused(user_admin.UserAdminError(404, "not_found", f"user {user_id} not found"))
     return api_keys.list_keys(user_id)
+
+
+@router.post("/api/users/{user_id}/api-keys", response_model=APIKeyCreatedResponse, status_code=201)
+def api_create_user_api_key(user_id: int, body: APIKeyCreate, caller=Depends(users_admin)):
+    """An admin issues a key for someone (MVP-2.8.0, owner 2026-11-10): never above that person's role; the full key
+    is in this response only, for the admin to hand over — like a reset password."""
+    from agenticops.services import api_keys
+    try:
+        owner = api_keys.issuable_owner(user_id)
+        row, key = api_keys.create_key(owner, name=body.name, permissions=body.permissions,
+                                       expires_days=body.expires_days, caller=caller, by_admin=True)
+    except api_keys.ApiKeyError as e:
+        return _refused(e)
+    return {**row, "key": key}
 
 
 @router.delete("/api/users/{user_id}/api-keys/{key_id}", status_code=204)

@@ -2,7 +2,9 @@
 
 - A key is ["read"] or ["read","write"]: never more than its owner's role (a viewer gets read only), never admin.
 - The full key exists once — returned at creation; stored hashed; never listed, audited or shown to an admin.
-- Revoking flips is_active (the row stays, so the list can say «已撤销»); an owner revokes their own, an admin anyone's.
+- Revoking (the page's «删除») flips is_active: the row stays for the audit, but it leaves every list (MVP-2.8.0 user
+  management round); an owner revokes their own, an admin anyone's.
+- An admin may issue a key for someone else, never above that person's role; the audit says it was an admin.
 - A demotion that takes write away downgrades the user's keys to read (one audit row each); nothing ever upgrades one.
 - Every create / revoke / downgrade writes one audit row in the same transaction.
 Managing keys needs a signed-in session, never a key (web/deps.require_session_user) — a leaked key cannot mint
@@ -55,10 +57,13 @@ def _audit(s, action: str, k: APIKey, caller, **details) -> None:
 
 def list_keys(user_id: int) -> list[dict]:
     with get_db_session() as s:
-        return [_row(k) for k in s.query(APIKey).filter_by(user_id=user_id).order_by(APIKey.created_at.desc()).all()]
+        rows = (s.query(APIKey).filter(APIKey.user_id == user_id, APIKey.is_active.is_(True))
+                .order_by(APIKey.created_at.desc()).all())
+        return [_row(k) for k in rows]          # active and expired; a revoked (deleted) key is no longer listed
 
 
-def create_key(user, *, name: str, permissions, expires_days: Optional[int], caller) -> tuple[dict, str]:
+def create_key(user, *, name: str, permissions, expires_days: Optional[int], caller,
+               by_admin: bool = False) -> tuple[dict, str]:
     from agenticops.auth.service import generate_api_key
     name = (name or "").strip()
     if not 1 <= len(name) <= NAME_MAX:
@@ -77,7 +82,7 @@ def create_key(user, *, name: str, permissions, expires_days: Optional[int], cal
                    expires_at=_now() + timedelta(days=int(expires_days)) if expires_days else None)
         s.add(k)
         s.flush()
-        _audit(s, "api_key.create", k, caller)
+        _audit(s, "api_key.create", k, caller, by_admin=by_admin)
         return _row(k), key
 
 
@@ -116,6 +121,19 @@ def active_counts() -> dict[int, int]:
             if exp is None or exp > now:
                 out[uid] = out.get(uid, 0) + 1
         return out
+
+
+def issuable_owner(user_id: int) -> User:
+    """The user an admin issues a key for (detached): missing or deleted → 404; disabled → 409 (a key for someone
+    who cannot sign in would never work)."""
+    with get_db_session() as s:
+        u = s.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
+        if u is None:
+            raise ApiKeyError(404, "not_found", f"user {user_id} not found")
+        if not u.is_active:
+            raise ApiKeyError(409, "user_inactive", f"user {user_id} is disabled")
+        s.expunge(u)
+        return u
 
 
 def owner_exists(user_id: int) -> bool:
