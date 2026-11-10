@@ -1,5 +1,6 @@
 import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { legacyInboxRedirect } from "@/lib/workitemRoutes";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { AppShell } from "@/components/layout/AppShell";
 import { HomeResolver } from "@/components/layout/HomeResolver";
@@ -14,7 +15,6 @@ const Login = lazy(() => import("@/pages/Login"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Chat = lazy(() => import("@/pages/Chat"));
 const Cases = lazy(() => import("@/pages/Cases"));
-const Inbox = lazy(() => import("@/pages/Inbox"));
 const CasePlaceholder = lazy(() => import("@/pages/Cases").then((m) => ({ default: m.CasePlaceholder })));
 const CaseReading = lazy(() => import("@/pages/Cases").then((m) => ({ default: m.CaseReading })));
 const ChangeDetail = lazy(() => import("@/pages/ChangeDetail"));
@@ -57,6 +57,12 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 
 /** /app/changes and /app/audit are tabs of Plans & changes since MVP-2.7.0 S3; old links keep their query. */
+/** /app/inbox → Issues · 在等我, the search and a valid selected item kept (lib/workitemRoutes.legacyInboxRedirect). */
+function InboxRedirect() {
+  const { search } = useLocation();
+  return <Navigate to={legacyInboxRedirect(search)} replace />;
+}
+
 function HubRedirect({ tab }: { tab: "changes" | "audit" }) {
   const { search } = useLocation();
   return <Navigate to={hubRedirect(tab, search)} replace />;
@@ -103,7 +109,8 @@ export default function App() {
               }
             />
             {/* The to-do workbench (MVP-2.8.0 S2): the item in ?item=, so the queue never remounts */}
-            <Route path="inbox" element={<Suspense fallback={<Spinner />}><Inbox /></Suspense>} />
+            {/* MVP-2.8.0: the to-do workbench merged into Issues («在等我»); the old address keeps working */}
+            <Route path="inbox" element={<InboxRedirect />} />
             {/* Cases (MVP-2.7.0 S4): a layout route, so the queue stays mounted while you move between cases */}
             <Route path="issues" element={<Suspense fallback={<Spinner />}><Cases /></Suspense>}>
               <Route index element={<Suspense fallback={<Spinner />}><CasePlaceholder /></Suspense>} />

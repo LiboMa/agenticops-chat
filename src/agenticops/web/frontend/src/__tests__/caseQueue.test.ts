@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  ACTIVE_STATUSES, QUEUE_CAP, QUICK_VIEWS, backTarget, capped, caseHref, queueFilters, queueParams, rowState, scrollKey, SPLIT_MIN_WIDTH,
+  ACTIVE_STATUSES, QUEUE_CAP, QUICK_VIEWS, backTarget, capped, caseHref, currentView, defaultView, queueFilters, queueParams, rowState,
+  scrollKey, SPLIT_MIN_WIDTH, waitingSearch,
 } from "@/lib/caseQueue";
 
 const q = (s: string) => queueFilters(new URLSearchParams(s));
@@ -66,13 +67,31 @@ describe("rowState (review I1)", () => {
 });
 
 
-describe("quick views (MVP-2.8.0 S2)", () => {
-  it("all / waiting on me / failed / waiting long — the view goes to the server, the default stays out of the URL", () => {
-    expect(QUICK_VIEWS).toEqual(["all", "mine", "failed", "long_wait"]);
-    expect(queueFilters(new URLSearchParams("view=mine")).view).toBe("mine");
-    expect(queueFilters(new URLSearchParams("view=nope")).view).toBeUndefined();
-    expect(queueFilters(new URLSearchParams("")).view).toBeUndefined();
-    expect(queueParams(new URLSearchParams("view=mine"), "view", "all").toString()).toBe("");
-    expect(queueParams(new URLSearchParams(""), "view", "long_wait").toString()).toBe("view=long_wait");
+describe("quick views — «在等我» first (MVP-2.8.0: the to-do workbench merged into Issues)", () => {
+  const p = (x: string) => new URLSearchParams(x);
+  it("waiting / all / failed / waiting long; a person who can act lands on «在等我», a viewer on «全部»", () => {
+    expect(QUICK_VIEWS).toEqual(["waiting", "all", "failed", "long_wait"]);
+    expect([defaultView(false), defaultView(true)]).toEqual(["waiting", "all"]);
+    expect(currentView(p(""), false)).toBe("waiting");
+    expect(currentView(p(""), true)).toBe("all");
+    expect(currentView(p("view=mine"), false)).toBe("waiting");        // the old «待我处理» link
+    expect(currentView(p("view=nope"), false)).toBe("waiting");
+    expect(currentView(p("view=all"), false)).toBe("all");
+  });
+  it("only failed / waiting long filter the issue list on the server", () => {
+    expect(queueFilters(p("view=failed")).view).toBe("failed");
+    expect(queueFilters(p("view=long_wait")).view).toBe("long_wait");
+    for (const v of ["", "view=waiting", "view=all", "view=mine", "view=nope"]) expect(queueFilters(p(v)).view).toBeUndefined();
+  });
+  it("the default view stays out of the URL, and changing view drops the selected item", () => {
+    expect(queueParams(p("view=all&item=I4"), "view", "waiting", { view: "waiting" }).toString()).toBe("");
+    expect(queueParams(p("item=I4"), "view", "all", { view: "waiting" }).toString()).toBe("view=all");
+    expect(queueParams(p("view=failed"), "view", "all", { view: "all" }).toString()).toBe("");   // a viewer's default
+    expect(queueParams(p(""), "view", "long_wait").toString()).toBe("view=long_wait");
+  });
+  it("a «在等我» row keeps the search and names the item", () => {
+    expect(waitingSearch(p("q=web&item=I3"), "C5")).toBe("?q=web&item=C5");
+    expect(waitingSearch(p("q=web&item=I3"), null)).toBe("?q=web");
+    expect(waitingSearch(p(""), null)).toBe("");
   });
 });

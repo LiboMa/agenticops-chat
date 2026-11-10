@@ -10,8 +10,8 @@ export interface HealthIssueFilters {
   severity?: string;
   q?: string;
   sort?: "newest" | "oldest" | "severity";
-  /** MVP-2.8.0 S2 quick views: mine / failed / long_wait (subsets of the workbench rows) */
-  view?: "all" | "mine" | "failed" | "long_wait";
+  /** MVP-2.8.0 quick views that filter the issue list: failed / long_wait (subsets of the to-do rows) */
+  view?: "failed" | "long_wait";
   account_id?: number;
   limit?: number;
 }

@@ -17,12 +17,23 @@ export const ACTIVE_STATUSES: readonly IssueStatus[] = ISSUE_STATUSES.filter((s)
 export const STATUS_GROUPS = ["all", "active", "resolved", "dismissed"] as const;
 export const SEVERITY_CHOICES = ["critical", "high", "medium", "low"] as const;
 export const SORTS = ["newest", "oldest", "severity"] as const;
-/** MVP-2.8.0 S2: the queue's quick views — subsets of the workbench rows, counted by the server */
-export const QUICK_VIEWS = ["all", "mine", "failed", "long_wait"] as const;
+/** The queue's quick views (MVP-2.8.0): «在等我» (the to-do workbench, merged in — issues AND changes waiting on you,
+ *  grouped by decision; GET /api/ui/attention) first, then the issue list: all, failed, waiting long. */
+export const QUICK_VIEWS = ["waiting", "all", "failed", "long_wait"] as const;
 export type QuickView = (typeof QUICK_VIEWS)[number];
 type Sort = (typeof SORTS)[number];
 
-const DEFAULTS: Record<string, string> = { scope: "ops", sort: "newest", status: "all", view: "all" };
+const DEFAULTS: Record<string, string> = { scope: "ops", sort: "newest", status: "all", view: "waiting" };
+
+/** Where «问题» opens: on what waits on you — a viewer, who can act on nothing, on the whole list. */
+export const defaultView = (readOnly: boolean): QuickView => (readOnly ? "all" : "waiting");
+
+/** The view in the URL; none (or an unknown one) is the default; the old «待我处理» (`mine`) is «在等我». */
+export function currentView(params: URLSearchParams, readOnly: boolean): QuickView {
+  const v = params.get("view");
+  if (v === "mine") return "waiting";
+  return v && (QUICK_VIEWS as readonly string[]).includes(v) ? (v as QuickView) : defaultView(readOnly);
+}
 
 export function queueFilters(params: URLSearchParams): HealthIssueFilters & { limit: number } {
   const status = params.get("status");
@@ -37,17 +48,30 @@ export function queueFilters(params: URLSearchParams): HealthIssueFilters & { li
     ...(severity && (SEVERITY_CHOICES as readonly string[]).includes(severity) ? { severity } : {}),
     ...(q ? { q: q.slice(0, 200) } : {}),
     sort: sort && (SORTS as readonly string[]).includes(sort) ? (sort as Sort) : "newest",
-    ...(view && view !== "all" && (QUICK_VIEWS as readonly string[]).includes(view) ? { view: view as QuickView } : {}),
+    // only these two filter the issue list (subsets of the to-do rows, server side); «在等我» is not this list at all
+    ...(view === "failed" || view === "long_wait" ? { view } : {}),
     limit: QUEUE_CAP + 1,
   };
 }
 
-/** The params with one filter set; a default or empty value leaves the URL. */
-export function queueParams(params: URLSearchParams, key: string, value: string): URLSearchParams {
+/** The params with one filter set; a default or empty value leaves the URL (`defaults` overrides — a viewer's default
+ *  view is «全部»). Changing the view drops the selected «在等我» item. */
+export function queueParams(params: URLSearchParams, key: string, value: string,
+                            defaults: Partial<Record<string, string>> = {}): URLSearchParams {
   const next = new URLSearchParams(params);
-  if (!value || DEFAULTS[key] === value) next.delete(key);
+  if (!value || ({ ...DEFAULTS, ...defaults })[key] === value) next.delete(key);
   else next.set(key, value);
+  if (key === "view") next.delete("item");
   return next;
+}
+
+/** A «在等我» row's search: the same view and search, this item selected (none: back to the list). */
+export function waitingSearch(params: URLSearchParams, item: string | null): string {
+  const next = new URLSearchParams(params);
+  if (item) next.set("item", item);
+  else next.delete("item");
+  const qs = next.toString();
+  return qs ? `?${qs}` : "";
 }
 
 export const caseHref = (id: number, search: string) => `/app/issues/${id}${search}`;

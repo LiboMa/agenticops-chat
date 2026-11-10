@@ -26,7 +26,7 @@ function initials(name: string | null | undefined, email: string | null | undefi
  *  switch and the avatar menu (account, theme, font size, home, sign out — on phones too). */
 export function TopBar({ onSearch }: { onSearch: () => void }) {
   const { t, locale, setLocale } = useLocale();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const crumb = breadcrumbFor(pathname);
   const boot = useBootstrap();
   const readOnly = useReadOnly();
@@ -60,7 +60,7 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
 
       <div className="flex shrink-0 items-center gap-3 max-[1100px]:gap-2">
         {boot.data?.features.attention && (
-          <Link to="/app/inbox" aria-current={pathname === "/app/inbox" ? "page" : undefined}
+          <Link to="/app/issues?view=waiting" aria-current={pathname === "/app/issues" && search.includes("view=waiting") ? "page" : undefined}
                 aria-label={waiting !== null ? `${t("attention.title")} ${waiting}` : t("attention.title")}
                 className="flex items-center gap-2 rounded-[5px] border border-primary/20 bg-card px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-selected max-[600px]:px-2">
             <span className="max-[1100px]:hidden">{t("attention.title")}</span>

@@ -4,7 +4,7 @@ import { NAV_GROUPS, V1_DEFAULT, breadcrumbFor, defaultOrder, entryForPath, migr
 describe("NAV_GROUPS — the blue/white sidebar", () => {
   it("MVP-2.8.0 S2 rework (owner 2026-11-09): tools hold overview, Galaxy, schedules, resources, agent metrics and skills; administration only users and settings; every old entry kept", () => {
     expect(NAV_GROUPS.map((g) => [g.id, g.items.map((i) => i.id)])).toEqual([
-      ["daily", ["inbox", "chat", "issues", "plans", "security", "reports"]],
+      ["daily", ["issues", "chat", "plans", "security", "reports"]],   // MVP-2.8.0: the workbench merged into Issues
       ["tools", ["overview", "galaxy", "schedules", "resources", "agent-metrics", "skills"]],
       ["administration", ["users", "settings"]],
     ]);
@@ -12,7 +12,7 @@ describe("NAV_GROUPS — the blue/white sidebar", () => {
       ["daily", false, false], ["tools", true, false], ["administration", false, true],
     ]);
     expect(NAV_GROUPS[2].items[0]).toMatchObject({ id: "users", to: "/app/users", icon: "users", labelKey: "nav.users" });
-    expect(NAV_GROUPS[0].items[0]).toMatchObject({ id: "inbox", to: "/app/inbox", icon: "inbox" });
+    expect(NAV_GROUPS[0].items[0]).toMatchObject({ id: "issues", to: "/app/issues" });
     const all = NAV_GROUPS.flatMap((g) => g.items.map((i) => i.id));
     const renamed: Record<string, string> = { dashboard: "overview", changes: "plans", audit: "plans" };  // S3 merged changes + audit
     for (const old of V1_DEFAULT) expect(all).toContain(renamed[old] ?? old);
@@ -35,7 +35,7 @@ describe("migrateNavOrder", () => {
     const own = ["security", "galaxy", "reports", "chat", "issues", "schedules", "resources", "audit", "changes",
                  "dashboard", "agent-metrics", "skills"];
     expect(migrateNavOrder(own)).toEqual({
-      daily: ["inbox", "security", "reports", "chat", "issues", "plans"],   // the workbench first (spec; S2 review)
+      daily: ["security", "reports", "chat", "issues", "plans"],   // the user's own order, nothing put first
       tools: ["galaxy", "schedules", "resources", "overview", "agent-metrics", "skills"],
       administration: ["users", "settings"],   // neither was in the v1 list: default places
     });
@@ -45,13 +45,13 @@ describe("migrateNavOrder", () => {
 describe("normalizeOrder / moveWithinGroup", () => {
   it("a v2 order saved with changes + audit keeps the merged entry where changes was", () => {
     expect(normalizeOrder({ daily: ["chat", "changes", "issues", "audit"] }).daily)
-      .toEqual(["inbox", "chat", "plans", "security", "reports", "issues"]);
+      .toEqual(["chat", "plans", "security", "reports", "issues"]);
   });
   it("MVP-2.8.0 S2: a v2 order saved before the move — plans and security join daily work, settings joins the tools, the workbench comes first, the user's own order stays", () => {
     const saved = { daily: ["reports", "chat", "issues"], tools: ["schedules", "plans", "resources"],
                     administration: ["galaxy", "security", "overview", "agent-metrics", "skills", "settings"] };
     expect(normalizeOrder(saved)).toEqual({
-      daily: ["inbox", "reports", "chat", "issues", "plans", "security"],
+      daily: ["reports", "chat", "plans", "security", "issues"],
       tools: ["overview", "galaxy", "schedules", "resources", "agent-metrics", "skills"],
       administration: ["users", "settings"],
     });
@@ -70,7 +70,7 @@ describe("normalizeOrder / moveWithinGroup", () => {
   });
   it("old change paths belong to Plans & changes, with the right reference", () => {
     expect(entryForPath("/app/changes/3")?.entry.id).toBe("plans");
-    expect(entryForPath("/app/inbox")?.entry.id).toBe("inbox");
+    expect(entryForPath("/app/inbox")).toBeNull();      // the old workbench address redirects to Issues · 在等我
     expect(breadcrumbFor("/app/changes/3")).toEqual({ sectionKey: "nav.plans", object: "C#3" });
     expect(breadcrumbFor("/app/plans/12")).toEqual({ sectionKey: "nav.plans", object: "#12" });
     // «My API keys» has no sidebar entry (the avatar menu opens it) — never the 404 title (MVP-2.8.0 E2E)
@@ -79,8 +79,13 @@ describe("normalizeOrder / moveWithinGroup", () => {
   });
   it("fills entries added since the order was saved and drops ones that are gone", () => {
     expect(normalizeOrder({ daily: ["reports", "gone", "chat"] }).daily)
-      .toEqual(["inbox", "reports", "chat", "issues", "plans", "security"]);
+      .toEqual(["issues", "reports", "chat", "plans", "security"]);
     expect(normalizeOrder(undefined)).toEqual(defaultOrder());
+  });
+  it("MVP-2.8.0: a stored order with the workbench — Issues takes its slot, everything else keeps its place", () => {
+    expect(normalizeOrder({ daily: ["inbox", "chat", "issues", "plans", "security", "reports"] }).daily).toEqual(defaultOrder().daily);
+    expect(normalizeOrder({ daily: ["issues", "chat", "inbox", "plans"] }).daily)
+      .toEqual(["chat", "issues", "plans", "security", "reports"]);
   });
   it("moves only inside one group", () => {
     const o = moveWithinGroup(defaultOrder(), "tools", "skills", "overview");
@@ -93,7 +98,7 @@ describe("entryForPath", () => {
   it.each([
     ["/app/chat/abc", "daily", "chat"], ["/app/issues/5", "daily", "issues"], ["/app/signals", "daily", "issues"],
     ["/app/changes/3", "daily", "plans"], ["/app/plans/9", "daily", "plans"], ["/app/resources/12", "tools", "resources"],
-    ["/app/inbox", "daily", "inbox"], ["/app/security", "daily", "security"], ["/app/settings", "administration", "settings"],
+    ["/app/security", "daily", "security"], ["/app/settings", "administration", "settings"],
     ["/app/overview", "tools", "overview"], ["/app/skills/linux-admin", "tools", "skills"], ["/app/galaxy", "tools", "galaxy"],
     ["/app/users", "administration", "users"],
   ])("%s → %s / %s", (path, group, id) => {

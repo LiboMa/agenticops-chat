@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useHealthIssues } from "@/hooks/useHealthIssues";
-import { useIssueViewCounts } from "@/hooks/useIssueViewCounts";
+import { useReadOnly } from "@/hooks/useBootstrap";
+import { QuickViews } from "@/components/cases/QuickViews";
 import { waitLabel } from "@/lib/inbox";
 import { useScopedAccountId } from "@/components/layout/AccountScope";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
@@ -11,7 +12,8 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { ISSUE_SCOPES } from "@/lib/issueScope";
 import { issueRow } from "@/lib/workItems";
 import {
-  LAST_CASE_KEY, QUEUE_CAP, QUICK_VIEWS, SEVERITY_CHOICES, SORTS, STATUS_GROUPS, capped, queueFilters, queueParams, rowState, scrollKey,
+  LAST_CASE_KEY, QUEUE_CAP, SEVERITY_CHOICES, SORTS, STATUS_GROUPS, capped, currentView, defaultView, queueFilters, queueParams,
+  rowState, scrollKey,
 } from "@/lib/caseQueue";
 import type { HealthIssue } from "@/api/types";
 
@@ -38,8 +40,8 @@ export function CaseQueue({ selectedId, wide }: { selectedId: number | null; wid
   const filters = queueFilters(params);
   const accountId = useScopedAccountId();
   const issues = useHealthIssues({ ...filters, account_id: accountId });
-  const viewCounts = useIssueViewCounts(filters.scope, accountId);
-  const view = filters.view ?? "all";
+  const readOnly = useReadOnly();
+  const view = currentView(params, readOnly);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const id = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(id); }, []);
   const [q, setQ] = useState(filters.q ?? "");
@@ -94,25 +96,7 @@ export function CaseQueue({ selectedId, wide }: { selectedId: number | null; wid
       </div>
 
       <div className="space-y-2">
-        <div role="group" aria-label={t("cases.views")} className="grid grid-cols-2 gap-1">
-          {QUICK_VIEWS.map((v) => (
-            <button key={v} type="button" aria-pressed={view === v} onClick={() => set("view", v)}
-                    className={`flex items-center justify-between rounded-md border px-2 py-1 text-xs ${view === v
-                      ? "border-primary/50 bg-selected font-semibold text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}>
-              <span>{t(`cases.view.${v}`)}</span>
-              <span className="tabular-nums">{viewCounts.data ? viewCounts.data[v] : viewCounts.isError ? "—" : "…"}</span>
-            </button>
-          ))}
-        </div>
-        {/* the counts' own failed state (four data states): never «…» forever (S2 review); the list keeps working */}
-        {viewCounts.isError && !viewCounts.data && (
-          <p role="alert" className="text-xs text-status-danger">
-            {t("cases.viewCountFailed")}
-            <button type="button" onClick={() => void viewCounts.refetch()} className="ml-2 text-primary hover:underline">
-              {t("common.retry")}
-            </button>
-          </p>
-        )}
+        <QuickViews view={view} scope={filters.scope} accountId={accountId} />
         <div role="group" aria-label={t("workitem.filter.scope")} className="flex rounded-md border border-border p-0.5">
           {ISSUE_SCOPES.map((s) => (
             <button key={s} type="button" aria-pressed={filters.scope === s} onClick={() => set("scope", s)}
@@ -153,7 +137,14 @@ export function CaseQueue({ selectedId, wide }: { selectedId: number | null; wid
               <p>{t("cases.empty")}</p>
               {filtered && (
                 <button type="button" className="mt-2 text-primary hover:underline"
-                        onClick={() => { setQ(""); setParams(params.get("scope") ? { scope: params.get("scope")! } : {}, { replace: true }); }}>
+                        onClick={() => {
+                          setQ("");
+                          // clear the filters, not the view (the default view is «在等我», another page entirely)
+                          const keep: Record<string, string> = {};
+                          if (params.get("scope")) keep.scope = params.get("scope")!;
+                          if (view !== defaultView(readOnly)) keep.view = view;
+                          setParams(keep, { replace: true });
+                        }}>
                   {t("cases.clear")}
                 </button>
               )}

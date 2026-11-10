@@ -11,7 +11,6 @@ export interface NavEntry {
   to: string;
   icon: string;
   labelKey: string;
-  badge?: boolean;
   /** Other paths this entry is the home of (highlight + breadcrumb), e.g. Signals belongs to Issues. */
   owns?: string[];
 }
@@ -28,11 +27,11 @@ export interface NavGroup {
 
 export const NAV_GROUPS: NavGroup[] = [
   {
-    // MVP-2.8.0 S2: the design's daily work — the workbench first, then the pages a person works in every day
+    // MVP-2.8.0: the to-do workbench merged into Issues («在等我», its first tab) — Issues first, then the pages a
+    // person works in every day
     id: "daily", labelKey: "nav.group.daily", collapsible: false, bottom: false, items: [
-      { id: "inbox", to: "/app/inbox", icon: "inbox", labelKey: "nav.inbox" },
+      { id: "issues", to: "/app/issues", icon: "clock", labelKey: "nav.issues", owns: ["/app/signals"] },
       { id: "chat", to: "/app/chat", icon: "chat", labelKey: "nav.chat" },
-      { id: "issues", to: "/app/issues", icon: "clock", labelKey: "nav.issues", badge: true, owns: ["/app/signals"] },
       // MVP-2.7.0 S3: Changes and Audit are tabs of Plans & changes; their old paths still belong here
       { id: "plans", to: "/app/plans", icon: "clipboard", labelKey: "nav.plans", owns: ["/app/changes", "/app/audit"] },
       { id: "security", to: "/app/security", icon: "shield", labelKey: "nav.security" },
@@ -80,8 +79,6 @@ const same = (a: string[], b: string[]) => a.length === b.length && a.every((x, 
 /** The stored v1 order, into groups. The old sidebar saved its default order on first mount, so a stored
  *  order equal to the v1 default means "never reordered" → the new default groups. Otherwise each group keeps
  *  the user's relative order, and items the v1 list never had take their default place. */
-const FIRST = new Set(["inbox"]);
-
 export function migrateNavOrder(v1: unknown): NavOrder {
   const defaults = defaultOrder();
   if (!Array.isArray(v1) || !v1.every((x) => typeof x === "string")) return defaults;
@@ -93,12 +90,21 @@ export function migrateNavOrder(v1: unknown): NavOrder {
   const out = {} as NavOrder;
   for (const g of NAV_GROUPS) {
     const ids = g.items.map((i) => i.id);
-    // entries the v1 list never had: the workbench first in daily work (spec, S2 review); Settings, pinned at the
-    // v1 foot, last — where the user last saw it
+    // entries the v1 list never had take their default places at the end (Settings, pinned at the v1 foot, last —
+    // where the user last saw it)
     const added = ids.filter((id) => !renamed.includes(id));
-    out[g.id] = [...added.filter((id) => FIRST.has(id)), ...renamed.filter((id) => ids.includes(id)),
-                 ...added.filter((id) => !FIRST.has(id))];
+    out[g.id] = [...renamed.filter((id) => ids.includes(id)), ...added];
   }
+  return out;
+}
+
+/** MVP-2.8.0: the to-do workbench merged into Issues — a stored order that has it gets Issues in its slot (an
+ *  order saved with the S2 default becomes the new default; a custom one keeps everything else where it was).
+ *  A plain rename is not enough: de-duplication would keep an earlier Issues where it was. */
+function issuesIntoInboxSlot(ids: string[]): string[] {
+  if (!ids.includes("inbox")) return ids;
+  const out = ids.filter((id) => id !== "issues");
+  out.splice(out.indexOf("inbox"), 1, "issues");
   return out;
 }
 
@@ -109,7 +115,8 @@ export function normalizeOrder(stored: unknown): NavOrder {
   const out = {} as NavOrder;
   for (const g of NAV_GROUPS) {
     const v = s[g.id];
-    out[g.id] = reorderNavIds(Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [], defaults[g.id], V2_RENAMES);
+    const ids = Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+    out[g.id] = reorderNavIds(issuesIntoInboxSlot(ids), defaults[g.id], V2_RENAMES);
   }
   return out;
 }

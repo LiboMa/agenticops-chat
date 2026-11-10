@@ -1,46 +1,14 @@
 import { describe, expect, it } from "vitest";
 import en from "@/locales/en.json";
 import zh from "@/locales/zh.json";
-import {
-  INBOX_TABS, inboxParams, inboxSearch, nextTab, parseItem, selectionState, tabCount, tabReasons, waitFact, waitLabel,
-} from "@/lib/inbox";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { DECISION_GROUPS, groupItems, groupOf, parseItem, selectionState, waitFact, waitLabel } from "@/lib/inbox";
+import type { AttentionItem } from "@/lib/attention";
 
 const tEn = (k: string) => (en as Record<string, string>)[k] ?? k;
 const tZh = (k: string) => (zh as Record<string, string>)[k] ?? k;
 const NOW = Date.parse("2026-11-09T12:00:00Z");
-
-describe("the workbench's decision tabs (MVP-2.8.0 S2)", () => {
-  it("map onto the attention reasons; not started joins failed, clarification joins to-confirm", () => {
-    expect(INBOX_TABS).toEqual(["all", "approval", "acceptance", "failed", "confirm"]);
-    expect(tabReasons("all")).toBeNull();
-    expect(tabReasons("approval")).toEqual(["approval_required"]);
-    expect(tabReasons("acceptance")).toEqual(["verification_required"]);
-    expect(tabReasons("failed")).toEqual(["execution_failed", "execution_not_started"]);
-    expect(tabReasons("confirm")).toEqual(["review_required", "clarification_required"]);
-  });
-  it("count from the server's per-reason counts", () => {
-    const counts = { approval_required: 2, execution_failed: 1, execution_not_started: 3, review_required: 4 };
-    expect(tabCount(counts, "all")).toBe(10);
-    expect(tabCount(counts, "failed")).toBe(4);
-    expect(tabCount(counts, "acceptance")).toBe(0);
-    expect(tabCount(undefined, "all")).toBe(0);
-  });
-});
-
-describe("inboxParams / inboxSearch — the workbench's state lives in the URL", () => {
-  it("round-trips and drops defaults; `decision`, never `tab` (the issue page's legacy param)", () => {
-    const p = inboxParams("?decision=acceptance&q=%20disk%20&item=I12&layout=compact");
-    expect(p).toEqual({ decision: "acceptance", q: "disk", item: "I12", layout: "compact" });
-    expect(inboxSearch(p)).toBe("?decision=acceptance&q=disk&item=I12&layout=compact");
-    expect(inboxSearch(inboxParams(""))).toBe("");
-    expect(inboxSearch({ ...inboxParams(""), item: "C3" })).toBe("?item=C3");
-  });
-  it("falls back to defaults on unknown values and caps the search", () => {
-    expect(inboxParams("?decision=everything&layout=wide&item=X9")).toEqual(
-      { decision: "all", q: "", item: null, layout: "split" });
-    expect(inboxParams(`?q=${"x".repeat(300)}`).q).toHaveLength(200);
-  });
-});
 
 describe("parseItem", () => {
   it("reads an issue or a change ref; anything else is null", () => {
@@ -104,15 +72,21 @@ describe("selectionState with what the page knows (S2 review)", () => {
   });
 });
 
-describe("the decision tabs take the keyboard (S2 leftover)", () => {
-  it("arrows move and wrap, Home / End go to the ends, any other key is not ours", () => {
-    expect(nextTab(INBOX_TABS, "all", "ArrowRight")).toBe("approval");
-    expect(nextTab(INBOX_TABS, "confirm", "ArrowRight")).toBe("all");
-    expect(nextTab(INBOX_TABS, "all", "ArrowLeft")).toBe("confirm");
-    expect(nextTab(INBOX_TABS, "failed", "ArrowLeft")).toBe("acceptance");
-    expect(nextTab(INBOX_TABS, "failed", "Home")).toBe("all");
-    expect(nextTab(INBOX_TABS, "approval", "End")).toBe("confirm");
-    expect(nextTab(INBOX_TABS, "all", "Enter")).toBeNull();
-    expect(nextTab(INBOX_TABS, "all", "ArrowDown")).toBeNull();
+describe("«在等我» groups the to-do items by the decision they need (MVP-2.8.0)", () => {
+  const shared = JSON.parse(readFileSync(resolve(__dirname, "../../../../../../tests/fixtures/attention_decision_groups.json"), "utf8"));
+  const it_ = (id: string, reason: string) => ({ id, reason } as unknown as AttentionItem);
+  it("the same groups as the server (services/attention.DECISION_OF)", () => {
+    expect(DECISION_GROUPS).toEqual(shared.groups);
+    for (const [reason, group] of Object.entries(shared.reasons)) expect(groupOf(reason)).toBe(group);
+  });
+  it("groups in the fixed order, counts include rows not loaded yet, an empty group is left out", () => {
+    const items = [it_("I1", "approval_required"), it_("C2", "approval_required"), it_("I3", "execution_not_started"),
+                   it_("C4", "clarification_required")];
+    const counts = { approval_required: 5, execution_not_started: 1, execution_failed: 2, clarification_required: 1, review_required: 3 };
+    const g = groupItems(items, counts);
+    expect(g.map((x) => [x.group, x.count, x.items.map((i) => i.id)])).toEqual([
+      ["approval", 5, ["I1", "C2"]], ["failed", 3, ["I3"]], ["confirm", 4, ["C4"]],
+    ]);
   });
 });
+
