@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MutationObserver, QueryClient } from "@tanstack/react-query";
-import { createApiKeyOptions } from "@/hooks/useApiKeys";
+import { createApiKeyOptions, rotateApiKeyOptions } from "@/hooks/useApiKeys";
 import { createUserOptions, resetPasswordOptions } from "@/hooks/useUsers";
 
 /** A secret shown once — a new API key, a new user's or a reset password — is forgotten when its dialog closes:
@@ -19,6 +19,10 @@ describe("a secret shown once leaves the cache with its dialog", () => {
   it("a new API key", async () => {
     const qc = new QueryClient();
     expect(await leftAfterReset(createApiKeyOptions(qc), { key: "aiops_SECRET_full_key" })).not.toContain("SECRET");
+  });
+  it("a key's new value after an update", async () => {
+    const qc = new QueryClient();
+    expect(await leftAfterReset(rotateApiKeyOptions(qc), { key: "aiops_SECRET_rotated" })).not.toContain("SECRET");
   });
   it("a new user's password and a reset password", async () => {
     const qc = new QueryClient();

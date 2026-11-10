@@ -31,3 +31,18 @@ export function useRevokeApiKey() {
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
   });
 }
+
+/** «更新密钥»: a new key under the same name, the old one dead at once; the new key is shown once (gcTime 0). */
+export function rotateApiKeyOptions(qc: QueryClient) {
+  return {
+    // a secret shown once: dropped from the mutation cache as soon as the page resets it (closing its dialog)
+    gcTime: 0,
+    mutationFn: ({ id, ...body }: { id: number; permissions: string[]; expires_days: number | null }) =>
+      apiFetch<ApiKeyRow & { key: string }>(`/api-keys/${id}/rotate`, { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  };
+}
+
+export function useRotateApiKey() {
+  return useMutation(rotateApiKeyOptions(useQueryClient()));
+}

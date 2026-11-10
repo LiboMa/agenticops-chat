@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EXPIRY_CHOICES, canChooseWrite, curlExample, expiryLabel, keyState, scopeKey } from "@/lib/apiKeys";
+import { EXPIRY_CHOICES, canChooseWrite, curlExample, expiryLabel, keyState, rotateDefaults, scopeKey, writeAllowedForRole } from "@/lib/apiKeys";
 import zh from "@/locales/zh.json";
 
 const NOW = Date.parse("2026-11-10T12:00:00Z");
@@ -51,5 +51,25 @@ describe("the expiry choices in words (spec: 30 天 / 90 天 / 1 年 / 永不过
   it("365 days reads as one year, null as never", () => {
     const t = (k: string) => (zh as Record<string, string>)[k] ?? k;
     expect(EXPIRY_CHOICES.map((d) => expiryLabel(d, t))).toEqual(["30 天", "90 天", "1 年", "永不过期"]);
+  });
+});
+
+describe("updating a key starts from what it was (MVP-2.8.0 user management)", () => {
+  const row = (over: Record<string, unknown>) => key({ created_at: "2026-11-01T00:00:00", ...over });
+  it("keeps the access, minus write the person may not have", () => {
+    expect(rotateDefaults(row({ permissions: ["read", "write"], expires_at: null }), true)).toEqual({ write: true, expiry: null });
+    expect(rotateDefaults(row({ permissions: ["read", "write"], expires_at: null }), false)).toEqual({ write: false, expiry: null });
+    expect(rotateDefaults(row({ permissions: ["read"], expires_at: null }), true)).toEqual({ write: false, expiry: null });
+  });
+  it("keeps the expiry when it was one of the choices, else the default 90 days", () => {
+    expect(rotateDefaults(row({ expires_at: "2026-12-01T00:00:00" }), true).expiry).toBe(30);
+    expect(rotateDefaults(row({ expires_at: "2027-01-30T00:00:00" }), true).expiry).toBe(90);
+    expect(rotateDefaults(row({ expires_at: "2027-11-01T00:00:00" }), true).expiry).toBe(365);
+    expect(rotateDefaults(row({ expires_at: "2026-12-18T00:00:00" }), true).expiry).toBe(90);   // 47 days
+  });
+  it("a viewer's keys are read-only", () => {
+    expect(writeAllowedForRole("viewer")).toBe(false);
+    expect(writeAllowedForRole("writer")).toBe(true);
+    expect(writeAllowedForRole("admin")).toBe(true);
   });
 });

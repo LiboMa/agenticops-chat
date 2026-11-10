@@ -1,4 +1,4 @@
-import type { ApiKeyRow } from "@/api/types";
+import type { ApiKeyRow, UserRole } from "@/api/types";
 import { parseApiDate } from "@/lib/formatDate";
 import type { isReadOnly } from "@/lib/permissions";
 
@@ -42,4 +42,23 @@ export function expiryLabel(days: number | null, t: (k: string) => string): stri
 /** How to use the key — a call to this site with it as the Bearer token. */
 export function curlExample(origin: string, key: string): string {
   return `curl -H "Authorization: Bearer ${key}" \\\n  ${origin}/api/health-issues?limit=5`;
+}
+
+/** A viewer's keys are read-only — whoever issues them (MVP-2.8.0: an admin issues keys for others too). */
+export function writeAllowedForRole(role: UserRole): boolean {
+  return role !== "viewer";
+}
+
+const DAY = 86_400_000;
+
+/** «更新密钥» starts from what the key was: its access (minus write the person may not have) and its expiry — the same
+ *  number of days when that was one of the choices, else the default; a key that never expired stays so. */
+export function rotateDefaults(row: Pick<ApiKeyRow, "permissions" | "expires_at" | "created_at">,
+                               canWrite: boolean): { write: boolean; expiry: number | null } {
+  const write = canWrite && row.permissions.includes("write");
+  const exp = parseApiDate(row.expires_at);
+  if (!exp) return { write, expiry: null };
+  const made = parseApiDate(row.created_at);
+  const days = made ? Math.round((exp.getTime() - made.getTime()) / DAY) : NaN;
+  return { write, expiry: EXPIRY_CHOICES.includes(days) ? days : DEFAULT_EXPIRY };
 }

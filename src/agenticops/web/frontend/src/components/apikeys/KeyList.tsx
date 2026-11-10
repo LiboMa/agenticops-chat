@@ -3,15 +3,20 @@ import type { ApiKeyRow } from "@/api/types";
 import { StatusText } from "@/components/ui/StatusText";
 import { formatShortDate, utcDayKey } from "@/lib/formatDate";
 import { keyState, scopeKey, type KeyState } from "@/lib/apiKeys";
+import { RotateCcwKey, Trash2 } from "lucide-react";
+import { IconButton } from "@/components/ui/IconButton";
 
 /** A list of API keys (MVP-2.8.0) — «My API keys» (a table from 768 px, cards below) and the admin's dialog in user
- *  management (`cards`: always cards). Only an active key offers «Revoke»; the full key is never here. */
+ *  management (`cards`: always cards). Each key (active or expired; a deleted one is no longer listed) has two icon
+ *  buttons: update (a new key under the same name) and delete. The full key is never here. */
 
 const TONE: Record<KeyState, "ok" | "warn" | "neutral"> = { active: "ok", expired: "warn", revoked: "neutral" };
 
-export function KeyList({ rows, onRevoke, busyId, cards = false, showCreated = true }: {
+export function KeyList({ rows, onRevoke, onRotate, busyId, cards = false, showCreated = true }: {
   rows: ApiKeyRow[];
   onRevoke: (row: ApiKeyRow) => void;
+  /** update = a new key under the same name; no button without it */
+  onRotate?: (row: ApiKeyRow) => void;
   busyId?: number | null;
   cards?: boolean;
   showCreated?: boolean;
@@ -24,12 +29,15 @@ export function KeyList({ rows, onRevoke, busyId, cards = false, showCreated = t
     const s = keyState(k, now);
     return <StatusText tone={TONE[s]}>{t(`apiKeys.state.${s}`)}</StatusText>;
   };
-  const revoke = (k: ApiKeyRow) => keyState(k, now) === "active" && (
-    <button type="button" disabled={busyId === k.id} onClick={() => onRevoke(k)}
-            aria-label={t("apiKeys.revokeNamed").replace("{name}", k.name)}
-            className="min-h-[32px] rounded-md border border-status-danger/40 px-2.5 text-xs text-status-danger hover:bg-status-danger/5 disabled:opacity-50">
-      {t("apiKeys.revoke")}
-    </button>
+  const revoke = (k: ApiKeyRow) => keyState(k, now) !== "revoked" && (
+    <span className="inline-flex gap-1.5">
+      {onRotate && (
+        <IconButton label={t("apiKeys.rotateNamed").replace("{name}", k.name)} icon={<RotateCcwKey className="h-4 w-4" aria-hidden="true" />}
+                    disabled={busyId === k.id} onClick={() => onRotate(k)} />
+      )}
+      <IconButton label={t("apiKeys.deleteNamed").replace("{name}", k.name)} icon={<Trash2 className="h-4 w-4" aria-hidden="true" />}
+                  tone="danger" disabled={busyId === k.id} onClick={() => onRevoke(k)} />
+    </span>
   );
   const prefix = (k: ApiKeyRow) => <code className="font-mono text-xs text-muted-foreground">{k.key_prefix}…</code>;
 
