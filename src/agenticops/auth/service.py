@@ -140,7 +140,7 @@ class AuthService:
             User if authentication successful, None otherwise
         """
         with get_db_session() as session:
-            user = session.query(User).filter_by(email=email, is_active=True).first()
+            user = session.query(User).filter_by(email=email, is_active=True).filter(User.deleted_at.is_(None)).first()
             if user and verify_password(password, user.password_hash):
                 user.last_login_at = datetime.now(timezone.utc)
                 # Eagerly load attributes before session closes
@@ -199,7 +199,7 @@ class AuthService:
                 user = session.query(User).filter_by(
                     id=db_session.user_id,
                     is_active=True,
-                ).first()
+                ).filter(User.deleted_at.is_(None)).first()
                 if user:
                     session.expunge(user)
                 return user
@@ -297,7 +297,7 @@ class AuthService:
                 user = session.query(User).filter_by(
                     id=api_key.user_id,
                     is_active=True,
-                ).first()
+                ).filter(User.deleted_at.is_(None)).first()
 
                 if user:
                     # Detach both loaded, before the commit expires them (as validate_session does): callers

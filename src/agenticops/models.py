@@ -1703,6 +1703,8 @@ _ADD_COLUMNS_2_7_0: dict[str, dict[str, Optional[str]]] = {
     # S6: a report's content identity and visibility; existing rows are workspace, hash / language backfilled
     "reports": {"content_version": "NOT NULL DEFAULT 1", "content_hash": None, "source_language": None,
                 "owner_user_id": None, "visibility": "NOT NULL DEFAULT 'workspace'"},
+    # MVP-2.8.0: soft-deleted users (NULL on existing rows = not deleted)
+    "users": {"deleted_at": None},
 }
 _migrated_2_7_0_urls: set[str] = set()
 _migrate_2_7_0_lock = threading.Lock()
