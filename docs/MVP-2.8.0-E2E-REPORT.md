@@ -303,7 +303,7 @@
 | 17 | 删除用户 | PASS | 取消 C#3 后再删：204，这一行消失，焦点回到「＋ 新建用户」（修复后，见下）。对话框的文字：删掉登录、所有会话、全部 API 密钥和未发送的附件，立即失效；保留对话、报告和审计记录，谁能看不变；登录名以后不能再用；删除后不能恢复 |
 | 18 | 同名新建 | PASS | 新建「e2e-flow2」被拒：「这个登录名属于一个已删除的用户，不能再用，请换一个。」 |
 | 19 | 删除之后 | PASS | `e2e-admin` 被 `admin` 删掉以后，它原来的会话调 `/api/users/me` 返回 401。副本库里所有已删除用户：有效会话 0 个，有效 Key 0 个 |
-| 20 | 收尾：删掉 12 个测试账户 | PASS | 在页面上逐个删掉 `e2e-admin3`、`e2e-admin4`、`e2e-chat`、`e2e-chat2`、`e2e-editor`、`e2e-flow`、`e2e-flow2`、`e2e-flow3`、`e2e-target`、`e2e-viewer`、`e2e-writer`（由 `e2e-admin` 删），最后 `e2e-admin`（由 `admin` 删）。副本库只剩 `admin`；审计 12 条 `user.delete`（`e2e-admin` 11 条、`admin` 1 条）。另外临时建的 `e2e-v-rot` 测完也删了。本地正式库本来就只有 `admin`，没有动 |
+| 20 | 收尾：删掉 12 个测试账户 | PASS | 在页面上逐个删掉 `e2e-admin3`、`e2e-admin4`、`e2e-chat`、`e2e-chat2`、`e2e-editor`、`e2e-flow`、`e2e-flow2`、`e2e-flow3`、`e2e-target`、`e2e-viewer`、`e2e-writer`（由 `e2e-admin` 删），最后 `e2e-admin`（由 `admin` 删）。副本库只剩 `admin`；审计 12 条 `user.delete`（`e2e-admin` 11 条、`admin` 1 条）。另外临时建的 `e2e-v-rot` 测完也删了。本地正式库没有动：核对时只有 `admin`，之后 `admin` 新建了 `john`（2026-11-10 12:25 UTC），是正式账户，不删 |
 | 21 | 窄屏 | PASS | 390 / 320 px：用户管理变卡片，图标按钮 2.5rem（本机 38 px），没有整页横向溢出；侧栏、「在等我」同样没有溢出<br>![](images/mvp-2.8.0-credentials-sidebar-e2e/users-390.jpg) |
 | 22 | 1280 / 1024 px | PASS | 用户管理、「在等我」（含选中 C#3）、「全部」、我的 API 密钥：都没有整页横向溢出 |
 | 23 | 英文界面 | PASS | 「Delete the user e2e-admin?」「Issue a key for Administrator」「＋ New user」，删除对话框的四句话都有英文 |
