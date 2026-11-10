@@ -1010,7 +1010,7 @@ Open `http://localhost:8000/app/` and sign in. **The workspace shell (MVP-2.7.0)
 - **Signed out?** Any page sends you to `/app/login?next=…` and back to the same page (query and hash
   included) after signing in; only same-origin `/app` pages are accepted as `next`.
 - **Needs your attention** (top bar, left of search; MVP-2.7.0 S3, a link to the workbench since 2.8.0 S2): the count of work items that wait on *you* — the same «Waiting for you / an approver / acceptance» the issue and change pages show, filtered by what you may do (your own change never asks you to approve it). Click it to open the **to-do workbench** (`/app/inbox`, below). Nothing is approved from the list.
-- **To-do workbench** (`/app/inbox`, first entry of *Daily work*; MVP-2.8.0 S2): every item that waits on a person, longest wait first. Tabs — All, To approve, To accept, Failed (including «approved but not started»), To confirm (including «needs clarification») — each with its count. Search a title, a resource or a number (`I#12`, `12`). Each row says the item, its severity or risk, the resource · account · region, why it waits, and for how long (hover for the UTC time). On a wide screen (≥ 1280px) the queue sits beside the item's own page — decide there; on a narrower one the list and the item take turns and «← Back to the to-do list» returns to the same tab and scroll. **Split / Compact** switches the row density. When the item you are on has just been handled it says so and offers the next one. The tab, search, item and layout are in the URL, so a link opens the same view; the top bar's account scope applies. It lists only what *you* can do: a read-only account's workbench is empty.
+- **To-do workbench** (`/app/inbox`, first entry of *Daily work*; MVP-2.8.0 S2): every item that waits on a person, longest wait first. Tabs — All, To approve, To accept, Failed (including «approved but not started»), To confirm (including «needs clarification») — each with its count; the tab bar is one keyboard stop, ←/→ move between tabs, Home / End go to the first / last. Search a title, a resource or a number (`I#12`, `12`). Each row says the item, its severity or risk, the resource · account · region, why it waits, and for how long (hover for the UTC time). On a wide screen (≥ 1280px) the queue sits beside the item's own page — decide there; on a narrower one the list and the item take turns and «← Back to the to-do list» returns to the same tab and scroll. **Split / Compact** switches the row density. When the item you are on has just been handled it says so and offers the next one. The tab, search, item and layout are in the URL, so a link opens the same view; the top bar's account scope applies. It lists only what *you* can do: a read-only account's workbench is empty.
 - **Account scope** (top bar, between «Needs your attention» and search; in the avatar menu on a phone; MVP-2.7.0 S4): pick one account (or All) and the issue queue, the Fix plans and Changes tabs, Resources and «Needs your attention» show only that account. A detail page shows its own record's account, so the scope is greyed there; pages it does not filter (overview, security, Galaxy, Chat, Settings) grey it out and say so. An old link with `?account=` / `?account_id=` sets the scope once and drops the parameter.
 - **Approvals say what they do**: «Approve & run» only when approving really queues the run (auto-fix and the executor on); otherwise «Approve», with a note that someone presses **Execute** afterwards. Every approval asks you to tick «I have reviewed this version, the target scope, the risks and the recovery checks» first.
 - **Sidebar** (regrouped by the owner in the 2.8.0 S2 rework): *Daily work* (To-do workbench, Chat, Issues, Plans &
@@ -1175,7 +1175,8 @@ the content still matches what was approved (nothing is said for a plan approved
 then one line per declared check — failed, to check and warnings first. Before any run it shows the diagnosis
 evidence: whether the root cause is located on a resource, the model's own confidence, the critic's conclusion and
 the human verdict — four separate lines, never one folded number. «Expand the check records and plan basis» opens the card underneath. A fix plan's page has the same
-latest-run block and, when its issue waits for acceptance, a «Go accept this run» link to the issue.
+latest-run block and, when its issue waits for acceptance, a «Go accept this run» link to the issue (not shown to a
+read-only account, which cannot accept).
 
 **Managing users (2.8.0, admins).** **Administration → Users** (`/app/users`) lists every web account with its
 role (Admin, Writer, Viewer, Viewer who may view Settings), its state and its last sign-in (UTC). **New user** asks for
@@ -1184,6 +1185,25 @@ closing. Each row offers what is allowed: change role, reset password (a new pas
 browsers sign out — your own reset keeps you signed in here), disable (their browsers sign out at once and their API
 keys are revoked; enabling again restores neither). You cannot disable or demote yourself, and the last active admin
 stays. Every change is in the audit log, never the password. `aiops users create / list / disable` still works.
+Each row's **API keys: N** (active, unexpired keys; «none» at 0) opens the user's keys — name, prefix, access, last
+use, expiry, state — and revokes an active one after a confirm; an admin never creates a key for someone else and
+never sees a full key.
+
+**API keys for apps and coding agents (2.8.0).** Avatar menu → **API keys** (`/app/account/api-keys`), for every
+signed-in person. **New API key** asks for a name, the access — *Read only* (see issues, plans, resources and
+reports, hold read-only chats) or *Read & write* (also request changes, add notes and chat as you; a read-only
+account issues read-only keys only) — and the expiry (30 days, 90 days, 1 year or never; 90 by default). The full
+key is shown **once**, with Copy and an example:
+
+```bash
+curl -H "Authorization: Bearer aiops_…" https://<your-site>/api/health-issues?limit=5
+```
+
+The list shows each key's prefix, access, created / last used / expiry (UTC) and state (active / expired / revoked);
+**Revoke** takes effect at once, and disabling an account voids its keys. Whatever its access, a key never
+approves, rejects, runs or accepts anything — not even through the agent in a chat it started — and never creates
+or revokes keys, changes a password or manages users: do those signed in. A user who loses write access has their
+keys downgraded to read only. With API sign-in off a banner says requests need no key and its limits do not apply.
 
 **Statistics in a chat answer (2.8.0).** Counts, comparisons, shares and trends come as one sentence plus a table —
 it costs fewer tokens. Ask for a chart («画个柱状图», "plot it") and the answer draws one; a flow, call chain or
@@ -1191,7 +1211,7 @@ sequence of steps is drawn as a flowchart.
 
 **Accepting a run (2.8.0).** **Accept result** opens «Accept this run»: tick each check still to verify (no
 result, or a warning) and the overall confirmation; **Confirm acceptance** stays off until every box is ticked.
-The note is optional (without one the reason says how many items you checked). The ticked `pc-n` ids are
+The note is optional (without one the reason says how many checks you verified — the overall confirmation is not counted). The ticked `pc-n` ids are
 recorded with the acceptance in the audit log. Rejecting keeps its own reason dialog.
 
 **Cases quick views (2.8.0).** Above the issue queue: All / Waiting on me / Failed / Waiting long (over
