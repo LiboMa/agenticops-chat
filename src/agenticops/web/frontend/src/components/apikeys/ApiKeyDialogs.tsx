@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useLocale } from "@/i18n/LocaleContext";
 import { ModalFrame } from "@/components/ui/ModalFrame";
 import { copyText } from "@/lib/clipboard";
-import { DEFAULT_EXPIRY, EXPIRY_CHOICES, curlExample } from "@/lib/apiKeys";
+import { DEFAULT_EXPIRY, EXPIRY_CHOICES, curlExample, expiryLabel } from "@/lib/apiKeys";
 
 /** «My API keys» dialogs (MVP-2.8.0): new key (name, scope, expiry) and the key shown once. */
 
@@ -54,7 +54,7 @@ export function CreateKeyDialog({ canWrite, busy, error, onSubmit, onClose }: {
             {EXPIRY_CHOICES.map((d) => (
               <button key={String(d)} type="button" role="radio" aria-checked={expiry === d} onClick={() => setExpiry(d)}
                       className={choice(expiry === d)}>
-                {d === null ? t("apiKeys.expiry.never") : t("apiKeys.expiry.days").replace("{n}", String(d))}
+                {expiryLabel(d, t)}
               </button>
             ))}
           </div>

@@ -1484,6 +1484,7 @@
   "apiKeys.scope.write": "Read & write",
   "apiKeys.scope.admin": "Read & write + admin (legacy key)",
   "apiKeys.expiry.days": "{n} days",
+  "apiKeys.expiry.year": "1 year",
   "apiKeys.expiry.never": "Never expires",
   "apiKeys.dialog.createTitle": "New API key",
   "apiKeys.dialog.name": "Name",

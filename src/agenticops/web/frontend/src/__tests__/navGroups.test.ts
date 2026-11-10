@@ -73,6 +73,8 @@ describe("normalizeOrder / moveWithinGroup", () => {
     expect(entryForPath("/app/inbox")?.entry.id).toBe("inbox");
     expect(breadcrumbFor("/app/changes/3")).toEqual({ sectionKey: "nav.plans", object: "C#3" });
     expect(breadcrumbFor("/app/plans/12")).toEqual({ sectionKey: "nav.plans", object: "#12" });
+    // «My API keys» has no sidebar entry (the avatar menu opens it) — never the 404 title (MVP-2.8.0 E2E)
+    expect(breadcrumbFor("/app/account/api-keys")).toEqual({ sectionKey: "apiKeys.title", object: null });
     expect(breadcrumbFor("/app/audit")).toEqual({ sectionKey: "nav.plans", object: null });
   });
   it("fills entries added since the order was saved and drops ones that are gone", () => {

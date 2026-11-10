@@ -32,6 +32,13 @@ export function canChooseWrite(boot: BootLike): boolean {
 export const EXPIRY_CHOICES: (number | null)[] = [30, 90, 365, null];
 export const DEFAULT_EXPIRY = 90;
 
+/** A choice in words: «30 天», «1 年» (365 days), «永不过期». */
+export function expiryLabel(days: number | null, t: (k: string) => string): string {
+  if (days === null) return t("apiKeys.expiry.never");
+  if (days === 365) return t("apiKeys.expiry.year");
+  return t("apiKeys.expiry.days").replace("{n}", String(days));
+}
+
 /** How to use the key — a call to this site with it as the Bearer token. */
 export function curlExample(origin: string, key: string): string {
   return `curl -H "Authorization: Bearer ${key}" \\\n  ${origin}/api/health-issues?limit=5`;

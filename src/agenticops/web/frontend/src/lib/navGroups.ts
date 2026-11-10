@@ -135,6 +135,7 @@ export function entryForPath(pathname: string): { group: GroupId; entry: NavEntr
  *  reference (I#5, C#3, R#12 — R# is a resource, so a report is just #7). null section = no entry (404). */
 export function breadcrumbFor(pathname: string): { sectionKey: string | null; object: string | null } {
   if (pathname === "/app/signals" || pathname.startsWith("/app/signals/")) return { sectionKey: "signals.title", object: null };
+  if (pathname === "/app/account/api-keys") return { sectionKey: "apiKeys.title", object: null };  // from the avatar menu
   const hit = entryForPath(pathname);
   if (!hit) return { sectionKey: null, object: null };
   // the path's own base: an owned path (/app/changes/3 under Plans & changes) keeps its own reference

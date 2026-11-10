@@ -1484,6 +1484,7 @@
   "apiKeys.scope.write": "读写",
   "apiKeys.scope.admin": "读写 + 管理（旧 Key）",
   "apiKeys.expiry.days": "{n} 天",
+  "apiKeys.expiry.year": "1 年",
   "apiKeys.expiry.never": "永不过期",
   "apiKeys.dialog.createTitle": "新建 API Key",
   "apiKeys.dialog.name": "名称",

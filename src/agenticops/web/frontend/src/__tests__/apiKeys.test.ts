@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { EXPIRY_CHOICES, canChooseWrite, curlExample, keyState, scopeKey } from "@/lib/apiKeys";
+import { EXPIRY_CHOICES, canChooseWrite, curlExample, expiryLabel, keyState, scopeKey } from "@/lib/apiKeys";
+import zh from "@/locales/zh.json";
 
 const NOW = Date.parse("2026-11-10T12:00:00Z");
 const key = (over: Record<string, unknown> = {}) => ({
@@ -43,5 +44,12 @@ describe("the create dialog's choices and the usage example", () => {
     const ex = curlExample("https://ops.example.com", "aiops_abc");
     expect(ex).toContain("Authorization: Bearer aiops_abc");
     expect(ex).toContain("https://ops.example.com/api/health-issues?limit=5");
+  });
+});
+
+describe("the expiry choices in words (spec: 30 天 / 90 天 / 1 年 / 永不过期)", () => {
+  it("365 days reads as one year, null as never", () => {
+    const t = (k: string) => (zh as Record<string, string>)[k] ?? k;
+    expect(EXPIRY_CHOICES.map((d) => expiryLabel(d, t))).toEqual(["30 天", "90 天", "1 年", "永不过期"]);
   });
 });
