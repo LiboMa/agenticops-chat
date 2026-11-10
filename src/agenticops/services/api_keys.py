@@ -120,4 +120,4 @@ def active_counts() -> dict[int, int]:
 
 def owner_exists(user_id: int) -> bool:
     with get_db_session() as s:
-        return s.query(func.count(User.id)).filter(User.id == user_id).scalar() > 0
+        return s.query(func.count(User.id)).filter(User.id == user_id, User.deleted_at.is_(None)).scalar() > 0

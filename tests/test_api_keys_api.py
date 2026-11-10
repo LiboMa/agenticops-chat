@@ -96,7 +96,8 @@ def test_a_key_never_manages_keys_the_password_or_users(env):
                                ("PUT", "/api/users/me/password", {"old_password": "pw-ops-0", "new_password": "pw-ops-1"})):
         r = env.client.request(method, path, headers=H(rw), json=body)
         assert (r.status_code, r.json()["detail"].get("code")) == (403, "session_required"), (method, path, r.text)
-    for method, path in (("GET", "/api/users"), ("POST", f"/api/users/{ops.id}/reset-password")):
+    for method, path in (("GET", "/api/users"), ("POST", f"/api/users/{ops.id}/reset-password"),
+                         ("DELETE", f"/api/users/{ops.id}")):
         r = env.client.request(method, path, headers=H(admin_key))
         assert (r.status_code, r.json()["detail"].get("code")) == (403, "session_required"), (method, path, r.text)
 

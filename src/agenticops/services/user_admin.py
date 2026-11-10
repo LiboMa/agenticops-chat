@@ -8,6 +8,11 @@
   what a CLI disable (which only flips is_active) left alive, and keys are re-issued. Resetting a password ends the user's
   sessions, except the caller's own current one when they reset their own (the new password must stay on screen).
 - Every change writes one audit row in the same transaction as the change.
+- Deleting (MVP-2.8.0, owner 2026-11-10) is soft: the row stays with `deleted_at` set, so its login name is never
+  given to anyone else (records name people by `user:<email>`) and private chats / reports keep an owner nobody else
+  can ever be. It ends the sessions, revokes the keys and removes unsent chat uploads at once; a deleted user is
+  gone from every admin view (404 / not listed) and no sign-in path accepts them (auth/service). Refused for
+  yourself, for the last active admin, and while a change request waits on them as its requester.
 """
 import secrets
 from typing import Optional
@@ -25,9 +30,10 @@ NAME_MAX = 100
 class UserAdminError(Exception):
     """A refused change: the HTTP status, a stable code the page words, and a sentence for logs / the API."""
 
-    def __init__(self, status: int, code: str, detail: str):
+    def __init__(self, status: int, code: str, detail: str, extra: Optional[dict] = None):
         super().__init__(detail)
         self.status, self.code, self.detail = status, code, detail
+        self.extra = extra or {}
 
 
 def _row(u: User) -> dict:
@@ -50,7 +56,7 @@ def _audit(s, action: str, u: User, caller, old: Optional[dict] = None, new: Opt
 
 
 def _get(s, user_id: int) -> User:
-    u = s.query(User).filter_by(id=user_id).first()
+    u = s.query(User).filter_by(id=user_id).filter(User.deleted_at.is_(None)).first()
     if u is None:
         raise UserAdminError(404, "not_found", f"user {user_id} not found")
     return u
@@ -64,7 +70,7 @@ def _end_sessions(s, user_id: int, keep_token_hash: Optional[str] = None) -> Non
 
 
 def _other_active_admins(s, user_id: int) -> int:
-    rows = s.query(User).filter(User.is_active.is_(True), User.id != user_id).all()
+    rows = s.query(User).filter(User.is_active.is_(True), User.deleted_at.is_(None), User.id != user_id).all()
     return sum(1 for u in rows if role_of(u)[0] == "admin")
 
 
@@ -77,7 +83,7 @@ def _grants(role: str, settings_view: bool) -> tuple[bool, list[str]]:
 
 def list_users() -> list[dict]:
     with get_db_session() as s:
-        return [_row(u) for u in s.query(User).order_by(User.email).all()]
+        return [_row(u) for u in s.query(User).filter(User.deleted_at.is_(None)).order_by(User.email).all()]
 
 
 def create_user(*, email: str, name: Optional[str], role: str, settings_view: bool, caller) -> tuple[dict, str]:
@@ -89,7 +95,10 @@ def create_user(*, email: str, name: Optional[str], role: str, settings_view: bo
     name = (name or "").strip()[:NAME_MAX] or None
     password = secrets.token_urlsafe(12)
     with get_db_session() as s:
-        if s.query(User).filter_by(email=email).first() is not None:
+        taken = s.query(User).filter_by(email=email).first()
+        if taken is not None and taken.deleted_at is not None:
+            raise UserAdminError(409, "name_taken_by_deleted", f"{email!r} belonged to a deleted user; pick another name")
+        if taken is not None:
             raise UserAdminError(409, "email_taken", f"a user named {email!r} exists")
         u = User(email=email, name=name, password_hash=hash_password(password), is_admin=is_admin,
                  permissions=permissions, is_active=True)
@@ -149,3 +158,42 @@ def reset_password(user_id: int, *, caller, keep_token_hash: Optional[str] = Non
         _end_sessions(s, u.id, keep_token_hash if own else None)
         _audit(s, "user.reset_password", u, caller)
         return password
+
+
+# change requests that wait on their requester (attention shows them only to that requester), or may come back to
+# them: a review can return one as needs_clarification — so a requester with any of these is not deleted
+_WAITING_ON_REQUESTER = ("draft", "needs_clarification", "under_review")
+
+
+def delete_user(user_id: int, *, caller) -> None:
+    """Soft-delete a user (see the module doc). One `user.delete` audit row; the unsent uploads' files go after the
+    commit (their rows go in the transaction)."""
+    from datetime import datetime, timezone
+    from agenticops.chat.attachments import service as attachments, store
+    from agenticops.models import ChangeRequest
+    with get_db_session() as s:
+        u = _get(s, user_id)
+        if caller is not None and getattr(caller, "id", None) == u.id:
+            raise UserAdminError(409, "self_change", "you cannot delete yourself")
+        if role_of(u)[0] == "admin" and u.is_active and _other_active_admins(s, u.id) == 0:
+            raise UserAdminError(409, "last_admin", "the last active admin cannot be deleted")
+        key = f"user:{u.email}"
+        open_ids = [cid for (cid,) in s.query(ChangeRequest.id)
+                    .filter(ChangeRequest.requested_by == key, ChangeRequest.status.in_(_WAITING_ON_REQUESTER))
+                    .order_by(ChangeRequest.id).all()]
+        if open_ids:
+            refs = [f"C#{cid}" for cid in open_ids]
+            raise UserAdminError(409, "has_open_requests",
+                                 f"{u.email} still has change requests waiting on them: {', '.join(refs)}",
+                                 extra={"refs": refs})
+        sessions = s.query(Session).filter(Session.user_id == u.id).count()
+        keys = s.query(APIKey).filter(APIKey.user_id == u.id, APIKey.is_active.is_(True)).count()
+        u.deleted_at = datetime.now(timezone.utc)
+        u.is_active = False
+        _end_sessions(s, u.id)
+        s.execute(update(APIKey).where(APIKey.user_id == u.id).values(is_active=False))
+        removed = attachments.delete_staged_of(s, key)
+        _audit(s, "user.delete", u, caller, old={"deleted": False},
+               new={"deleted": True, "sessions_ended": sessions, "keys_revoked": keys, "attachments_removed": len(removed)})
+    for att_id in removed:
+        store.remove_staged(att_id)

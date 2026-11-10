@@ -28,7 +28,8 @@ async def users_admin(request: Request):
 def _refused(e) -> JSONResponse:
     """The UiError shape the web client reads ({"detail": {"detail", "code"}} — api/client.apiFetch keeps the code);
     a top-level code was dropped, so the page could not word the refusal (MVP-2.8.0 API keys round)."""
-    return JSONResponse(status_code=e.status, content={"detail": {"detail": e.detail, "code": e.code}})
+    extra = getattr(e, "extra", None) or {}       # e.g. has_open_requests names the requests ({"refs": [...]})
+    return JSONResponse(status_code=e.status, content={"detail": {"detail": e.detail, "code": e.code, **extra}})
 
 
 def _token_hash(request: Request) -> str | None:
@@ -78,6 +79,16 @@ def api_update_user(user_id: int, body: UserPatchBody, caller=Depends(users_admi
     try:
         return user_admin.update_user(user_id, role=body.role, settings_view=body.settings_view,
                                       is_active=body.is_active, caller=caller)
+    except user_admin.UserAdminError as e:
+        return _refused(e)
+
+
+@router.delete("/api/users/{user_id}", status_code=204)
+def api_delete_user(user_id: int, caller=Depends(users_admin)):
+    """Delete a user (MVP-2.8.0): soft — sessions, keys and unsent uploads go at once, records stay with their
+    owner, the login name is never reused (services/user_admin.delete_user)."""
+    try:
+        user_admin.delete_user(user_id, caller=caller)
     except user_admin.UserAdminError as e:
         return _refused(e)
 
