@@ -13,19 +13,22 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from agenticops.services import user_admin
-from agenticops.web.deps import require_authenticated_user
-from agenticops.web.schemas import (PasswordResetResponse, UserCreateBody, UserCreatedResponse, UserPatchBody,
-                                    UserRow)
+from agenticops.web.deps import require_session_user
+from agenticops.web.schemas import (APIKeyResponse, PasswordResetResponse, UserCreateBody, UserCreatedResponse,
+                                    UserPatchBody, UserRow)
 
 router = APIRouter(tags=["users"])
 
 
 async def users_admin(request: Request):
-    return await require_authenticated_user(request, admin=True)
+    # a signed-in admin session — never an API key, even an admin-scoped one (MVP-2.8.0 API keys)
+    return await require_session_user(request, admin=True)
 
 
-def _refused(e: user_admin.UserAdminError) -> JSONResponse:
-    return JSONResponse(status_code=e.status, content={"detail": e.detail, "code": e.code})
+def _refused(e) -> JSONResponse:
+    """The UiError shape the web client reads ({"detail": {"detail", "code"}} — api/client.apiFetch keeps the code);
+    a top-level code was dropped, so the page could not word the refusal (MVP-2.8.0 API keys round)."""
+    return JSONResponse(status_code=e.status, content={"detail": {"detail": e.detail, "code": e.code}})
 
 
 def _token_hash(request: Request) -> str | None:
@@ -36,7 +39,28 @@ def _token_hash(request: Request) -> str | None:
 
 @router.get("/api/users", response_model=List[UserRow])
 def api_list_users(caller=Depends(users_admin)):
-    return user_admin.list_users()
+    from agenticops.services import api_keys
+    counts = api_keys.active_counts()
+    return [{**u, "active_api_keys": counts.get(u["id"], 0)} for u in user_admin.list_users()]
+
+
+@router.get("/api/users/{user_id}/api-keys", response_model=List[APIKeyResponse])
+def api_list_user_api_keys(user_id: int, caller=Depends(users_admin)):
+    """An admin sees a user's API keys — prefixes only, never a full key (MVP-2.8.0)."""
+    from agenticops.services import api_keys
+    if not api_keys.owner_exists(user_id):
+        return _refused(user_admin.UserAdminError(404, "not_found", f"user {user_id} not found"))
+    return api_keys.list_keys(user_id)
+
+
+@router.delete("/api/users/{user_id}/api-keys/{key_id}", status_code=204)
+def api_revoke_user_api_key(user_id: int, key_id: int, caller=Depends(users_admin)):
+    """An admin revokes a user's API key; the audit says it was an admin (MVP-2.8.0)."""
+    from agenticops.services import api_keys
+    try:
+        api_keys.revoke_key(key_id, owner_id=user_id, caller=caller, by_admin=True)
+    except api_keys.ApiKeyError as e:
+        return _refused(e)
 
 
 @router.post("/api/users", response_model=UserCreatedResponse, status_code=201)

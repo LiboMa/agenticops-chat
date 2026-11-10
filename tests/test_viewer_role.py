@@ -60,6 +60,7 @@ def test_settings_are_visible_to_writers_and_to_a_viewer_with_settings_read():
     ("POST", f"/api/chat/sessions/{SID}/messages"),
     ("POST", "/api/graph/vpc/vpc-0abc123/dependency-chain"), ("POST", "/api/graph/vpc/vpc-0abc123/change-simulation"),
     ("GET", "/api/settings"), ("GET", "/api/health-issues/5"), ("get", "/api/accounts"),
+    ("POST", "/api/api-keys"), ("DELETE", "/api/api-keys/1"),     # MVP-2.8.0: its own read-only keys
 ])
 def test_reads_and_the_allowlisted_writes_pass(method, path):
     assert viewer_may(method, path)
@@ -69,7 +70,7 @@ def test_reads_and_the_allowlisted_writes_pass(method, path):
     ("POST", f"/api/chat/sessions/{SID}"),             # a session id is never the create route
     ("PATCH", "/api/chat/sessions"), ("DELETE", "/api/chat/sessions"), ("POST", "/api/chat/sessions/"),
     ("POST", f"/api/chat/sessions/{SID}/messages/x"), ("PATCH", f"/api/chat/sessions/{SID}/messages"),
-    ("PATCH", "/api/settings"), ("POST", "/api/api-keys"), ("DELETE", "/api/api-keys/1"),
+    ("PATCH", "/api/settings"),
     ("POST", "/api/health-issues/5/rca"), ("POST", "/api/galaxy/rebuild"), ("POST", "/api/reports/from-session"),
     ("PUT", "/api/users/me/preferences"), ("POST", "/api/auth/register"),
     ("POST", "/api/graph/vpc/a/b/dependency-chain"), ("post", "/api/scan"),
@@ -131,6 +132,8 @@ def test_the_walk_covers_the_app_and_every_allowlist_entry_is_a_real_route():
         ("POST", "/api/graph/vpc/x1/change-simulation"),
         # 2026-11-07: a viewer attaches files to its own chats (the service touches only its own uploads)
         ("POST", "/api/chat/attachments"), ("DELETE", "/api/chat/attachments/x1"),
+        # MVP-2.8.0 (owner): a viewer issues and revokes its own read-only API keys
+        ("POST", "/api/api-keys"), ("DELETE", "/api/api-keys/x1"),
     }
 
 

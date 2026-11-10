@@ -31,6 +31,9 @@ _ALLOWED: tuple[tuple[str, re.Pattern], ...] = tuple(
         # a viewer attaches files to its own chats; the service lets it touch only its own uploads
         ("POST", r"/api/chat/attachments"),
         ("DELETE", rf"/api/chat/attachments/{_SEG}"),
+        # MVP-2.8.0: a viewer issues and revokes its OWN read-only API keys (services/api_keys enforces both)
+        ("POST", r"/api/api-keys"),
+        ("DELETE", rf"/api/api-keys/{_SEG}"),
         # in-memory analysis over read-only describes — nothing is written or changed
         ("POST", rf"/api/graph/vpc/{_SEG}/dependency-chain"),
         ("POST", rf"/api/graph/vpc/{_SEG}/change-simulation"),

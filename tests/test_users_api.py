@@ -72,7 +72,8 @@ def test_an_admin_lists_every_user_with_its_role_and_state(env):
     assert r.status_code == 200
     rows = r.json()
     assert [u["email"] for u in rows] == ["ops", "root", "view"]
-    assert set(rows[0]) == {"id", "email", "name", "role", "settings_view", "is_active", "last_login_at", "created_at"}
+    assert set(rows[0]) == {"id", "email", "name", "role", "settings_view", "is_active", "last_login_at", "created_at",
+                            "active_api_keys"}
     assert {u["email"]: (u["role"], u["settings_view"]) for u in rows} == {
         "ops": ("writer", False), "root": ("admin", False), "view": ("viewer", True)}
 
@@ -112,11 +113,11 @@ def test_create_refuses_a_taken_or_empty_name_and_settings_on_a_writer(env):
     _, tok = _user("root", "admin")
     _user("ops", "writer")
     r = env.client.post("/api/users", headers=H(tok), json={"email": "ops", "role": "viewer"})
-    assert (r.status_code, r.json()["code"]) == (409, "email_taken")
+    assert (r.status_code, r.json()["detail"]["code"]) == (409, "email_taken")
     r = env.client.post("/api/users", headers=H(tok), json={"email": "   ", "role": "viewer"})
-    assert (r.status_code, r.json()["code"]) == (422, "invalid_email")
+    assert (r.status_code, r.json()["detail"]["code"]) == (422, "invalid_email")
     r = env.client.post("/api/users", headers=H(tok), json={"email": "w2", "role": "writer", "settings_view": True})
-    assert (r.status_code, r.json()["code"]) == (422, "invalid_role")
+    assert (r.status_code, r.json()["detail"]["code"]) == (422, "invalid_role")
 
 
 # ── change ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -130,7 +131,7 @@ def test_a_role_change_applies_on_the_next_request(env):
     r = env.client.patch(f"/api/users/{view.id}", headers=H(tok), json={"role": "writer"})
     assert r.status_code == 200 and r.json()["role"] == "writer"
     assert "write" in AuthService.validate_session(view_tok).permissions
-    assert env.client.patch("/api/users/99999", headers=H(tok), json={"role": "viewer"}).json()["code"] == "not_found"
+    assert env.client.patch("/api/users/99999", headers=H(tok), json={"role": "viewer"}).json()["detail"]["code"] == "not_found"
 
 
 def test_nobody_disables_or_demotes_themselves(env):
@@ -138,7 +139,7 @@ def test_nobody_disables_or_demotes_themselves(env):
     _user("root2", "admin")
     for patch in ({"is_active": False}, {"role": "writer"}):
         r = env.client.patch(f"/api/users/{root.id}", headers=H(tok), json=patch)
-        assert (r.status_code, r.json()["code"]) == (409, "self_change")
+        assert (r.status_code, r.json()["detail"]["code"]) == (409, "self_change")
 
 
 def test_the_service_keeps_the_last_admin(env):
@@ -167,7 +168,7 @@ def test_with_sign_in_off_only_an_admin_manages_users_and_not_themselves(env):
     assert env.client.patch(f"/api/users/{root.id}", headers=H(view_tok), json={"is_active": False}).status_code == 403
     assert env.client.get("/api/users", headers=H(root_tok)).status_code == 200
     r = env.client.patch(f"/api/users/{root.id}", headers=H(root_tok), json={"is_active": False})
-    assert (r.status_code, r.json()["code"]) == (409, "self_change")
+    assert (r.status_code, r.json()["detail"]["code"]) == (409, "self_change")
 
 
 def test_disable_ends_sessions_and_keys_and_enable_brings_neither_back(env):
@@ -251,4 +252,4 @@ def test_every_change_is_audited_and_never_the_password(env):
 def test_the_routes_are_plain_def():
     from agenticops.web.routers import users
     endpoints = [r.endpoint for r in users.router.routes]
-    assert len(endpoints) == 4 and not any(inspect.iscoroutinefunction(e) for e in endpoints)
+    assert len(endpoints) == 6 and not any(inspect.iscoroutinefunction(e) for e in endpoints)   # + the 2 key routes

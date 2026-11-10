@@ -939,8 +939,10 @@ class APIKeyCreatedResponse(BaseModel):
     id: int
     name: str
     key: str  # Full key - only shown once!
+    key_prefix: str = ""
     permissions: List[str]
     expires_at: Optional[datetime]
+    created_at: Optional[datetime] = None
 
 
 class PasswordChangeRequest(BaseModel):
@@ -1143,6 +1145,7 @@ class UserRow(BaseModel):
     is_active: bool
     last_login_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
+    active_api_keys: int = 0                         # MVP-2.8.0: active, unexpired API keys (the list's «API Key N»)
 
 
 class UserCreateBody(BaseModel):

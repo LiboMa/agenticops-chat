@@ -120,6 +120,9 @@ def update_user(user_id: int, *, role: Optional[str] = None, settings_view: Opti
         if new != old:
             u.is_admin, u.permissions = is_admin, permissions
             _audit(s, "user.update", u, caller, old=old, new=new)
+            if "write" not in permissions:     # MVP-2.8.0: the user's keys lose write with the user; never regain it
+                from agenticops.services.api_keys import downgrade_keys
+                downgrade_keys(s, u.id, caller=caller)
         if disable:
             u.is_active = False
             _end_sessions(s, u.id)

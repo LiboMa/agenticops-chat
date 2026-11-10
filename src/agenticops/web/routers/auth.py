@@ -3,7 +3,8 @@
 from datetime import datetime, timedelta, timezone
 from typing import List
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from agenticops.models import get_db_session
 from agenticops.web.schemas import (
@@ -17,6 +18,12 @@ from agenticops.web.schemas import (
 )
 
 router = APIRouter()
+
+
+async def _session_user(request: Request):
+    """A signed-in session, never an API key (MVP-2.8.0: a key never manages keys or the password)."""
+    from agenticops.web.deps import require_session_user
+    return await require_session_user(request, admin=False)
 
 
 @router.post("/api/auth/login", response_model=LoginResponse)
@@ -80,108 +87,43 @@ async def api_get_current_user(request: Request):
 
 
 @router.put("/api/users/me/password")
-async def api_change_password(request: Request, request_data: PasswordChangeRequest):
-    """Change the current user's password."""
-    from agenticops.auth import AuthService, get_current_user
-    from fastapi.security import HTTPAuthorizationCredentials
-
-    # Get current user
-    auth_header = request.headers.get("authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Authentication required")
-
-    token = auth_header[7:]
-    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-
-    user = await get_current_user(request, credentials)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
+def api_change_password(request_data: PasswordChangeRequest, user=Depends(_session_user)):
+    """Change the current user's password — from a signed-in session only (an API key never changes it)."""
+    from agenticops.auth import AuthService
     if not AuthService.update_password(user.id, request_data.old_password, request_data.new_password):
         raise HTTPException(status_code=400, detail="Invalid current password")
-
     return {"message": "Password changed successfully"}
 
 
+def _key_refused(e) -> JSONResponse:
+    return JSONResponse(status_code=e.status, content={"detail": {"detail": e.detail, "code": e.code}})
+
+
 @router.post("/api/api-keys", response_model=APIKeyCreatedResponse, status_code=201)
-async def api_create_api_key(request: Request, request_data: APIKeyCreate):
-    """Create a new API key for the current user."""
-    from agenticops.auth import AuthService, get_current_user
-    from fastapi.security import HTTPAuthorizationCredentials
-
-    # Get current user
-    auth_header = request.headers.get("authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Authentication required")
-
-    token = auth_header[7:]
-    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-
-    user = await get_current_user(request, credentials)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    # Create API key
-    key = AuthService.create_api_key(
-        user_id=user.id,
-        name=request_data.name,
-        permissions=request_data.permissions,
-        expires_days=request_data.expires_days,
-    )
-
-    # Get the created key info
-    with get_db_session() as session:
-        from agenticops.auth.models import APIKey
-        api_key = session.query(APIKey).filter_by(user_id=user.id).order_by(APIKey.created_at.desc()).first()
-
-        return APIKeyCreatedResponse(
-            id=api_key.id,
-            name=api_key.name,
-            key=key,  # Full key - only shown once!
-            permissions=api_key.permissions,
-            expires_at=api_key.expires_at,
-        )
+def api_create_api_key(request_data: APIKeyCreate, user=Depends(_session_user)):
+    """Create an API key for the signed-in user (MVP-2.8.0): ["read"] or ["read","write"], never above the owner's role
+    (a viewer: read only); the full key is in this response only."""
+    from agenticops.services import api_keys
+    try:
+        row, key = api_keys.create_key(user, name=request_data.name, permissions=request_data.permissions,
+                                       expires_days=request_data.expires_days, caller=user)
+    except api_keys.ApiKeyError as e:
+        return _key_refused(e)
+    return {**row, "key": key}
 
 
 @router.get("/api/api-keys", response_model=List[APIKeyResponse])
-async def api_list_api_keys(request: Request):
-    """List API keys for the current user."""
-    from agenticops.auth import AuthService, get_current_user
-    from fastapi.security import HTTPAuthorizationCredentials
-
-    # Get current user
-    auth_header = request.headers.get("authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Authentication required")
-
-    token = auth_header[7:]
-    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-
-    user = await get_current_user(request, credentials)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    keys = AuthService.list_api_keys(user.id)
-    return [APIKeyResponse.model_validate(k) for k in keys]
+def api_list_api_keys(user=Depends(_session_user)):
+    """The signed-in user's API keys — prefixes only, never a full key."""
+    from agenticops.services import api_keys
+    return api_keys.list_keys(user.id)
 
 
 @router.delete("/api/api-keys/{key_id}", status_code=204)
-async def api_revoke_api_key(request: Request, key_id: int):
-    """Revoke an API key."""
-    from agenticops.auth import AuthService, get_current_user
-    from fastapi.security import HTTPAuthorizationCredentials
-
-    # Get current user
-    auth_header = request.headers.get("authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Authentication required")
-
-    token = auth_header[7:]
-    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-
-    user = await get_current_user(request, credentials)
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    if not AuthService.revoke_api_key(key_id, user.id):
-        raise HTTPException(status_code=404, detail="API key not found")
+def api_revoke_api_key(key_id: int, user=Depends(_session_user)):
+    """Revoke one of the signed-in user's API keys (another user's is a 404)."""
+    from agenticops.services import api_keys
+    try:
+        api_keys.revoke_key(key_id, owner_id=user.id, caller=user, by_admin=False)
+    except api_keys.ApiKeyError as e:
+        return _key_refused(e)
