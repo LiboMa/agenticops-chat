@@ -1150,6 +1150,7 @@ class Settings(BaseSettings):
             "claude-haiku-5-5":  {"input": 0.10, "output": 0.50, "cache_read": 0.01, "cache_write": 0.125},
             "claude-opus-5":     {"input": 5.0,  "output": 25.0, "cache_read": 0.50, "cache_write": 6.25},
             "claude-sonnet-5":   {"input": 2.0,  "output": 10.0, "cache_read": 0.20, "cache_write": 2.50},
+            "claude-fable-5-2":  {"input": 8.0, "output": 40.0, "cache_read": 0.20, "cache_write": 10.00},
             "claude-fable-5-1":  {"input": 10.0, "output": 50.0, "cache_read": 0.25, "cache_write": 12.50},
             "claude-fable-5":    {"input": 10.0, "output": 50.0, "cache_read": 1.00, "cache_write": 12.50},
             "claude-opus-4-8":   {"input": 5.0,  "output": 25.0, "cache_read": 0.50, "cache_write": 6.25},
@@ -1244,6 +1245,11 @@ MODEL_WINDOW_DEFAULTS: dict[str, dict[str, int]] = {
         "main": 100, "scan": 80, "detect": 80,
         "rca": 200, "sre": 200,
         "executor": 20, "reporter": 80,
+    },
+    "claude-fable-5-2": {
+        "main": 200, "scan": 120, "detect": 120,
+        "rca": FULL_CONTEXT, "sre": FULL_CONTEXT,
+        "executor": 20, "reporter": 120,
     },
     "claude-fable-5-1": {
         "main": 200, "scan": 120, "detect": 120,
