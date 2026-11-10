@@ -35,6 +35,13 @@ export function currentView(params: URLSearchParams, readOnly: boolean): QuickVi
   return v && (QUICK_VIEWS as readonly string[]).includes(v) ? (v as QuickView) : defaultView(readOnly);
 }
 
+/** The view the issue list beside an open issue (`/app/issues/:id`) really shows: «在等我» is its own page, so there —
+ *  and with no view, as every link straight to an issue has — the list is the whole list (MVP-2.8.0 final review). */
+export function listView(params: URLSearchParams, readOnly: boolean): Exclude<QuickView, "waiting"> {
+  const v = currentView(params, readOnly);
+  return v === "waiting" ? "all" : v;
+}
+
 export function queueFilters(params: URLSearchParams): HealthIssueFilters & { limit: number } {
   const status = params.get("status");
   const severity = params.get("severity");

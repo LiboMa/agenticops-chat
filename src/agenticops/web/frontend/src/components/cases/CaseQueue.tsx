@@ -12,7 +12,7 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { ISSUE_SCOPES } from "@/lib/issueScope";
 import { issueRow } from "@/lib/workItems";
 import {
-  LAST_CASE_KEY, QUEUE_CAP, SEVERITY_CHOICES, SORTS, STATUS_GROUPS, capped, currentView, defaultView, queueFilters, queueParams,
+  LAST_CASE_KEY, QUEUE_CAP, SEVERITY_CHOICES, SORTS, STATUS_GROUPS, capped, listView, defaultView, queueFilters, queueParams,
   rowState, scrollKey,
 } from "@/lib/caseQueue";
 import type { HealthIssue } from "@/api/types";
@@ -41,7 +41,7 @@ export function CaseQueue({ selectedId, wide }: { selectedId: number | null; wid
   const accountId = useScopedAccountId();
   const issues = useHealthIssues({ ...filters, account_id: accountId });
   const readOnly = useReadOnly();
-  const view = currentView(params, readOnly);
+  const view = listView(params, readOnly);  // the rows' own view: «在等我» is WaitingView's page
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const id = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(id); }, []);
   const [q, setQ] = useState(filters.q ?? "");

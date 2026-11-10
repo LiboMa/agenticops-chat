@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  listView,
   ACTIVE_STATUSES, QUEUE_CAP, QUICK_VIEWS, backTarget, capped, caseHref, currentView, defaultView, queueFilters, queueParams, rowState,
   scrollKey, SPLIT_MIN_WIDTH, waitingSearch,
 } from "@/lib/caseQueue";
@@ -93,5 +94,26 @@ describe("quick views — «在等我» first (MVP-2.8.0: the to-do workbench me
     expect(waitingSearch(p("q=web&item=I3"), "C5")).toBe("?q=web&item=C5");
     expect(waitingSearch(p("q=web&item=I3"), null)).toBe("?q=web");
     expect(waitingSearch(p(""), null)).toBe("");
+  });
+});
+
+/** Final review (Important 2): every link straight to an issue (`/app/issues/12`, from search, chat, notifications)
+ *  showed «在等我» pressed above the whole issue list. Beside an open issue the list is the issue list — «在等我» is its
+ *  own page — so the pressed view is the one the rows really are. */
+describe("listView", () => {
+  const p = (s: string) => new URLSearchParams(s);
+  it("no view, or «在等我», beside an issue: the whole list, as the rows are", () => {
+    expect(listView(p(""), false)).toBe("all");
+    expect(listView(p("view=waiting"), false)).toBe("all");
+    expect(listView(p("view=mine"), false)).toBe("all");
+    expect(queueFilters(p("")).view).toBeUndefined();
+  });
+  it("the issue list's own views stay", () => {
+    expect(listView(p("view=failed"), false)).toBe("failed");
+    expect(listView(p("view=long_wait"), true)).toBe("long_wait");
+    expect(listView(p("view=all"), false)).toBe("all");
+  });
+  it("a viewer: the whole list", () => {
+    expect(listView(p(""), true)).toBe("all");
   });
 });
