@@ -1201,8 +1201,10 @@ curl -H "Authorization: Bearer aiops_…" https://<your-site>/api/health-issues?
 
 The list shows each key's prefix, access, created / last used / expiry (UTC) and state (active / expired / revoked);
 **Revoke** takes effect at once, and disabling an account voids its keys. Whatever its access, a key never
-approves, rejects, runs or accepts anything — not even through the agent in a chat it started — and never creates
-or revokes keys, changes a password or manages users: do those signed in. A user who loses write access has their
+approves, rejects, deletes, runs or accepts a plan or change — not even through the agent in a chat it started (the
+403 says `code: human_session_required`) — and never creates or revokes keys, changes a password or manages users:
+do those signed in. *Still open (owner's decision): a read-write key's chat can use the writer tools that reach the
+host itself — Claude Code (`enhanced_task`, when enabled), MCP server settings, local file writes, schedules.* A user who loses write access has their
 keys downgraded to read only. With API sign-in off a banner says requests need no key and its limits do not apply.
 
 **Statistics in a chat answer (2.8.0).** Counts, comparisons, shares and trends come as one sentence plus a table —

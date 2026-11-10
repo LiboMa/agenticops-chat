@@ -162,6 +162,29 @@ When the step has no explicit type, infer from the command:
 EXECUTOR_SYSTEM_PROMPT = _build_executor_prompt()
 
 
+def _api_key_refusal(fix_plan_id: int) -> str | None:
+    """A turn that came through an API key never runs a plan: running one is a person's decision (rbac
+    `no-api-key-human-decisions`, MVP-2.8.0). The routes check it; this tool is the chat's way to the same run, so it
+    checks too (final review: a read-write key's chat ran an approved plan). The check writes its own audit row; the
+    refusal stands even if a custom rbac.yaml dropped the rule. Queued runs set their own context (agent:executor)."""
+    from agenticops.run_context import get_run_context
+    ctx = get_run_context()
+    if not getattr(ctx, "via_api_key", False):
+        return None
+    from agenticops.auth import authz
+    from agenticops.auth.actor import actor_from_run_context
+    from agenticops.models import FixPlan, get_db_session
+    with get_db_session() as db:
+        plan = db.query(FixPlan).filter_by(id=fix_plan_id).first()
+        change = getattr(plan, "plan_kind", None) == "change"
+        try:
+            authz.check(actor_from_run_context(ctx), "change.execute" if change else "plan.execute",
+                        subject=plan.change_request if change and plan is not None else plan)
+        except authz.AuthzDenied as e:
+            return str(e)
+    return "human_session_required: an API key may never run a plan — use a signed-in session"
+
+
 @tool
 def executor_agent(fix_plan_id: int) -> str:
     """Execute an APPROVED FixPlan following the 7-step execution protocol.
@@ -183,6 +206,9 @@ def executor_agent(fix_plan_id: int) -> str:
             "Executor is DISABLED. Cannot execute fix plans. "
             "Set AIOPS_EXECUTOR_ENABLED=true to enable execution."
         )
+    refused = _api_key_refusal(fix_plan_id)
+    if refused:
+        return f"REJECTED: {refused}"
 
     try:
         from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_executor_interventions, get_bedrock_boto_session

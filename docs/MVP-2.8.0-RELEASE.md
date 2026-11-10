@@ -36,7 +36,7 @@
 | 我的 API 密钥 `/app/account/api-keys`（新） | 头像菜单「首页与语言」下面的「API 密钥」，所有已登录的人都有，只读账户也有。<br>列表：名称、前缀、权限（只读 / 读写）、创建时间、最近使用（UTC，没用过写「从未使用」）、到期（UTC 日期或「永不过期」）、状态（有效 / 已过期 / 已撤销）。768 px 以下变卡片。只有有效的 Key 有「撤销」，先确认。<br>新建：名称；权限两选一，默认只读，只读账户的「读写」不能选并写明原因；有效期 30 天 / 90 天 / 1 年 / 永不过期，默认 90 天。<br>完整的 Key 只显示一次：带「复制」、一个 curl 示例和一句 MCP 说明；点外面不会关，关闭后连同请求缓存一起清掉，焦点回到「＋ 新建 API Key」。<br>认证关闭时页面顶部写明：请求不需要 Key，Key 的权限限制也不生效。 |
 | 用户管理里的「API Key N」 | 每行多一个按钮，N 是这个人当前有效且未过期的 Key 数，0 个时写「无」。点开列出这个人的所有 Key，有效的可以撤销（先确认）。管理员不能替别人建 Key，也看不到完整的 Key。 |
 | 只读 Key 名副其实 | 一个请求用不带 `write` 的 Key 认证时，按只读账户处理：中间件拒绝白名单以外的所有写请求（403 `read_only`），不管 `rbac_enforce` 开没开；这次请求的 actor 是只读的，所以对话跑只读代理，命令校验也按只读来。 |
-| Key 不能做人的决定 | 经由 Key 的请求不能批准、拒绝或执行方案和变更，也不能验收或裁决评审（验收和裁决检查的是批准权限）。规则 `no-api-key-human-decisions`（`config/rbac.yaml`，`enforce: always`，影子模式也生效），理由 `human_session_required`。用这个 Key 发起的对话里，代理工具代它去批准也一样被拒（`RunContext.via_api_key`）。 |
+| Key 不能做人的决定 | 经由 Key 的请求不能批准、拒绝或执行方案和变更，也不能验收或裁决评审（验收和裁决检查的是批准权限），也不能删除修复方案（删除就是换个说法的拒绝）。规则 `no-api-key-human-decisions`（`config/rbac.yaml`，`enforce: always`，影子模式也生效），403 的返回是 `{detail, code: "human_session_required"}`。用这个 Key 发起的对话里，代理工具代它去批准或执行（`executor_agent`）也一样被拒（`RunContext.via_api_key`）。 |
 | Key 不能管理 Key、密码和用户 | 经由 Key 的请求访问 `/api/api-keys`、`PUT /api/users/me/password` 和 `/api/users*`，一律 403 `session_required`，只能用登录会话。否则一个泄露的 Key 可以给自己再建一个永不过期的读写 Key。 |
 | 降级 | 用户失去写权限时（`user_admin.update_user`），他的读写 Key 一并降成只读，每个 Key 记一条 `api_key.downgrade` 审计；重新升级不会恢复。 |
 
@@ -71,10 +71,40 @@
 | Schedule | 非目标 |
 | Notification | 非目标 |
 
+### 整个分支评审之后（2026-11-10）
+
+评审结果：没有 Critical，3 个 Important，13 个 Minor。按实际影响重新定级后，修了 3 个 Important 里的 2 个，以及 3 个 spec 明确写到的 Minor；每一项都先补一个会失败的测试或 E2E 复现。剩下 1 个 Important 要主人定，其余 10 个 Minor 记录在案。
+
+- **用 Key 发起的对话能执行已批准的方案**：主代理的 `executor_agent` 工具不检查执行权限。现在经由 Key 的对话调用它会被拒，并记一条拒绝审计；排队执行的那条路径用它自己的身份（`agent:executor`），不受影响。
+- **`DELETE /api/fix-plans/{id}` 不检查权限**：读写 Key 能删掉一个待审批的方案，等于不留痕迹地拒绝它。现在删除要有拒绝权限，经由 Key 一律 403；接口改成普通 `def`。
+- **`human_session_required` 没有码**：原来只写在一句话里。现在修复方案的批准 / 拒绝 / 执行 / 取消、变更的各个决定和验收，被这条规则拒绝时都返回 `{detail, code: "human_session_required"}`，和 `read_only`、`session_required` 一样；其他拒绝的返回不变（`authz.http_detail`）。
+- **一次性的 Key 关闭后还在浏览器缓存里**：`reset()` 只是断开，请求缓存要 5 分钟后才清。新建 Key、新建用户、重置密码三个请求现在在关闭时就清掉。
+- **理由对话框的输入框在手机上是 14 px**：现在是 16 px。
+
+**待主人定（Important）**：写权限账户本来就能用的几样东西，经由一个长期、交给第三方的读写 Key 也能用到，它们能碰到主机本身：
+- 对话里的 Claude Code（`enhanced_task`，开着 `acp_enhanced_enabled` 时）；
+- MCP 服务端配置（`PUT /api/settings/mcp-servers`，存进去的命令下次建代理时会被启动）；
+- 本地写文件（`write_local_file`）；
+- 定时任务（以 `agent:scheduler` 的身份运行主代理）。
+
+在主人定之前，「任何 Key 都不能做人的决定」这句话对这几条路径不成立。
+
+记录在案、留到后面处理的 10 个 Minor：
+- 请求还没返回就关掉新建对话框，会留下一个谁也没看到的有效 Key（列表里有，可以撤销）；
+- 降级时连已撤销的 Key 也改写并记审计；
+- 新建 Key 和降级同时发生时，可能留下一个读写 Key；
+- 旧接口建的带 `admin` 的 Key 仍能通过 `/api/users` 以外的管理员门槛（本地库里没有这种 Key）；
+- 这条规则只写在 `rbac.yaml` 和内置默认策略里，自定义的策略文件漏掉它就失效（`executor_agent` 现在另有一道代码层的拒绝）；
+- 正在进行的对话，Key 被撤销后这一轮仍按原身份跑完；
+- 用命令行停用的用户，他的 Key 在列表里仍显示「有效」（实际已不能用）；
+- `auth/viewer.py` 模块说明过时，`web/deps.py` 有一个没用到的导入；
+- 页面加载完成前，只读账户能短暂选到「读写」（服务端会拒绝并说明）；
+- 没有登录时页面仍显示「＋ 新建 API Key」；权限和有效期两组选项没有方向键操作（每个选项都能用 Tab 到达）。
+
 ### 验证
 
-- 后端全量：7584 通过，1 个失败：`test_web_tools` 那条已知的假失败（本机 DNS 把 example.com 解析到 198.18.0.x，SSRF 守卫先拦下）。
-- 前端：vitest 83 个文件、892 个测试全部通过；`tsc --noEmit` 通过；`/tmp` 空目录里 `npm ci && npm run build` 通过。
+- 后端全量：7584 通过，1 个失败：`test_web_tools` 那条已知的假失败（本机 DNS 把 example.com 解析到 198.18.0.x，SSRF 守卫先拦下）。评审修复之后 7587 通过，失败的仍是同一条。
+- 前端：vitest 83 个文件、892 个测试全部通过（评审修复之后 84 个文件、894 个）；`tsc --noEmit` 通过；`/tmp` 空目录里 `npm ci && npm run build` 通过。
 - E2E：同一个 :8001 实例（副本库，定时任务全停，开启认证），管理员、可写、只读三种账户，1440 / 390 / 320 px，加一次英文界面；接口用真实请求逐条测了只读 Key、读写 Key、人的决定、Key 管理、撤销后 401；真实模型对话一次（只读 Key 跑的是只读代理）；4 个遗留问题逐条在页面上复现。发现并修好 2 个问题：页面标题写成「页面不存在」、有效期写成「365 天」。详见 E2E 报告。
 
 ## S2 返工：侧栏、对话页、统计默认表格、用户管理（2026-11-09）

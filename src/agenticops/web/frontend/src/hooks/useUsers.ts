@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import type { ApiKeyRow, UserRole, UserRow } from "@/api/types";
 
@@ -15,13 +15,18 @@ function useInvalidate() {
   return () => qc.invalidateQueries({ queryKey: KEY });
 }
 
-export function useCreateUser() {
-  const invalidate = useInvalidate();
-  return useMutation({
+export function createUserOptions(qc: QueryClient) {
+  return {
+    // a secret shown once: dropped from the mutation cache as soon as the page resets it (closing its dialog)
+    gcTime: 0,
     mutationFn: (body: { email: string; name: string | null; role: UserRole; settings_view: boolean }) =>
       apiFetch<{ user: UserRow; password: string }>("/users", { method: "POST", body: JSON.stringify(body) }),
-    onSuccess: invalidate,
-  });
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  };
+}
+
+export function useCreateUser() {
+  return useMutation(createUserOptions(useQueryClient()));
 }
 
 export function useUpdateUser() {
@@ -33,12 +38,17 @@ export function useUpdateUser() {
   });
 }
 
-export function useResetPassword() {
-  const invalidate = useInvalidate();
-  return useMutation({
+export function resetPasswordOptions(qc: QueryClient) {
+  return {
+    // a secret shown once: dropped from the mutation cache as soon as the page resets it (closing its dialog)
+    gcTime: 0,
     mutationFn: (id: number) => apiFetch<{ password: string }>(`/users/${id}/reset-password`, { method: "POST" }),
-    onSuccess: invalidate,
-  });
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  };
+}
+
+export function useResetPassword() {
+  return useMutation(resetPasswordOptions(useQueryClient()));
 }
 
 /** An admin's view of someone's API keys (MVP-2.8.0): GET /api/users/{id}/api-keys — never the full key. Under the

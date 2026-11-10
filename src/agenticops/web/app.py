@@ -2617,7 +2617,7 @@ def _reject_plan(session, plan, actor: Actor, reason: str) -> None:
     try:
         authz.check(actor, "plan.reject", subject=plan)
     except authz.AuthzDenied as e:
-        raise HTTPException(status_code=403, detail=str(e))
+        raise HTTPException(status_code=403, detail=authz.http_detail(e))
     if plan.status == "approved":
         # an approval's auto-run writes no row until it ends: withdrawing now would leave the executor running while
         # the issue invites a new plan (final review I5)
@@ -2849,7 +2849,7 @@ async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody, actor: Ac
         try:
             authz.check(actor, "plan.approve", subject=plan)
         except authz.AuthzDenied as e:
-            raise HTTPException(status_code=403, detail=str(e))
+            raise HTTPException(status_code=403, detail=authz.http_detail(e))
         from agenticops.services.change_service import fix_path_refusal
         refusal = fix_path_refusal(plan, "approved")
         if refusal:
@@ -2915,12 +2915,18 @@ async def api_reject_fix_plan(plan_id: int, data: FixPlanRejectBody, actor: Acto
 
 
 @app.delete("/api/fix-plans/{plan_id}", status_code=204)
-async def api_delete_fix_plan(plan_id: int):
-    """Delete a fix plan."""
+def api_delete_fix_plan(plan_id: int, actor: Actor = Depends(current_actor)):
+    """Delete a fix plan. Withdrawing a plan is a reject by another name, so it needs `plan.reject` — and through
+    an API key it is refused like one (MVP-2.8.0 final review: a read-write key withdrew a pending plan unchecked)."""
+    from agenticops.auth import authz
     with get_db_session() as session:
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
+        try:
+            authz.check(actor, "plan.reject", subject=plan)
+        except authz.AuthzDenied as e:
+            raise HTTPException(status_code=403, detail=authz.http_detail(e))
         from agenticops.services.change_service import fix_path_refusal
         refusal = fix_path_refusal(plan, "deleted")
         if refusal:
@@ -2968,7 +2974,7 @@ async def api_execute_fix_plan(plan_id: int, actor: Actor = Depends(current_acto
         try:
             authz.check(actor, "plan.execute", subject=plan)
         except authz.AuthzDenied as e:
-            raise HTTPException(status_code=403, detail=str(e))
+            raise HTTPException(status_code=403, detail=authz.http_detail(e))
 
         # An approval's auto-run writes no row until it ends and leaves the plan 'approved': a second executor
         # must not run the same plan alongside it (2026-10-05 final review C1)
@@ -3160,7 +3166,7 @@ async def api_cancel_execution(execution_id: int, actor: Actor = Depends(current
             else:
                 authz.check(actor, "plan.execute", subject=plan)
         except authz.AuthzDenied as e:
-            raise HTTPException(status_code=403, detail=str(e))
+            raise HTTPException(status_code=403, detail=authz.http_detail(e))
     if _executor_service.cancel_execution(execution_id):
         AuditService.log(Actions.PLAN_EXECUTION_CANCELLED, EntityTypes.FIX_PLAN, str(plan_id),
                          actor=actor.key, user_id=actor.user_id,
@@ -3179,7 +3185,8 @@ def api_accept_execution(execution_id: int, data: ExecutionAcceptBody, actor: Ac
         accept_execution(execution_id, actor=actor, decision=data.decision, reason=data.reason,
                          confirmed_checks=data.confirmed_checks)
     except AcceptanceError as e:
-        raise HTTPException(status_code=e.status_code, detail=str(e))
+        from agenticops.auth import authz
+        raise HTTPException(status_code=e.status_code, detail=authz.http_detail(e))
     with get_db_session() as session:
         return FixExecutionResponse.model_validate(session.get(FixExecution, execution_id))
 

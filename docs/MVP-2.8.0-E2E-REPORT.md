@@ -254,3 +254,13 @@
 |---|---|---|---|
 | 页面标题 | 浏览器标签页写「AgenticOps · 页面不存在」：这一页不在侧栏里，顶栏把它当成 404 | 「AgenticOps · 我的 API 密钥」，面包屑「AgenticOps / 我的 API 密钥」（`navGroups.test` 先失败、再通过） | `11c964b` |
 | 有效期的文字 | 第三个选项写「365 天」 | 「1 年」，和 spec 一致（`apiKeys.test` 先失败、再通过） | `11c964b` |
+
+### 整个分支评审之后的修复（2026-11-10）
+
+| 问题 | 修复前 | 修复后 |
+|---|---|---|
+| 用 Key 发起的对话执行已批准的方案 | 评审的探针：`executor_agent` 一路通过所有检查，走到建模型那一步 | 返回 `REJECTED: … human_session_required …`，方案仍是已批准；同一个人用登录会话照常能走到执行（`test_an_agent_in_a_key_chat_cannot_run_a_plan` 先失败、再通过）。没有在 :8001 上用真实对话去试：守卫一旦失效，就会在真实账户上执行一个方案 |
+| 读写 Key 删除修复方案 | 待审批的方案被删掉，204，不留痕迹 | :8001 上 `DELETE /api/fix-plans/3` 返回 403 `{detail, code: "human_session_required"}`，方案 #3 仍是草稿；登录会话照常能删（`test_a_key_never_deletes_a_fix_plan` 先失败、再通过） |
+| `human_session_required` 没有码 | `{"detail": "user:… human_session_required: …"}` | :8001 上批准修复方案 #157、批准变更 C#2、验收执行 #39 都返回 `{detail: {detail, code: "human_session_required"}}`（`test_every_human_decision_refusal_carries_the_code` 覆盖六个接口，先失败、再通过） |
+| 一次性的 Key / 密码留在请求缓存里 | `reset()` 之后缓存里还是 `[{"key":"aiops_SECRET_full_key"}]`，5 分钟后才清 | `reset()` 之后就没有了（`oneTimeSecrets.test` 先失败、再通过） |
+| 理由对话框的输入框 | 390 px 下 14 px | 390 px 下 16 px，1440 px 下不变 |

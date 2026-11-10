@@ -82,7 +82,7 @@ export function ReasonDialog({
               </label>
               <textarea ref={ref} value={reason} onChange={(e) => setReason(e.target.value)} rows={3} maxLength={maxLength}
                 placeholder={t("plans.reasonPlaceholder")}
-                className="w-full border border-border bg-background text-foreground rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
+                className="w-full border border-border bg-background text-foreground rounded-lg px-3 py-2 text-[16px] sm:text-sm focus:outline-none focus:ring-2 focus:ring-primary/50" />
               {error && <p role="alert" className="text-sm text-red-500 mt-2">{error}</p>}
               {ack && (
                 <label className="mt-3 flex items-start gap-2 text-sm text-foreground">

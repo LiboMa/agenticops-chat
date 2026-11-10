@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import type { ApiKeyRow } from "@/api/types";
 
@@ -10,13 +10,18 @@ export function useMyApiKeys() {
   return useQuery({ queryKey: KEY, queryFn: () => apiFetch<ApiKeyRow[]>("/api-keys") });
 }
 
-export function useCreateApiKey() {
-  const qc = useQueryClient();
-  return useMutation({
+export function createApiKeyOptions(qc: QueryClient) {
+  return {
+    // a secret shown once: dropped from the mutation cache as soon as the page resets it (closing its dialog)
+    gcTime: 0,
     mutationFn: (body: { name: string; permissions: string[]; expires_days: number | null }) =>
       apiFetch<ApiKeyRow & { key: string }>("/api-keys", { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
-  });
+  };
+}
+
+export function useCreateApiKey() {
+  return useMutation(createApiKeyOptions(useQueryClient()));
 }
 
 export function useRevokeApiKey() {

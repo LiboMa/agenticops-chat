@@ -149,3 +149,94 @@ def test_an_agent_tool_in_a_key_chat_cannot_approve(env):
         reset_run_context(token)
     assert _plan_status(pid) == "pending_approval", out
     assert "human_session_required" in out, out
+
+
+# ── final review (2026-11-10): the paths the first pass missed ────────────────────────────────────────────
+
+
+def _approved_plan():
+    from agenticops.models import FixPlan, HealthIssue, RCAResult, get_session
+    s = get_session()
+    try:
+        i = HealthIssue(title="t", description="d", severity="low", source="test", status="fix_approved", resource_id="i-1")
+        s.add(i); s.flush()
+        rca = RCAResult(health_issue_id=i.id, root_cause="x", confidence=0.9, critic_verdict="supported")
+        s.add(rca); s.flush()
+        p = FixPlan(health_issue_id=i.id, rca_result_id=rca.id, plan_kind="fix", risk_level="L2", title="p", summary="s",
+                    status="approved", approved_by="user:boss", steps=[{"command": "aws ec2 describe-instances"}])
+        s.add(p); s.commit()
+        return p.id
+    finally:
+        s.close()
+
+
+def test_an_agent_in_a_key_chat_cannot_run_a_plan(env, monkeypatch):
+    """Main's executor_agent tool checked nothing: a read-write key's chat ran an approved plan (review probe A)."""
+    import importlib
+    from agenticops.run_context import RunContext, reset_run_context, set_run_context
+    ex = importlib.import_module("agenticops.agents.executor_agent")
+    monkeypatch.setattr(env.settings, "executor_enabled", True)
+
+    def reached(*a, **k):
+        raise RuntimeError("REACHED_MODEL_BUILD")
+    monkeypatch.setattr(ex, "BedrockModel", reached)
+    ops, _ = _user("ops", "writer")
+    pid = _approved_plan()
+
+    def run(via_key):
+        token = set_run_context(RunContext(actor="user:ops", actor_user_id=ops.id, actor_permissions=("read", "write"),
+                                           via_api_key=via_key, agent_name="main"))
+        try:
+            return ex.executor_agent(pid)
+        finally:
+            reset_run_context(token)
+    out = run(True)
+    assert "human_session_required" in out and "REACHED_MODEL_BUILD" not in out, out
+    assert _plan_status(pid) == "approved"
+    # the same person signed in still reaches the run (the guard is the key's, nothing else changed)
+    assert "REACHED_MODEL_BUILD" in run(False)
+
+
+def test_a_key_never_deletes_a_fix_plan(env):
+    """DELETE /api/fix-plans/{id} withdrew a pending plan with no check (review probe B) — a reject by another name."""
+    ops, session = _user("ops", "writer")
+    key = _key(ops, ["read", "write"])
+    _, pid = _issue_and_plan()
+    r = env.client.delete(f"/api/fix-plans/{pid}", headers=H(key))
+    assert r.status_code == 403 and r.json()["detail"]["code"] == "human_session_required", r.text
+    assert _plan_status(pid) == "pending_approval"
+    assert env.client.delete(f"/api/fix-plans/{pid}", headers=H(session)).status_code == 204
+
+
+def test_every_human_decision_refusal_carries_the_code(env, monkeypatch):
+    """The spec's 403 code `human_session_required`, as {detail, code} like read_only / session_required — it was
+    only inside a sentence (review probe C)."""
+    from agenticops.models import ChangeRequest, FixExecution, FixPlan, get_session
+    monkeypatch.setattr(env.settings, "executor_enabled", True)  # the execute route checks the switch and the state first
+    ops, _ = _user("ops", "writer")
+    key = _key(ops, ["read", "write"])
+    _, pid = _issue_and_plan()
+    approved = _approved_plan()
+    s = get_session()
+    try:
+        cr = ChangeRequest(title="tag web", description="d", requested_by="user:someone", status="planned")
+        s.add(cr); s.flush()
+        cp = FixPlan(plan_kind="change", change_request_id=cr.id, risk_level="L1", title="p", summary="s",
+                     status="pending_approval", steps=[{"command": "aws ec2 describe-instances"}])
+        run = FixExecution(fix_plan_id=pid, status="succeeded", verification_status="pending_acceptance")
+        s.add_all([cp, run]); s.commit()
+        cr_id, run_id = cr.id, run.id
+    finally:
+        s.close()
+    calls = [("PUT", f"/api/fix-plans/{pid}/approve", {"content_hash": "x"}),
+             ("POST", f"/api/fix-plans/{pid}/reject", {"reason": "no"}),
+             ("POST", f"/api/fix-plans/{approved}/execute", {}),
+             ("POST", f"/api/changes/{cr_id}/approve", {"reason": "ok", "content_hash": "x"}),
+             ("POST", f"/api/changes/{cr_id}/reject", {"reason": "no"}),
+             ("POST", f"/api/fix-executions/{run_id}/accept", {"decision": "accepted", "reason": "ok"})]
+    for method, path, body in calls:
+        r = env.client.request(method, path, headers=H(key), json=body)
+        detail = r.json().get("detail")
+        assert r.status_code == 403 and isinstance(detail, dict) and detail.get("code") == "human_session_required", \
+            (method, path, r.status_code, r.text)
+        assert "human_session_required" in detail["detail"]

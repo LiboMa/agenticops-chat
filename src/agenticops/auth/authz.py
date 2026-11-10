@@ -303,6 +303,22 @@ def _audit_denial(actor: Actor, permission: str, reason: str, rule: Optional[str
                        actor.key, permission, reason, rule, exc_info=True)
 
 
+HUMAN_SESSION_REQUIRED = "human_session_required"
+
+
+def http_detail(e: BaseException) -> Any:
+    """An HTTP 403's `detail` for a refusal: the key rule's (`no-api-key-human-decisions`, MVP-2.8.0) as
+    {detail, code: human_session_required} — the shape `read_only` / `session_required` use and the Web client reads
+    codes from — found on the error or its cause (a service wraps AuthzDenied `from e`); any other refusal stays the
+    sentence it was."""
+    cur: Optional[BaseException] = e
+    while cur is not None:
+        if isinstance(cur, AuthzDenied) and str(cur.reason).startswith(HUMAN_SESSION_REQUIRED):
+            return {"detail": str(e), "code": HUMAN_SESSION_REQUIRED}
+        cur = cur.__cause__
+    return str(e)
+
+
 def check(actor: Actor, permission: str, subject: Any = None, *, details: Optional[dict] = None) -> None:
     """Raise AuthzDenied when denied under enforce (or an always-enforced rule); shadow otherwise.
     `details` is extra context recorded on the denial audit row (e.g. the claimed name behind a check)."""

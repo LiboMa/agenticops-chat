@@ -48,7 +48,8 @@ def _call(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
     except cs.ChangeError as e:
-        raise HTTPException(status_code=e.status_code, detail=str(e))
+        from agenticops.auth import authz
+        raise HTTPException(status_code=e.status_code, detail=authz.http_detail(e))
 
 
 def _last_policy_decision(cr_id: int) -> Optional[dict]:
