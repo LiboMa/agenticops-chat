@@ -1429,3 +1429,13 @@ export interface ApiKeyRow {
   expires_at: string | null;
   created_at: string | null;
 }
+
+/** GET /api/ui/nav-counts (MVP-2.8.0 direction A): the sidebar's numbers; a count that failed is null, never 0. */
+export interface NavCounts {
+  read_only: boolean;
+  attention: { total: number; critical: number } | null;
+  security_high: number | null;
+  schedules_failed: number | null;
+  skill_drafts: number | null;
+  generated_at: string;
+}

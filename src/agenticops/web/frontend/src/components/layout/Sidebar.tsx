@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import * as Dialog from "@radix-ui/react-dialog";
 import { usePersistedState } from "@/hooks/usePersistedState";
-import { useStats } from "@/hooks/useStats";
-import { useBootstrap, useCanManageUsers, useCanViewSettings } from "@/hooks/useBootstrap";
+import { useBootstrap, useCanManageUsers, useCanViewSettings, useReadOnly } from "@/hooks/useBootstrap";
+import { useNavCounts } from "@/hooks/useNavCounts";
+import { foldedBadge, navBadge, type BadgeTone, type NavBadge } from "@/lib/navCounts";
+import { countLabel } from "@/lib/attention";
 import { navItemVisible } from "@/lib/permissions";
 import { useLocale } from "@/i18n/LocaleContext";
 import {
@@ -28,15 +30,30 @@ function initialOrder(): NavOrder {
   }
 }
 
+const BADGE: Record<BadgeTone, string> = {
+  solid: "rounded-full bg-primary px-1.5 py-px text-[11px] font-semibold text-primary-foreground",
+  solidDanger: "rounded-full bg-status-danger px-1.5 py-px text-[11px] font-semibold text-white",
+  muted: "text-[12px] font-semibold text-muted-foreground",
+  danger: "text-[12px] font-semibold text-status-danger",
+};
+
+const fill = (text: string, vars?: Record<string, string>) =>
+  Object.entries(vars ?? {}).reduce((s, [k, v]) => s.replace(`{${k}}`, v), text);
+
 /** The blue/white sidebar: daily work, the collapsible tools (the group holding the current page opens by itself,
- *  not saved; a group the user opens or closes is saved to their preferences), and administration at the foot. */
+ *  not saved; a group the user opens or closes is saved to their preferences), and administration at the foot.
+ *  MVP-2.8.0 direction A (owner 2026-11-10): each entry has at most one quiet number (lib/navCounts) and a hint line
+ *  under its name — on hover, keyboard focus and the current page — that says what the number is; the current page
+ *  has a blue bar on its left; a folded group keeps its red number on the heading. */
 export function Sidebar() {
   const { t } = useLocale();
   const { pathname } = useLocation();
   const boot = useBootstrap();
   const can = { settings: useCanViewSettings(), users: useCanManageUsers() };
-  const stats = useStats();
-  const hasOpenIssues = (stats.data?.open_anomalies ?? 0) > 0;
+  const counts = useNavCounts();
+  const readOnly = useReadOnly();
+  const query = { status: counts.status, data: counts.data };
+  const badge = (id: string): NavBadge => navBadge(id, query, readOnly);
 
   const [storedOrder, setStoredOrder] = usePersistedState<NavOrder>(ORDER_V2, initialOrder());
   const order = useMemo(() => normalizeOrder(storedOrder), [storedOrder]);
@@ -85,8 +102,13 @@ export function Sidebar() {
               : collapsible ? "border-t border-border py-3" : "mb-5"}>
               {collapsible ? (
                 <button type="button" onClick={() => toggle(g.id as CollapsibleGroup)} aria-expanded={open}
-                        className="flex w-full items-center justify-between rounded px-[11px] py-1 text-[11px] text-muted-foreground hover:text-foreground">
-                  {t(g.labelKey)}
+                        className="flex w-full items-center justify-between gap-2 rounded px-[11px] py-1 text-[11px] text-muted-foreground hover:text-foreground">
+                  <span className="truncate">{t(g.labelKey)}</span>
+                  {!open && (() => {
+                    // folded: its red numbers stay on the heading — a failure is never hidden by folding
+                    const red = foldedBadge(items.map((i) => i.id), query, readOnly);
+                    return red !== null && <span className="ml-auto text-[12px] font-semibold tabular-nums text-status-danger">{countLabel(red)}</span>;
+                  })()}
                   <span aria-hidden="true" className={`text-base leading-none transition-transform ${open ? "rotate-90" : ""}`}>›</span>
                 </button>
               ) : (
@@ -94,7 +116,11 @@ export function Sidebar() {
               )}
               {open && (
                 <nav aria-label={t(g.labelKey)} className={collapsible ? "pt-1" : ""}>
-                  {items.map((item) => (
+                  {items.map((item) => {
+                    const here = current?.entry.id === item.id;
+                    const b = badge(item.id);
+                    const hintId = `nav-hint-${item.id}`;
+                    return (
                     <div
                       key={item.id}
                       draggable
@@ -111,22 +137,31 @@ export function Sidebar() {
                       {/* a plain Link: the active entry is lib/navGroups' (detail pages, Signals), and so is aria-current */}
                       <Link
                         to={item.to}
-                        className={`relative my-0.5 flex min-h-[39px] items-center gap-2.5 rounded-[5px] px-[11px] py-2 text-[13px] transition-colors max-[1100px]:gap-2 max-[1100px]:px-2 max-[1100px]:text-xs ${
-                          current?.entry.id === item.id ? "bg-selected font-semibold text-primary" : "text-foreground/75 hover:bg-accent hover:text-foreground"
+                        aria-describedby={hintId}
+                        className={`group relative my-0.5 flex min-h-[39px] items-center gap-2.5 rounded-[5px] px-[11px] py-2 text-[13px] transition-colors max-[1100px]:gap-2 max-[1100px]:px-2 max-[1100px]:text-xs ${
+                          here ? "bg-selected font-semibold text-primary before:absolute before:bottom-2 before:left-0 before:top-2 before:w-[3px] before:rounded-r before:bg-primary"
+                            : "text-foreground/75 hover:bg-accent hover:text-foreground"
                         }`}
-                        aria-current={current?.entry.id === item.id ? "page" : undefined}
+                        aria-current={here ? "page" : undefined}
                       >
-                        <SvgIcon d={ICON_PATHS[item.icon]} className="h-[17px] w-[17px]" />
-                        <span className="truncate">{t(item.labelKey)}</span>
-                        {item.badge && hasOpenIssues && (
-                          <>
-                            <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-red-500" aria-hidden="true" />
-                            <span className="sr-only">{t("nav.openIssues")}</span>
-                          </>
+                        <SvgIcon d={ICON_PATHS[item.icon]} className="h-[17px] w-[17px] shrink-0" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate">{t(item.labelKey)}</span>
+                          {/* the hint line: what the number means (or what the page is); read as the link's description */}
+                          <span className={`grid transition-[grid-template-rows] duration-150 motion-reduce:transition-none ${
+                            here ? "grid-rows-[1fr]" : "grid-rows-[0fr] group-hover:grid-rows-[1fr] group-focus-visible:grid-rows-[1fr]"}`}>
+                            <span id={hintId} className="block overflow-hidden truncate text-[11px] font-normal text-muted-foreground">
+                              {fill(t(b.hint.key), b.hint.vars)}
+                            </span>
+                          </span>
+                        </span>
+                        {b.count !== null && b.tone && (
+                          <span aria-hidden="true" className={`ml-auto shrink-0 tabular-nums ${BADGE[b.tone]}`}>{countLabel(b.count)}</span>
                         )}
                       </Link>
                     </div>
-                  ))}
+                    );
+                  })}
                 </nav>
               )}
             </section>

@@ -10,7 +10,8 @@ import { HomePrefsDialog, MobileNav } from "./Sidebar";
 import { AccountScopeSelect, useAccountScope } from "./AccountScope";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useBootstrap, useReadOnly } from "@/hooks/useBootstrap";
-import { useAttention } from "@/hooks/useAttention";
+import { useNavCounts } from "@/hooks/useNavCounts";
+import { topBarCount } from "@/lib/navCounts";
 import { countLabel } from "@/lib/attention";
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -29,8 +30,9 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
   const crumb = breadcrumbFor(pathname);
   const boot = useBootstrap();
   const readOnly = useReadOnly();
-  const scope = useAccountScope();
-  const attention = useAttention(scope.accountId);
+  // the same number as the sidebar's «问题» (MVP-2.8.0: one request, nav-counts); nothing when it could not be counted
+  const nav = useNavCounts();
+  const waiting = topBarCount({ status: nav.status, data: nav.data });
   const resolving = pathname === "/app" || pathname === "/app/";  // the home resolver is deciding: say nothing yet
   const section = resolving ? "" : crumb.sectionKey ? t(crumb.sectionKey) : t("notFound.title");
 
@@ -59,11 +61,11 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
       <div className="flex shrink-0 items-center gap-3 max-[1100px]:gap-2">
         {boot.data?.features.attention && (
           <Link to="/app/inbox" aria-current={pathname === "/app/inbox" ? "page" : undefined}
-                aria-label={attention.data ? `${t("attention.title")} ${attention.data.total}` : t("attention.title")}
+                aria-label={waiting !== null ? `${t("attention.title")} ${waiting}` : t("attention.title")}
                 className="flex items-center gap-2 rounded-[5px] border border-primary/20 bg-card px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-selected max-[600px]:px-2">
             <span className="max-[1100px]:hidden">{t("attention.title")}</span>
             <b className="min-w-[20px] rounded-[4px] bg-selected px-1.5 text-center text-[11px] font-semibold">
-              {attention.isLoading ? "…" : countLabel(attention.data?.total ?? 0)}
+              {nav.isLoading ? "…" : waiting !== null ? countLabel(waiting) : ""}
             </b>
           </Link>
         )}
