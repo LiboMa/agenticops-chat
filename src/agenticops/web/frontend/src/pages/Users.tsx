@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocale } from "@/i18n/LocaleContext";
 import { ApiError } from "@/api/client";
 import type { UserRow } from "@/api/types";
@@ -13,6 +13,7 @@ import { IconButton } from "@/components/ui/IconButton";
 import { KeyPlusIcon } from "@/components/apikeys/KeyPlusIcon";
 import { Ban, RectangleEllipsis, Trash2, UserCheck, UserCog } from "lucide-react";
 import { formatShortDate } from "@/lib/formatDate";
+import { closeFocusTarget } from "@/lib/focusReturn";
 import {
   fillRefusal, filterUsers, keysLabel, lastActiveAdminId, roleKey, rowActions, type RoleFilter, type RowAction, type StatusFilter,
 } from "@/lib/users";
@@ -39,6 +40,12 @@ export default function Users() {
   const [keysOf, setKeysOf] = useState<UserRow | null>(null);
   const [keyFlow, setKeyFlow] = useState<UserRow | null>(null);
   const [deleting, setDeleting] = useState<UserRow | null>(null);
+  // a delete closes in two renders: first the dialog learns its opener's row is gone (focus goes to «新建用户»), then
+  // it closes — Radix hands focus back while the row is still on the page (T11 E2E: focus fell to <body>)
+  const [deleted, setDeleted] = useState(false);
+  useEffect(() => {
+    if (deleted) { setDeleting(null); setDeleted(false); }
+  }, [deleted]);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   // a deleted user's row is gone: focus comes back to «＋ 新建用户»
   const newUserButton = useRef<HTMLButtonElement | null>(null);
@@ -224,10 +231,11 @@ export default function Users() {
       {keysOf && <UserKeysDialog user={keysOf} onClose={() => setKeysOf(null)} />}
       {keyFlow && <IssueKeyFlow user={keyFlow} returnTo={flowOpener.current} onClose={() => setKeyFlow(null)} />}
       {deleting && (
-        <DeleteUserDialog user={deleting} busy={del.isPending} error={deleteError}
+        <DeleteUserDialog user={deleting} busy={del.isPending || deleted} error={deleteError}
+                          returnTo={closeFocusTarget(flowOpener.current, newUserButton.current, deleted)}
                           onClose={() => { setDeleting(null); setDeleteError(null); }}
                           onConfirm={() => del.mutate(deleting.id, {
-                            onSuccess: () => { setDeleting(null); requestAnimationFrame(() => newUserButton.current?.focus()); },
+                            onSuccess: () => setDeleted(true),
                             onError: (e) => setDeleteError(say(e)),
                           })} />
       )}

@@ -103,13 +103,15 @@ export function PasswordOnceDialog({ email, password, kind, onClose, returnTo }:
 /** Delete a user (MVP-2.8.0, owner 2026-11-10): says what goes at once, what stays (and that who may see it does not
  *  change), that the sign-in name is never used again, and that it cannot be undone. A refusal (their change requests
  *  still waiting on them, the last admin) shows inside the dialog. */
-export function DeleteUserDialog({ user, busy, error, onConfirm, onClose }: {
+export function DeleteUserDialog({ user, busy, error, returnTo, onConfirm, onClose }: {
   user: UserRow; busy: boolean; error: string | null; onConfirm: () => void; onClose: () => void;
+  /** where focus goes on close (the row's button, or «新建用户» once the row is gone) */
+  returnTo?: HTMLElement | null;
 }) {
   const { t } = useLocale();
   const who = user.name || user.email;
   return (
-    <Frame title={t("users.delete.title").replace("{who}", who)} onClose={onClose}>
+    <Frame title={t("users.delete.title").replace("{who}", who)} onClose={onClose} returnTo={returnTo}>
       <ul className="mt-3 space-y-1.5 text-sm text-foreground">
         <li>{t("users.delete.goes")}</li>
         <li>{t("users.delete.stays")}</li>

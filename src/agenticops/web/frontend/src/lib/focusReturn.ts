@@ -9,3 +9,10 @@ export function returnFocusTo(
   event.preventDefault();
   opener.focus();
 }
+
+/** Where focus goes when a dialog closes: its opener, unless the action removed the opener's row (a deleted user) —
+ *  then `fallback`, the page's own button. Decided before the dialog closes: Radix hands focus back while the row is
+ *  still on the page, and the refetch that removes it would drop focus on <body> (MVP-2.8.0 T11 E2E). */
+export function closeFocusTarget<T>(opener: T | null, fallback: T | null, removed: boolean): T | null {
+  return removed && fallback ? fallback : opener;
+}
