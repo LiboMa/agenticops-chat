@@ -37,12 +37,13 @@ function renderBrief(swap){
   }
   const b = NF.briefs[it.kind], keep = swap ? 0 : el.scrollTop, acct = NF.seed.accounts.find(a => a.id === it.account);
   el.innerHTML = `<div class="meta"><span class="ref">${it.ref}</span><span class="sev ${it.tone}">${NF.sevLabel(it)}</span>
-      <span>${it.snoozed ? t("snoozed") : t("waited", {t: NF.fmtWait(it.waitMin)})}</span><span>${acct ? esc(tx(acct.name)) : ""}　${it.region}</span></div>
+      <span>${it.snoozed ? t("snoozed") : t("waited", {t: NF.fmtWait(it.waitMin)})}</span><span>${acct ? esc(tx(acct.name)) : ""}　${it.region}</span>
+      <span class="pos">${t("pos", {i: S.curIdx + 1, n: w.length})}</span><button class="story-link" data-do="story" data-id="${it.id}">${t("act.story")}<kbd>↵</kbd></button></div>
     <h1>${esc(tx(it.title))}</h1>
+    ${it.returned ? `<p class="back">${t(it.returned)}</p>` : ""}
     <p class="ask"><b>${t("ask.lead")}</b>${esc(b.ask(it))}</p>
     ${b.body(it)}
-    <div class="actions" id="actions">${NF.store.canDecide() ? b.buttons(it) : `<span class="readonly-note">${t("readonly")}</span>`}
-      <span class="spacer"></span><span class="pos">${t("pos", {i: S.curIdx + 1, n: w.length})}</span></div>`;
+    <div class="actions" id="actions">${NF.store.canDecide() ? b.buttons(it) : `<span class="readonly-note">${t("readonly")}</span>`}</div>`;
   el.scrollTop = keep;
   if (swap){ el.classList.remove("swap"); void el.offsetWidth; el.classList.add("swap"); }
 }
@@ -51,6 +52,7 @@ function renderFeed(){
   $("#feedTitle").textContent = t("feed.title");
   const mine = NF.store.items.filter(i => i.run || i.agent).map(i => {
     if (i.agent) return `<div class="f run"><div class="h"><span><span class="dot"></span>${t("feed.agent")}</span><span class="num">${i.ref}</span></div><div>${t(i.agent.taskKey)}</div></div>`;
+    if (!i.run) return "";
     const r = i.run, step = i.plan.steps[Math.min(r.step, r.total - 1)];
     return `<div class="f ${r.done ? "" : "run"}"><div class="h"><span><span class="dot"></span>${t(r.done ? "feed.done" : r.pending ? "feed.pending" : "feed.running")}</span><span class="num">${i.ref}</span></div>
       <div>${r.done ? NF.prov(true) + t("feed.checked", {n: i.checks.length}) : r.pending ? t("feed.canUndo") : esc(tx(step.say))}</div>
@@ -97,12 +99,21 @@ function move(d){
   NF.closePeek(); renderQueue(); renderBrief(true); NF.sky && NF.sky.aim(); NF.syncHash();
   const sel = $('.q[aria-selected="true"]'); if (sel) sel.scrollIntoView({block: "nearest", inline: "nearest"});
 }
-function openReject(){
-  const it = NF.current(); if (!it || !NF.briefs[it.kind].reject || !NF.store.canDecide()) return;
+/* One reason box, two ways to say no. mode "reject" = the brief's own «no» (ask for changes, fail an acceptance, withdraw…);
+   mode "close" = close the item for good (dismiss an issue, reject a change). Enter sends the mode the box was opened in. */
+function openReject(mode = "reject"){
+  const it = NF.current(), b = it && NF.briefs[it.kind]; if (!it || !NF.store.canDecide()) return;
+  const close = mode === "close";
+  if (close ? !NF.canClose(it) : !b.reject) return;
+  const change = it.entity === "change";
+  const label = close ? (change ? "act.rejectChange" : "act.close")
+    : b.rejectLabel || (change && it.kind === "accept" ? "act.failChange" : it.kind === "accept" ? "act.rejectAccept" : "act.reject");
+  const ph = close ? (change ? "rejectChange.placeholder" : "close.placeholder") : b.rejectPlaceholder || (it.kind === "accept" ? "fail.placeholder" : "reject.placeholder");
   S.rejecting = true;
-  $("#actions").innerHTML = `<form class="reason" data-form="reject"><input class="field" id="rejInput" placeholder="${t("reject.placeholder")}" aria-label="${t("reject.label")}" maxlength="200">
-    <button class="btn primary" type="submit"><span class="t">${t(it.kind === "accept" ? "act.rejectAccept" : "act.reject")}</span></button>
-    <button class="btn" type="button" data-do="rejectCancel"><span class="t">${t("act.cancel")}</span><kbd>Esc</kbd></button></form>`;
+  $("#actions").innerHTML = `<form class="reason" data-form="reject" data-mode="${mode}"><input class="field" id="rejInput" placeholder="${t(ph)}" aria-label="${t(close ? "close.label" : "reject.label")}" maxlength="200">
+    <button class="btn primary" type="submit"><span class="t">${t(label)}</span><kbd>↵</kbd></button>
+    <button class="btn" type="button" data-do="rejectCancel"><span class="t">${t("act.cancel")}</span><kbd>Esc</kbd></button>
+    ${close || b.rejectNote ? `<p class="note">${t(close ? (change ? "rejectChange.note" : "close.note") : b.rejectNote)}</p>` : ""}</form>`;
   $("#rejInput").focus();
 }
 NF.closeReject = () => renderBrief(false);
@@ -116,12 +127,15 @@ Object.assign(NF.on, {
   tick: el => { const it = NF.current(); if (it) NF.actions.tick(NF.store, it.id, +el.dataset.k); },
   tickNext: () => { const it = NF.current(); if (it) NF.actions.tick(NF.store, it.id); },
   verdict: el => { const it = NF.current(); if (it) NF.actions.verdict(NF.store, it.id, el.dataset.v); },
-  reject: () => openReject(), rejectCancel: () => NF.closeReject(),
+  reject: () => openReject(), close: () => openReject("close"), rejectCancel: () => NF.closeReject(),
   ask: () => ask(), snooze: () => snooze(), primary: () => primary(),
+  alt: el => { const it = NF.current(); if (it && NF.actions[el.dataset.a]) NF.actions[el.dataset.a](NF.store, it.id); },
+  story: el => NF.openStory(el.dataset.id),
 });
 NF.onSubmit.reject = form => {
   const it = NF.current(), input = form.querySelector("input"); if (!it) return;
-  if (!NF.briefs[it.kind].reject(it, input.value)){ input.value = ""; input.placeholder = t("reject.required"); input.focus(); }
+  const sent = form.dataset.mode === "close" ? NF.actions.close(NF.store, it.id, input.value) : NF.briefs[it.kind].reject(it, input.value);
+  if (!sent){ input.value = ""; input.placeholder = t("reject.required"); input.focus(); }
 };
 document.addEventListener("pointerdown", e => { const b = e.target.closest && e.target.closest("#primary"); if (b && b.dataset.hold === "1") holdStart(); });
 ["pointerup", "pointercancel"].forEach(ev => document.addEventListener(ev, () => holdEnd(), true));
@@ -145,9 +159,11 @@ NF.screens.decide = {
     if (k === "k" || k === "arrowup"){ e.preventDefault(); return move(-1); }
     if (k === "a"){ if (!e.repeat) holdStart(); return; }
     if (k === "r"){ e.preventDefault(); return openReject(); }
+    if (k === "d"){ e.preventDefault(); return openReject("close"); }
     if (k === "e"){ e.preventDefault(); return ask(); }
     if (k === "s") return snooze();
     if (k === " "){ e.preventDefault(); const l = evList(); if (l.length) NF.openPeek(l[0]); return; }
+    if (k === "enter"){ e.preventDefault(); return NF.openStory(it.id); }
     const own = NF.briefs[it.kind].keys; if (own && own[k]) own[k](it);
   },
   keyup(e, k){ if (k === "a") holdEnd(); },

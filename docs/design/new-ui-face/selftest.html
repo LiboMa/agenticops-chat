@@ -21,9 +21,13 @@
 <div data-theme="night" id="probe-night" hidden></div><div data-theme="day" id="probe-day" hidden></div>
 
 <script src="data.js"></script>
+<script src="data-situations.js"></script>
 <script src="i18n.js"></script>
 <script src="proto.js"></script>
 <script src="screens/briefs-core.js"></script>
+<script src="screens/briefs-recovery.js"></script>
+<script src="screens/briefs-change.js"></script>
+<script src="screens/story.js"></script>
 <script>
 (function(){
 "use strict";
@@ -41,10 +45,11 @@ function fakeClock(){
 const fresh = () => { const clock = fakeClock(), store = NF.createStore(NF.seed, clock); store.notices = []; store.notice = (k, v) => store.notices.push(k); return {clock, store}; };
 const refs = list => list.map(i => i.ref);
 
-test("队列：先按严重度，再按等待时间", () => { const {store} = fresh(); eq(refs(store.waiting()), ["I#12", "I#8", "I#21", "I#934", "C#3"]); });
+test("队列：先按严重度，再按等待时间", () => { const {store} = fresh();
+  eq(refs(store.waiting()), ["I#12", "I#52", "I#8", "I#31", "I#47", "I#21", "I#44", "I#40", "C#6", "I#934", "C#8", "I#19", "C#3", "I#58", "C#7", "C#5"]); });
 test("每一类的计数，以及按类筛选", () => { const {store} = fresh();
-  eq(store.counts(), {all: 5, approval: 3, acceptance: 1, confirm: 1, failed: 0});
-  eq(refs(store.waiting("approval")), ["I#12", "I#8", "C#3"]); eq(refs(store.waiting("acceptance")), ["I#934"]); });
+  eq(store.counts(), {all: 16, approval: 3, acceptance: 4, confirm: 6, failed: 3});
+  eq(refs(store.waiting("approval")), ["I#12", "I#8", "C#3"]); eq(refs(store.waiting("failed")), ["I#52", "I#31", "C#7"]); });
 test("批准后 5 秒内可以撤回，撤回后什么都没有发生", () => { const {store, clock} = fresh();
   yes(A.approve(store, "I12")); eq(store.get("I12").status, "pending"); yes(store.pending());
   clock.advance(NF.UNDO_MS - 1); eq(store.get("I12").status, "pending", "just before the window ends:");
@@ -54,6 +59,10 @@ test("撤回期过后才开始执行，每一步之后走完，检查通过后�
   A.approve(store, "I12"); clock.advance(NF.UNDO_MS); eq(store.get("I12").status, "running"); eq(store.undo(), false, "undo after the window:");
   clock.advance(NF.STEP_MS * 3); eq(store.get("I12").status, "fixed"); yes(store.get("I12").run.done);
   yes(store.events.some(e => e.key === "event.fixed"), "an event is logged"); eq(store.notices, ["toast.done"]); });
+test("执行完有检查没有结果：不算通过，回到队列等验收", () => { const {store, clock} = fresh();
+  A.approve(store, "I8"); clock.advance(NF.UNDO_MS + NF.STEP_MS * 2); const it = store.get("I8");
+  eq([it.status, it.kind, it.situation, it.reason], ["waiting", "accept", "awaitingAcceptance", "verification_required"]); eq(it.run, undefined);
+  eq(A.accept(store, "I8"), false, "no box ticked yet:"); A.tick(store, "I8"); A.tick(store, "I8"); yes(A.accept(store, "I8")); });
 test("新的决定让上一个立即生效；只有最后一个决定能撤回", () => { const {store, clock} = fresh();
   A.approve(store, "I12"); clock.advance(1000); A.approve(store, "C3");
   eq(store.get("I12").status, "running", "the first approval is settled at once:"); eq(store.get("C3").status, "pending");
@@ -68,30 +77,131 @@ test("验收的勾可以取消；全勾之后再没有可勾的", () => { const 
   A.tick(store, "I934"); A.tick(store, "I934"); A.tick(store, "I934"); eq(A.tick(store, "I934"), false); });
 test("只读身份：任何决定都做不了", () => { const {store} = fresh(); store.role = "viewer";
   eq([A.approve(store, "I12"), A.tick(store, "I934"), A.verdict(store, "I21", "yes"), A.snooze(store, "I8"), A.reject(store, "I8", "x")], [false, false, false, false, false]);
-  eq(refs(store.waiting()).length, 5); });
+  eq([A.newPlan(store, "I31"), A.rediagnose(store, "I44"), A.retry(store, "I52"), A.withdraw(store, "I52", "x"), A.resolve(store, "I58"), A.recheck(store, "I19"),
+      A.startReview(store, "C5"), A.cancelChange(store, "C5", "x"), A.answer(store, "C6", 0, "x"), A.clarify(store, "C6")], Array(10).fill(false), "the D2 actions:");
+  eq(refs(store.waiting()).length, 16); });
 test("退回必须写理由；退回后交给 agent 重做", () => { const {store, clock} = fresh();
-  eq(A.reject(store, "I8", "   "), false); yes(A.reject(store, "I8", "先确认没有人依赖 0 天保留")); eq(store.get("I8").status, "rejected");
+  eq(A.reject(store, "I8", "   "), false); yes(A.reject(store, "I8", "先确认没有人依赖 0 天保留")); eq(store.get("I8").status, "sent");
   clock.advance(NF.UNDO_MS); eq(store.get("I8").status, "agent"); eq(store.get("I8").agent.taskKey, "agent.replanning");
-  clock.advance(NF.AGENT_MS); eq(store.get("I8").status, "handed"); });
-test("验收不通过也要写理由", () => { const {store} = fresh(); eq(A.rejectAccept(store, "I934", ""), false); yes(A.rejectAccept(store, "I934", "延迟 94 秒不能接受")); eq(store.get("I934").status, "rejected"); });
-test("诊断的判断只有四种", () => { const {store} = fresh(); eq(A.verdict(store, "I21", "maybe"), false); yes(A.verdict(store, "I21", "partial")); eq(store.get("I21").verdict, "partial"); });
-test("动作只对它那一种简报有效", () => { const {store} = fresh(); eq([A.approve(store, "I934"), A.accept(store, "I12"), A.verdict(store, "I12", "yes")], [false, false, false]); });
-test("稍后：排到同一严重度的最后", () => { const {store} = fresh(); yes(A.snooze(store, "I21")); eq(refs(store.waiting()), ["I#12", "I#8", "I#934", "I#21", "C#3"]); });
+  clock.advance(NF.AGENT_MS); eq(store.get("I8").status, "handed", "no next version in the sample data:"); });
+test("要求修改：新的一版带着和上一版的差别、连同你的理由回来", () => { const {store, clock} = fresh();
+  A.reject(store, "I12", "先查有没有人在用"); clock.advance(NF.UNDO_MS + NF.AGENT_MS); const it = store.get("I12");
+  eq([it.status, it.kind, it.plan.version, it.diffFrom, it.myReason, it.returned], ["waiting", "approve", 3, 2, "先查有没有人在用", "returned.replanned"]);
+  eq(it.diff.map(d => d.op), ["add", "same", "same", "same"]); eq(it.waitMin, 0); yes(NF.briefs.approve.body(it).includes("先查有没有人在用"), "the brief quotes the reason");
+  yes(store.notices.includes("toast.back")); yes(A.approve(store, "I12"), "and it can be approved"); });
+test("撤回一次「交给 agent」：什么都不会发生", () => { const {store, clock} = fresh();
+  A.reject(store, "I12", "x"); yes(store.undo()); clock.advance(60000); const it = store.get("I12");
+  eq([it.status, it.plan.version, it.myReason, it.agent], ["waiting", 2, undefined, undefined]); yes(it.next, "the next version is still unused"); });
+test("验收不通过也要写理由；问题回到诊断，变更直接判定失败", () => { const {store} = fresh();
+  eq(A.rejectAccept(store, "I934", ""), false); yes(A.rejectAccept(store, "I934", "延迟 94 秒不能接受")); eq(store.get("I934").status, "sent");
+  yes(A.rejectAccept(store, "C8", "误拦了正常请求")); eq([store.get("C8").status, NF.stateOf(store.get("C8"))], ["done", "failed"]); });
+test("诊断的判断只有四种；判断「对」之后带着方案回来，其他判断回到诊断", () => { const {store, clock} = fresh();
+  eq(A.verdict(store, "I21", "maybe"), false); yes(A.verdict(store, "I21", "yes")); eq(store.get("I21").myVerdict, "yes");
+  clock.advance(NF.UNDO_MS + NF.AGENT_MS); eq([store.get("I21").status, store.get("I21").kind, store.get("I21").plan.version], ["waiting", "approve", 1]);
+  const b = fresh(); A.verdict(b.store, "I21", "no"); b.clock.advance(NF.UNDO_MS + NF.AGENT_MS); eq(b.store.get("I21").status, "handed"); yes(b.store.get("I21").next, "the plan is not used up"); });
+test("执行失败：重新出方案会带着差别回来；重新诊断则不回来", () => { const {store, clock} = fresh();
+  yes(A.newPlan(store, "I31")); clock.advance(NF.UNDO_MS + NF.AGENT_MS); const it = store.get("I31");
+  eq([it.status, it.kind, it.plan.version, it.diff.length], ["waiting", "approve", 2, 4]);
+  const b = fresh(); yes(A.rediagnose(b.store, "I31")); b.clock.advance(NF.UNDO_MS + NF.AGENT_MS); eq(b.store.get("I31").status, "handed"); });
+test("被退回的方案、已确认的诊断、变更草稿：交给 agent 后都回到「等你批准」", () => { const {store, clock} = fresh();
+  yes(A.newPlan(store, "I40")); yes(A.newPlan(store, "I47")); yes(A.startReview(store, "C5")); clock.advance(NF.UNDO_MS + NF.AGENT_MS);
+  eq(["I40", "I47", "C5"].map(id => store.get(id).status + ":" + store.get(id).reason), Array(3).fill("waiting:approval_required"));
+  eq(store.get("I40").plan.window, "18:00 UTC"); yes(NF.briefs.approve.ask(store.get("I40")).includes("18:00 UTC"), "the ask names the window"); });
+test("没有开始的执行：重试要走撤回期，然后执行；撤回批准要写理由", () => { const {store, clock} = fresh();
+  yes(A.retry(store, "I52")); eq(store.get("I52").status, "pending"); clock.advance(NF.UNDO_MS + NF.STEP_MS * 2); eq(store.get("I52").status, "fixed");
+  eq(A.withdraw(store, "C7", " "), false); yes(A.withdraw(store, "C7", "今天不动 DNS")); eq([store.get("C7").status, NF.stateOf(store.get("C7"))], ["withdrawn", "cancelled"]); });
+test("标记已解决；没有结论的旧执行可以让 agent 补做检查", () => { const {store} = fresh();
+  yes(A.resolve(store, "I58")); eq(NF.stateOf(store.get("I58")), "resolved"); eq(A.recheck(store, "I58"), false, "only for a run with no verdict:"); yes(A.recheck(store, "I19")); });
+test("审核的问题：每一个都回答了才能提交", () => { const {store} = fresh();
+  eq(A.clarify(store, "C6"), false); A.answer(store, "C6", 0, "ng-general"); eq(A.clarify(store, "C6"), false); A.answer(store, "C6", 1, "   "); eq(A.clarify(store, "C6"), false);
+  A.answer(store, "C6", 1, "可以"); yes(A.clarify(store, "C6")); eq(store.get("C6").status, "sent"); });
+test("撤销变更草稿要写理由", () => { const {store} = fresh(); eq(A.cancelChange(store, "C5", ""), false); yes(A.cancelChange(store, "C5", "不改了")); eq(NF.stateOf(store.get("C5")), "cancelled"); });
+test("16 件事覆盖后端的全部 15 种待办情形，每种情形都有简报", () => { const {store} = fresh();
+  const want = Object.entries(NF.STATE_OF).flatMap(([e, m]) => Object.keys(m).map(s => e + ":" + s)).sort();
+  eq([...new Set(store.items.map(i => i.entity + ":" + i.situation))].sort(), want); eq(want.length, 15); eq(store.items.length, 16); });
+test("后端的 22 个状态都有中英文的说法，也都说明了在等谁", () => {
+  const all = Object.entries(NF.STATES).flatMap(([e, m]) => Object.keys(m).map(s => `state.${e}.${s}`)); eq(all.length, 22);
+  eq(all.filter(k => !(k in NF.STR.zh) || !(k in NF.STR.en)), []); eq([...new Set(Object.values(NF.STATES).flatMap(m => Object.values(m)))].filter(w => !(("wait." + w) in NF.STR.zh)), []);
+  const {store} = fresh(); store.items.forEach(i => yes(NF.stateOf(i) in NF.STATES[i.entity], i.ref + " → " + NF.stateOf(i))); });
+test("「经过」页：每件等人的事恰好有一个当前阶段，前面都做完，后面都没到", () => { const {store} = fresh(); NF.store = store;
+  store.items.forEach(i => { const st = NF.storyPhases(i).map(p => p.state), k = st.findIndex(s => s === "now" || s === "bad");
+    eq(st.length, 6); yes(k >= 0, i.ref + " has a current phase"); yes(st.slice(0, k).every(s => s === "done") && st.slice(k + 1).every(s => s === "todo"), i.ref + " " + st.join(",")); }); });
+test("「经过」页跟着状态走：批准后在执行，做完后六个阶段都完成", () => { const {store, clock} = fresh(); NF.store = store;
+  A.approve(store, "I12"); eq(NF.storyPhases(store.get("I12")).map(p => p.state), ["done", "done", "done", "done", "now", "todo"]);
+  clock.advance(NF.UNDO_MS + NF.STEP_MS * 3); eq(NF.storyPhases(store.get("I12")).map(p => p.state), Array(6).fill("done")); });
+test("动作只对它那一种简报有效", () => { const {store} = fresh();
+  eq([A.approve(store, "I934"), A.accept(store, "I12"), A.verdict(store, "I12", "yes"), A.newPlan(store, "I12"), A.retry(store, "I12"), A.resolve(store, "I12"), A.startReview(store, "C3"), A.clarify(store, "C3")], Array(8).fill(false)); });
+test("稍后：排到同一严重度的最后", () => { const {store} = fresh(); yes(A.snooze(store, "I21"));
+  eq(refs(store.waiting()).slice(5, 11), ["I#44", "I#40", "C#6", "I#934", "C#8", "I#21"]); });
 test("时间和等待时长的写法", () => { eq([NF.clockAt(0), NF.clockAt(2.47), NF.clockAt(18.17)], ["06:20", "03:52", "昨天 12:10"]); eq([NF.fmtWait(40), NF.fmtWait(128), NF.fmtWait(1090), NF.fmtWait(4000)], ["40 分钟", "2 小时", "18 小时", "3 天"]); });
 test("中英文文案：键一一对应，没有空的", () => { const {zh, en} = NF.STR;
   eq(Object.keys(zh).filter(k => !(k in en)), [], "only in zh:"); eq(Object.keys(en).filter(k => !(k in zh)), [], "only in en:");
   eq(Object.keys(zh).filter(k => !zh[k] || !en[k]), [], "empty:"); });
 test("示例数据用到的每个文案键都存在", () => { const need = new Set(); const S0 = NF.seed;
-  S0.items.forEach(i => { need.add("need." + i.reason); if (i.severity) need.add("sev." + i.severity); if (i.cause){ need.add("critic." + i.cause.critic); need.add("location." + i.cause.location); }
+  S0.items.concat(S0.items.map(i => i.next || i.acceptAfter).filter(Boolean)).forEach(i => { if (i.reason) need.add("need." + i.reason); if (i.severity) need.add("sev." + i.severity); if (i.returned) need.add(i.returned);
+    if (i.cause){ need.add("critic." + i.cause.critic); need.add("location." + i.cause.location); } if (i.found && !/^[a-z]+$/.test(i.found.by)) throw new Error("found.by " + i.found.by);
     (i.needChecks || []).forEach(c => need.add("why." + c.why)); (i.plan ? i.plan.steps : []).forEach(s => need.add("tier." + s.tier)); });
   Object.values(S0.evidence).forEach(e => need.add("peek." + e.src)); S0.runs.forEach(r => { if (r.stateKey) need.add(r.stateKey); });
   eq([...need].filter(k => !(k in NF.STR.zh)), []); });
 test("示例数据自洽：证据、简报、星图的引用都对得上", () => { const S0 = NF.seed;
-  S0.items.forEach(i => { ((i.cause ? i.cause.ev : i.ev) || []).forEach(e => yes(S0.evidence[e], `${i.ref} cites ${e}`)); const b = NF.briefs[i.kind]; yes(b && b.ask && b.body && b.buttons, `${i.ref}: brief «${i.kind}»`);
-    yes(NF.GROUP_OF[i.reason], `${i.ref}: reason ${i.reason}`); });
+  S0.items.forEach(i => { ((i.cause ? i.cause.ev : []).concat(i.ev || [])).forEach(e => yes(S0.evidence[e], `${i.ref} cites ${e}`)); const b = NF.briefs[i.kind]; yes(b && b.ask && b.body && b.buttons, `${i.ref}: brief «${i.kind}»`);
+    yes(NF.GROUP_OF[i.reason], `${i.ref}: reason ${i.reason}`); yes(i.found && i.at, `${i.ref}: story facts`);
+    const n = i.next || i.acceptAfter; if (n){ yes(NF.briefs[n.kind], `${i.ref} → brief «${n.kind}»`); yes(NF.STATE_OF[i.entity][n.situation], `${i.ref} → situation ${n.situation}`); } });
   S0.hot.forEach(h => yes(S0.clusters[h.cl], `hot ${h.name}`)); });
 test("每种简报都能画出来，开头都有「需要你做什么」", () => { NF.store = NF.createStore(NF.seed, fakeClock());
-  NF.store.items.forEach(i => { const b = NF.briefs[i.kind]; yes(b.ask(i).length > 4, i.ref + " ask"); yes(b.body(i).includes('class="sec"'), i.ref + " body"); yes(b.buttons(i).includes("<button"), i.ref + " buttons"); }); });
+  NF.store.items.forEach(i => { const b = NF.briefs[i.kind], all = b.ask(i) + b.body(i) + b.buttons(i);
+    yes(b.ask(i).length > 4, i.ref + " ask"); yes(b.body(i).includes('class="sec"'), i.ref + " body"); yes(b.buttons(i).includes("<button"), i.ref + " buttons");
+    yes(!/undefined|\[object|NaN/.test(all), i.ref + " renders a hole"); yes((b.buttons(i).match(/id="primary"/g) || []).length <= 1, i.ref + " one primary at most"); }); });
+
+/* the backend state behind what the page says — checked against models.py's three transition tables */
+test("交给 agent 之后，后端状态跟着任务走，等的是 agent 不是你", () => { const {store, clock} = fresh();
+  const during = (id, fn) => { yes(fn(), id + " acts"); clock.advance(NF.UNDO_MS); const it = store.get(id); return [NF.stateOf(it), NF.waitsOn(it)]; };
+  eq(during("I12", () => A.reject(store, "I12", "先收紧到办公网段")), ["fix_planned", "agent"], "a plan sent back for changes:");
+  eq(NF.storyPhases(store.get("I12")).map(p => p.state), ["done", "done", "now", "todo", "todo", "todo"], "while the plan is redone, the plan is the current step:");
+  clock.advance(NF.AGENT_MS); const back = store.get("I12");
+  eq([back.status, NF.stateOf(back), NF.waitsOn(back), back.agentState], ["waiting", "fix_planned", "you", undefined], "back with the new plan:");
+  eq(during("I31", () => A.newPlan(store, "I31")), ["root_cause_identified", "agent"], "a new plan after a failed run:");
+  eq(during("I44", () => A.rediagnose(store, "I44")), ["investigating", "agent"], "a new diagnosis:");
+  eq(during("I19", () => A.recheck(store, "I19")), ["fix_executed", "agent"], "checks run again:");
+  eq(during("C5", () => A.startReview(store, "C5")), ["under_review", "agent"], "a change under review:");
+  eq(NF.storyPhases(store.get("C5")).map(p => p.state), ["done", "now", "todo", "todo", "todo", "todo"], "a change under review:"); });
+test("被别人退回的方案：问题留在 fix_planned；撤回批准：问题回到 root_cause_identified", () => { const {store} = fresh();
+  eq(NF.stateOf(store.get("I40")), "fix_planned"); yes(A.withdraw(store, "I52", "证书先不换"));
+  eq([NF.stateOf(store.get("I52")), NF.waitsOn(store.get("I52"))], ["root_cause_identified", "none"]); });
+test("批准后等的是执行器，跑起来等的是 agent，做完了谁也不等", () => { const {store, clock} = fresh();
+  A.approve(store, "I12"); eq(NF.waitsOn(store.get("I12")), "executor"); clock.advance(NF.UNDO_MS); eq(NF.waitsOn(store.get("I12")), "agent");
+  clock.advance(NF.STEP_MS * 3); eq(NF.waitsOn(store.get("I12")), "none"); eq(NF.waitsOn(store.get("I8")), "you"); });
+test("关掉一件事：要写理由，5 秒内可撤回；问题记为 dismissed，变更记为 rejected", () => { const {store, clock} = fresh();
+  eq(A.close(store, "I12", "  "), false, "no reason:"); yes(A.close(store, "I12", "这条规则是故意开的，周五关"));
+  eq([store.get("I12").status, NF.stateOf(store.get("I12")), NF.waitsOn(store.get("I12"))], ["closed", "dismissed", "none"]); eq(store.waiting().some(i => i.id === "I12"), false);
+  yes(store.undo()); eq([store.get("I12").status, store.get("I12").myReason], ["waiting", undefined], "undone:");
+  yes(A.close(store, "I12", "这条规则是故意开的，周五关")); clock.advance(NF.UNDO_MS + NF.AGENT_MS); eq(store.get("I12").status, "closed", "stays closed:");
+  yes(A.close(store, "C3", "这批机器下周下线")); eq(NF.stateOf(store.get("C3")), "rejected");
+  eq(store.events.filter(e => e.key === "event.closed").length, 1, "one event once the window has passed:"); });
+test("哪些简报可以关掉：有方案或诊断要判断的；验收、未开始、收尾、变更草稿和澄清不行", () => { const {store} = fresh();
+  const can = store.items.filter(i => NF.canClose(i)).map(i => i.ref).sort();
+  eq(can, ["C#3", "I#12", "I#21", "I#31", "I#40", "I#44", "I#47", "I#8"]);
+  ["I934", "C8", "I52", "C7", "I58", "I19", "C5", "C6"].forEach(id => eq(A.close(store, id, "x"), false, id + ":"));
+  store.role = "viewer"; eq(A.close(store, "I12", "x"), false, "a viewer:"); });
+test("关掉的事在「经过」页停在它所在的那一步，后面的步骤没有发生", () => { const {store, clock} = fresh();
+  A.close(store, "I12", "故意开的"); clock.advance(NF.UNDO_MS);
+  const ph = NF.storyPhases(store.get("I12")); eq(ph.map(p => p.state), ["done", "done", "done", "closed", "todo", "todo"]); yes(ph[3].html.includes("故意开的"), "the reason is on the page"); });
+
+test("忽略的问题可以重新打开：回到 open，由 agent 重新看；变更被拒绝后不能再打开", () => { const {store, clock} = fresh();
+  A.close(store, "I12", "故意开的"); eq(A.reopen(store, "I12"), false, "still inside the undo window:"); clock.advance(NF.UNDO_MS);
+  yes(A.reopen(store, "I12")); const it = store.get("I12"); eq([it.status, NF.stateOf(it), NF.waitsOn(it)], ["handed", "open", "agent"]);
+  eq(NF.storyPhases(it).map(p => p.state), ["done", "now", "todo", "todo", "todo", "todo"], "the diagnosis is the current step again:");
+  A.close(store, "C3", "下周下线"); clock.advance(NF.UNDO_MS); eq(A.reopen(store, "C3"), false, "a rejected change:");
+  eq(A.reopen(store, "I8"), false, "an item that is not closed:"); });
+test("「经过」页列出方案的每一步和每一次执行", () => { const {store} = fresh();
+  const run = NF.storyPhases(store.get("I31")).find(p => p.id === "run").html, plan = NF.storyPhases(store.get("I12")).find(p => p.id === "plan").html;
+  yes(run.includes("<details") && run.includes("#41") && run.includes('class="steps"'), "the failed run with its steps");
+  yes(plan.includes("<details") && plan.includes('class="steps"'), "the plan's steps");
+  yes(NF.storyPhases(store.get("I934")).find(p => p.id === "run").html.includes("#" + store.get("I934").ran.run), "a finished run names its number"); });
+
+test("只读账户看得到每一页简报，但没有任何可以动手的控件", () => { NF.store = NF.createStore(NF.seed, fakeClock()); NF.store.role = "viewer";
+  NF.store.items.forEach(i => { const body = NF.briefs[i.kind].body(i);
+    yes(body.includes('class="sec"'), i.ref + " still shows its content"); yes(!/<button class="(tickbox|choice)"|<input/.test(body), i.ref + " has a write control"); }); });
 
 /* contrast: every text colour on every surface, both themes (WCAG 2 formula) */
 function contrastRows(theme){

@@ -36,9 +36,13 @@
   <div class="gcol" data-theme="day" id="g-day"></div>
 </div>
 
+<script src="i18n.js"></script>
+<script src="proto.js"></script>
 <script>
 (function(){
 "use strict";
+const NF = window.NF;
+const states = e => Object.entries(NF.STATES[e]).map(([s, w]) => `<div class="statusline" style="margin-bottom:6px"><b>${NF.STR.zh[`state.${e}.${s}`]}</b><span class="${w === "you" ? "wait" : ""}">${NF.STR.zh["wait." + w]}</span><span class="mono" style="color:var(--faint);margin-left:auto">${s}</span></div>`).join("");
 const TOK = [["--ink", "页面底"], ["--solid", "实面"], ["--raise", "抬起的面"], ["--line", "线"], ["--chalk", "正文"], ["--dim", "次要文字"], ["--faint", "标签"],
              ["--amber", "在等人"], ["--mint", "agent 在做"], ["--red", "严重"], ["--violet", "变更"], ["--fill", "主按钮"]];
 const prov = c => `<span class="prov ${c ? "code" : "model"}"></span>`;
@@ -136,9 +140,17 @@ function render(el, name){
     <ol class="spine">
       <li class="done"><h3>发现<time>03:56 UTC</time><span class="who">扫描</span></h3><p>${prov(true)}sg_web 的 22 端口对 0.0.0.0/0 开放。</p></li>
       <li class="done"><h3>诊断<time>04:02 UTC</time><span class="who">RCA agent</span></h3><p>${prov(false)}部署流水线加的规则，之后没有收回。</p></li>
-      <li class="now"><h3>方案 v2<time>04:08 UTC</time><span class="who">SRE agent</span></h3><p>3 步，其中 1 步会改动。在等你批准。</p></li>
+      <li class="now"><h3>方案 v2<time>04:08 UTC</time><span class="who">SRE agent</span></h3><p>3 步，其中 1 步会改动。在等你批准。</p>
+        <details class="more"><summary>看这一版的每一步</summary><ol class="steps"><li><span class="say">收回 22 端口对公网的那条规则<span class="tier w">会改动</span></span><code class="cmd">aws ec2 revoke-security-group-ingress …</code></li></ol></details></li>
       <li class="bad"><h3>执行<time>—</time></h3><p>失败的阶段长这样。</p></li>
-      <li class="todo"><h3>验收</h3></li></ol></div>
+      <li class="closed"><h3>批准</h3><p>${prov(true)}被忽略或被拒绝的事停在它所在的那一步，后面的步骤没有发生。</p></li>
+      <li class="todo"><h3>验收</h3></li></ol>
+    <p class="rule">圆点五种：做完（薄荷）、现在（琥珀）、出错（红）、停在这里（灰）、还没到（空心）。可以展开的内容用「▸」。</p></div>
+
+  <div class="gsec"><h3>状态栏：后端的 22 个状态怎么说</h3>
+    <p class="rule" style="margin:0 0 8px">问题的 10 个状态：</p>${states("issue")}
+    <p class="rule" style="margin:12px 0 8px">变更的 12 个状态：</p>${states("change")}
+    <p class="rule">每个状态说三件事：它叫什么、在等谁、后端的名字。在等人的用琥珀色。</p></div>
 
   <div class="gsec"><h3>agent 在做的事</h3><div class="feed" style="max-width:260px">
     <div class="f run"><div class="h"><span><span class="dot"></span>正在执行</span><span class="num">I#12</span></div><div>确认堡垒机网段的规则还在</div><div class="barp"><i style="width:66%"></i></div></div>

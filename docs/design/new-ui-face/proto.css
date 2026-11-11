@@ -41,7 +41,7 @@ a{color:var(--mint)}
 .mono{font-family:var(--mono)}
 
 /* ── components ─────────────────────────────────────────────────────────── */
-kbd{font-family:var(--num);font-size:11.5px;line-height:1;min-width:18px;height:18px;padding:0 5px;display:inline-flex;align-items:center;justify-content:center;
+kbd{font-family:var(--num);font-size:var(--fs-xs);line-height:1;min-width:18px;height:18px;padding:0 5px;display:inline-flex;align-items:center;justify-content:center;
   border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;color:var(--dim);background:var(--raise)}
 
 .btn{position:relative;overflow:hidden;display:inline-flex;align-items:center;gap:var(--sp-2);height:40px;padding:0 14px;border:1px solid var(--line);border-radius:var(--r-2);background:var(--raise);font-size:var(--fs-sm);white-space:nowrap}
@@ -51,6 +51,7 @@ kbd{font-family:var(--num);font-size:11.5px;line-height:1;min-width:18px;height:
 .btn.primary kbd{background:transparent;border-color:color-mix(in srgb,var(--fill-ink) 45%,transparent);color:var(--fill-ink)}
 .btn.danger{color:var(--red);border-color:color-mix(in srgb,var(--red) 55%,transparent)}
 .btn.quiet{background:transparent}
+.actions .btn.quiet{padding:0 10px}
 .btn.sm{height:32px;padding:0 10px}
 .btn .fill{position:absolute;inset:0 auto 0 0;width:0;background:color-mix(in srgb,var(--fill-ink) 26%,transparent)}
 .btn.holding .fill{width:100%;transition:width .9s linear}
@@ -134,7 +135,7 @@ table.grid td{padding:6px 8px 6px 0;border-bottom:1px solid var(--line);vertical
 .pulse .tick.decision:hover::after{--unrot:-45deg}
 .pulse .now{position:absolute;right:0;top:3px;bottom:3px;width:2px;background:var(--chalk);border-radius:1px}
 .pulse .lbl{position:absolute;left:-76px;top:6px;font-size:var(--fs-xs);color:var(--faint);white-space:nowrap}
-.pulse .hm{position:absolute;top:19px;transform:translateX(-50%);font-family:var(--num);font-size:10px;color:var(--faint)}
+.pulse .hm{position:absolute;top:19px;transform:translateX(-50%);font-family:var(--num);font-size:var(--fs-xs);line-height:1;color:var(--faint)}
 .pulse .hm::before{content:"";position:absolute;left:50%;top:-6px;width:1px;height:4px;background:var(--line)}
 .who{display:flex;align-items:center;gap:8px}
 main{position:fixed;inset:var(--top) 0 var(--bar) 0;z-index:2}
@@ -186,10 +187,12 @@ main{position:fixed;inset:var(--top) 0 var(--bar) 0;z-index:2}
 .brief.swap{animation:swap .22s ease-out}
 @keyframes swap{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 .meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;font-size:var(--fs-sm);color:var(--dim)}
-.meta .story-link{margin-left:auto;color:var(--dim);display:inline-flex;gap:6px;align-items:center}
+.meta .pos{margin-left:auto}
+.meta .story-link{color:var(--dim);display:inline-flex;gap:6px;align-items:center}
 .brief h1{font-size:var(--fs-2xl);line-height:1.35;font-weight:650;margin:10px 0 2px;letter-spacing:-.01em;text-wrap:balance}
 .ask{margin:8px 0 0;padding:8px 12px;border-left:3px solid var(--amber);background:color-mix(in srgb,var(--amber) 9%,transparent);border-radius:0 var(--r-1) var(--r-1) 0;font-size:var(--fs-md)}
 .ask b{color:var(--amber);font-weight:600}
+.back{margin:8px 0 0;font-size:var(--fs-sm);color:var(--mint)}
 .sec{padding:14px 0;border-top:1px solid var(--line);margin-top:14px}
 .sec h2{font-size:var(--fs-sm);font-weight:600;color:var(--faint);margin:0 0 8px}
 .sec p{margin:0}
@@ -227,7 +230,8 @@ main{position:fixed;inset:var(--top) 0 var(--bar) 0;z-index:2}
 .actions{position:sticky;bottom:0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:16px -24px 0;padding:12px 24px 14px;border-top:1px solid var(--line);background:var(--solid);border-radius:0 0 var(--r-3) var(--r-3)}
 .spacer{flex:1}
 .pos{font-family:var(--num);font-size:var(--fs-sm);color:var(--faint)}
-.reason{display:flex;gap:8px;width:100%}
+.reason{display:flex;flex-wrap:wrap;gap:8px;width:100%}
+.reason .note{flex-basis:100%;margin:0}
 .reason .field{flex:1;border-color:var(--amber)}
 .readonly-note{font-size:var(--fs-sm);color:var(--dim)}
 
@@ -260,12 +264,20 @@ main{position:fixed;inset:var(--top) 0 var(--bar) 0;z-index:2}
 .spine > li.done::before{background:var(--mint);border-color:var(--mint)}
 .spine > li.now::before{background:var(--amber);border-color:var(--amber);box-shadow:0 0 0 4px color-mix(in srgb,var(--amber) 25%,transparent)}
 .spine > li.bad::before{background:var(--red);border-color:var(--red)}
+.spine > li.closed::before{background:var(--faint);border-color:var(--faint)}
 .spine > li.todo{color:var(--faint)}
 .spine h3{margin:0;font-size:var(--fs-md);font-weight:600;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
 .spine h3 time{font-family:var(--num);font-weight:400;color:var(--faint);font-size:var(--fs-xs)}
 .spine .who{display:inline;font-size:var(--fs-xs);color:var(--faint);font-weight:400}
 .spine p{margin:4px 0 0;color:var(--dim)}
 .spine .box{margin-top:8px}
+.more{margin-top:6px}
+.more > summary{cursor:pointer;color:var(--dim);list-style:none;border-radius:var(--r-1)}
+.more > summary::-webkit-details-marker{display:none}
+.more > summary::after{content:"　▸";color:var(--dim)}
+.more[open] > summary::after{content:"　▾"}
+.more > summary:hover{color:var(--chalk)}
+.more .steps{margin-top:8px}
 .facts{padding:14px 16px;font-size:var(--fs-sm);max-height:calc(100dvh - var(--top) - var(--bar) - 22px);overflow:auto}
 .facts h2{font-size:var(--fs-sm);font-weight:600;color:var(--faint);margin:14px 0 6px} .facts h2:first-child{margin-top:0}
 .facts dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:4px 12px} .facts dt{color:var(--faint)} .facts dd{margin:0;overflow-wrap:anywhere}
@@ -311,8 +323,10 @@ main{position:fixed;inset:var(--top) 0 var(--bar) 0;z-index:2}
 /* ── responsive ─────────────────────────────────────────────────────────── */
 @media (max-width:1180px){
   #decide{grid-template-columns:200px minmax(0,1fr)} #decide .side-live{display:none}
-  #story{grid-template-columns:minmax(0,1fr)} #story .facts{max-height:none}
-  #story{overflow:auto;align-content:start}
+  /* one column that scrolls as a whole: as grid rows inside a fixed-height view, the two panels squeezed each other */
+  #story{display:block;overflow:auto}
+  #story .story,#story .facts{max-height:none;overflow:visible}
+  #story .facts{margin-top:12px}
 }
 @media (max-width:760px){
   :root{--top:44px}
@@ -328,7 +342,7 @@ main{position:fixed;inset:var(--top) 0 var(--bar) 0;z-index:2}
   .brief{padding:16px 16px 0;max-height:calc(100dvh - var(--top) - var(--bar) - 132px)}
   .brief h1,.story h1{font-size:var(--fs-xl)}
   .actions{margin:14px -16px 0;padding:10px 16px 12px}
-  .actions kbd,.actions .pos,.actions .spacer{display:none}
+  .actions kbd{display:none}
   .btn{height:44px}
   .choices{grid-template-columns:1fr}
   .story{padding:14px 16px 16px;max-height:none}

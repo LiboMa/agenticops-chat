@@ -13,7 +13,7 @@ NF.AGENT_MS = 4000;    // sample agent work after a decision
 NF.briefs = NF.briefs || {}; NF.actions = NF.actions || {}; NF.screens = NF.screens || {}; NF.on = NF.on || {}; NF.onSubmit = NF.onSubmit || {};
 
 /* ── what the person is looking at ─────────────────────────────────────── */
-const S = NF.S = { lens: "decide", cur: null, curIdx: 0, lang: "zh", theme: "night", role: "writer", view: "ready",
+const S = NF.S = { lens: "decide", cur: null, curIdx: 0, story: null, lang: "zh", theme: "night", role: "writer", view: "ready",
                    filter: "all", onlyCritical: false, peek: null, peekIdx: 0, hoursAgo: 0, rejecting: false, lastOk: 0.2 };
 
 /* ── words and time ────────────────────────────────────────────────────── */
@@ -97,10 +97,62 @@ NF.createStore = function(seed, clock){
   return store;
 };
 NF.afterRun = (store, it) => {
+  if (it.afterRun === "acceptance" && it.acceptAfter){       // a check has no result: the run comes back for acceptance
+    const n = it.acceptAfter; delete it.acceptAfter; delete it.afterRun; delete it.run;
+    Object.assign(it, n, {status: "waiting", waitMin: 0, snoozed: false, ticks: undefined, rev: it.rev + 1});
+    store.log("decision", "event.back", {ref: it.ref}); store.notice("toast.back", {ref: it.ref});
+    return;
+  }
   it.status = "fixed";
   store.log("agent", "event.fixed", {ref: it.ref});
   store.notice("toast.done", {ref: it.ref, n: (it.checks || []).length});
 };
+/* An agent finished what a decision asked of it: the item comes back as its `next` situation, or stays handed. */
+NF.comeBack = (store, it) => {
+  if (!it.next){ it.status = "handed"; return; }
+  const n = it.next; delete it.next; delete it.agentState;
+  Object.assign(it, n, {status: "waiting", waitMin: 0, snoozed: false, ticks: undefined, rev: it.rev + 1});
+  store.log("decision", "event.back", {ref: it.ref}); store.notice("toast.back", {ref: it.ref});
+};
+
+/* The backend's own state of an item (10 for an issue, 12 for a change), from what the prototype knows.
+   Checked against models.py (_ISSUE_TRANSITIONS, CHANGE_TRANSITIONS) and services/work_phases.py.
+   NF.STATES = who a state waits on when nothing else is known (the gallery's 22 lines); NF.waitsOn(it) is the answer for one item. */
+NF.STATES = {
+  issue: {open: "agent", investigating: "agent", acknowledged: "agent", root_cause_identified: "you", fix_planned: "you", fix_approved: "executor",
+          fix_executing: "agent", fix_executed: "you", resolved: "none", dismissed: "none"},
+  change: {draft: "you", under_review: "agent", needs_clarification: "you", planned: "you", approved: "executor", executing: "agent",
+           needs_review: "you", completed: "none", failed: "none", rolled_back: "none", rejected: "none", cancelled: "none"},
+};
+NF.STATE_OF = {
+  issue: {needsNewPlan: "root_cause_identified", planRejected: "fix_planned", needsReview: "root_cause_identified", rcaRejected: "root_cause_identified",
+          toGenerate: "root_cause_identified", awaitingApproval: "fix_planned", notQueued: "fix_approved", awaitingAcceptance: "fix_executed",
+          passed: "fix_executed", unverified: "fix_executed"},
+  change: {draft: "draft", needsClarification: "needs_clarification", awaitingApproval: "planned", notQueued: "approved", awaitingAcceptance: "needs_review"},
+};
+NF.stateOf = it => {
+  const issue = it.entity === "issue";
+  switch (it.status){
+    case "waiting": return NF.STATE_OF[it.entity][it.situation];
+    case "pending": return issue ? "fix_approved" : "approved";
+    case "running": return issue ? "fix_executing" : "executing";
+    case "fixed": case "done": return it.endState || (issue ? "resolved" : "completed");
+    case "withdrawn": return issue ? "root_cause_identified" : "cancelled";   // an approval taken back before the run began
+    case "cancelled": return "cancelled";
+    case "closed": return issue ? "dismissed" : "rejected";
+    default: return it.agentState || (issue ? "investigating" : "under_review");      // sent / agent / handed
+  }
+};
+/* the state an item is in while an agent does what a decision asked for */
+NF.AGENT_STATE = {
+  "agent.replanning": {issue: "fix_planned", change: "under_review"},    // the plan was sent back; the next version is being written
+  "agent.planning": {issue: "root_cause_identified"},
+  "agent.rediagnose": {issue: "investigating"},
+  "agent.rechecking": {issue: "fix_executed"},
+  "agent.reviewing": {change: "under_review"},
+};
+/* who this item waits on right now: you | agent | executor | none */
+NF.waitsOn = it => ({waiting: "you", pending: "executor", running: "agent", sent: "agent", agent: "agent", handed: "agent"})[it.status] || "none";
 
 /* ── the shell ─────────────────────────────────────────────────────────── */
 NF.shown = () => S.view === "empty" ? [] : NF.store.waiting(S.filter).filter(i => !S.onlyCritical || i.severity === "critical");   // what the queue shows
@@ -136,7 +188,7 @@ NF.stateBlock = view => view === "loading"
 
 NF.setLens = l => {
   S.lens = l; NF.closePeek && NF.closePeek(); NF.closeSheet && NF.closeSheet();
-  ["decide", "live", "world"].forEach(x => { $("#" + x).hidden = x !== l; });
+  ["decide", "live", "world", "story"].forEach(x => { $("#" + x).hidden = x !== l; });
   if (l !== "world"){ S.hoursAgo = 0; }
   NF.render(true);
 };
@@ -147,12 +199,14 @@ NF.render = swap => {
   NF.syncHash();
 };
 NF.syncHash = () => {
-  const h = S.lens === "decide" && S.cur ? "#/decide/" + S.cur : "#/" + S.lens;
+  const h = S.lens === "story" ? "#/story/" + S.story : S.lens === "decide" && S.cur ? "#/decide/" + S.cur : "#/" + S.lens;
   if (location.hash !== h) history.replaceState(null, "", h);
 };
 NF.readHash = () => {
-  const m = /^#\/(decide|live|world)(?:\/([\w-]+))?$/.exec(location.hash); if (!m) return;
-  S.lens = m[1]; if (m[2] && NF.store.get(m[2])) S.cur = m[2];
+  const m = /^#\/(decide|live|world|story)(?:\/([\w-]+))?$/.exec(location.hash); if (!m) return;
+  const it = m[2] && NF.store.get(m[2]);
+  if (m[1] === "story"){ if (it){ S.lens = "story"; S.story = it.id; } return; }
+  S.lens = m[1]; if (it) S.cur = it.id;
 };
 
 /* notices: a decision's undo line, or a plain line — both speak from the command bar's place */
@@ -182,7 +236,7 @@ NF.undo = () => {                                 // what was taken back comes b
 NF.setTheme = th => { S.theme = th; document.body.dataset.theme = th; NF.sky && NF.sky.recolor(); NF.renderTop(); };
 NF.openHelp = () => {
   const K = (...ks) => ks.map(k => `<kbd>${k}</kbd>`).join("");
-  const rows = [[K("J", "K"), "help.move"], [K("A"), "help.primary"], [K("R"), "help.reject"], [K("E"), "help.ask"], [K("S"), "help.snooze"],
+  const rows = [[K("J", "K"), "help.move"], [K("A"), "help.primary"], [K("R"), "help.reject"], [K("D"), "help.close"], [K("E"), "help.ask"], [K("S"), "help.snooze"],
                 [K(NF.t("key.space")), "help.peek"], [K("X"), "help.tick"], [K("Y", "P", "N", "M"), "help.verdict"], [K("1", "2", "3"), "help.lens"],
                 [K("/"), "help.cmd"], [K("Z"), "help.undo"], [K("T"), "help.theme"]];
   $("#help").innerHTML = `<div class="dialog" role="dialog" aria-modal="true" aria-label="${NF.t("keys.open")}"><h2>${NF.t("help.title")}</h2><p>${NF.t("help.p")}</p>
@@ -246,7 +300,8 @@ NF.start = () => {
       if (S.peek){ NF.closePeek(); return; }
       if (!$("#sheet").hidden){ NF.closeSheet(); return; }
       if (S.rejecting){ NF.closeReject(); return; }
-      if (inField) document.activeElement.blur();
+      if (inField){ document.activeElement.blur(); return; }
+      if (S.lens === "story") NF.on.storyBack();
       return;
     }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k"){ e.preventDefault(); cmd.focus(); return; }
