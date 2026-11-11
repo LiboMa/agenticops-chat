@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AgenticOps · 指挥台（交互设计稿）</title>
+<style>
+:root{
+  --num:"DIN Alternate","Bahnschrift","Roboto Condensed","Arial Narrow",system-ui,sans-serif;
+  --font:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --top:48px; --bar:64px;
+}
+body[data-theme="night"]{
+  --ink:#11132B; --ink2:#0B0D20; --deck:rgba(26,29,58,.84); --solid:#1B1E3A; --raise:#242850; --line:#31366A;
+  --chalk:#ECE8DD; --dim:#A3A7C8; --faint:#73779D;
+  --amber:#FFB224; --fill:#FFB224; --fill-ink:#2A1B00; --mint:#5EE6C8; --red:#FF6B6B; --violet:#8B7CF6; --star:236,232,221;
+}
+body[data-theme="day"]{
+  --ink:#E7EAF4; --ink2:#D9DEED; --deck:rgba(255,255,255,.88); --solid:#FFFFFF; --raise:#F1F3FA; --line:#C6CCE2;
+  --chalk:#171A33; --dim:#4D5378; --faint:#7A80A2;
+  --amber:#A95F00; --fill:#FFB224; --fill-ink:#2A1B00; --mint:#0A7A63; --red:#C22F2F; --violet:#5B4BD6; --star:23,26,51;
+}
+*{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+::-webkit-scrollbar-track{background:transparent}
+body[data-theme="night"]{color-scheme:dark} body[data-theme="day"]{color-scheme:light}
+[hidden]{display:none !important}
+html,body{height:100%;margin:0}
+body{font-family:var(--font);font-size:14px;line-height:1.55;color:var(--chalk);
+  background:radial-gradient(1200px 800px at 30% 20%,var(--ink) 0%,var(--ink2) 100%);overflow:hidden;-webkit-font-smoothing:antialiased}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:0;padding:0}
+:focus-visible{outline:2px solid var(--amber);outline-offset:2px;border-radius:6px}
+kbd{font-family:var(--num);font-size:11px;line-height:1;min-width:18px;height:18px;padding:0 5px;display:inline-flex;align-items:center;justify-content:center;
+  border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;color:var(--dim);background:var(--raise)}
+.num{font-family:var(--num);font-variant-numeric:tabular-nums;letter-spacing:.01em}
+#sky{position:fixed;inset:0;width:100%;height:100%;display:block}
+
+/* top strip */
+.top{position:fixed;inset:0 0 auto 0;height:var(--top);display:flex;align-items:center;gap:18px;padding:0 16px;z-index:5}
+.lens{display:flex;gap:2px;padding:3px;border:1px solid var(--line);border-radius:10px;background:var(--deck);backdrop-filter:blur(12px)}
+.lens button{display:flex;align-items:center;gap:7px;height:30px;padding:0 11px;border-radius:7px;color:var(--dim);font-size:13px}
+.lens button[aria-selected="true"]{background:var(--raise);color:var(--chalk);font-weight:600}
+.lens .n{font-family:var(--num);color:var(--amber);font-weight:400}
+.pulse{position:relative;flex:1;height:30px;min-width:120px;margin-left:76px}
+.pulse::before{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:var(--line)}
+.pulse .tick{position:absolute;top:50%;width:7px;height:7px;margin:-3.5px 0 0 -3.5px;border-radius:50%;background:var(--faint)}
+.pulse .tick.signal{background:var(--red)} .pulse .tick.agent{background:var(--mint)} .pulse .tick.decision{background:var(--amber);border-radius:1px;transform:rotate(45deg)}
+.pulse .tick.change{background:var(--violet);border-radius:1px}
+.pulse .tick:hover::after{content:attr(data-tip);position:absolute;top:14px;left:50%;transform:translateX(-50%) rotate(var(--unrot,0deg));white-space:nowrap;
+  background:var(--solid);border:1px solid var(--line);border-radius:6px;padding:3px 8px;font-size:12px;color:var(--chalk);z-index:9}
+.pulse .tick.decision:hover::after{--unrot:-45deg}
+.pulse .now{position:absolute;right:0;top:3px;bottom:3px;width:2px;background:var(--chalk);border-radius:1px}
+.pulse .lbl{position:absolute;left:-76px;top:6px;font-size:11px;color:var(--faint);white-space:nowrap}
+.pulse .hm{position:absolute;top:19px;transform:translateX(-50%);font-family:var(--num);font-size:10px;color:var(--faint)}
+.pulse .hm::before{content:"";position:absolute;left:50%;top:-6px;width:1px;height:4px;background:var(--line)}
+.who{display:flex;align-items:center;gap:8px}
+.chip-btn{height:30px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--deck);color:var(--dim);font-size:12.5px;backdrop-filter:blur(12px)}
+.avatar{width:30px;height:30px;border-radius:50%;background:var(--raise);border:1px solid var(--line);font-family:var(--num);font-size:12px;color:var(--dim)}
+
+/* stage */
+main{position:fixed;inset:var(--top) 0 var(--bar) 0;z-index:2}
+.view{position:absolute;inset:0;padding:10px 16px 6px}
+#decide{display:grid;grid-template-columns:232px minmax(0,720px) 232px;justify-content:center;gap:18px;align-items:start}
+
+.rail-title{display:flex;align-items:baseline;justify-content:space-between;font-size:12px;color:var(--faint);padding:6px 4px 8px}
+.rail-title b{font-family:var(--num);font-size:22px;font-weight:400;color:var(--amber)}
+.queue{display:flex;flex-direction:column;gap:6px}
+.q{position:relative;display:block;width:100%;text-align:left;padding:8px 10px 8px 14px;border:1px solid var(--line);border-radius:10px;background:var(--deck);backdrop-filter:blur(12px)}
+.q::before{content:"";position:absolute;left:5px;top:9px;bottom:9px;width:3px;border-radius:2px;background:var(--faint)}
+.q.crit::before{background:var(--red)} .q.warn::before{background:var(--amber)} .q.info::before{background:var(--violet)}
+.q[aria-selected="true"]{border-color:var(--amber);background:var(--solid)}
+.q .r{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--faint)}
+.q .r .ref{font-family:var(--num);color:var(--dim)}
+.q .t{font-size:13px;line-height:1.35;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.q .need{font-size:11.5px;color:var(--amber);margin-top:3px}
+.hint{display:flex;align-items:center;gap:3px;margin:12px 2px 0;font-size:11px;color:var(--faint);white-space:nowrap}
+
+.brief{position:relative;max-height:calc(100dvh - var(--top) - var(--bar) - 22px);overflow:auto;border:1px solid var(--line);border-radius:16px;background:var(--deck);
+  backdrop-filter:blur(16px);padding:20px 24px 0}
+.brief.swap{animation:swap .22s ease-out}
+@keyframes swap{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;font-size:12.5px;color:var(--dim)}
+.ref-big{font-family:var(--num);font-size:15px;color:var(--chalk);padding:1px 8px;border:1px solid var(--line);border-radius:6px}
+.sev{font-weight:600} .sev.crit{color:var(--red)} .sev.warn{color:var(--amber)} .sev.info{color:var(--violet)}
+.brief h1{font-size:22px;line-height:1.35;font-weight:650;margin:10px 0 2px;letter-spacing:-.01em;text-wrap:balance}
+.sec{padding:14px 0;border-top:1px solid var(--line);margin-top:14px}
+.sec h2{font-size:12.5px;font-weight:600;color:var(--faint);margin:0 0 8px}
+.sec p{margin:0}
+.prov{display:inline-block;width:8px;height:8px;margin:0 6px 1px 0;transform:rotate(45deg);vertical-align:middle}
+.prov.code{background:var(--mint)} .prov.model{border:1.5px solid var(--dim)}
+.ev{display:inline-flex;align-items:center;height:20px;padding:0 7px;margin:0 2px;border:1px solid var(--line);border-radius:5px;font-family:var(--num);font-size:12px;color:var(--mint);background:var(--raise)}
+.ev:hover{border-color:var(--mint)}
+.trust{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}
+.trust div{border:1px solid var(--line);border-radius:9px;padding:7px 10px;background:var(--raise)}
+.trust small{display:block;font-size:11.5px;color:var(--faint)}
+.trust b{font-family:var(--num);font-size:19px;font-weight:400}
+.trust b.zh{font-family:var(--font);font-size:14px;font-weight:600}
+.steps{list-style:none;margin:0;padding:0;counter-reset:s}
+.steps li{position:relative;padding:6px 0 6px 30px;counter-increment:s}
+.steps li::before{content:counter(s);position:absolute;left:0;top:7px;width:20px;height:20px;border:1px solid var(--line);border-radius:50%;font-family:var(--num);font-size:12px;display:flex;align-items:center;justify-content:center;color:var(--dim)}
+.steps li.ok::before{content:"✓";background:var(--mint);border-color:var(--mint);color:var(--ink2)}
+.steps li.doing::before{border-color:var(--mint);color:var(--mint);animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.35}}
+.steps .say{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.tier{font-size:11px;padding:0 6px;border-radius:4px;border:1px solid var(--line);color:var(--dim)}
+.tier.w{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 50%,transparent)}
+.cmd{display:block;font-family:var(--mono);font-size:11.5px;color:var(--faint);margin-top:2px;overflow-wrap:anywhere}
+.note{font-size:12.5px;color:var(--dim);margin-top:8px}
+.impact{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.impact svg{flex:none}
+.impact .nums{display:flex;gap:14px}
+.impact .nums div{font-size:11.5px;color:var(--faint)} .impact .nums b{display:block;font-family:var(--num);font-size:20px;font-weight:400;color:var(--chalk)}
+.checks{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.checks li{display:flex;gap:10px;align-items:flex-start;padding:7px 10px;border:1px solid var(--line);border-radius:9px;background:var(--raise)}
+.checks .pc{font-family:var(--num);font-size:12px;color:var(--faint);min-width:30px;padding-top:1px}
+.checks .st{margin-left:auto;font-size:12px;white-space:nowrap}
+.st.ok{color:var(--mint)} .st.need{color:var(--amber)}
+.tickbox{flex:none;width:20px;height:20px;border:1.5px solid var(--amber);border-radius:5px;display:flex;align-items:center;justify-content:center;color:var(--fill-ink);font-size:13px}
+.tickbox[aria-checked="true"]{background:var(--fill);border-color:var(--fill)}
+.choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.choice{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--raise);text-align:left}
+.choice:hover{border-color:var(--amber)}
+.actions{position:sticky;bottom:0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:16px -24px 0;padding:12px 24px 14px;border-top:1px solid var(--line);
+  background:var(--solid);border-radius:0 0 16px 16px}
+.btn{position:relative;overflow:hidden;display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 14px;border:1px solid var(--line);border-radius:10px;background:var(--raise);font-size:13.5px}
+.btn:hover{border-color:var(--dim)}
+.btn.primary{background:var(--fill);border-color:var(--fill);color:var(--fill-ink);font-weight:650}
+.btn.primary kbd{background:transparent;border-color:color-mix(in srgb,var(--fill-ink) 45%,transparent);color:var(--fill-ink)}
+.btn.primary:disabled{opacity:.45;cursor:not-allowed}
+.btn .fill{position:absolute;inset:0 auto 0 0;width:0;background:color-mix(in srgb,var(--fill-ink) 26%,transparent)}
+.btn.holding .fill{width:100%;transition:width .9s linear}
+.btn span.t{position:relative}
+.spacer{flex:1}
+.pos{font-family:var(--num);font-size:12.5px;color:var(--faint)}
+.reason{display:flex;gap:8px;width:100%}
+.reason input{flex:1;height:40px;padding:0 12px;border:1px solid var(--amber);border-radius:10px;background:var(--raise);font-size:16px}
+.clear{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;min-height:360px;padding:30px 10px 40px}
+.clear .big{font-size:26px;font-weight:650;letter-spacing:-.01em}
+.clear p{color:var(--dim);max-width:44ch;margin:10px 0 0}
+.clear .watch{display:flex;gap:22px;margin-top:22px;flex-wrap:wrap;justify-content:center}
+.clear .watch div{font-size:12px;color:var(--faint)} .clear .watch b{display:block;font-family:var(--num);font-size:24px;font-weight:400;color:var(--mint)}
+
+.feed{display:flex;flex-direction:column;gap:6px}
+.f{padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--deck);backdrop-filter:blur(12px);font-size:12.5px}
+.f .h{display:flex;justify-content:space-between;gap:8px;color:var(--faint);font-size:11.5px}
+.f .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--mint);margin-right:6px}
+.f.run .dot{animation:blink 1s infinite}
+.f .barp{height:3px;border-radius:2px;background:var(--line);margin-top:6px;overflow:hidden}
+.f .barp i{display:block;height:100%;background:var(--mint);transition:width .5s ease}
+
+/* live lens */
+#live{display:flex;justify-content:center}
+.rec{width:min(820px,100%);max-height:100%;overflow:auto;display:flex;flex-direction:column;gap:12px;padding-bottom:10px}
+.run{border:1px solid var(--line);border-radius:14px;background:var(--deck);backdrop-filter:blur(14px);padding:14px 18px}
+.run header{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:baseline}
+.run header b{font-size:15px}
+.run header .state{font-size:12.5px;color:var(--mint)} .run header .state.wait{color:var(--amber)} .run header .state.done{color:var(--dim)}
+.run ol{list-style:none;margin:10px 0 0;padding:0;border-left:1px solid var(--line)}
+.run ol li{position:relative;padding:3px 0 3px 16px;font-size:13px;color:var(--dim)}
+.run ol li::before{content:"";position:absolute;left:-4px;top:11px;width:7px;height:7px;border-radius:50%;background:var(--line)}
+.run ol li.find{color:var(--chalk)} .run ol li.find::before{background:var(--mint)}
+.run ol li code{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+.steer{display:flex;gap:8px;margin-top:10px}
+.steer input{flex:1;height:36px;padding:0 10px;border:1px solid var(--line);border-radius:9px;background:var(--raise);font-size:16px}
+
+/* world lens */
+#world{pointer-events:none}
+#world > *{pointer-events:auto}
+.happen{position:absolute;left:16px;top:10px;width:300px;max-height:calc(100% - 110px);overflow:auto;border:1px solid var(--line);border-radius:14px;background:var(--deck);backdrop-filter:blur(14px);padding:12px 14px}
+.happen h2{font-size:12.5px;color:var(--faint);font-weight:600;margin:0 0 6px}
+.happen .abn{font-family:var(--num);font-size:30px;line-height:1.1}
+.happen .abn small{font-family:var(--font);font-size:12.5px;color:var(--dim);margin-left:6px}
+.happen ul{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:7px}
+.happen li{font-size:12.5px;display:grid;grid-template-columns:46px 1fr;gap:8px}
+.happen li time{font-family:var(--num);color:var(--faint)}
+.happen li.cause{color:var(--amber)}
+.scrub{position:absolute;left:50%;transform:translateX(-50%);bottom:8px;width:min(760px,calc(100% - 32px));border:1px solid var(--line);border-radius:14px;background:var(--deck);backdrop-filter:blur(14px);padding:10px 16px 12px}
+.scrub .row{display:flex;justify-content:space-between;font-size:12.5px;color:var(--dim)}
+.scrub .row b{font-family:var(--num);font-weight:400;font-size:15px;color:var(--chalk)}
+.scrub input{width:100%;margin:6px 0 0;accent-color:var(--amber)}
+.nodecard{position:absolute;right:16px;top:10px;width:270px;border:1px solid var(--line);border-radius:14px;background:var(--deck);backdrop-filter:blur(14px);padding:12px 14px;font-size:13px}
+.nodecard h3{margin:0 0 4px;font-size:15px}
+.legend{position:absolute;right:16px;bottom:86px;display:grid;gap:4px;font-size:12px;color:var(--dim)}
+.legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+#tip{position:fixed;z-index:20;pointer-events:none;background:var(--solid);border:1px solid var(--line);border-radius:7px;padding:4px 9px;font-size:12px}
+
+/* command bar */
+.barwrap{position:fixed;left:0;right:0;bottom:0;height:var(--bar);display:flex;align-items:center;justify-content:center;padding:0 16px env(safe-area-inset-bottom);z-index:8}
+.bar{display:flex;align-items:center;gap:10px;width:min(720px,100%);height:46px;padding:0 12px 0 16px;border:1px solid var(--line);border-radius:14px;background:var(--solid);box-shadow:0 10px 40px rgba(0,0,0,.28)}
+.bar:focus-within{border-color:var(--amber)}
+.spark{width:9px;height:9px;transform:rotate(45deg);background:var(--mint);flex:none}
+.bar input{flex:1;min-width:0;height:100%;border:0;background:transparent;outline:none;font-size:16px}
+.bar input::placeholder{color:var(--faint)}
+.sugg{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--bar) + 2px);width:min(720px,calc(100% - 32px));max-height:46vh;overflow:auto;border:1px solid var(--line);border-radius:14px;background:var(--solid);padding:6px;z-index:9;box-shadow:0 10px 40px rgba(0,0,0,.3)}
+.sugg button{display:flex;width:100%;align-items:center;gap:10px;padding:8px 10px;border-radius:9px;text-align:left;font-size:13.5px}
+.sugg button[aria-selected="true"]{background:var(--raise)}
+.sugg small{color:var(--faint);margin-left:auto;white-space:nowrap}
+.sheet{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--bar) + 2px);width:min(720px,calc(100% - 32px));max-height:60vh;overflow:auto;border:1px solid var(--line);border-radius:16px;background:var(--solid);padding:16px 18px;z-index:9;box-shadow:0 10px 40px rgba(0,0,0,.3);animation:swap .2s ease-out}
+.sheet .q0{color:var(--dim);font-size:12.5px;margin-bottom:6px}
+.sheet table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}
+.sheet th{text-align:left;color:var(--faint);font-weight:500;padding:4px 8px 4px 0;border-bottom:1px solid var(--line)}
+.sheet td{padding:5px 8px 5px 0;border-bottom:1px solid var(--line)}
+.sheet .more{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.sheet .more button{padding:5px 10px;border:1px solid var(--line);border-radius:999px;font-size:12.5px;color:var(--dim)}
+.sheet .more button:hover{border-color:var(--mint);color:var(--chalk)}
+
+/* peek */
+.peek{position:fixed;top:var(--top);right:0;bottom:var(--bar);width:min(420px,100%);border-left:1px solid var(--line);background:var(--solid);z-index:10;padding:16px 18px;overflow:auto;animation:slide .2s ease-out}
+@keyframes slide{from{transform:translateX(24px);opacity:0}to{transform:none;opacity:1}}
+.peek h3{margin:0 0 2px;font-size:16px}
+.peek .src{font-size:12.5px;color:var(--dim);margin-bottom:10px}
+.peek pre{font-family:var(--mono);font-size:11.5px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--raise);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0 0}
+.peek .nav{display:flex;justify-content:space-between;align-items:center;margin-top:14px;font-size:12.5px;color:var(--faint)}
+
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc((var(--bar) - 46px)/2);z-index:12;display:flex;align-items:center;gap:10px;
+  width:min(720px,calc(100% - 32px));height:46px;padding:0 14px 0 16px;border:1px solid var(--line);border-radius:14px;background:var(--solid);font-size:13.5px;overflow:hidden}
+.toast.count{border-color:var(--amber)}
+.toast .msg{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.toast .cd{position:absolute;left:0;bottom:0;height:2px;background:var(--amber);width:100%}
+.toast.count .cd{animation:cd 5s linear forwards}
+@keyframes cd{to{width:0}}
+.toast button{color:var(--amber);font-weight:600;display:inline-flex;gap:6px;align-items:center}
+
+.help{position:fixed;inset:0;z-index:30;background:rgba(5,6,18,.6);display:grid;place-items:center;padding:16px}
+.help .box{width:min(620px,100%);max-height:90dvh;overflow:auto;border:1px solid var(--line);border-radius:16px;background:var(--solid);padding:20px 22px}
+.help h2{margin:0 0 4px;font-size:18px}
+.help p{color:var(--dim);margin:0 0 12px;font-size:13px}
+.keys{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 18px;font-size:13px}
+.keys div{display:flex;gap:8px;align-items:center}
+.keys span{color:var(--dim)}
+
+@media (min-width:1400px){
+  #decide{transition:transform .2s ease-out}
+  body.peeking #decide{transform:translateX(-104px)}
+}
+@media (max-width:1180px){
+  #decide{grid-template-columns:200px minmax(0,1fr)}
+  #decide .side-live{display:none}
+}
+@media (max-width:760px){
+  :root{--top:44px}
+  .top{gap:8px;padding:0 10px}
+  .pulse{display:none}
+  .lens button .n{display:none}
+  .who .chip-btn.scope{display:none}
+  .top{justify-content:space-between}
+  .view{padding:8px 10px 4px}
+  #decide{display:block}
+  #decide .side-q{margin-bottom:8px}
+  .rail-title{padding:0 2px 6px}
+  .queue{flex-direction:row;overflow-x:auto;gap:6px;padding-bottom:2px;scrollbar-width:none}
+  .q{flex:0 0 150px}
+  .q .t{-webkit-line-clamp:1}
+  .q .need{display:none}
+  .hint{display:none}
+  .brief{padding:16px 16px 0;max-height:calc(100dvh - var(--top) - var(--bar) - 96px)}
+  .brief h1{font-size:19px}
+  .actions{margin:14px -16px 0;padding:10px 16px 12px}
+  .actions kbd{display:none}
+  .btn{height:44px}
+  .trust{grid-template-columns:1fr 1fr 1fr}
+  .choices{grid-template-columns:1fr}
+  .happen{position:static;width:auto;max-height:34vh;margin-bottom:8px}
+  .steer{flex-wrap:wrap} .steer input{flex:1 1 100%} .steer .btn{flex:1;justify-content:center}
+  .actions .pos,.actions .spacer{display:none}
+  .nodecard{left:10px;right:10px;top:auto;bottom:96px;width:auto}
+  .legend{display:none}
+  .keys{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none !important;transition:none !important}
+  .btn.holding .fill{transition:width .9s linear !important}
+}
+</style>
+</head>
+<body data-theme="night">
+<canvas id="sky" aria-hidden="true"></canvas>
+
+<header class="top">
+  <div class="lens" role="tablist" aria-label="视角">
+    <button role="tab" data-lens="decide" aria-selected="true"><span class="n">1</span>待决</button>
+    <button role="tab" data-lens="live" aria-selected="false"><span class="n">2</span>现场</button>
+    <button role="tab" data-lens="world" aria-selected="false"><span class="n">3</span>全景</button>
+  </div>
+  <div class="pulse" id="pulse" aria-label="过去 24 小时发生的事"></div>
+  <div class="who">
+    <button class="chip-btn scope" id="scopeBtn">全部账户</button>
+    <button class="chip-btn" id="themeBtn" aria-label="切换昼夜">夜</button>
+    <button class="chip-btn" id="helpBtn" aria-label="快捷键">?</button>
+    <button class="avatar" aria-label="账户">MA</button>
+  </div>
+</header>
+
+<main>
+  <section class="view" id="decide">
+    <aside class="side-q">
+      <div class="rail-title"><span>在等你决定</span><b id="qCount">5</b></div>
+      <div class="queue" id="queue" role="listbox" aria-label="待决队列"></div>
+      <p class="hint"><kbd>J</kbd><kbd>K</kbd>换一件 <kbd>空格</kbd>证据 <kbd>?</kbd>全部</p>
+    </aside>
+    <article class="brief" id="brief" aria-live="polite"></article>
+    <aside class="side-live">
+      <div class="rail-title"><span>agent 现在在做</span></div>
+      <div class="feed" id="feed"></div>
+    </aside>
+  </section>
+
+  <section class="view" id="live" hidden>
+    <div class="rec" id="rec"></div>
+  </section>
+
+  <section class="view" id="world" hidden>
+    <div class="happen" id="happen"></div>
+    <div class="nodecard" id="nodecard" hidden></div>
+    <div class="legend">
+      <span><i style="background:var(--red)"></i>严重</span>
+      <span><i style="background:var(--amber)"></i>在等你</span>
+      <span><i style="background:var(--mint)"></i>agent 在处理</span>
+      <span><i style="background:var(--violet)"></i>有待批的变更</span>
+      <span><i style="background:rgb(var(--star));opacity:.6"></i>没有未结问题（不等于健康）</span>
+    </div>
+    <div class="scrub">
+      <div class="row"><span>拖动回到过去</span><b id="scrubLbl">现在 14:20</b></div>
+      <input type="range" id="scrub" min="0" max="240" value="240" aria-label="时间">
+    </div>
+  </section>
+</main>
+
+<div class="sugg" id="sugg" hidden role="listbox"></div>
+<div class="sheet" id="sheet" hidden></div>
+<aside class="peek" id="peek" hidden aria-label="证据"></aside>
+<div class="toast" id="toast" hidden role="status"></div>
+<div id="tip" hidden></div>
+
+<div class="barwrap">
+  <label class="bar">
+    <span class="spark" aria-hidden="true"></span>
+    <input id="cmd" type="text" autocomplete="off" spellcheck="false" placeholder="说一句话，或输入 / 找命令、@ 找对象" aria-label="指令">
+    <kbd>/</kbd>
+  </label>
+</div>
+
+<div class="help" id="help" hidden>
+  <div class="box" role="dialog" aria-modal="true" aria-label="快捷键">
+    <h2>手不离键盘</h2>
+    <p>这是一份可以点的交互设计稿，数据是示例。它想验证一件事：把 900 多个问题，变成眼前的几个决定。</p>
+    <div class="keys">
+      <div><kbd>J</kbd><kbd>K</kbd><span>下一件 / 上一件</span></div>
+      <div><kbd>A</kbd><span>按住：批准并执行；验收</span></div>
+      <div><kbd>R</kbd><span>退回并说明</span></div>
+      <div><kbd>E</kbd><span>就这件事问 agent</span></div>
+      <div><kbd>S</kbd><span>稍后再提醒</span></div>
+      <div><kbd>空格</kbd><span>看证据，← → 换一条</span></div>
+      <div><kbd>X</kbd><span>验收时逐项打勾</span></div>
+      <div><kbd>Y</kbd><kbd>P</kbd><kbd>N</kbd><kbd>M</kbd><span>诊断：对 / 部分对 / 不对 / 再查</span></div>
+      <div><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><span>待决 / 现场 / 全景</span></div>
+      <div><kbd>/</kbd><span>指令条（也可以直接问）</span></div>
+      <div><kbd>Z</kbd><span>5 秒内撤回</span></div>
+      <div><kbd>T</kbd><span>昼 / 夜</span></div>
+    </div>
+    <p style="margin-top:14px"><span class="prov code"></span>代码核实的事实　<span class="prov model"></span>模型的推断。每句话都标明是哪一种。</p>
+    <div style="text-align:right"><button class="btn" id="helpClose"><span class="t">知道了</span><kbd>Esc</kbd></button></div>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+const $=(s,el=document)=>el.querySelector(s), $$=(s,el=document)=>[...el.querySelectorAll(s)];
+const HOLD_MS=900, NOW="14:20";
+
+/* ───────── data (sample) ───────── */
+const EVID={
+  E1:{title:"CloudTrail：谁改了规则",src:"代码取回的原始记录",code:true,body:`{
+  "eventTime": "2026-11-10T03:52:11Z",
+  "eventName": "AuthorizeSecurityGroupIngress",
+  "userIdentity": { "arn": "arn:aws:sts::…:assumed-role/deploy-role/ci-4412" },
+  "requestParameters": {
+    "groupId": "sg-0a41…",
+    "ipPermissions": [{ "fromPort": 22, "toPort": 22, "cidrIp": "0.0.0.0/0" }]
+  }
+}`},
+  E2:{title:"安全组当前的入站规则",src:"代码取回的原始记录",code:true,body:`sg-0a41… (sg_web)
+  tcp 443   0.0.0.0/0        ← 原有
+  tcp 22    10.20.0.0/24     ← 原有（堡垒机）
+  tcp 22    0.0.0.0/0        ← 11:52 新增`},
+  E3:{title:"哪些资源挂着这个安全组",src:"关系图（规则生成，不是模型猜的）",code:true,body:`sg_web ──attached_to──▶ web-1, web-2, web-3, bastion
+依赖这 4 台机器的还有 5 个资源（ALB 目标组、2 个定时任务…）`},
+  E4:{title:"诊断的推理过程",src:"模型的推断",code:false,body:`部署流水线在 11:52 发布 web 服务时，脚本为了调试临时打开了 22 端口，
+发布结束后没有执行收回的那一步。——这是模型根据 E1 的时间和 ci-4412 的日志推断的，
+没有直接的记录证明「为了调试」。`},
+  E5:{title:"RDS 参数变更记录",src:"代码取回的原始记录",code:true,body:`ModifyDBInstance  database-demo
+  BackupRetentionPeriod: 7 → 0
+  by: user/john   at 昨天 20:10`},
+  E6:{title:"执行 #37 的检查结果",src:"代码逐项核对",code:true,body:`pc-1  4 个 Aurora 实例各有 CPU / 连接数告警     通过
+pc-2  2 个 ALB 各有 5xx 告警                    通过
+pc-5  端到端通知测试                              警告：收到了，但延迟 94 秒
+pc-6  把问题状态改为已解决                         没有结果（这一步不该由执行器做）`},
+  E7:{title:"ECS 任务停止原因",src:"代码取回的原始记录",code:true,body:`orders-svc 最近 14 次停止：
+  OutOfMemoryError: Container killed due to memory usage   ×9
+  Essential container exited (exit 137)                     ×5`},
+};
+const ITEMS=[
+ {id:"I#12",kind:"approve",tone:"crit",sev:"严重",wait:"2 小时",scope:"生产账户　us-east-1",node:"sg_web",need:"等你批准",
+  title:"安全组 sg_web 把 SSH（22 端口）开给了整个公网",
+  cause:{text:"今天 11:52，部署流水线用的角色给 sg_web 加了一条 0.0.0.0/0 的入站规则，之后没有收回。",ev:["E1","E2","E3","E4"],self:"92%",critic:"支持",loc:"已核实"},
+  plan:{label:"修复方案 v2",hash:"3fa9c1d2",risk:"L2",steps:[
+    {say:"收回 22 端口对公网的那条规则",cmd:"aws ec2 revoke-security-group-ingress --group-id sg-0a41… --protocol tcp --port 22 --cidr 0.0.0.0/0",w:true},
+    {say:"确认堡垒机网段的规则还在",cmd:"aws ec2 describe-security-groups --group-ids sg-0a41…",w:false},
+    {say:"从堡垒机连一次 web-1",cmd:"ssm: nc -zv web-1 22",w:false}],
+   rollback:"把原规则加回去。回滚不会中断现有连接。"},
+  impact:{deps:["web-1","web-2","web-3","bastion"],s:4,p:9,o:0},
+  checks:["22 端口不再对公网开放","堡垒机仍能连上 web-1","30 分钟内没有新的告警"]},
+ {id:"C#3",kind:"approve",tone:"info",sev:"常规变更",wait:"5 小时",scope:"生产账户　ap-southeast-1",node:"web-asg",need:"等你批准",
+  title:"给 web 集群的 6 台机器补上 Project 标签",
+  cause:{text:"alice 提的变更。agent 审过了：只加标签，不改任何运行中的配置。",ev:["E3"],self:"—",critic:"审核通过",loc:"6 台都找到了"},
+  plan:{label:"实施方案 v1",hash:"8c20be71",risk:"L1",steps:[
+    {say:"给 6 台实例加 Project=storefront",cmd:"aws ec2 create-tags --resources i-0f07… (6) --tags Key=Project,Value=storefront",w:true},
+    {say:"确认标签都在",cmd:"aws ec2 describe-tags --filters Name=key,Values=Project",w:false}],
+   rollback:"删掉这个标签。"},
+  impact:{deps:["web-asg"],s:1,p:1,o:0},
+  checks:["6 台实例都有 Project 标签"]},
+ {id:"I#8",kind:"approve",tone:"warn",sev:"高",wait:"1 天",scope:"数据账户　cn-northwest-1",node:"database-demo",need:"等你批准",
+  title:"database-demo 的自动备份被关掉了",
+  cause:{text:"昨天 20:10，john 把备份保留期从 7 天改成了 0。没有对应的变更单。",ev:["E5"],self:"88%",critic:"支持",loc:"已核实"},
+  plan:{label:"修复方案 v1",hash:"b41f09aa",risk:"L1",steps:[
+    {say:"把备份保留期改回 7 天",cmd:"aws rds modify-db-instance --db-instance-identifier database-demo --backup-retention-period 7 --apply-immediately",w:true},
+    {say:"确认已生效",cmd:"aws rds describe-db-instances --db-instance-identifier database-demo",w:false}],
+   rollback:"改回 0（不建议）。"},
+  impact:{deps:["orders-api","report-job"],s:2,p:3,o:0},
+  checks:["BackupRetentionPeriod = 7","下一个备份窗口有快照"]},
+ {id:"I#934",kind:"accept",tone:"warn",sev:"中",wait:"40 分钟",scope:"数据账户　cn-northwest-1",node:"aurora-main",need:"等你验收",
+  title:"Aurora 和 ALB 的告警已经建好，有两项检查要你看一眼",
+  ran:{label:"执行 #37",steps:"3 步都完成了，用时 2 分 41 秒",bind:"按 修复方案 v1（哈希 d48806a4）执行，和批准时的内容一致"},
+  auto:[{pc:"pc-1",t:"4 个 Aurora 实例各有 CPU 和连接数告警"},{pc:"pc-2",t:"2 个 ALB 各有 5xx 告警"}],
+  need_checks:[{pc:"pc-5",t:"端到端通知测试：收到了，但延迟 94 秒",why:"警告"},{pc:"pc-6",t:"把问题状态改为已解决",why:"没有结果"}],
+  ev:["E6"]},
+ {id:"I#21",kind:"confirm",tone:"warn",sev:"中",wait:"3 小时",scope:"生产账户　us-east-1",node:"ecs-orders",need:"等你确认",
+  title:"orders-svc 频繁重启：agent 认为是内存上限太小，但把握不够",
+  cause:{text:"14 次停止里有 9 次是内存超限。agent 推断内存上限（512 MB）在流量高峰时不够用，但没有找到流量上升的直接证据。",ev:["E7"],self:"58%",critic:"证据偏弱",loc:"已核实"},
+  gate:"把握低于 60% 的诊断不会自动出方案，需要你判断。"},
+];
+ITEMS.forEach(i=>{i.status="waiting"});
+const RUNS=[
+ {id:"r1",title:"诊断 I#37　lambda-pay 错误率升高",state:"run",stateTxt:"正在查",steps:[
+   {t:"取这个函数周围的关系和最近的变更",c:"get_topology_evidence(I#37)",act:true},
+   {t:"13:55 起错误率从 0.2% 升到 7.4%",c:"cloudwatch get-metric-data",find:true},
+   {t:"13:52 有一次发布：pay-fn 版本 41 → 42",c:"cloudtrail lookup-events",find:true},
+   {t:"在看版本 42 改了什么……",c:"lambda get-function --qualifier 42",act:true}],more:[
+   {t:"版本 42 把超时从 30 秒改成了 3 秒",c:"diff 41..42",find:true},
+   {t:"下游 orders-api 的 p95 是 4.1 秒，超过新的超时",c:"cloudwatch get-metric-data",find:true},
+   {t:"推断：超时改成 3 秒后，调下游的请求全部超时。把握 86%",c:"save_rca_result"}],steer:true},
+ {id:"r2",title:"扫描 us-east-1 的资源",state:"run",stateTxt:"62%",steps:[{t:"已列完 EC2、RDS、ELB；正在列 EKS",c:"scan",act:true}]},
+ {id:"r3",title:"I#40 的修复方案草稿",state:"wait",stateTxt:"在过策略",steps:[{t:"3 步里有 1 步分类不了，不会自动批准，会来问你",c:"unclassified_command",find:true}]},
+ {id:"r4",title:"执行 I#31　已完成",state:"done",stateTxt:"12 分钟前",steps:[{t:"3 项检查由代码逐项核对，全部通过",c:"verification: passed",find:true}]},
+];
+const EVENTS=[ // h = hours ago
+ {h:21.0,k:"signal",t:"database-demo 的自动备份被关闭"},
+ {h:18.2,k:"agent",t:"扫描完成：1,623 个资源"},
+ {h:10.3,k:"agent",t:"每日巡检完成"},
+ {h:4.8,k:"signal",t:"orders-svc 任务重启 14 次"},
+ {h:2.47,k:"change",t:"deploy-role 改了 sg_web 的入站规则",cause:true},
+ {h:2.4,k:"signal",t:"sg_web 的 22 端口对公网开放"},
+ {h:2.3,k:"agent",t:"I#12 诊断完成"},
+ {h:2.2,k:"decision",t:"I#12 的方案在等你批准"},
+ {h:0.7,k:"agent",t:"I#934 执行完成"},
+ {h:0.65,k:"decision",t:"I#934 在等你验收"},
+ {h:0.42,k:"signal",t:"lambda-pay 错误率升高"},
+ {h:0.4,k:"agent",t:"开始诊断 I#37"},
+];
+const HOT=[ // named nodes: health over time (hours ago interval)
+ {name:"sg_web",cl:0,from:2.4,to:0,tone:"red",ref:"I#12"},
+ {name:"database-demo",cl:2,from:21,to:0,tone:"amber",ref:"I#8"},
+ {name:"aurora-main",cl:2,from:30,to:0.7,tone:"amber",ref:"I#934"},
+ {name:"ecs-orders",cl:0,from:4.8,to:0,tone:"amber",ref:"I#21"},
+ {name:"lambda-pay",cl:1,from:0.42,to:0,tone:"mint",ref:"I#37"},
+ {name:"web-asg",cl:1,from:5,to:0,tone:"violet",ref:"C#3"},
+];
+const CLUSTERS=[
+ {name:"生产　us-east-1",cx:-.52,cy:-.22,n:132,sp:.2},
+ {name:"生产　ap-southeast-1",cx:.5,cy:-.34,n:96,sp:.17},
+ {name:"数据　cn-northwest-1",cx:.42,cy:.42,n:84,sp:.16},
+ {name:"EKS chaos-lab",cx:-.44,cy:.48,n:72,sp:.15},
+ {name:"公共与边缘",cx:.0,cy:.04,n:40,sp:.12},
+];
+
+/* ───────── state ───────── */
+const S={lens:"decide",cur:0,t:0,peek:null,peekIdx:0,undo:null,ticks:{},rejecting:false,selNode:null,sugIdx:0,filter:null};
+const waiting=()=>ITEMS.filter(i=>i.status==="waiting"&&(!S.filter||i.tone===S.filter));
+const current=()=>{const w=waiting();if(!w.length)return null;S.cur=Math.max(0,Math.min(S.cur,w.length-1));return w[S.cur]};
+const prov=c=>`<span class="prov ${c?"code":"model"}" title="${c?"代码核实":"模型推断"}"></span>`;
+
+/* ───────── sky (canvas) ───────── */
+const cv=$("#sky"),cx=cv.getContext("2d");let W=0,H=0,DPR=1;
+function rng(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const R=rng(20261110),gauss=()=>(R()+R()+R()+R()-2)/2;
+const NODES=[],EDGES=[];
+CLUSTERS.forEach((c,ci)=>{for(let i=0;i<c.n;i++)NODES.push({x:c.cx+gauss()*c.sp*1.5,y:c.cy+gauss()*c.sp*1.5,cl:ci,r:.55+R()*1.05,ph:R()*6.28,name:null})});
+HOT.forEach(h=>{const c=CLUSTERS[h.cl],pool=NODES.filter(n=>n.cl===h.cl&&!n.name&&Math.hypot(n.x-c.cx,n.y-c.cy)<c.sp*1.5),named=NODES.filter(n=>n.cl===h.cl&&n.name);
+  const score=n=>named.length?Math.min(...named.map(m=>Math.hypot(n.x-m.x,(n.y-m.y)*2.2))):-Math.hypot(n.x-(c.cx-c.sp*.5),n.y-(c.cy-c.sp*.6));
+  const n=pool.reduce((a,b)=>score(b)>score(a)?b:a);n.name=h.name;n.r=2.4;h.node=n});
+NODES.forEach((a,i)=>{const near=NODES.map((b,j)=>({j,d:(a.x-b.x)**2+(a.y-b.y)**2,same:b.cl===a.cl})).filter(o=>o.j!==i&&o.same).sort((p,q)=>p.d-q.d).slice(0,2);
+  near.forEach(o=>{if(o.j>i)EDGES.push([i,o.j])})});
+for(let k=0;k<10;k++){const a=NODES.findIndex(n=>n.cl===4&&R()<.3),b=Math.floor(R()*NODES.length);if(a>=0&&NODES[b].cl!==4)EDGES.push([a,b,1])}
+const cam={x:0,y:0,z:1,tx:0,ty:0,tz:1};
+let colors={};const LBL="12px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif";
+function readColors(){const cs=getComputedStyle(document.body);const g=n=>cs.getPropertyValue(n).trim();
+  colors={ink2:g("--ink2"),star:g("--star"),amber:g("--amber"),mint:g("--mint"),red:g("--red"),violet:g("--violet"),dim:g("--dim"),chalk:g("--chalk")}}
+function resize(){DPR=Math.min(2,window.devicePixelRatio||1);W=cv.clientWidth;H=cv.clientHeight;cv.width=W*DPR;cv.height=H*DPR;if(typeof aimCamera==="function"&&typeof S!=="undefined")aimCamera()}
+function hotAt(h,hoursAgo){ // is this hotspot active at that moment?
+  const it=ITEMS.find(i=>i.id===h.ref);
+  if(hoursAgo===0&&it&&(it.status==="done"||it.status==="fixed"))return false;
+  return hoursAgo<=h.from&&hoursAgo>=h.to}
+function toneColor(t){return colors[t]||colors.amber}
+const reduce=matchMedia("(prefers-reduced-motion: reduce)").matches;
+function draw(ts){
+  const t=ts/1000;
+  cam.x+=(cam.tx-cam.x)*.06;cam.y+=(cam.ty-cam.y)*.06;cam.z+=(cam.tz-cam.z)*.06;
+  const sc=Math.min(W,H)*.5*cam.z,ox=W/2,oy=H/2;
+  cx.setTransform(DPR,0,0,DPR,0,0);cx.clearRect(0,0,W,H);
+  const world=S.lens==="world",focus=S.lens==="decide"?current():null,fnode=focus?HOT.find(h=>h.ref===focus.id):null;
+  NODES.forEach(n=>{n.sx=ox+(n.x-cam.x)*sc;n.sy=oy+(n.y-cam.y)*sc});
+  cx.lineWidth=1;
+  EDGES.forEach(([a,b,far])=>{const A=NODES[a],B=NODES[b];const near=fnode&&(A===fnode.node||B===fnode.node);
+    cx.strokeStyle=near?toneColor(fnode.tone):`rgba(${colors.star},${far?(world?.07:.04):(world?.14:.07)})`;cx.globalAlpha=near?.8:1;
+    cx.beginPath();cx.moveTo(A.sx,A.sy);cx.lineTo(B.sx,B.sy);cx.stroke()});
+  cx.globalAlpha=1;
+  NODES.forEach(n=>{const tw=reduce?.75:.55+.35*Math.sin(t*1.3+n.ph);
+    cx.fillStyle=`rgba(${colors.star},${(world?.75:.42)*tw})`;cx.beginPath();cx.arc(n.sx,n.sy,n.r*(world?1.25:1),0,6.283);cx.fill()});
+  HOT.forEach(h=>{if(!hotAt(h,S.t))return;const n=h.node,c=toneColor(h.tone),isF=fnode===h,pul=reduce?1:(1+.35*Math.sin(t*2.4+n.ph));
+    cx.strokeStyle=c;cx.globalAlpha=isF?.9:.5;cx.lineWidth=isF?2:1.2;cx.beginPath();cx.arc(n.sx,n.sy,(isF?13:8)*pul,0,6.283);cx.stroke();
+    cx.globalAlpha=1;cx.fillStyle=c;cx.beginPath();cx.arc(n.sx,n.sy,isF?4.5:3.4,0,6.283);cx.fill();
+    if(world||isF){cx.font=LBL;const w=cx.measureText(h.name).width;cx.globalAlpha=.78;cx.fillStyle=colors.ink2;cx.fillRect(n.sx+12,n.sy-9,w+10,18);
+      cx.globalAlpha=1;cx.fillStyle=colors.chalk;cx.fillText(h.name,n.sx+17,n.sy+4)}});
+  if(world){cx.font=LBL;cx.fillStyle=colors.dim;cx.globalAlpha=.85;cx.textAlign="center";
+    CLUSTERS.forEach(c=>{cx.fillText(c.name,ox+(c.cx-cam.x)*sc,oy+(c.cy-c.sp*1.62-cam.y)*sc)});cx.textAlign="start";cx.globalAlpha=1}
+  requestAnimationFrame(draw)}
+function aimCamera(){
+  if(S.lens==="world"){const narrow=W<=760;cam.tx=0;cam.ty=narrow?-.42:.05;cam.tz=narrow?.86:.92;return}
+  if(S.lens==="live"){cam.tx=0;cam.ty=0;cam.tz=1.05;return}
+  const it=current(),h=it&&HOT.find(h=>h.ref===it.id);
+  if(h){cam.tz=1.3;const sc=Math.min(W,H)*.5*cam.tz,wide=W>1180,px=wide?W/2+494:W/2,py=wide?H*.68:H/2;
+    cam.tx=h.node.x-(px-W/2)/sc;cam.ty=h.node.y-(py-H/2)/sc}else{cam.tx=0;cam.ty=0;cam.tz=1.05}}
+
+/* ───────── pulse strip ───────── */
+const pulseX=h=>(1-Math.sqrt(Math.min(h,24)/24))*100;   // recent hours get more room; the marks keep it honest
+function renderPulse(){
+  $("#pulse").innerHTML=`<span class="lbl">过去 24 小时</span>`+[12,6,3,1].map(h=>`<span class="hm" style="left:${pulseX(h)}%">${h}h</span>`).join("")
+   +EVENTS.map(e=>`<i class="tick ${e.k}" style="left:${pulseX(e.h)}%" data-tip="${clock(e.h)}　${e.t}"></i>`).join("")+`<span class="now" title="现在 ${NOW}"></span>`}
+function clock(h){const m=14*60+20-Math.round(h*60),mm=((m%1440)+1440)%1440;return (m<0?"昨天 ":"")+String(Math.floor(mm/60)).padStart(2,"0")+":"+String(mm%60).padStart(2,"0")}
+
+/* ───────── decide lens ───────── */
+function renderQueue(){
+  const w=waiting();$("#qCount").textContent=w.length;
+  $("#queue").innerHTML=w.map((i,k)=>`<button class="q ${i.tone}" role="option" aria-selected="${k===S.cur}" data-k="${k}">
+    <span class="r"><span class="ref">${i.id}</span><span>等了 ${i.wait}</span></span><span class="t">${i.title}</span><span class="need">${i.need}</span></button>`).join("")}
+function impactSvg(it){const d=it.impact.deps,c="var(--"+(it.tone==="crit"?"red":it.tone==="info"?"violet":"amber")+")";
+  const n=d.length,pts=d.map((_,k)=>[124,n===1?42:12+k*(60/(n-1))]);
+  return `<svg width="150" height="84" viewBox="0 0 150 84" aria-hidden="true">${pts.map(p=>`<line x1="20" y1="42" x2="${p[0]}" y2="${p[1]}" stroke="${c}" stroke-opacity=".55"/>`).join("")}
+   <circle cx="20" cy="42" r="6" fill="${c}"/><circle cx="20" cy="42" r="11" fill="none" stroke="${c}" stroke-opacity=".5"/>
+   ${pts.map(p=>`<circle cx="${p[0]}" cy="${p[1]}" r="4" fill="var(--chalk)" fill-opacity=".85"/>`).join("")}</svg>`}
+function renderBrief(swap){
+  const it=current(),el=$("#brief"),w=waiting();S.rejecting=false;
+  if(!it){el.innerHTML=`<div class="clear"><div class="big">现在没有需要你决定的事</div>
+    <p>agent 还在看着。出现它拿不准的、或者需要人批准的事，会第一时间放到这里。</p>
+    <div class="watch"><div><b class="num">1,623</b>个资源在看</div><div><b class="num">12 分钟</b>前扫过一遍</div><div><b class="num">${RUNS.filter(r=>r.state!=="done").length+ITEMS.filter(i=>i.run&&!i.run.done).length}</b>件事 agent 正在处理</div></div>
+    <p style="font-size:12.5px;margin-top:18px">没有未结问题不等于一切健康：agent 只能看到它被允许看的东西。</p></div>`;return}
+  const pos=`<span class="pos num">${S.cur+1} / ${w.length}</span>`;
+  const head=`<div class="meta"><span class="ref-big">${it.id}</span><span class="sev ${it.tone}">${it.sev}</span><span>等了 ${it.wait}</span><span>${it.scope}</span></div><h1>${it.title}</h1>`;
+  const chips=ev=>`<span style="white-space:nowrap">`+ev.map(e=>`<button class="ev" data-ev="${e}">${e}</button>`).join("")+`</span>`;
+  let body="",acts="";
+  if(it.kind==="approve"){
+    body=`<div class="sec"><h2>为什么</h2><p>${prov(false)}${it.cause.text} ${chips(it.cause.ev)}</p>
+      <div class="trust"><div><small>${prov(false)}模型自己的把握</small><b>${it.cause.self}</b></div><div><small>${prov(false)}另一个模型复核</small><b class="zh">${it.cause.critic}</b></div><div><small>${prov(true)}出事的位置</small><b class="zh">${it.cause.loc}</b></div></div></div>
+     <div class="sec"><h2>打算怎么做　<span class="num" style="color:var(--dim)">${it.plan.label}　${it.plan.hash}　${it.plan.risk}</span></h2>
+      <ol class="steps">${it.plan.steps.map(s=>`<li><span class="say">${s.say}<span class="tier ${s.w?"w":""}">${s.w?"会改动":"只读"}</span></span><code class="cmd">${s.cmd}</code></li>`).join("")}</ol>
+      <p class="note">${prov(true)}每条命令的「会改动 / 只读」是代码分的类。出问题时：${it.plan.rollback}</p></div>
+     <div class="sec"><h2>会碰到谁</h2><div class="impact">${impactSvg(it)}<div><div class="nums"><div><b>${it.impact.s}</b>直接相连</div><div><b>${it.impact.p}</b>可能受影响</div><div><b>${it.impact.o}</b>已经出问题</div></div>
+      <p class="note">${prov(true)}${it.impact.deps.join("、")} 直接依赖它。关系来自规则，不是模型猜的。</p></div></div></div>
+     <div class="sec"><h2>做完怎么算成</h2><ul class="checks">${it.checks.map((c,k)=>`<li><span class="pc">pc-${k+1}</span><span>${c}</span><span class="st">执行后由代码核对</span></li>`).join("")}</ul>
+      <p class="note">少一项结果，就不算通过，会回到这里等你验收。</p></div>`;
+    acts=`<button class="btn primary" id="primary" data-hold="1"><span class="fill"></span><span class="t">按住批准并执行</span><kbd>A</kbd></button>
+      <button class="btn" data-act="reject"><span class="t">退回</span><kbd>R</kbd></button><button class="btn" data-act="ask"><span class="t">问它</span><kbd>E</kbd></button><button class="btn" data-act="snooze"><span class="t">稍后</span><kbd>S</kbd></button>`;
+  }else if(it.kind==="accept"){
+    const tk=S.ticks[it.id]||(S.ticks[it.id]=it.need_checks.map(()=>false).concat(false));
+    const all=tk.every(Boolean);
+    body=`<div class="sec"><h2>做了什么</h2><p>${prov(true)}${it.ran.label}：${it.ran.steps}。 ${chips(it.ev)}</p><p class="note">${prov(true)}${it.ran.bind}。</p></div>
+     <div class="sec"><h2>代码已经核对过的</h2><ul class="checks">${it.auto.map(c=>`<li><span class="pc">${c.pc}</span><span>${c.t}</span><span class="st ok">通过</span></li>`).join("")}</ul></div>
+     <div class="sec"><h2>要你看一眼的</h2><ul class="checks" id="ticks">${it.need_checks.map((c,k)=>`<li><button class="tickbox" role="checkbox" aria-checked="${tk[k]}" data-tick="${k}" aria-label="已核对 ${c.pc}">${tk[k]?"✓":""}</button><span class="pc">${c.pc}</span><span>${c.t}</span><span class="st need">${c.why}</span></li>`).join("")}
+       <li><button class="tickbox" role="checkbox" aria-checked="${tk[tk.length-1]}" data-tick="${tk.length-1}" aria-label="总体确认">${tk[tk.length-1]?"✓":""}</button><span class="pc"></span><span>我看过结果了，目标状态符合预期</span></li></ul>
+      <p class="note">打完勾才能验收。你勾了哪几项会记进审计。</p></div>`;
+    acts=`<button class="btn primary" id="primary" ${all?"":"disabled"}><span class="t">验收</span><kbd>A</kbd></button>
+      <button class="btn" data-act="tick"><span class="t">逐项打勾</span><kbd>X</kbd></button><button class="btn" data-act="reject"><span class="t">不通过</span><kbd>R</kbd></button><button class="btn" data-act="ask"><span class="t">问它</span><kbd>E</kbd></button>`;
+  }else{
+    body=`<div class="sec"><h2>agent 的判断</h2><p>${prov(false)}${it.cause.text} ${chips(it.cause.ev)}</p>
+      <div class="trust"><div><small>${prov(false)}模型自己的把握</small><b style="color:var(--amber)">${it.cause.self}</b></div><div><small>${prov(false)}另一个模型复核</small><b class="zh">${it.cause.critic}</b></div><div><small>${prov(true)}出事的位置</small><b class="zh">${it.cause.loc}</b></div></div>
+      <p class="note">${prov(true)}${it.gate}</p></div>
+     <div class="sec"><h2>你怎么看</h2><div class="choices">
+       <button class="choice" data-verdict="对，照这个出方案"><kbd>Y</kbd>对，照这个出方案</button><button class="choice" data-verdict="部分对"><kbd>P</kbd>部分对，我补充一句</button>
+       <button class="choice" data-verdict="不对"><kbd>N</kbd>不对</button><button class="choice" data-verdict="让它再查一次"><kbd>M</kbd>让它再查一次</button></div>
+      <p class="note">你的判断会成为它下次遇到同类问题时的依据。</p></div>`;
+    acts=`<button class="btn" data-act="ask"><span class="t">问它</span><kbd>E</kbd></button><button class="btn" data-act="snooze"><span class="t">稍后</span><kbd>S</kbd></button>`;
+  }
+  el.innerHTML=head+body+`<div class="actions" id="actions">${acts}<span class="spacer"></span>${pos}</div>`;
+  el.scrollTop=0;if(swap){el.classList.remove("swap");void el.offsetWidth;el.classList.add("swap")}}
+function renderFeed(){
+  const live=ITEMS.filter(i=>i.run);
+  $("#feed").innerHTML=live.map(i=>{const r=i.run;return `<div class="f ${r.done?"":"run"}"><div class="h"><span><span class="dot"></span>${r.done?"做完了":r.pending?"5 秒后开始":"正在执行"}</span><span class="num">${i.id}</span></div>
+     <div>${r.done?`${prov(true)}${r.total} 项检查由代码核对，都通过了`:r.pending?"还可以撤回":i.plan.steps[Math.min(r.step,r.total-1)].say}</div><div class="barp"><i style="width:${r.done?100:Math.round(r.step/r.total*100)}%"></i></div></div>`}).join("")
+   +RUNS.filter(r=>r.state!=="done").map(r=>`<div class="f ${r.state==="run"?"run":""}"><div class="h"><span><span class="dot" ${r.state==="wait"?'style="background:var(--amber)"':""}></span>${r.stateTxt}</span></div><div>${r.title}</div></div>`).join("")}
+function renderDecide(swap){renderQueue();renderBrief(swap);renderFeed();aimCamera()}
+
+/* ───────── actions ───────── */
+let toastTimer=null;
+function toast(html,undo){const el=$("#toast");
+  if(!undo&&S.undo)return;                                      // a plain notice never cuts an undo window short
+  clearTimeout(toastTimer);
+  if(S.undo){const u=S.undo;S.undo=null;u.commit&&u.commit()}   // only the last action can be undone
+  S.undo=undo||null;
+  el.className="toast"+(undo?" count":"");el.innerHTML=`<span class="spark" aria-hidden="true"></span><span class="msg">${html}</span>`+(undo?`<button id="undoBtn">撤回<kbd>Z</kbd></button><i class="cd"></i>`:"");el.hidden=false;
+  if(undo)void el.offsetWidth;
+  toastTimer=setTimeout(()=>{el.hidden=true;if(S.undo){const u=S.undo;S.undo=null;u.commit&&u.commit()}},undo?5000:2600)}
+function doUndo(){if(!S.undo)return;const u=S.undo;S.undo=null;clearTimeout(toastTimer);u.revert();$("#toast").hidden=true;toast("已撤回，什么都没有发生");renderDecide(true)}
+function approve(it){
+  it.status="running";it.run={step:0,total:it.plan.steps.length,pending:true,done:false};
+  toast(`已批准 ${it.id}，5 秒后开始执行`,{revert(){it.status="waiting";delete it.run},commit(){startRun(it)}});renderDecide(true)}
+function startRun(it){it.run.pending=false;renderFeed();
+  const tick=()=>{if(!it.run)return;it.run.step++;if(it.run.step>=it.run.total){it.run.done=true;it.status="fixed";EVENTS.push({h:0.01,k:"agent",t:`${it.id} 已修复，检查全部通过`});renderPulse();renderFeed();toast(`${it.id} 做完了：${it.checks.length} 项检查由代码核对，都通过`);return}renderFeed();setTimeout(tick,1500)};
+  setTimeout(tick,1500)}
+function accept(it){it.status="done";toast(`已验收 ${it.id}`,{revert(){it.status="waiting"},commit(){}});renderDecide(true)}
+function verdict(it,v){it.status="done";toast(`记下了：${v}`,{revert(){it.status="waiting"},commit(){}});renderDecide(true)}
+function snooze(it){const k=ITEMS.indexOf(it);ITEMS.push(ITEMS.splice(k,1)[0]);toast(`${it.id} 放到最后，1 小时后再提醒你`);renderDecide(true)}
+function openReject(){const it=current();if(!it||it.kind==="confirm")return;S.rejecting=true;
+  $("#actions").innerHTML=`<form class="reason" id="rejForm"><input id="rejInput" placeholder="说一句为什么，agent 会照着重做" aria-label="退回的理由" maxlength="200"><button class="btn primary" type="submit"><span class="t">退回</span></button><button class="btn" type="button" data-act="cancel"><span class="t">取消</span><kbd>Esc</kbd></button></form>`;
+  $("#rejInput").focus()}
+function submitReject(){const it=current(),v=$("#rejInput").value.trim();if(!v){$("#rejInput").placeholder="要写一句理由";return}
+  it.status="rejected";toast(`已退回 ${it.id}，agent 会按「${v.slice(0,18)}${v.length>18?"…":""}」重做`,{revert(){it.status="waiting"},commit(){}});renderDecide(true)}
+function tickNext(){const it=current();if(!it||it.kind!=="accept")return;const tk=S.ticks[it.id],k=tk.indexOf(false);if(k<0)return;tk[k]=true;renderBrief(false)}
+let holdTimer=null;
+function primary(){const it=current();if(!it)return;if(it.kind==="approve")approve(it);else if(it.kind==="accept"&&S.ticks[it.id].every(Boolean))accept(it)}
+function holdStart(){const b=$("#primary");if(!b||b.disabled||holdTimer||S.rejecting)return;
+  if(b.dataset.hold!=="1"){primary();return}
+  b.classList.add("holding");holdTimer=setTimeout(()=>{holdTimer=null;primary()},HOLD_MS)}
+function holdEnd(){if(!holdTimer)return;clearTimeout(holdTimer);holdTimer=null;const b=$("#primary");if(b){b.classList.remove("holding");const t=b.querySelector(".t");const old=t.textContent;t.textContent="要按住不放";setTimeout(()=>{if(t.isConnected)t.textContent=old},900)}}
+function move(d){const w=waiting();if(!w.length)return;S.cur=(S.cur+d+w.length)%w.length;closePeek();renderDecide(true);const sel=$('.q[aria-selected="true"]');sel&&sel.scrollIntoView({block:"nearest",inline:"nearest"})}
+function ask(){const it=current(),i=$("#cmd");i.value=it?`@${it.id} `:"";i.focus();showSugg()}
+
+/* ───────── evidence peek ───────── */
+function evList(){const it=current();return it?(it.cause?it.cause.ev:it.ev)||[]:[]}
+function openPeek(id){const list=evList();S.peekIdx=Math.max(0,list.indexOf(id));S.peek=list[S.peekIdx]||id;renderPeek()}
+function renderPeek(){const e=EVID[S.peek],list=evList(),el=$("#peek");if(!e){closePeek();return}
+  el.innerHTML=`<h3><span class="num" style="color:var(--mint)">${S.peek}</span>　${e.title}</h3><div class="src">${prov(e.code)}${e.src}</div><pre>${e.body.replace(/</g,"&lt;")}</pre>
+   <div class="nav"><span><kbd>←</kbd> <kbd>→</kbd> 换一条　<span class="num">${S.peekIdx+1} / ${list.length}</span></span><button class="btn" id="peekClose" style="height:32px"><span class="t">关上</span><kbd>Esc</kbd></button></div>`;el.hidden=false;document.body.classList.add("peeking")}
+function closePeek(){S.peek=null;$("#peek").hidden=true;document.body.classList.remove("peeking")}
+function peekStep(d){const list=evList();if(!list.length)return;S.peekIdx=(S.peekIdx+d+list.length)%list.length;S.peek=list[S.peekIdx];renderPeek()}
+
+/* ───────── live lens ───────── */
+function renderLive(){
+  $("#rec").innerHTML=RUNS.map(r=>`<article class="run" data-run="${r.id}"><header><b>${r.title}</b><span class="state ${r.state==="wait"?"wait":r.state==="done"?"done":""}">${r.stateTxt}</span></header>
+    <ol>${r.steps.map(s=>`<li class="${s.find?"find":""}">${s.act?"":prov(!!s.find)}${s.t}　<code>${s.c}</code></li>`).join("")}</ol>
+    ${r.steer?`<form class="steer"><input placeholder="插一句话：比如「先看下游的超时」" aria-label="给 agent 补充一句"><button class="btn" type="submit" style="height:36px"><span class="t">告诉它</span></button><button class="btn" type="button" data-pause style="height:36px"><span class="t">先停一下</span></button></form>`:""}</article>`).join("")}
+let liveTimer=null;
+function liveStart(){clearInterval(liveTimer);liveTimer=setInterval(()=>{const r=RUNS[0];if(S.lens!=="live"||!r.more.length||r.paused)return;r.steps.push(r.more.shift());if(!r.more.length){r.state="wait";r.stateTxt="查完了，在出方案";}renderLive();renderFeed()},2600)}
+
+/* ───────── world lens ───────── */
+function renderWorld(){
+  const h=S.t,abn=HOT.filter(x=>hotAt(x,h)).length;
+  const list=EVENTS.filter(e=>e.h>=h).sort((a,b)=>a.h-b.h).slice(0,W<=760?4:9);
+  $("#happen").innerHTML=`<h2>${h===0?"现在":"回到 "+clock(h)}</h2><div class="abn num">${abn}<small>个资源不正常</small></div>
+    <ul>${list.map(e=>`<li class="${e.cause?"cause":""}"><time>${clock(e.h).replace("昨天 ","昨 ")}</time><span>${e.t}${e.cause?"　← 之后出的事从这里开始":""}</span></li>`).join("")}</ul>`;
+  $("#scrubLbl").textContent=h===0?`现在 ${NOW}`:`${clock(h)}（${h<1?Math.round(h*60)+" 分钟":h.toFixed(1)+" 小时"}前）`}
+function nodeCard(n){const h=HOT.find(x=>x.node===n),el=$("#nodecard");if(!n){el.hidden=true;return}
+  const it=h&&ITEMS.find(i=>i.id===h.ref);
+  el.innerHTML=`<h3>${n.name||"一个资源"}</h3><div style="color:var(--dim)">${CLUSTERS[n.cl].name}</div>
+   <p style="margin:8px 0 0">${h&&hotAt(h,S.t)?`${prov(true)}有未结的问题 <span class="num">${h.ref}</span>`+(it?`：${it.title}`:"")
+     :`${prov(true)}没有未结的问题。这不等于健康，只是没有发现异常。`}</p>
+   ${it&&it.status==="waiting"?`<div style="margin-top:10px"><button class="btn primary" data-open="${it.id}"><span class="t">去处理</span></button></div>`:""}`;el.hidden=false}
+
+/* ───────── lens ───────── */
+function setLens(l){S.lens=l;closePeek();closeSheet();
+  $$(".lens button").forEach(b=>b.setAttribute("aria-selected",b.dataset.lens===l));
+  $("#decide").hidden=l!=="decide";$("#live").hidden=l!=="live";$("#world").hidden=l!=="world";
+  if(l!=="world"){S.t=0;$("#scrub").value=240;$("#nodecard").hidden=true}
+  if(l==="decide")renderDecide(true);if(l==="live")renderLive();if(l==="world")renderWorld();aimCamera()}
+
+/* ───────── command bar ───────── */
+function commands(){
+  return [
+   {k:"看待决的事",h:"1",run:()=>setLens("decide")},{k:"看 agent 现在在做什么",h:"2",run:()=>setLens("live")},{k:"看全景，拖时间",h:"3",run:()=>setLens("world")},
+   {k:"只看严重的",run:()=>{S.filter="crit";S.cur=0;setLens("decide");toast("只显示严重的。再输入「全部」恢复")}},
+   {k:"全部",run:()=>{S.filter=null;setLens("decide")}},
+   {k:"切换昼 / 夜",h:"T",run:toggleTheme},{k:"快捷键",h:"?",run:()=>{$("#help").hidden=false}},
+   ...ITEMS.filter(i=>i.status==="waiting").map(i=>({k:`${i.id}　${i.title}`,h:i.need,run:()=>{S.filter=null;S.cur=waiting().indexOf(i);setLens("decide")}})),
+   {k:"报告",h:"今天 1 份新的",run:()=>toast("设计稿里没有画这一页：报告、定时任务、技能、设置都从这里进")},
+   {k:"定时任务",h:"1 个连续失败",run:()=>toast("设计稿里没有画这一页")},{k:"技能",run:()=>toast("设计稿里没有画这一页")},{k:"设置",run:()=>toast("设计稿里没有画这一页")},
+  ]}
+let sugg=[];
+function showSugg(){const v=$("#cmd").value.trim(),q=v.replace(/^[\/@]/,"").toLowerCase();
+  let list=commands().filter(c=>!q||c.k.toLowerCase().includes(q));
+  if(v.startsWith("@"))list=list.filter(c=>/^[IC]#/.test(c.k));
+  if(v&&!v.startsWith("/"))list.unshift({k:`问 agent：${v}`,h:"回车",run:()=>answer(v)});
+  sugg=list.slice(0,8);S.sugIdx=0;const el=$("#sugg");
+  if(!sugg.length||document.activeElement!==$("#cmd")){el.hidden=true;return}
+  el.innerHTML=sugg.map((c,k)=>`<button role="option" aria-selected="${k===0}" data-s="${k}"><span>${c.k}</span>${c.h?`<small>${c.h}</small>`:""}</button>`).join("");el.hidden=false;closeSheet()}
+function runSugg(k){const c=sugg[k];if(!c)return;$("#sugg").hidden=true;$("#cmd").value="";$("#cmd").blur();c.run()}
+let typing=null;
+function answer(q){const el=$("#sheet");clearInterval(typing);
+  const about=/I#12|sg_web|22/.test(q);
+  const text=about?"sg_web 是今天 11:52 被部署流水线改的：它加了一条 22 端口对公网的规则，之后没有收回。直接的记录有两条（E1、E2），「为了调试」这一点是我推断的，没有记录能证明。"
+    :"过去 24 小时有三件事值得你知道。其余 14 条信号我已经并到已有的问题里，没有打扰你。";
+  const rows=about?[["11:52","deploy-role 加了规则","E1"],["11:56","扫描发现 22 端口对公网开放","E2"],["12:04","诊断完成，出了方案 v2","—"]]
+    :[["I#12","SSH 对公网开放","严重","等你批准"],["I#37","lambda-pay 错误率升高","高","我正在查"],["I#8","RDS 自动备份被关","高","等你批准"]];
+  el.innerHTML=`<div class="q0">${q.replace(/</g,"&lt;")}</div><div id="ans"></div>`;el.hidden=false;
+  const out=$("#ans");let n=0;typing=setInterval(()=>{n+=3;out.textContent=text.slice(0,n);if(n>=text.length){clearInterval(typing);
+    out.insertAdjacentHTML("afterend",`<table><tr>${(about?["时间","发生了什么","证据"]:["编号","什么事","级别","现在"]).map(h=>`<th>${h}</th>`).join("")}</tr>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join("")}</tr>`).join("")}</table>
+     <div class="more">${(about?["把 E1 给我看","直接批准 I#12"]:["为什么 sg_web 会被改？","打开 I#12","生成今天的日报"]).map(m=>`<button data-more="${m}">${m}</button>`).join("")}</div>`)}},reduce?1:16)}
+function closeSheet(){clearInterval(typing);$("#sheet").hidden=true}
+function toggleTheme(){const b=document.body,n=b.dataset.theme==="night"?"day":"night";b.dataset.theme=n;$("#themeBtn").textContent=n==="night"?"夜":"昼";readColors()}
+
+/* ───────── events ───────── */
+document.addEventListener("click",e=>{
+  const t=e.target.closest("button");if(!t)return;
+  if(t.dataset.lens)return setLens(t.dataset.lens);
+  if(t.dataset.k!==undefined){S.cur=+t.dataset.k;closePeek();return renderDecide(true)}
+  if(t.dataset.ev)return openPeek(t.dataset.ev);
+  if(t.dataset.tick!==undefined){const it=current(),tk=S.ticks[it.id];tk[+t.dataset.tick]=!tk[+t.dataset.tick];return renderBrief(false)}
+  if(t.dataset.verdict)return verdict(current(),t.dataset.verdict);
+  if(t.dataset.act==="reject")return openReject();
+  if(t.dataset.act==="cancel")return renderBrief(false);
+  if(t.dataset.act==="ask")return ask();
+  if(t.dataset.act==="snooze")return snooze(current());
+  if(t.dataset.act==="tick")return tickNext();
+  if(t.dataset.s!==undefined)return runSugg(+t.dataset.s);
+  if(t.dataset.more){const m=t.dataset.more;if(m==="打开 I#12"||m==="直接批准 I#12"){closeSheet();S.filter=null;S.cur=Math.max(0,waiting().findIndex(i=>i.id==="I#12"));return setLens("decide")}if(m==="把 E1 给我看"){closeSheet();return openPeek("E1")}return answer(m)}
+  if(t.dataset.open){S.cur=Math.max(0,waiting().findIndex(i=>i.id===t.dataset.open));return setLens("decide")}
+  if(t.id==="undoBtn")return doUndo();
+  if(t.id==="peekClose")return closePeek();
+  if(t.id==="themeBtn")return toggleTheme();
+  if(t.id==="helpBtn"){$("#help").hidden=false;return}
+  if(t.id==="helpClose"){$("#help").hidden=true;return}
+  if(t.id==="scopeBtn")return toast("设计稿里账户范围只有「全部」");
+  if(t.dataset.pause!==undefined){const r=RUNS[0];r.paused=!r.paused;r.stateTxt=r.paused?"停住了，等你":"正在查";t.querySelector(".t").textContent=r.paused?"继续":"先停一下";$('.run[data-run="r1"] .state').textContent=r.stateTxt;return}
+});
+document.addEventListener("submit",e=>{e.preventDefault();
+  if(e.target.id==="rejForm")return submitReject();
+  if(e.target.classList.contains("steer")){const i=e.target.querySelector("input"),v=i.value.trim();if(!v)return;RUNS[0].steps.push({t:`你说：「${v}」。它调整了下一步`,c:"steer",find:true});renderLive();toast("告诉它了，它会先做这件事")}});
+// hold with pointer
+document.addEventListener("pointerdown",e=>{if(e.target.closest("#primary"))holdStart()});
+["pointerup","pointercancel","pointerleave"].forEach(ev=>document.addEventListener(ev,e=>{if(holdTimer)holdEnd()},true));
+const cmd=$("#cmd");
+cmd.addEventListener("input",showSugg);cmd.addEventListener("focus",showSugg);
+cmd.addEventListener("blur",()=>setTimeout(()=>{$("#sugg").hidden=true},120));
+cmd.addEventListener("keydown",e=>{
+  if(e.key==="ArrowDown"||e.key==="ArrowUp"){e.preventDefault();if(!sugg.length)return;S.sugIdx=(S.sugIdx+(e.key==="ArrowDown"?1:-1)+sugg.length)%sugg.length;$$("#sugg button").forEach((b,k)=>b.setAttribute("aria-selected",k===S.sugIdx))}
+  else if(e.key==="Enter"&&!e.isComposing&&e.keyCode!==229){e.preventDefault();if(sugg.length)runSugg(S.sugIdx)}
+  else if(e.key==="Escape"){cmd.value="";cmd.blur()}});
+document.addEventListener("keydown",e=>{
+  const inField=/INPUT|TEXTAREA/.test(document.activeElement.tagName);
+  if(e.key==="Escape"){if(!$("#help").hidden){$("#help").hidden=true;return}if(S.peek)return closePeek();if(!$("#sheet").hidden)return closeSheet();if(S.rejecting)return renderBrief(false);return}
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="k"){e.preventDefault();cmd.focus();return}
+  if(inField||e.metaKey||e.ctrlKey||e.altKey)return;
+  const k=e.key.toLowerCase();
+  if(k==="/"){e.preventDefault();$("#toast").hidden=true;cmd.focus();return}
+  if(k==="?"){$("#help").hidden=false;return}
+  if(!$("#help").hidden)return;
+  if(k==="1")return setLens("decide");if(k==="2")return setLens("live");if(k==="3")return setLens("world");
+  if(k==="t")return toggleTheme();if(k==="z")return doUndo();
+  if(S.lens!=="decide")return;
+  if(S.peek){if(k==="arrowright")return peekStep(1);if(k==="arrowleft")return peekStep(-1);if(k===" "){e.preventDefault();return closePeek()}}
+  const it=current();if(!it)return;
+  if(k==="j"||k==="arrowdown"){e.preventDefault();return move(1)}
+  if(k==="k"||k==="arrowup"){e.preventDefault();return move(-1)}
+  if(k==="a"){if(!e.repeat)holdStart();return}
+  if(k==="r")return (e.preventDefault(),openReject());
+  if(k==="e")return (e.preventDefault(),ask());
+  if(k==="s")return snooze(it);
+  if(k==="x")return tickNext();
+  if(k===" "){e.preventDefault();const l=evList();if(l.length)openPeek(l[0]);return}
+  if(it.kind==="confirm"){const m={y:"对，照这个出方案",p:"部分对",n:"不对",m:"让它再查一次"}[k];if(m)return verdict(it,m)}
+});
+document.addEventListener("keyup",e=>{if(e.key.toLowerCase()==="a")holdEnd()});
+$("#scrub").addEventListener("input",e=>{S.t=(240-+e.target.value)/10;renderWorld()});
+cv.addEventListener("mousemove",e=>{if(S.lens!=="world"){$("#tip").hidden=true;return}
+  let best=null,bd=18*18;NODES.forEach(n=>{const d=(n.sx-e.clientX)**2+(n.sy-e.clientY)**2;if(d<bd){bd=d;best=n}});
+  const tip=$("#tip");if(!best){tip.hidden=true;cv.style.cursor="default";return}
+  const h=HOT.find(x=>x.node===best);tip.textContent=(best.name||"资源")+"　"+(h&&hotAt(h,S.t)?h.ref+" 未结":"没有未结问题");tip.style.left=e.clientX+14+"px";tip.style.top=e.clientY+12+"px";tip.hidden=false;cv.style.cursor="pointer"});
+cv.addEventListener("click",e=>{if(S.lens!=="world")return;let best=null,bd=18*18;NODES.forEach(n=>{const d=(n.sx-e.clientX)**2+(n.sy-e.clientY)**2;if(d<bd){bd=d;best=n}});nodeCard(best)});
+window.addEventListener("resize",resize);
+
+/* ───────── boot ───────── */
+readColors();resize();renderPulse();renderDecide(false);liveStart();requestAnimationFrame(draw);
+window.__proto={S,ITEMS,waiting,current};
+})();
+</script>
+</body>
+</html>
