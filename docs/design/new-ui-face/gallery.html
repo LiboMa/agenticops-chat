@@ -152,9 +152,33 @@ function render(el, name){
     <p class="rule" style="margin:12px 0 8px">变更的 12 个状态：</p>${states("change")}
     <p class="rule">每个状态说三件事：它叫什么、在等谁、后端的名字。在等人的用琥珀色。</p></div>
 
-  <div class="gsec"><h3>agent 在做的事</h3><div class="feed" style="max-width:260px">
-    <div class="f run"><div class="h"><span><span class="dot"></span>正在执行</span><span class="num">I#12</span></div><div>确认堡垒机网段的规则还在</div><div class="barp"><i style="width:66%"></i></div></div>
-    <div class="f"><div class="h"><span><span class="dot" style="background:var(--amber)"></span>在过策略</span></div><div>I#40 的修复方案草稿</div></div></div></div>
+  <div class="gsec"><h3>现场：一条在做的事</h3><div style="max-width:320px;display:grid;gap:6px">
+    <div class="lane run" aria-selected="true"><span class="lt"><span class="ag">执行器</span><span class="st">第 2 / 3 步</span></span><span class="ti">执行 I#12</span><span class="sb">安全组 sg_web 把 SSH 开给了整个公网</span><div class="strip"><i class="done"></i><i class="now"></i><i class="todo"></i></div></div>
+    <div class="lane held"><span class="lt"><span class="ag">RCA agent</span><span class="st">停住了，等你</span></span><span class="ti">诊断 I#37　lambda-pay 错误率升高</span><div class="strip"><i class="done"></i><i class="done"></i><i class="you"></i><i class="held"></i><i class="todo"></i></div></div>
+    <div class="lane wait"><span class="lt"><span class="ag">SRE agent</span><span class="st">在过策略</span></span><span class="ti">I#63 的修复方案草稿</span><div class="strip"><i class="done"></i><i class="wait"></i></div></div>
+    <div class="lane stop"><span class="lt"><span class="ag">执行器</span><span class="st">正在回滚</span></span><span class="ti">执行 I#8</span><div class="strip"><i class="done"></i><i class="skip"></i><i class="now"></i></div></div>
+    <div class="lane done"><span class="lt"><span class="ag">执行器</span><span class="st">12 分钟前完成</span></span><span class="ti">执行 I#58　清理 web-2 的磁盘</span><div class="strip"><i class="done"></i><i class="done"></i><i class="done"></i></div></div></div>
+    <p class="rule">左边的竖条和状态的颜色是一回事：青绿 = agent 在做，琥珀 = 在等（等你、等策略、等时间），红 = 叫停和回滚，灰 = 做完了。步骤条一格一步：做完、正在做、还没到、你插的话、没有执行（虚线）。</p></div>
+
+  <div class="gsec"><h3>现场：一步一步的记录</h3>
+    <ol class="lsteps" style="margin-top:0">
+      <li class="done"><span class="say"><span class="actm">▸</span>取这个函数周围的关系和最近的变更</span><code class="cmd">get_topology_evidence(I#37)</code></li>
+      <li class="done"><span class="say">${prov(true)}05:52 UTC 有一次发布：pay-fn 版本 41 → 42</span><code class="cmd">cloudtrail lookup-events</code></li>
+      <li class="done you"><span class="say"><b class="youtag">你</b>先看下游 orders-api 的超时</span></li>
+      <li class="now"><span class="say">${prov(false)}收到。先核对这一点，再继续原来的顺序。</span></li>
+      <li class="skip"><span class="say"><span class="actm">▸</span>被叫停之后没有执行的步骤<span class="tier w">会改动</span></span><code class="cmd">aws ec2 …</code></li>
+      <li class="todo more">后面还有 2 步</li></ol>
+    <p class="rule">每一步前面的记号说明它是什么：◆ 代码取到的事实、◇ 模型自己的话、▸ agent 做的动作。你插的话留在记录里。执行按批准的那一版走，不能插话，只能叫停。</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px"><button class="btn danger"><span class="fill"></span><span class="t">按住叫停并回滚</span><kbd>A</kbd></button><button class="btn primary"><span class="t">继续</span><kbd>A</kbd></button><button class="btn"><span class="t">先停一下</span><kbd>A</kbd></button></div></div>
+
+  <div class="gsec"><h3>全景：资源的健康只有四个值</h3>
+    <div style="display:grid;gap:4px;font-size:var(--fs-sm)">
+      <span><i class="hdot" style="background:var(--red)"></i>严重</span><span><i class="hdot" style="background:var(--amber)"></i>有问题</span>
+      <span><i class="hdot" style="background:var(--mint)"></i>有事在处理（agent）　<i class="hdot" style="background:var(--violet)"></i>有事在处理（待批的变更）</span>
+      <span><i class="hdot" style="background:rgb(var(--star))"></i>未知（没有未结问题）</span></div>
+    <p class="rule">没有「健康」这个值：没有未结问题只说明没有发现异常。回到过去看时，按那个时刻算。连线里虚线是模型推断的关系，仅供参考。</p>
+    <div class="scrub card" style="position:static;transform:none;width:100%;margin-top:10px"><div class="row"><button class="btn sm"><span class="t">◂</span><kbd>[</kbd></button><button class="btn sm"><span class="t">回放 24 小时</span><kbd>P</kbd></button><button class="btn sm"><span class="t">▸</span><kbd>]</kbd></button><b>03:52 UTC（2 小时前）</b></div>
+      <div class="ticks"><i class="signal" style="left:20%"></i><i class="agent" style="left:44%"></i><i class="change cause" style="left:88%"></i><i class="decision" style="left:92%"></i></div><input type="range" min="0" max="240" value="215" aria-label="时间"></div></div>
 
   <div class="gsec"><h3>表格</h3><table class="grid"><tr><th>编号</th><th>什么事</th><th>级别</th><th>现在</th></tr><tr><td class="num">I#12</td><td>SSH 对公网开放</td><td>严重</td><td>等你批准</td></tr><tr><td class="num">I#37</td><td>lambda-pay 错误率升高</td><td>高</td><td>agent 正在查</td></tr></table></div>
 

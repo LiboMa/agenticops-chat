@@ -36,14 +36,20 @@
     <aside class="facts card" id="storyFacts"></aside>
   </section>
 
-  <section class="view" id="live" hidden><div class="rec" id="rec"></div></section>
+  <section class="view" id="live" hidden>
+    <aside class="lanes" id="lanes"></aside>
+    <article class="stream card" id="stream" aria-live="polite"></article>
+  </section>
 
   <section class="view" id="world" hidden>
-    <div class="happen card" id="happen"></div>
-    <div class="nodecard card" id="nodecard" hidden></div>
+    <div class="wleft" id="wleft"><div class="wtools card" id="wtools"></div><div class="happen card" id="happen"></div></div>
+    <p class="wpast" id="wpast" hidden></p>
+    <aside class="nodecard card" id="nodecard" hidden></aside>
     <div class="legend" id="legend"></div>
-    <div class="scrub card">
-      <div class="row"><span id="scrubT"></span><b id="scrubLbl"></b></div>
+    <div class="wstate card" id="wstate" hidden></div>
+    <div class="scrub card" id="scrubCard">
+      <div class="row" id="scrubCtl"></div>
+      <div class="ticks" id="scrubTicks" aria-hidden="true"></div>
       <input type="range" id="scrub" min="0" max="240" value="240">
     </div>
   </section>
@@ -64,8 +70,11 @@
 
 <script src="data.js"></script>
 <script src="data-situations.js"></script>
+<script src="data-live.js"></script>
 <script src="i18n.js"></script>
 <script src="proto.js"></script>
+<script src="model-live.js"></script>
+<script src="model-world.js"></script>
 <script src="screens/sky.js"></script>
 <script src="screens/briefs-core.js"></script>
 <script src="screens/briefs-recovery.js"></script>

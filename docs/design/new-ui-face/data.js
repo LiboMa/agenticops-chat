@@ -91,26 +91,6 @@ NF.seed = {
           body: "orders-svc 最近 14 次停止：\n  OutOfMemoryError: Container killed due to memory usage   ×9\n  Essential container exited (exit 137)                     ×5" },
   },
 
-  /* What agents are doing right now (the «现场» lens). `act` = an action the agent took, `find` = a fact the code
-     fetched; neither = the model's own inference. */
-  runs: [
-    { id: "r1", title: "诊断 I#37　lambda-pay 错误率升高", state: "run", stateKey: "live.investigating", steer: true, steps: [
-        {t: "取这个函数周围的关系和最近的变更", c: "get_topology_evidence(I#37)", act: true},
-        {t: "05:55 UTC 起错误率从 0.2% 升到 7.4%", c: "cloudwatch get-metric-data", find: true},
-        {t: "05:52 UTC 有一次发布：pay-fn 版本 41 → 42", c: "cloudtrail lookup-events", find: true},
-        {t: "在看版本 42 改了什么……", c: "lambda get-function --qualifier 42", act: true}],
-      more: [
-        {t: "版本 42 把超时从 30 秒改成了 3 秒", c: "diff 41..42", find: true},
-        {t: "下游 orders-api 的 p95 是 4.1 秒，超过新的超时", c: "cloudwatch get-metric-data", find: true},
-        {t: "推断：超时改成 3 秒后，调下游的请求全部超时。把握 86%", c: "save_rca_result"}] },
-    { id: "r2", title: "扫描 us-east-1 的资源", state: "run", stateText: "62%", steps: [
-        {t: "已列完 EC2、RDS、ELB；正在列 EKS", c: "scan", act: true}] },
-    { id: "r3", title: "I#40 的修复方案草稿", state: "wait", stateKey: "live.inPolicy", steps: [
-        {t: "3 步里有 1 步分类不了，不会自动批准，会来问你", c: "unclassified_command", find: true}] },
-    { id: "r4", title: "执行 I#31", state: "done", stateKey: "live.doneAgo", agoMin: 12, steps: [
-        {t: "3 项检查由代码逐项核对，全部通过", c: "verification: passed", find: true}] },
-  ],
-
   /* The last 24 hours (the pulse strip and the «全景» list). k: signal | agent | decision | change */
   events: [
     {h: 18.17, k: "signal", t: "database-demo 的自动备份被关闭"},
@@ -129,20 +109,20 @@ NF.seed = {
 
   /* The starfield: clusters of resources and the named ones that have something open.
      from / to = the hours-ago interval in which the resource is not normal. */
-  clusters: [
-    {name: "生产　us-east-1", cx: -.52, cy: -.22, n: 132, sp: .2},
-    {name: "生产　ap-southeast-1", cx: .5, cy: -.34, n: 96, sp: .17},
-    {name: "数据　cn-northwest-1", cx: .42, cy: .42, n: 84, sp: .16},
-    {name: "EKS chaos-lab", cx: -.44, cy: .48, n: 72, sp: .15},
-    {name: "公共与边缘", cx: 0, cy: .04, n: 40, sp: .12},
+  clusters: [                                   // n adds up to watch.resources; profile = how its resource types are mixed (model-world.js)
+    {name: "生产　us-east-1", cx: -.52, cy: -.22, n: 505, sp: .2, account: "prod", region: "us-east-1", profile: "general"},
+    {name: "生产　ap-southeast-1", cx: .5, cy: -.34, n: 368, sp: .17, account: "prod", region: "ap-southeast-1", profile: "general"},
+    {name: "数据　cn-northwest-1", cx: .42, cy: .42, n: 322, sp: .16, account: "data", region: "cn-northwest-1", profile: "data"},
+    {name: "EKS chaos-lab", cx: -.44, cy: .48, n: 276, sp: .15, account: "prod", region: "us-east-1", profile: "k8s"},
+    {name: "公共与边缘", cx: 0, cy: .04, n: 152, sp: .12, account: "prod", region: "global", profile: "edge"},
   ],
   hot: [
-    {name: "sg_web", cl: 0, from: 2.4, to: 0, tone: "red", ref: "I12"},
-    {name: "database-demo", cl: 2, from: 18.17, to: 0, tone: "amber", ref: "I8"},
-    {name: "aurora-main", cl: 2, from: 30, to: 0.7, tone: "amber", ref: "I934"},
-    {name: "ecs-orders", cl: 0, from: 4.8, to: 0, tone: "amber", ref: "I21"},
-    {name: "lambda-pay", cl: 1, from: 0.42, to: 0, tone: "mint", ref: "I37"},
-    {name: "web-asg", cl: 1, from: 5, to: 0, tone: "violet", ref: "C3"},
+    {name: "sg_web", cl: 0, from: 2.4, to: 0, tone: "red", ref: "I12", type: "network"},
+    {name: "database-demo", cl: 2, from: 18.17, to: 0, tone: "amber", ref: "I8", type: "database"},
+    {name: "aurora-main", cl: 2, from: 30, to: 0.7, tone: "amber", ref: "I934", type: "database"},
+    {name: "ecs-orders", cl: 0, from: 4.8, to: 0, tone: "amber", ref: "I21", type: "container"},
+    {name: "lambda-pay", cl: 1, from: 0.42, to: 0, tone: "mint", ref: "I37", type: "compute"},
+    {name: "web-asg", cl: 1, from: 5, to: 0, tone: "violet", ref: "C3", type: "compute"},
   ],
   watch: { resources: 1623, lastScanMin: 12 },
 };

@@ -47,9 +47,9 @@ B.quote = (text, cite) => `<blockquote class="quote">${esc(tx(text))}<cite>${esc
 B.checksAfter = it => `<ul class="checks">${it.checks.map((c, k) => `<li><span class="pc">pc-${k + 1}</span><span>${esc(tx(c))}</span><span class="st">${t("checks.after")}</span></li>`).join("")}</ul>`;
 
 NF.briefs.failed = {
-  ask: () => t("ask.failed"),
+  ask: it => t(it.lastRun.stopped ? "ask.stopped" : "ask.failed"),                  // a run a person stopped is the same page with other words
   body: it => { const r = it.lastRun; return `
-    <div class="sec"><h2>${t("sec.failedStep")}</h2><p>${prov(true)}${esc(t("ran.failed", {run: r.id, n: r.failedAt, duration: tx(r.duration)}))}</p>${B.runSteps(r)}</div>
+    <div class="sec"><h2>${t(r.stopped ? "sec.stoppedAt" : "sec.failedStep")}</h2><p>${prov(true)}${esc(t(r.stopped ? "ran.stopped" : "ran.failed", {run: r.id, n: r.failedAt, duration: tx(r.duration)}))}</p>${B.runSteps(r)}</div>
     <div class="sec"><h2>${t("sec.stateNow")}</h2><p>${prov(true)}${esc(tx(r.rollback))}</p></div>
     <div class="sec"><h2>${t("sec.itsReason")}</h2>${B.cause(it)}</div>`; },
   buttons: it => `<button class="btn primary" id="primary" data-do="primary"><span class="t">${t("act.newPlan")}</span><kbd>A</kbd></button>`

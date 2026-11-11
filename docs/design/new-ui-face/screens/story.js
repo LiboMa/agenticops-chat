@@ -47,9 +47,10 @@ NF.storyPhases = it => {
       : cur === "approve" && it.status === "waiting" ? P`${t("story.approve.waiting")}`
       : P`${esc(t("story.approve.done", {by: who(it.approved ? it.approved.by : "you"), t: at.approve != null ? NF.clockAt(at.approve) : NF.clockAt(0)}))}`,
     run: () => {
-      if (it.run && !it.run.done) return P`${it.run.pending ? t("feed.pending") + "。" + t("feed.canUndo") + "。" : esc(t("story.run.running", {i: Math.min(it.run.step + 1, it.run.total), n: it.run.total}))}`;
+      if (it.run && !it.run.done) return P`${it.run.pending ? t("feed.pending") + "。" + t("feed.canUndo") + "。" : esc(t("story.run.running", {i: Math.min(it.run.step + 1, it.run.total), n: it.run.total}))}`
+        + `<p><button class="btn sm" data-do="lane" data-id="x-${it.id}"><span class="t">${t("story.watchLive")}</span></button></p>`;
       if (it.status === "fixed") return P`${prov(true)}${t("story.run.fixed")}`;
-      if (it.lastRun) return `<details class="more"><summary>${prov(true)}${esc(t("ran.failed", {run: it.lastRun.id, n: it.lastRun.failedAt, duration: tx(it.lastRun.duration)}))}</summary>${NF.briefParts.runSteps(it.lastRun)}</details>`
+      if (it.lastRun) return `<details class="more"><summary>${prov(true)}${esc(t(it.lastRun.stopped ? "ran.stopped" : "ran.failed", {run: it.lastRun.id, n: it.lastRun.failedAt, duration: tx(it.lastRun.duration)}))}</summary>${NF.briefParts.runSteps(it.lastRun)}</details>`
         + P`${prov(true)}${esc(tx(it.lastRun.rollback))}`;
       if (it.kind === "not_started") return P`${prov(true)}${t("story.run.notStarted")}` + P`${prov(true)}${esc(tx(it.why))}`;
       if (it.ran) return P`${prov(true)}${esc(t("story.run.done", {run: it.ran.run, steps: it.ran.steps}))}`;
@@ -74,15 +75,15 @@ NF.storyPhases = it => {
 function render(){
   const it = NF.store.get(S.story); if (!it){ NF.setLens("decide"); return; }
   if (S.view !== "ready"){                       // loading / failed / not there: the same three pictures as every screen
-    const back = `<button class="back" data-do="storyBack">← ${t("story.back")}<kbd>Esc</kbd></button>`;
+    const back = `<button class="back" data-do="storyBack">← ${t("story.back." + (S.storyFrom || "decide"))}<kbd>Esc</kbd></button>`;
     $("#storyMain").dataset.id = ""; $("#storyFacts").hidden = true;
-    $("#storyMain").innerHTML = back + (S.view === "empty" ? `<div class="state"><div class="big">${t("story.none.big")}</div><p>${t("story.none.p")}</p></div>` : NF.stateBlock(S.view));
+    $("#storyMain").innerHTML = back + (S.view === "empty" ? `<div class="state"><div class="big">${t("story.none.big")}</div><p>${t("story.none.p")}</p></div>` : NF.stateBlock(S.view, "story.failed.p"));
     return;
   }
   $("#storyFacts").hidden = false;
   const state = NF.stateOf(it), waits = NF.waitsOn(it), acct = NF.seed.accounts.find(a => a.id === it.account), b = NF.briefs[it.kind];
   const main = $("#storyMain"), keep = main.dataset.id === it.id ? main.scrollTop : 0; main.dataset.id = it.id; main.setAttribute("aria-label", t("story.label"));
-  main.innerHTML = `<button class="back" data-do="storyBack">← ${t("story.back")}<kbd>Esc</kbd></button>
+  main.innerHTML = `<button class="back" data-do="storyBack">← ${t("story.back." + (S.storyFrom || "decide"))}<kbd>Esc</kbd></button>
     <div class="meta" style="margin-top:10px"><span class="ref">${it.ref}</span><span class="sev ${it.tone}">${NF.sevLabel(it)}</span></div>
     <h1>${esc(tx(it.title))}</h1>
     <div class="statusline"><b>${t(`state.${it.entity}.${state}`)}</b><span class="${waits === "you" ? "wait" : ""}">${t("wait." + waits)}${it.status === "waiting" && !it.snoozed ? "　" + NF.fmtWait(it.waitMin) : ""}</span>
@@ -107,9 +108,9 @@ function render(){
       <button class="btn sm" type="submit"><span class="t">${t("note.add")}</span></button></form>` : ""}
     <p class="note">${t("note.rule")}</p>`;
 }
-NF.openStory = id => { if (!NF.store.get(id)) return; S.story = id; NF.setLens("story"); };
+NF.openStory = id => { if (!NF.store.get(id)) return; if (S.lens !== "story") S.storyFrom = S.lens; S.story = id; NF.setLens("story"); };
 Object.assign(NF.on, {
-  storyBack: () => { const it = NF.store.get(S.story); if (it && it.status === "waiting") S.cur = it.id; NF.setLens("decide"); },
+  storyBack: () => { const it = NF.store.get(S.story); if (it && it.status === "waiting") S.cur = it.id; NF.setLens(S.storyFrom || "decide"); },
   storyDecide: () => NF.on.storyBack(),
   storyReopen: () => NF.actions.reopen(NF.store, S.story),
 });

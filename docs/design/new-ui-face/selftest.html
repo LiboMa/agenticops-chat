@@ -22,8 +22,11 @@
 
 <script src="data.js"></script>
 <script src="data-situations.js"></script>
+<script src="data-live.js"></script>
 <script src="i18n.js"></script>
 <script src="proto.js"></script>
+<script src="model-live.js"></script>
+<script src="model-world.js"></script>
 <script src="screens/briefs-core.js"></script>
 <script src="screens/briefs-recovery.js"></script>
 <script src="screens/briefs-change.js"></script>
@@ -202,6 +205,85 @@ test("「经过」页列出方案的每一步和每一次执行", () => { const 
 test("只读账户看得到每一页简报，但没有任何可以动手的控件", () => { NF.store = NF.createStore(NF.seed, fakeClock()); NF.store.role = "viewer";
   NF.store.items.forEach(i => { const body = NF.briefs[i.kind].body(i);
     yes(body.includes('class="sec"'), i.ref + " still shows its content"); yes(!/<button class="(tickbox|choice)"|<input/.test(body), i.ref + " has a write control"); }); });
+
+/* ── D3: the «现场» lens ─────────────────────────────────────────────── */
+const runsCopy = () => JSON.parse(JSON.stringify(NF.seed.runs));
+const lane = (store, runs, id) => NF.live.lanes(store, runs).find(l => l.id === id);
+test("现场：批准的事出现在现场，先是「还可以撤回」，然后一步一步走", () => { const {store, clock} = fresh(), runs = runsCopy();
+  eq(lane(store, runs, "x-I12"), undefined, "nothing before the approval:"); A.approve(store, "I12");
+  let l = lane(store, runs, "x-I12"); eq([l.state, l.agent, l.group, l.can.undo, l.can.stop], ["pending", "executor", "running", true, false]);
+  eq(l.steps.map(s => s.status), ["todo", "todo", "todo"]); yes(l.steps[0].cmd && l.steps[0].tier, "each step carries its command and tier");
+  clock.advance(NF.UNDO_MS); l = lane(store, runs, "x-I12"); eq([l.state, l.can.undo, l.can.stop, l.can.steer], ["run", false, true, false]); eq(l.steps.map(s => s.status), ["now", "todo", "todo"]);
+  clock.advance(NF.STEP_MS); eq(lane(store, runs, "x-I12").steps.map(s => s.status), ["done", "now", "todo"]);
+  clock.advance(NF.STEP_MS * 2); l = lane(store, runs, "x-I12"); eq([l.state, l.group], ["done", "finished"]); eq(l.steps.map(s => s.status), ["done", "done", "done"]); });
+test("现场：交给 agent 的事也有一条，说得出是哪个 agent 在做什么", () => { const {store, clock} = fresh(), runs = runsCopy();
+  A.reject(store, "I12", "先收紧"); clock.advance(NF.UNDO_MS); const l = lane(store, runs, "a-I12");
+  eq([l.state, l.agent, l.group, l.itemId], ["run", "sre", "running", "I12"]); eq(l.can, {steer: false, pause: false, stop: false, undo: false});
+  A.rediagnose(store, "I44"); clock.advance(NF.UNDO_MS); eq(lane(store, runs, "a-I44").agent, "rca");
+  clock.advance(NF.AGENT_MS); eq(lane(store, runs, "a-I44"), undefined, "gone when the agent has finished:"); });
+test("叫停：当前这一步做完后停下并回滚，问题带着「你叫停了」回到待决", () => { const {store, clock} = fresh(), runs = runsCopy();
+  eq(store.stopRun("I12"), false, "nothing is running:"); A.approve(store, "I12"); eq(store.stopRun("I12"), false, "still in the undo window — undo is the tool:");
+  clock.advance(NF.UNDO_MS + NF.STEP_MS); yes(store.stopRun("I12")); eq(store.stopRun("I12"), false, "already stopping:");
+  let l = lane(store, runs, "x-I12"); eq([l.state, l.can.stop], ["stopping", false]);
+  clock.advance(NF.STEP_MS); eq(lane(store, runs, "x-I12").state, "rollback"); clock.advance(NF.STEP_MS);
+  const it = store.get("I12"); eq([it.status, it.kind, it.situation, it.reason, NF.stateOf(it), it.returned], ["waiting", "failed", "needsNewPlan", "execution_failed", "root_cause_identified", "returned.stopped"]);
+  eq([it.lastRun.stopped, it.lastRun.failedAt], [true, 2]); eq(it.lastRun.steps.map(s => s.status), ["ok", "ok", "skip"]); eq(it.run, undefined);
+  eq(lane(store, runs, "x-I12"), undefined, "the lane is gone: the item is back in the queue"); yes(store.waiting().some(i => i.id === "I12"));
+  const b = NF.briefs.failed; NF.store = store; yes(b.ask(it).length > 4 && b.body(it).includes('class="steps"'), "its brief can be drawn"); });
+test("叫停一张变更：回滚后这张变更单结束（rolled_back），不回到待决", () => { const {store, clock} = fresh();
+  A.approve(store, "C3"); clock.advance(NF.UNDO_MS); yes(store.stopRun("C3")); clock.advance(NF.STEP_MS * 2);
+  const it = store.get("C3"); eq([it.status, NF.stateOf(it), NF.waitsOn(it)], ["done", "rolled_back", "none"]); eq(store.waiting().some(i => i.id === "C3"), false); });
+test("叫停得太晚（最后一步已经在做）：照常做完；只读账户不能叫停", () => { const {store, clock} = fresh();
+  A.approve(store, "I12"); clock.advance(NF.UNDO_MS + NF.STEP_MS * 2); yes(store.stopRun("I12"), "accepted during the last step"); clock.advance(NF.STEP_MS);
+  eq(store.get("I12").status, "fixed", "nothing was left to stop:"); yes(store.notices.includes("toast.stopTooLate"));
+  const b = fresh(); A.approve(b.store, "I8"); b.clock.advance(NF.UNDO_MS); b.store.role = "viewer"; eq(b.store.stopRun("I8"), false, "a viewer:"); });
+test("插话：只对正在诊断或出方案的 agent；执行按批准的那一版走，不能插话", () => { const {store, clock} = fresh(), runs = runsCopy(), r1 = runs.find(r => r.id === "r1");
+  eq(NF.live.steer(store, r1, "  "), false, "empty:"); const n = r1.steps.length; yes(NF.live.steer(store, r1, "先看下游的超时"));
+  eq(r1.steps.length, n + 2, "your words and the agent's answer:"); yes(r1.steps[n].you && r1.steps[n].t === "先看下游的超时");
+  yes(lane(store, runs, "r1").can.steer); eq(NF.live.steer(store, runs.find(r => r.agent === "scan"), "x"), false, "a scan takes no steering:");
+  A.approve(store, "I12"); clock.advance(NF.UNDO_MS); eq(lane(store, runs, "x-I12").can.steer, false, "an execution:");
+  store.role = "viewer"; eq(NF.live.steer(store, r1, "x"), false, "a viewer:"); eq(lane(store, runs, "r1").can, {steer: false, pause: false, stop: false, undo: false}); });
+test("暂停后不再往下走，继续后接着走；走完之后停在「在出方案」", () => { const {store} = fresh(), runs = runsCopy(), r1 = runs.find(r => r.id === "r1");
+  const n = r1.steps.length, more = r1.more.length; yes(NF.live.pause(store, r1)); eq(r1.state, "paused"); NF.live.tick(runs); eq(r1.steps.length, n, "paused:");
+  eq(lane(store, runs, "r1").group, "waiting", "a paused run waits on you:"); yes(NF.live.pause(store, r1)); eq(r1.state, "run");
+  for (let i = 0; i < more; i++) NF.live.tick(runs); eq([r1.steps.length, r1.state, r1.stateKey], [n + more, "wait", "live.planning"]);
+  eq(NF.live.pause(store, r1), false, "nothing to pause once it is done:"); });
+test("扫描走到 100% 记为完成；现场分三组，每一条都有 agent 的名字和状态的说法", () => { const {store} = fresh(), runs = runsCopy(), scan = runs.find(r => r.agent === "scan");
+  for (let i = 0; i < 20; i++) NF.live.tick(runs); eq([scan.state, scan.progress], ["done", 100]);
+  const ls = NF.live.lanes(store, runsCopy()); eq([...new Set(ls.map(l => l.group))].sort(), ["finished", "running", "waiting"]);
+  ls.forEach(l => { yes(("by." + l.agent) in NF.STR.zh && ("by." + l.agent) in NF.STR.en, l.id + " agent name"); yes(l.label && !/undefined/.test(l.label), l.id + " state label"); yes(l.total >= 1 && l.steps.length >= 1, l.id + " steps"); }); });
+
+/* ── D3: the «全景» lens ─────────────────────────────────────────────── */
+const sky = NF.buildSky(NF.seed);
+test("星图：节点数等于资源数，每个节点有名字、类型、账户和区域；同一份数据每次画出来一样", () => {
+  eq(sky.nodes.length, NF.seed.watch.resources); eq(sky.nodes.length, NF.seed.clusters.reduce((a, c) => a + c.n, 0));
+  sky.nodes.forEach(n => yes(n.name && NF.TYPES.some(t => t.id === n.type) && n.account && n.region, "node " + n.i));
+  eq(new Set(sky.nodes.map(n => n.name)).size, sky.nodes.length, "names are unique:");
+  sky.edges.forEach(e => yes(sky.nodes[e[0]] && sky.nodes[e[1]] && e[0] !== e[1], "edge")); yes(sky.edges.some(e => e[2] & 2), "some edges are model-inferred");
+  sky.hot.forEach(h => yes(h.node && h.node.name === h.name, "hot " + h.name)); eq(sky.hot.length, NF.seed.hot.length);
+  const again = NF.buildSky(NF.seed); eq(again.nodes.slice(0, 50).map(n => [n.x, n.y, n.type]), sky.nodes.slice(0, 50).map(n => [n.x, n.y, n.type])); eq(again.edges.length, sky.edges.length); });
+test("星图按比例放大到 1,900 和 5,000 个节点也建得出来", () => { [1900, 5000].forEach(c => { const s2 = NF.buildSky(NF.seed, {count: c});
+  eq(s2.nodes.length, c); yes(s2.edges.length > c * .8, "edges"); eq(s2.hot.length, NF.seed.hot.length); }); });
+test("资源的健康是四个值：没有未结问题是「未知」，不是「健康」", () => { const {store} = fresh(), W = NF.world;
+  const plain = sky.nodes.find(n => !n.hot), sg = sky.hot.find(h => h.ref === "I12").node, db = sky.hot.find(h => h.ref === "I8").node, fn = sky.hot.find(h => h.ref === "I37").node;
+  eq([W.health(plain, 0, store), W.health(sg, 0, store), W.health(db, 0, store), W.health(fn, 0, store)], ["unknown", "critical", "warning", "notice"]);
+  ["unknown", "notice", "warning", "critical"].forEach(h => yes(("health." + h) in NF.STR.zh && ("health." + h) in NF.STR.en, h)); yes(!("health.healthy" in NF.STR.zh)); });
+test("某个时刻哪些资源不正常，按那个时刻算；现在已经修好或关掉的不算", () => { const {store, clock} = fresh(), W = NF.world;
+  const sg = sky.hot.find(h => h.ref === "I12").node; eq(W.health(sg, 3, store), "unknown", "3 hours ago the rule was not there yet:"); eq(W.health(sg, 1, store), "critical");
+  const now = W.abnormal(sky, 0, store).length, before = W.abnormal(sky, 12, store).length; yes(now > before, "more is open now than 12 hours ago");
+  A.close(store, "I12", "故意开的"); clock.advance(NF.UNDO_MS); eq(W.health(sg, 0, store), "unknown", "dismissed now:"); eq(W.health(sg, 1, store), "critical", "an hour ago it still was:"); });
+test("全景的筛选：账户、类型、只看不正常的，可以叠加", () => { const {store} = fresh(), W = NF.world, ctx = {hoursAgo: 0, store};
+  const all = sky.nodes.filter(n => W.match(n, {}, ctx)).length; eq(all, sky.nodes.length);
+  const prod = sky.nodes.filter(n => W.match(n, {account: "prod"}, ctx)), db = sky.nodes.filter(n => W.match(n, {type: "database"}, ctx)), both = sky.nodes.filter(n => W.match(n, {account: "prod", type: "database"}, ctx));
+  yes(prod.length > 0 && prod.length < all && prod.every(n => n.account === "prod")); yes(db.length > 0 && db.every(n => n.type === "database")); eq(both.length, prod.filter(n => n.type === "database").length);
+  const abn = sky.nodes.filter(n => W.match(n, {onlyAbnormal: true}, ctx)); eq(abn.length, W.abnormal(sky, 0, store).length); });
+test("搜索：按名字、类型、I# / C# 找；空着不匹配任何东西；最多 8 条，有未结问题的排前面", () => { const {store} = fresh(), W = NF.world, ctx = {hoursAgo: 0, store};
+  eq(W.search(sky, "", ctx), []); eq(W.search(sky, "   ", ctx), []); eq(W.search(sky, "sg_web", ctx)[0].name, "sg_web"); eq(W.search(sky, "I#12", ctx)[0].name, "sg_web"); eq(W.search(sky, "i12", ctx)[0].name, "sg_web");
+  const many = W.search(sky, "db", ctx); yes(many.length > 1 && many.length <= 8); yes(W.health(many[0], 0, store) !== "unknown" || many.every(n => W.health(n, 0, store) === "unknown"), "open ones first");
+  eq(W.search(sky, "no-such-thing-zz", ctx), []); });
+test("时间回放：按事件往前往后跳，到头就停；往后跳过了最后一件就是现在", () => { const {store} = fresh(), W = NF.world, ev = store.events, hs = ev.map(e => e.h).sort((a, b) => a - b);
+  eq(W.stepEvent(ev, 0, -1), hs[0], "one step back from now = the latest event:"); eq(W.stepEvent(ev, hs[0], -1), hs[1]); eq(W.stepEvent(ev, hs[hs.length - 1], -1), hs[hs.length - 1], "the earliest: stay:");
+  eq(W.stepEvent(ev, hs[1], 1), hs[0]); eq(W.stepEvent(ev, hs[0], 1), 0, "past the latest = now:"); eq(W.stepEvent(ev, 0, 1), 0); });
 
 /* contrast: every text colour on every surface, both themes (WCAG 2 formula) */
 function contrastRows(theme){

@@ -178,8 +178,8 @@ S.events.push(
   {h: 1.6, k: "decision", t: "alice 退回了 I#40 的方案"}, {h: 0.9, k: "signal", t: "扩容 orders-api 的执行失败，已回滚"},
   {h: 0.75, k: "decision", t: "I#52 的方案已批准"}, {h: 0.33, k: "decision", t: "bob 确认了 I#47 的诊断"});
 S.hot.push(
-  {name: "orders-api", cl: 0, from: 0.9, to: 0, tone: "amber", ref: "I31"}, {name: "payments-queue", cl: 0, from: 30, to: 0, tone: "amber", ref: "I47"},
-  {name: "api-cert", cl: 4, from: 30, to: 0, tone: "red", ref: "I52"}, {name: "chaos-nodes", cl: 3, from: 1.2, to: 0, tone: "violet", ref: "C6"});
+  {name: "orders-api", cl: 0, from: 0.9, to: 0, tone: "amber", ref: "I31", type: "container"}, {name: "payments-queue", cl: 0, from: 30, to: 0, tone: "amber", ref: "I47", type: "compute"},
+  {name: "api-cert", cl: 4, from: 30, to: 0, tone: "red", ref: "I52", type: "security"}, {name: "chaos-nodes", cl: 3, from: 1.2, to: 0, tone: "violet", ref: "C6", type: "container"});
 
 /* the story page: who first saw it and when each phase happened (hours before now) */
 const STORY = {

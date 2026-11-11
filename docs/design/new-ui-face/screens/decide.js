@@ -50,19 +50,13 @@ function renderBrief(swap){
 
 function renderFeed(){
   $("#feedTitle").textContent = t("feed.title");
-  const mine = NF.store.items.filter(i => i.run || i.agent).map(i => {
-    if (i.agent) return `<div class="f run"><div class="h"><span><span class="dot"></span>${t("feed.agent")}</span><span class="num">${i.ref}</span></div><div>${t(i.agent.taskKey)}</div></div>`;
-    if (!i.run) return "";
-    const r = i.run, step = i.plan.steps[Math.min(r.step, r.total - 1)];
-    return `<div class="f ${r.done ? "" : "run"}"><div class="h"><span><span class="dot"></span>${t(r.done ? "feed.done" : r.pending ? "feed.pending" : "feed.running")}</span><span class="num">${i.ref}</span></div>
-      <div>${r.done ? NF.prov(true) + t("feed.checked", {n: i.checks.length}) : r.pending ? t("feed.canUndo") : esc(tx(step.say))}</div>
-      <div class="barp"><i style="width:${r.done ? 100 : Math.round(r.step / r.total * 100)}%"></i></div></div>`;
-  });
-  const others = NF.runs.filter(r => r.state !== "done").map(r =>
-    `<div class="f ${r.state === "run" ? "run" : ""}"><div class="h"><span><span class="dot" ${r.state === "wait" ? 'style="background:var(--amber)"' : ""}></span>${NF.runState(r)}</span></div><div>${esc(tx(r.title))}</div></div>`);
-  $("#feed").innerHTML = mine.concat(others).join("");
+  $("#feed").innerHTML = NF.live.lanes(NF.store, NF.runs).filter(l => l.group !== "finished" || l.itemId).map(l => {   // of the finished ones, only what came from your own decisions
+    const live = l.group === "running", cur = l.steps.find(s => s.status === "now");
+    return `<button class="f ${live ? "run" : ""}" data-do="lane" data-id="${l.id}"><span class="h"><span><span class="dot" ${l.group === "waiting" ? 'style="background:var(--amber)"' : ""}></span>${esc(l.label)}</span><span class="num">${l.ref || ""}</span></span>
+      <span class="b">${l.state === "done" && l.itemId ? NF.prov(true) : ""}${esc(l.itemId && cur && l.agent === "executor" ? tx(cur.t) : l.title)}</span>
+      ${l.agent === "executor" && l.itemId ? `<span class="barp"><i style="width:${l.state === "done" ? 100 : Math.round(Math.max(0, l.step - 1) / l.total * 100)}%"></i></span>` : ""}</button>`;
+  }).join("");
 }
-NF.runState = r => r.stateKey ? t(r.stateKey, {n: r.agoMin}) : r.stateText;
 
 /* ── evidence peek ─────────────────────────────────────────────────────── */
 const evList = () => { const it = NF.current(); return it ? ((it.cause ? it.cause.ev : it.ev) || []) : []; };
