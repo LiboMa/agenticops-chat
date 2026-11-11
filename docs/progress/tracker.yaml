@@ -3,7 +3,7 @@
 # Every status below cites the doc (or commit) it was read from; what could not be confirmed says so in notes.
 # After editing: python scripts/progress/build_dashboard.py  (then commit tracker.yaml + dashboard.html together).
 schema: 1
-updated: "2026-11-07"
+updated: "2026-11-11"
 releases:
   - id: "1.0.0"
     title: "MVP 1.0.0 — 多智能体 AI 运维助手"
@@ -428,10 +428,10 @@ releases:
   - id: "2.7.1"
     title: "核心能力轨 A1–A4（变更感知的系统模型）"
     status: in_progress
-    branch: ""
+    branch: MVP-2.7.1
     tag: ""
     doc: ""
-    notes: "只放从 2.7.0 移来的 A1–A4。2.7.1 另有 5 个本地提交未推送（9913f3e 开版 + bb75bb5 / 27e9168 / 0fb090e / 0a25f31 修完 2.7.0 E2E 观察 1–5 与第 9 条，本地全量 7008 passed），未推送前不能作为 evidence；分支 MVP-2.7.1 仅在本地 .worktrees/mvp-2.7.1。A1 详细计划未写。"
+    notes: "只放从 2.7.0 移来的 A1–A4。分支 MVP-2.7.1 已推送（origin/MVP-2.7.1 = 2ff1f0a，2026-11-09），除 A 轨外已做完：2.7.0 E2E 的后续修正（命令分类与自动批准下限、由代码记录的 RCA 模型与执行时长、修复方案只恢复 + 回滚停机闸门、受保护值按表格行 / 单元格比对）、ChatGPT 风格的 Web 对话、模型流读超时与思考摘要、编辑账户「合并不替换」+ 账户增删改审计（依该分支的 docs/MVP-2.7.1-RELEASE.md 与 CLAUDE.md；这些不在本 tracker 的条目里）。MVP-2.8.0 从它切出。A1–A4 未开始，A1 详细计划未写。"
     items:
       - id: "2.7.1/A1"
         title: "账本与分钟级"
@@ -461,6 +461,116 @@ releases:
         modules: []
         plan: ""
         notes: "依赖出处：路线图核心能力轨表 A4 依赖「A1–A3」。"
+
+  - id: "2.8.0"
+    title: "工作台改版（v2.7.0 审阅 R01–R20 + 登录 / 配置介绍 / 会话列表 / 变更页）"
+    status: in_progress
+    branch: MVP-2.8.0
+    tag: ""
+    doc: ""
+    notes: "分支 MVP-2.8.0 从 MVP-2.7.1 切出（2026-11-08），origin/MVP-2.8.0 = 78f8cf7；八个阶段，每阶段主人验收后才推送。发布说明 docs/MVP-2.8.0-RELEASE.md、E2E 报告 docs/MVP-2.8.0-E2E-REPORT.md、设计 docs/superpowers/specs/2026-11-08-mvp-2.8.0-workspace-redesign-design.md 都只在该分支上，所以 doc / plan 留空。S1、S2（含返工、API Key、用户管理里的密钥与删除用户、侧栏方向 A、「问题 · 在等我」）已验收并推送；S3–S8 未开始。待主人定：①读写 Key 的对话能否用碰得到主机的写工具；②停用的定时任务最后一次失败算不算侧栏红色数字；③S3–S8 是否等设计分支 new-UI-face（只在本地）定稿后再做。本机 :8000 跑的是 9466a48（与已验收的 d6d3779 只差两处文档）。"
+    items:
+      - id: "2.8.0/S1"
+        title: "状态可信 + 可访问性 + 定时任务的真实运行状态 + UTC（R01 R03 R04 R05 R06 R12 R16）"
+        status: done
+        depends_on: []
+        modules: ["web", "scheduler"]
+        plan: ""
+        evidence:
+          commits:
+            - {sha: "0697b8c", date: "2026-11-09", title: "docs(2.8.0): S1 — release note, live E2E evidence (16 checks, 3 defects fixed during the run), CLAUDE.md, READMEs, WORKFLOW"}
+            - {sha: "96ac497", date: "2026-11-09", title: "docs(2.8.0): S1 — the whole-branch review's fixes, re-tested in E2E; the scheduler weekday question for the owner"}
+            - {sha: "69f967d", date: "2026-11-09", title: "docs(2.8.0): S1 accepted by the owner (2026-11-09), pushed"}
+        notes: "主人 2026-11-09 验收，已推送（96ac497）。共用件 QueryState / StatusText / Switch 后面各阶段都用。E2E 16 项，运行中修了 3 个缺陷。"
+      - id: "2.8.0/S2"
+        title: "待办工作台 + 问题队列视图 + 执行结果前置 + 侧栏（R07 R08 R15）；主人看后返工"
+        status: done
+        depends_on: ["2.8.0/S1"]
+        modules: ["services/attention", "web"]
+        plan: ""
+        evidence:
+          commits:
+            - {sha: "8b617c8", date: "2026-11-09", title: "docs(2.8.0): S2 — workbench, sidebar, Cases views, latest run first, acceptance checks; E2E report with the six fixes"}
+            - {sha: "5d1e529", date: "2026-11-09", title: "docs(2.8.0): S2 — the whole-branch review's fixes, re-tested in E2E; deferred minors listed"}
+            - {sha: "0be714b", date: "2026-11-09", title: "docs(2.8.0): S2 rework — sidebar, chat full sidebar, stats as tables, user management; E2E with the bugs the sweep found"}
+            - {sha: "228fb70", date: "2026-11-10", title: "docs(2.8.0): S2 rework — the whole-branch review's fixes, the sign-in-off ruling, re-verified"}
+            - {sha: "78f8cf7", date: "2026-11-11", title: "docs(2.8.0): S2 and its follow-up rounds accepted by the owner (2026-11-11) and pushed (d6d3779)"}
+        notes: "第一版 11-09 做完后主人退回（「感觉全是Bug，比以前还更乱」），逐项预览确认后返工：侧栏重排、对话页完整侧栏、统计默认表格、用户管理页。返工 11-09 推送到 228fb70；主人 2026-11-11 验收。依赖出处：发布说明 S1「共用件（后面七个阶段都用）」。"
+      - id: "2.8.0/api-keys"
+        title: "API Key：MCP 对接的第一部分（我的 API 密钥页、只读 Key 真只读、Key 不做人的决定）"
+        status: done
+        depends_on: ["2.8.0/S2"]
+        modules: ["auth", "web"]
+        plan: ""
+        evidence:
+          commits:
+            - {sha: "1829dfb", date: "2026-11-10", title: "feat(auth): a read-only API key is read-only; no API key approves, rejects, runs or accepts — always enforced"}
+            - {sha: "196d60d", date: "2026-11-10", title: "feat(api-keys): «My API keys» from the avatar menu — create (shown once), list with state and last use, revoke"}
+            - {sha: "89d3c4b", date: "2026-11-10", title: "docs(2.8.0): API keys — release note, E2E evidence, CLAUDE.md, READMEs, workflow"}
+            - {sha: "50c40ee", date: "2026-11-10", title: "fix(api-keys): no key runs or deletes a plan, the refusal carries its code, one-time secrets leave the cache (final review)"}
+        notes: "2026-11-10 完成，主人 2026-11-11 验收，已推送。发布说明把它记在 S2 一行里。规则 no-api-key-human-decisions 始终生效（影子模式也拒绝）。评审遗留 1 个 Important 待主人定：读写 Key 的对话仍能用 enhanced_task、MCP 服务端配置、write_local_file、定时任务。"
+      - id: "2.8.0/credentials-sidebar"
+        title: "用户管理里的密钥与删除用户、侧栏方向 A、待办工作台并入「问题 · 在等我」"
+        status: done
+        depends_on: ["2.8.0/api-keys"]
+        modules: ["auth", "services/attention", "web"]
+        plan: ""
+        evidence:
+          commits:
+            - {sha: "925c0ca", date: "2026-11-10", title: "feat(users): an admin deletes a user — sessions, keys and unsent uploads go, records stay, the name stays taken"}
+            - {sha: "438f768", date: "2026-11-10", title: "docs(2.8.0): credentials in user management, delete user, sidebar direction A, «在等我» in Issues"}
+            - {sha: "9466a48", date: "2026-11-11", title: "docs(2.8.0): the whole-branch review — two fixes, eleven minors on record, one question for the owner"}
+            - {sha: "78f8cf7", date: "2026-11-11", title: "docs(2.8.0): S2 and its follow-up rounds accepted by the owner (2026-11-11) and pushed (d6d3779)"}
+        notes: "2026-11-10 完成，主人 2026-11-11 验收（原话「yes, current work is accepted.」），已推送 d6d3779。删除用户是软删除（名字不再给别人用）；侧栏每项一个数字，来自 GET /api/ui/nav-counts；/app/inbox 转到 /app/issues?view=waiting。11 个 Minor 记录在发布说明。"
+      - id: "2.8.0/S3"
+        title: "安全页按账号展示、发现能进入处理流程、采集失败不再给 100 分（R02 R11）"
+        status: todo
+        depends_on: ["2.8.0/S1"]
+        modules: ["security", "web"]
+        plan: ""
+        notes: "未开始。包含 backlog/security-followups 的 ①（采集全失败 → 100 分）和 ③（open 数是全局数）。主人已裁定：采集全失败 →「无法评分」；无账号的安全问题取采集任务账号并回填。 依赖出处：发布说明 S1「共用件（后面七个阶段都用）」；阶段按顺序逐段验收。"
+      - id: "2.8.0/S4"
+        title: "报告全集检索 + 阅读目录 + 由代码记录的覆盖范围（R13 R14）"
+        status: todo
+        depends_on: ["2.8.0/S1"]
+        modules: ["report", "web"]
+        plan: ""
+        notes: "未开始。覆盖范围由代码在 reporter 运行期间记录，不来自模型（主人裁定）。 依赖出处：发布说明 S1「共用件（后面七个阶段都用）」；阶段按顺序逐段验收。"
+      - id: "2.8.0/S5"
+        title: "会话列表 + 变更页（第二轮样本第 3、4 部分）"
+        status: todo
+        depends_on: ["2.8.0/S1"]
+        modules: ["chat", "web"]
+        plan: ""
+        notes: "未开始。 依赖出处：发布说明 S1「共用件（后面七个阶段都用）」；阶段按顺序逐段验收。"
+      - id: "2.8.0/S6"
+        title: "登录页 + 一页配置介绍（第二轮样本第 1、2 部分）"
+        status: todo
+        depends_on: ["2.8.0/S1"]
+        modules: ["web"]
+        plan: ""
+        notes: "未开始。 依赖出处：发布说明 S1「共用件（后面七个阶段都用）」；阶段按顺序逐段验收。"
+      - id: "2.8.0/S7"
+        title: "资源、表格、Agent 指标（R09 R10 R17）"
+        status: todo
+        depends_on: ["2.8.0/S1"]
+        modules: ["graph/query_service", "web"]
+        plan: ""
+        notes: "未开始。 依赖出处：发布说明 S1「共用件（后面七个阶段都用）」；阶段按顺序逐段验收。"
+      - id: "2.8.0/S8"
+        title: "设置信息架构 + 文案与时间全站统一 + Galaxy（R18 R19 R20）"
+        status: todo
+        depends_on: ["2.8.0/S1"]
+        modules: ["config.py", "galaxy", "web"]
+        plan: ""
+        notes: "未开始。四个高影响开关（executor_enabled、auto_fix_enabled、executor_auto_approve_l0_l1、executor_hitl_enabled）进 DB、仅管理员、审计（主人裁定）。 依赖出处：发布说明 S1「共用件（后面七个阶段都用）」；阶段按顺序逐段验收。"
+      - id: "2.8.0/mcp-server"
+        title: "AgenticOps 自己的 MCP 服务端（给第三方应用和 Coding Agent 用）"
+        status: todo
+        depends_on: ["2.8.0/api-keys"]
+        modules: []
+        plan: ""
+        notes: "未开始。主人 11-09 定为 S2 之后的下一件，要另开一轮：先问清楚、出预览。评审建议那时考虑「Key 请求按白名单放行」。待主人定的「读写 Key 能否用碰主机的写工具」最好在它之前回答。"
 
   - id: "accounts-models"
     title: "账户、模型与运行时（2026-11 起；版本号待主人定）"
@@ -507,25 +617,33 @@ releases:
         notes: "2026-11-07 随 PR #33 合入 main（603046d；PR #29 随之合并）。dev 已部署、live 检查通过（General 0/59 控件可用，写请求 403），dev 上账户 editor。全量 6981 passed / 1 已知 DNS 假失败。"
       - id: "acct/rbac-admin"
         title: "管理员在 Web 管理用户与角色"
-        status: todo
+        status: done
         depends_on: ["acct/editor"]
         modules: ["auth", "web"]
         plan: ""
-        notes: "主人 11-06 选定范围：Settings → Users（仅管理员）—— 列账户、按角色（Viewer / Viewer+Settings / Operator / Admin）建号并给一次性密码、改角色、停用 / 启用、重置密码，全部审计。不含编辑 rbac.yaml、不含自定义角色。计划未写（下一步 Plan Mode）。"
+        evidence:
+          commits:
+            - {sha: "1cc8aca", date: "2026-11-09", title: "feat(users): admins manage web accounts — list, create with a one-time password, change role, disable / enable, reset password; audited, never the password"}
+            - {sha: "4d07cf8", date: "2026-11-09", title: "feat(users): the user management page — admins only, list, create with a one-time password, role, disable / enable, reset"}
+            - {sha: "925c0ca", date: "2026-11-10", title: "feat(users): an admin deletes a user — sessions, keys and unsent uploads go, records stay, the name stays taken"}
+        notes: "在 MVP-2.8.0 的 S2 返工里交付（分支 MVP-2.8.0，未进 main）：独立页面 /app/users + /api/users（不在 Settings 里），仅管理员 —— 列账户、按身份建号并给一次性密码、改身份、停用 / 启用、重置密码，全部审计；11-10 又加了替人生成 / 更新 / 删除 API Key 和删除用户（软删除）。主人 2026-11-11 验收。不含编辑 rbac.yaml、不含自定义角色（原定范围之外，多用户 / 角色设计不在 2.8.0）。"
       - id: "models/skill-consistency"
         title: "技能构建与主 agent 用同一套模型设置"
-        status: todo
+        status: done
         depends_on: []
         modules: ["skills", "config.py"]
         plan: ""
-        notes: "11-06 dev 实测根因：skills/evolution.py（所有技能生成 / 改进路径）用 bedrock_model_id 直调 Bedrock，dev 的 /etc/agenticops.env 把它钉成 opus-4-6-v1（env 优先于 yaml），而主 agent 实际是 opus-5-5；evolution 未设读超时（默认 60 s），当天 6 次技能生成超时失败；evolution 调用不进 agent_logs / 成本。随 models/db-web 一起修。"
+        evidence:
+          commits:
+            - {sha: "f115743", date: "2026-11-07", title: "Merge pull request #35 from LiboMa/fix/model-config-consistency"}
+        notes: "PR #35 于 2026-11-07 合入 main（f115743）并部署开发机：技能生成 / 改进走主 agent 的模型（preamble.converse_text_on_main，main 上 skills/evolution.py 已核对），开发机环境里钉死 Opus 4.6 的那行已去掉。11-06 实测的根因见 git 历史中本条的旧说明。"
       - id: "models/db-web"
         title: "全部模型配置进 DB、在 Web 上可配（不留漏网之鱼）"
         status: todo
         depends_on: []
         modules: ["config.py", "web", "services"]
         plan: ""
-        notes: "11-06 盘点：约 15 个模型设置只能改 yaml / env（三档默认、executor_simple_model_id、signal_gate / critic / 翻译 / security / embedding 模型、model_aliases、custom_models、thinking 预算、价格表）；Web 选的 agent 模型写进 dev 盒子上未提交的 settings.yaml，redeploy 会抹掉；claude-opus-5-5 / sonnet-5-5 / gpt-6-astra 不在价格表里，按 $0 计费；目前没有存运行时设置的表。排在 acct/rbac-admin 之后（主人定的先后，不是技术依赖）。"
+        notes: "11-06 盘点：约 15 个模型设置只能改 yaml / env（三档默认、executor_simple_model_id、signal_gate / critic / 翻译 / security / embedding 模型、model_aliases、custom_models、thinking 预算、价格表）；Web 选的 agent 模型写进 dev 盒子上未提交的 settings.yaml，redeploy 会抹掉；claude-opus-5-5 / sonnet-5-5 / gpt-6-astra 不在价格表里，按 $0 计费；目前没有存运行时设置的表。【2026-11-11 更新】价格表已由 PR #35 补齐（f115743）；运行时设置表 runtime_settings 已在 main（PR #36，第一个键 chat_upload），MVP-2.7.1 又加了 model_runtime；主人 11-08 定方向：非核心与限额类配置逐项进 DB，agent 的模型 / max tokens / 窗口是下一批；MVP-2.8.0 S8 计划把 4 个高影响开关移进去。本条其余部分未开始。排在 acct/rbac-admin 之后（主人定的先后，不是技术依赖）。"
       - id: "models/openai-compat"
         title: "OpenAI 兼容 Model Provider（多来源 / 私有化模型）"
         status: todo
@@ -611,4 +729,4 @@ releases:
         depends_on: []
         modules: ["security"]
         plan: ""
-        notes: "据开发记录，未从文档确认：① 采集全失败时 findings 为空、评分 100 满分全 pass（CN 账户 live E2E 复现，未修）；② SNS Subject 报错；③ open_findings 用全局计数；④ CloudTrail 首跑慢；⑤ init_db 建表说明。"
+        notes: "据开发记录，未从文档确认：① 采集全失败时 findings 为空、评分 100 满分全 pass（CN 账户 live E2E 复现，未修）；② SNS Subject 报错；③ open_findings 用全局计数；④ CloudTrail 首跑慢；⑤ init_db 建表说明。【2026-11-11】① 与 ③ 已排进 2.8.0/S3（未开始）；②④⑤ 仍未排期。"
