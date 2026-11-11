@@ -15,7 +15,8 @@ const CLOSED = ["fixed", "done", "closed", "cancelled"];
 const TONE = {red: "critical", amber: "warning"};
 
 /* The map: {nodes, edges, hot}. node = {i, x, y, cl, r, ph, b, name, type, account, region, hot?}; edge = [a, b, flags]
-   (flags: 1 = between clusters, 2 = inferred by a model — advisory, drawn dashed). opts.count scales every cluster. */
+   (flags: 1 = between clusters, 2 = inferred by a model — advisory, drawn dashed, 4 = containment — the flat map shows it as the
+   cluster itself and draws the line only for the selected resource). opts.count scales every cluster. */
 NF.buildSky = (seed, opts = {}) => {
   let rs = 20261110;
   const R = () => { rs |= 0; rs = rs + 0x6D2B79F5 | 0; let t = Math.imul(rs ^ rs >>> 15, 1 | rs); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
@@ -51,10 +52,57 @@ NF.buildSky = (seed, opts = {}) => {
   });
   const edge = C.length - 1;                        // a few links from the shared cluster to the others
   for (let k = 0; k < 10; k++){ const a = start[edge] + Math.floor(R() * sizes[edge]), b = Math.floor(R() * start[edge]); edges.push([a, b, 1]); }
+  /* Containment (flag 4): every cluster has one root (a VPC, an EKS cluster) and a sub-container per ~45 resources (a subnet,
+     a namespace) on a ring around it; each resource belongs to the nearest one, and the roots meet in the shared cluster. This is what makes two
+     resources a few links apart, as they are in a real account. No random numbers: the layout above stays as it was. */
+  const roots = [];
+  sizes.forEach((size, ci) => {
+    const lo = start[ci], hi = lo + size, c = C[ci], k8s = c.profile === "k8s", free = []; for (let i = lo; i < hi; i++) if (!nodes[i].hot) free.push(nodes[i]);
+    const d2 = (a, x, y) => (a.x - x) ** 2 + (a.y - y) ** 2;
+    const root = free.reduce((a, b) => d2(b, c.cx, c.cy) < d2(a, c.cx, c.cy) ? b : a); roots.push(root);
+    root.name = (k8s ? "eks-" : "vpc-") + (0x1000 + root.i).toString(16); root.type = k8s ? "container" : "network"; root.r = 1.9; root.hub = 2;
+    const subs = [], want = Math.max(2, Math.round(size / 45));
+    for (let j = 0; j < want; j++){                // the sub-containers sit on a ring around the root, one per sector
+      const ang = 6.283 * j / want, tx = c.cx + Math.cos(ang) * c.sp * .9, ty = c.cy + Math.sin(ang) * c.sp * .9;
+      const sub = free.filter(n => !n.hub).reduce((x, y) => d2(y, tx, ty) < d2(x, tx, ty) ? y : x);
+      sub.name = (k8s ? "ns-" : "subnet-") + (0x1000 + sub.i).toString(16); sub.type = k8s ? "container" : "network"; sub.r = 1.4; sub.hub = 1; subs.push(sub);
+    }
+    subs.forEach(s => edges.push([root.i, s.i, 4]));
+    for (let i = lo; i < hi; i++){ const n = nodes[i]; if (n.hub) continue; const s = subs.reduce((a, b) => d2(n, b.x, b.y) < d2(n, a.x, a.y) ? b : a); edges.push([s.i, n.i, 4]); }
+  });
+  roots.slice(0, -1).forEach(r => edges.push([roots[roots.length - 1].i, r.i, 1]));      // each cluster's root is linked to the shared one
+  /* depth, for a 3D view: its own random stream, so the flat layout above stays exactly as it was */
+  let zs = 20261111;
+  const Z = () => { zs |= 0; zs = zs + 0x6D2B79F5 | 0; let t = Math.imul(zs ^ zs >>> 15, 1 | zs); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  nodes.forEach(n => { const c = C[n.cl]; n.z = (c.cz || 0) + (Z() + Z() + Z() + Z() - 2) / 2 * c.sp * 1.5; });
   return {nodes, edges, hot};
 };
+/* who is linked to whom: adj[i] = [[j, flags], …], built once per map */
+const adjOf = sky => sky.adj || (sky.adj = (() => { const a = sky.nodes.map(() => []); sky.edges.forEach(([x, y, f]) => { a[x].push([y, f]); a[y].push([x, f]); }); return a; })());
 
 NF.world = {
+  adj: adjOf,
+  /* «only what is around it»: the resource and everything within `hops` links of it, as a Set of node indexes */
+  around(sky, node, hops = 1){
+    const adj = adjOf(sky), seen = new Set([node.i]); let edge = [node.i];
+    for (let h = 0; h < hops; h++){ const next = []; edge.forEach(i => adj[i].forEach(([j]) => { if (!seen.has(j)){ seen.add(j); next.push(j); } })); edge = next; }
+    return seen;
+  },
+  /* the shortest chain of links from a to b, as node indexes — null when there is none within maxHops (or a is b) */
+  path(sky, a, b, maxHops = 8){
+    if (!a || !b || a.i === b.i) return null;
+    const adj = adjOf(sky), from = new Map([[a.i, -1]]); let edge = [a.i];
+    for (let h = 0; h < maxHops && edge.length; h++){
+      const next = [];
+      for (const i of edge) for (const [j] of adj[i]){
+        if (from.has(j)) continue; from.set(j, i);
+        if (j === b.i){ const out = [j]; let k = i; while (k !== -1){ out.push(k); k = from.get(k); } return out.reverse(); }
+        next.push(j);
+      }
+      edge = next;
+    }
+    return null;
+  },
   /* Is this named resource «not normal» at that hour? Now: unless its item has been fixed, closed or cancelled. */
   active(h, hoursAgo, store){
     const it = store.get(h.ref);

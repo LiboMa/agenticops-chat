@@ -109,12 +109,12 @@ NF.seed = {
 
   /* The starfield: clusters of resources and the named ones that have something open.
      from / to = the hours-ago interval in which the resource is not normal. */
-  clusters: [                                   // n adds up to watch.resources; profile = how its resource types are mixed (model-world.js)
-    {name: "生产　us-east-1", cx: -.52, cy: -.22, n: 505, sp: .2, account: "prod", region: "us-east-1", profile: "general"},
-    {name: "生产　ap-southeast-1", cx: .5, cy: -.34, n: 368, sp: .17, account: "prod", region: "ap-southeast-1", profile: "general"},
-    {name: "数据　cn-northwest-1", cx: .42, cy: .42, n: 322, sp: .16, account: "data", region: "cn-northwest-1", profile: "data"},
-    {name: "EKS chaos-lab", cx: -.44, cy: .48, n: 276, sp: .15, account: "prod", region: "us-east-1", profile: "k8s"},
-    {name: "公共与边缘", cx: 0, cy: .04, n: 152, sp: .12, account: "prod", region: "global", profile: "edge"},
+  clusters: [                                   // n adds up to watch.resources; profile = how its resource types are mixed (model-world.js); cz = depth, used only by the 3D preview
+    {name: "生产　us-east-1", cx: -.52, cy: -.22, cz: -.2, n: 505, sp: .2, account: "prod", region: "us-east-1", profile: "general"},
+    {name: "生产　ap-southeast-1", cx: .5, cy: -.34, cz: .24, n: 368, sp: .17, account: "prod", region: "ap-southeast-1", profile: "general"},
+    {name: "数据　cn-northwest-1", cx: .42, cy: .42, cz: -.26, n: 322, sp: .16, account: "data", region: "cn-northwest-1", profile: "data"},
+    {name: "EKS chaos-lab", cx: -.44, cy: .48, cz: .22, n: 276, sp: .15, account: "prod", region: "us-east-1", profile: "k8s"},
+    {name: "公共与边缘", cx: 0, cy: .04, cz: 0, n: 152, sp: .12, account: "prod", region: "global", profile: "edge"},
   ],
   hot: [
     {name: "sg_web", cl: 0, from: 2.4, to: 0, tone: "red", ref: "I12", type: "network"},

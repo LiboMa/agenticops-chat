@@ -285,6 +285,32 @@ test("时间回放：按事件往前往后跳，到头就停；往后跳过了�
   eq(W.stepEvent(ev, 0, -1), hs[0], "one step back from now = the latest event:"); eq(W.stepEvent(ev, hs[0], -1), hs[1]); eq(W.stepEvent(ev, hs[hs.length - 1], -1), hs[hs.length - 1], "the earliest: stay:");
   eq(W.stepEvent(ev, hs[1], 1), hs[0]); eq(W.stepEvent(ev, hs[0], 1), 0, "past the latest = now:"); eq(W.stepEvent(ev, 0, 1), 0); });
 
+/* ── the 3D preview: depth, «only what is around it», a path between two resources ───────── */
+test("每个资源有深度（z），是确定的；加了深度之后平面上的位置没有变", () => { const r6 = v => +v.toFixed(6), sg = sky.hot.find(h => h.ref === "I12").node;
+  sky.nodes.forEach(n => yes(Number.isFinite(n.z), "node " + n.i + " has a depth")); eq(NF.buildSky(NF.seed).nodes.slice(0, 40).map(n => n.z), sky.nodes.slice(0, 40).map(n => n.z));
+  eq([sky.nodes[0].x, sky.nodes[0].y, sky.nodes[700].x, sky.nodes[700].y, sg.i, sg.x, sg.y].map(r6), [-0.542227, -0.338551, 0.491193, -0.377695, 436, -0.616541, -0.347658]);
+  eq(sky.edges.filter(e => !(e[2] & 4)).length, 1619 + 4, "the links the flat map draws: as before, plus one from each cluster's root to the shared one:");
+  const spread = cl => { const zs = sky.nodes.filter(n => n.cl === cl).map(n => n.z); return Math.max(...zs) - Math.min(...zs); }; yes(spread(0) > .3, "a cluster is a ball, not a disc"); });
+const tiny = edges => ({nodes: Array.from({length: 12}, (_, i) => ({i})), edges, hot: []});
+test("只看它周围：自己加一跳之内的；两跳的范围更大", () => { const W = NF.world, g = tiny([[0, 1, 0], [1, 2, 0], [2, 3, 0], [4, 5, 0]]);
+  eq([...W.around(g, g.nodes[1], 1)].sort(), [0, 1, 2]); eq([...W.around(g, g.nodes[1], 2)].sort(), [0, 1, 2, 3]); eq([...W.around(g, g.nodes[6], 1)], [6], "a resource linked to nothing:");
+  const sg = sky.hot.find(h => h.ref === "I12").node, one = W.around(sky, sg, 1), two = W.around(sky, sg, 2); yes(one.has(sg.i) && one.size >= 2 && two.size >= one.size); });
+test("两个资源之间找一条路：给出最短的那条；连不到就是连不到；超过 8 跳不算", () => { const W = NF.world;
+  const g = tiny([[0, 1, 0], [1, 2, 0], [2, 3, 0], [0, 3, 0], [4, 5, 0]]);
+  eq(W.path(g, g.nodes[0], g.nodes[2]), [0, 1, 2]); eq(W.path(g, g.nodes[0], g.nodes[3]), [0, 3], "the direct link beats the long way:"); eq(W.path(g, g.nodes[0], g.nodes[5]), null, "another island:");
+  eq(W.path(g, g.nodes[0], g.nodes[0]), null, "the same resource twice:");
+  const chain = tiny(Array.from({length: 11}, (_, i) => [i, i + 1, 0])); eq(W.path(chain, chain.nodes[0], chain.nodes[8]).length, 9, "8 hops:"); eq(W.path(chain, chain.nodes[0], chain.nodes[9]), null, "9 hops:");
+  eq(W.path(chain, chain.nodes[0], chain.nodes[9], 12).length, 10, "allowed when asked for:");
+  const sg = sky.hot.find(h => h.ref === "I12").node, nb = [...W.around(sky, sg, 1)].find(i => i !== sg.i); eq(W.path(sky, sg, sky.nodes[nb]), [sg.i, nb], "on the real map:"); });
+
+test("包含关系：每个资源属于一个子容器，子容器属于集群的根；两个不相干的资源因此只隔几步", () => { const W = NF.world;
+  const hubs = sky.nodes.filter(n => n.hub), roots = hubs.filter(n => n.hub === 2); eq(roots.length, NF.seed.clusters.length); yes(hubs.every(n => !n.hot), "a named resource is never a container");
+  const contain = sky.edges.filter(e => e[2] & 4); eq(contain.length, sky.nodes.length - roots.length, "every resource but the roots has exactly one container:");
+  eq(new Set(sky.nodes.map(n => n.name)).size, sky.nodes.length, "names stay unique:");
+  const by = ref => sky.hot.find(h => h.ref === ref).node, same = W.path(sky, by("I12"), by("I31")), cross = W.path(sky, by("I12"), by("I8"));
+  yes(same && same.length - 1 <= 4, "two resources of one cluster: " + (same && same.length - 1)); yes(cross && cross.length - 1 <= 8, "across clusters: " + (cross && cross.length - 1));
+  eq(W.around(sky, sky.nodes[0], 9999).size, sky.nodes.length, "the whole map is one piece:"); });
+
 /* contrast: every text colour on every surface, both themes (WCAG 2 formula) */
 function contrastRows(theme){
   const cs = getComputedStyle(document.getElementById("probe-" + theme)), v = n => cs.getPropertyValue(n).trim();

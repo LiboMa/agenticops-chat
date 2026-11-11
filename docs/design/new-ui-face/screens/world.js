@@ -48,7 +48,8 @@ function renderScrub(){
     <button class="btn sm" data-do="wPlay"><span class="t">${t(F.playing ? "world.pause" : "world.play")}</span><kbd>P</kbd></button>
     <button class="btn sm" data-do="wStep" data-d="1" aria-label="${t("world.nextEvent")}"><span class="t">▸</span><kbd>]</kbd></button>
     <b id="scrubLbl">${h === 0 ? t("world.nowAt", {t: NF.clockAt(0)}) : t("world.ago", {t: NF.clockAt(h), d: NF.fmtWait(Math.max(1, Math.round(h * 60)))})}</b>
-    <span class="spacer"></span>${h > 0 ? `<button class="btn sm" data-do="wNow"><span class="t">${t("world.toNow")}</span><kbd>0</kbd></button>` : `<span class="built">${t("world.built", {t: NF.clockAt(NF.seed.watch.lastScanMin / 60)})}</span>`}`;
+    <span class="spacer"></span>${h > 0 ? `<button class="btn sm" data-do="wNow"><span class="t">${t("world.toNow")}</span><kbd>0</kbd></button>` : `<span class="built">${t("world.built", {t: NF.clockAt(NF.seed.watch.lastScanMin / 60)})}</span>`}
+    <a class="btn sm quiet" href="preview-3d.html"><span class="t">${t("world.open3d")}</span></a>`;
   $("#scrubTicks").innerHTML = ev.filter(e => e.h <= 24).map(e => `<i class="${e.k}${e.cause ? " cause" : ""}" style="left:${100 - e.h / 24 * 100}%"></i>`).join("");
   $("#scrub").setAttribute("aria-label", t("world.time")); $("#scrub").value = 240 - h * 10;
   const past = $("#wpast"); past.hidden = h === 0;

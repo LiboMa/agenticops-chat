@@ -324,6 +324,21 @@ add({
   "story.failed.p": ["这件事的记录没取到，不代表它不存在。上一次成功是 {t} UTC。", "The record could not be fetched; that does not mean the item is gone. Last success: {t} UTC."],
   "world.empty.big": ["还没有资源", "No resources yet"],
   "world.empty.p": ["接入一个云账户并扫描一次，这张图才有内容。", "Connect a cloud account and run one scan; the map fills in after that."],
+  /* the 3D preview (preview-3d.html) */
+  "world.open3d": ["3D 预览", "3D preview"],
+  "p3.title": ["全景 · 3D 预览", "World · 3D preview"],
+  "p3.sub": ["借鉴 knowledge-graph-3d.tsx 的一次尝试：同一个引擎，我们的数据和规则。还不是正式设计的一部分。", "A trial borrowing from knowledge-graph-3d.tsx: the same engine, our data and rules. Not part of the design proper yet."],
+  "p3.back": ["← 回到 2D 全景", "← Back to the flat map"],
+  "p3.focus": ["只看它周围", "Only what is around it"], "p3.path": ["两个资源之间找路", "Path between two"],
+  "p3.rotate": ["自动旋转", "Auto-rotate"], "p3.home": ["回到全貌", "Whole map"], "p3.fps": ["{n} 帧 / 秒", "{n} fps"],
+  "p3.heavyOff": ["画法：轻量", "Drawing: light"], "p3.heavyOn": ["画法：照原组件（每个资源两个球）", "Drawing: as the original (two spheres each)"],
+  "p3.heavyTip": ["原组件给每个节点一组网格和一张文字贴图。切过去看帧率怎么变。", "The original gives every node its own mesh group and text texture. Switch to see what that does to the frame rate."],
+  "p3.pathPick1": ["点第一个资源，或在左边搜。", "Pick the first resource, or search on the left."],
+  "p3.pathPick2": ["从 {a} 出发。再点第二个资源。", "From {a}. Now pick the second resource."],
+  "p3.pathFound": ["隔了 {n} 步：", "{n} links apart: "], "p3.pathNone": ["{a} 和 {b} 在 8 步之内连不到。", "{a} and {b} are not connected within 8 links."],
+  "p3.pathDemo": ["示例：sg_web ↔ database-demo", "Example: sg_web ↔ database-demo"], "p3.pathExit": ["退出找路", "Leave path mode"], "p3.pathFrom": ["从它找路", "Path from here"],
+  "p3.in": ["所属", "belongs to"], "p3.holds": ["包含", "contains"], "p3.cross": ["跨集群", "across clusters"], "p3.linked": ["相连", "linked"],
+  "p3.more": ["还有 {n} 个。", "{n} more."], "p3.noLib": ["3D 引擎没有加载（vendor/3d-force-graph.min.js）", "The 3D engine did not load (vendor/3d-force-graph.min.js)"],
   "dev.map": ["星图资源数", "Map size"], "dev.fps": ["{n} 帧 / 秒，画一帧 {ms} 毫秒", "{n} fps, {ms} ms per frame"],
 });
 

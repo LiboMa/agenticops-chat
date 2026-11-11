@@ -15,8 +15,7 @@ let frames = 0, fpsAt = 0;
 
 function rebuild(count){
   sky = NF.buildSky(NF.seed, count ? {count} : {});
-  adj = sky.nodes.map(() => []);
-  sky.edges.forEach(([a, b, f]) => { adj[a].push([b, f]); adj[b].push([a, f]); });
+  adj = NF.world.adj(sky);
   view.faint = null; view.hits = []; view.sel = null; view.free = false;
   NF.sky.nodes = sky.nodes; NF.sky.edges = sky.edges; NF.sky.hot = sky.hot; NF.sky.data = sky;
 }
@@ -66,7 +65,8 @@ function draw(ts){
   /* edges: four paths — ordinary, between clusters, model-inferred (dashed), and those outside the filter */
   const P = [new Path2D(), new Path2D(), new Path2D(), new Path2D()], E = sky.edges;
   for (let k = 0; k < E.length; k++){
-    const e = E[k], A = N[e[0]], B = N[e[1]]; if (!A.on && !B.on) continue;
+    const e = E[k]; if (e[2] & 4) continue;                                      // containment is the cluster itself; its lines show for the selected resource only
+    const A = N[e[0]], B = N[e[1]]; if (!A.on && !B.on) continue;
     const p = faint && (faint.has(e[0]) || faint.has(e[1])) ? P[3] : e[2] & 2 ? P[2] : e[2] & 1 ? P[1] : P[0];
     p.moveTo(A.sx, A.sy); p.lineTo(B.sx, B.sy);
   }

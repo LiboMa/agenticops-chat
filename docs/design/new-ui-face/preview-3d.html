@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgenticOps · new-UI-face · 全景 3D 预览</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="proto.css">
+</head>
+<body data-theme="night" class="app p3page">
+<!-- A preview, not part of the prototype proper: what the «全景» lens would look like if it borrowed from
+     knowledge-graph-3d.tsx. The 3D engine is the one that component uses, vendored under vendor/ (see vendor/README.md). -->
+<div id="g3d"></div>
+<div id="clabels" aria-hidden="true"></div>
+<div id="labels" aria-hidden="true"></div>
+
+<header class="top p3top">
+  <a class="chip-btn" id="p3back" href="index.html#/world"></a>
+  <div class="p3title" id="p3title"></div>
+  <span class="spacer"></span>
+  <button class="chip-btn" id="p3lang" data-do="p3lang"></button>
+  <button class="chip-btn" id="p3theme" data-do="p3theme"></button>
+</header>
+
+<main id="p3">
+  <div class="wleft"><div class="wtools card" id="p3tools"></div><div class="happen card" id="p3abnList"></div></div>
+  <p class="wpast p3hint" id="p3hint" hidden></p>
+  <aside class="nodecard card" id="nodecard" hidden></aside>
+  <div class="scrub card p3bar"><div class="row" id="p3bar"></div></div>
+</main>
+<div id="tip" hidden></div>
+
+<script src="data.js"></script>
+<script src="data-situations.js"></script>
+<script src="data-live.js"></script>
+<script src="i18n.js"></script>
+<script src="proto.js"></script>
+<script src="model-world.js"></script>
+<script src="vendor/3d-force-graph.min.js"></script>
+<script src="screens/world3d.js"></script>
+</body>
+</html>
