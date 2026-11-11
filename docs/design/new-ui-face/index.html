@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AgenticOps · new-UI-face（交互设计原型）</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="proto.css">
+</head>
+<body class="app" data-theme="night">
+<canvas id="sky" aria-hidden="true"></canvas>
+
+<header class="top">
+  <div class="tabs" id="lens" role="tablist"></div>
+  <div class="pulse" id="pulse"></div>
+  <div class="who" id="who"></div>
+</header>
+
+<main>
+  <section class="view" id="decide">
+    <aside class="side-q">
+      <div class="rail-title"><span id="qTitle"></span><b id="qCount"></b></div>
+      <div class="pills" id="filters"></div>
+      <div class="queue" id="queue" role="listbox"></div>
+      <p class="hint" id="hint"></p>
+    </aside>
+    <article class="brief card" id="brief" aria-live="polite"></article>
+    <aside class="side-live">
+      <div class="rail-title"><span id="feedTitle"></span></div>
+      <div class="feed" id="feed"></div>
+    </aside>
+  </section>
+
+  <section class="view" id="live" hidden><div class="rec" id="rec"></div></section>
+
+  <section class="view" id="world" hidden>
+    <div class="happen card" id="happen"></div>
+    <div class="nodecard card" id="nodecard" hidden></div>
+    <div class="legend" id="legend"></div>
+    <div class="scrub card">
+      <div class="row"><span id="scrubT"></span><b id="scrubLbl"></b></div>
+      <input type="range" id="scrub" min="0" max="240" value="240">
+    </div>
+  </section>
+</main>
+
+<div class="sugg" id="sugg" hidden role="listbox"></div>
+<div class="sheet" id="sheet" hidden></div>
+<aside class="peek" id="peek" hidden></aside>
+<div class="toast" id="toast" hidden role="status"></div>
+<div id="tip" hidden></div>
+
+<div class="barwrap">
+  <label class="bar"><span class="spark" aria-hidden="true"></span><input id="cmd" type="text" autocomplete="off" spellcheck="false"><kbd>/</kbd></label>
+</div>
+
+<div class="dev"><div class="pop" id="devpop" hidden></div><button id="devbtn" data-do="devToggle"></button></div>
+<div class="overlay" id="help" hidden></div>
+
+<script src="data.js"></script>
+<script src="i18n.js"></script>
+<script src="proto.js"></script>
+<script src="screens/sky.js"></script>
+<script src="screens/briefs-core.js"></script>
+<script src="screens/decide.js"></script>
+<script src="screens/live.js"></script>
+<script src="screens/world.js"></script>
+<script src="screens/command.js"></script>
+<script>NF.start();</script>
+</body>
+</html>

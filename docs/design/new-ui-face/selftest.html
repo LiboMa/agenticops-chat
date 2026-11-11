@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>new-UI-face · 自测</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="proto.css">
+<style>
+  body{max-width:920px;margin:0 auto;padding:24px 20px 60px;background:var(--ink)}
+  h1{font-size:var(--fs-2xl);margin:0 0 4px} .sum{font-family:var(--num);font-size:var(--fs-xl);margin:6px 0 16px}
+  .ok{color:var(--mint)} .bad{color:var(--red)}
+  li{margin:3px 0} li.bad{color:var(--red)} small{color:var(--faint)}
+</style>
+</head>
+<body data-theme="night">
+<h1>原型逻辑自测</h1>
+<p style="color:var(--dim);margin:0">不碰界面：用一只假的时钟驱动 store，检查原型里的每一条规则；另外核对中英文文案和两套主题的对比度。</p>
+<div class="sum" id="sum"></div>
+<ol id="out"></ol>
+<div data-theme="night" id="probe-night" hidden></div><div data-theme="day" id="probe-day" hidden></div>
+
+<script src="data.js"></script>
+<script src="i18n.js"></script>
+<script src="proto.js"></script>
+<script src="screens/briefs-core.js"></script>
+<script>
+(function(){
+"use strict";
+const NF = window.NF, A = NF.actions, results = [];
+const test = (name, fn) => { try { fn(); results.push({name, ok: true}); } catch (e){ results.push({name, ok: false, why: String(e.message || e)}); } };
+const eq = (a, b, what = "") => { const x = JSON.stringify(a), y = JSON.stringify(b); if (x !== y) throw new Error(`${what} expected ${y}, got ${x}`); };
+const yes = (v, what) => { if (!v) throw new Error(what || "expected true"); };
+
+/* a clock the tests move by hand */
+function fakeClock(){
+  let now = 0; const q = [];
+  return { after(ms, fn){ const e = {at: now + ms, fn, dead: false}; q.push(e); return () => { e.dead = true; }; },
+    advance(ms){ const end = now + ms; for (;;){ const n = q.filter(e => !e.dead && e.at <= end).sort((a, b) => a.at - b.at)[0]; if (!n) break; now = n.at; n.dead = true; n.fn(); } now = end; } };
+}
+const fresh = () => { const clock = fakeClock(), store = NF.createStore(NF.seed, clock); store.notices = []; store.notice = (k, v) => store.notices.push(k); return {clock, store}; };
+const refs = list => list.map(i => i.ref);
+
+test("队列：先按严重度，再按等待时间", () => { const {store} = fresh(); eq(refs(store.waiting()), ["I#12", "I#8", "I#21", "I#934", "C#3"]); });
+test("每一类的计数，以及按类筛选", () => { const {store} = fresh();
+  eq(store.counts(), {all: 5, approval: 3, acceptance: 1, confirm: 1, failed: 0});
+  eq(refs(store.waiting("approval")), ["I#12", "I#8", "C#3"]); eq(refs(store.waiting("acceptance")), ["I#934"]); });
+test("批准后 5 秒内可以撤回，撤回后什么都没有发生", () => { const {store, clock} = fresh();
+  yes(A.approve(store, "I12")); eq(store.get("I12").status, "pending"); yes(store.pending());
+  clock.advance(NF.UNDO_MS - 1); eq(store.get("I12").status, "pending", "just before the window ends:");
+  yes(store.undo()); eq(store.get("I12").status, "waiting"); eq(store.get("I12").run, undefined); eq(store.pending(), null);
+  clock.advance(60000); eq(store.get("I12").status, "waiting", "long after the undo:"); });
+test("撤回期过后才开始执行，每一步之后走完，检查通过后记为已修复", () => { const {store, clock} = fresh();
+  A.approve(store, "I12"); clock.advance(NF.UNDO_MS); eq(store.get("I12").status, "running"); eq(store.undo(), false, "undo after the window:");
+  clock.advance(NF.STEP_MS * 3); eq(store.get("I12").status, "fixed"); yes(store.get("I12").run.done);
+  yes(store.events.some(e => e.key === "event.fixed"), "an event is logged"); eq(store.notices, ["toast.done"]); });
+test("新的决定让上一个立即生效；只有最后一个决定能撤回", () => { const {store, clock} = fresh();
+  A.approve(store, "I12"); clock.advance(1000); A.approve(store, "C3");
+  eq(store.get("I12").status, "running", "the first approval is settled at once:"); eq(store.get("C3").status, "pending");
+  yes(store.undo()); eq(store.get("C3").status, "waiting"); eq(store.get("I12").status, "running", "undo does not reach the earlier one:"); });
+test("被撤回的决定不会在之后生效", () => { const {store, clock} = fresh();
+  A.approve(store, "I8"); store.undo(); clock.advance(NF.UNDO_MS * 3); eq(store.get("I8").status, "waiting"); eq(store.get("I8").run, undefined); });
+test("验收：每一项都勾了才能验收", () => { const {store} = fresh();
+  eq(A.accept(store, "I934"), false, "no box ticked:"); A.tick(store, "I934"); A.tick(store, "I934"); eq(A.accept(store, "I934"), false, "two of three:");
+  A.tick(store, "I934"); eq(store.get("I934").ticks, [true, true, true]); yes(A.accept(store, "I934")); eq(store.get("I934").status, "done"); });
+test("验收的勾可以取消；全勾之后再没有可勾的", () => { const {store} = fresh();
+  A.tick(store, "I934", 1); eq(store.get("I934").ticks, [false, true, false]); A.tick(store, "I934", 1); eq(store.get("I934").ticks, [false, false, false]);
+  A.tick(store, "I934"); A.tick(store, "I934"); A.tick(store, "I934"); eq(A.tick(store, "I934"), false); });
+test("只读身份：任何决定都做不了", () => { const {store} = fresh(); store.role = "viewer";
+  eq([A.approve(store, "I12"), A.tick(store, "I934"), A.verdict(store, "I21", "yes"), A.snooze(store, "I8"), A.reject(store, "I8", "x")], [false, false, false, false, false]);
+  eq(refs(store.waiting()).length, 5); });
+test("退回必须写理由；退回后交给 agent 重做", () => { const {store, clock} = fresh();
+  eq(A.reject(store, "I8", "   "), false); yes(A.reject(store, "I8", "先确认没有人依赖 0 天保留")); eq(store.get("I8").status, "rejected");
+  clock.advance(NF.UNDO_MS); eq(store.get("I8").status, "agent"); eq(store.get("I8").agent.taskKey, "agent.replanning");
+  clock.advance(NF.AGENT_MS); eq(store.get("I8").status, "handed"); });
+test("验收不通过也要写理由", () => { const {store} = fresh(); eq(A.rejectAccept(store, "I934", ""), false); yes(A.rejectAccept(store, "I934", "延迟 94 秒不能接受")); eq(store.get("I934").status, "rejected"); });
+test("诊断的判断只有四种", () => { const {store} = fresh(); eq(A.verdict(store, "I21", "maybe"), false); yes(A.verdict(store, "I21", "partial")); eq(store.get("I21").verdict, "partial"); });
+test("动作只对它那一种简报有效", () => { const {store} = fresh(); eq([A.approve(store, "I934"), A.accept(store, "I12"), A.verdict(store, "I12", "yes")], [false, false, false]); });
+test("稍后：排到同一严重度的最后", () => { const {store} = fresh(); yes(A.snooze(store, "I21")); eq(refs(store.waiting()), ["I#12", "I#8", "I#934", "I#21", "C#3"]); });
+test("时间和等待时长的写法", () => { eq([NF.clockAt(0), NF.clockAt(2.47), NF.clockAt(18.17)], ["06:20", "03:52", "昨天 12:10"]); eq([NF.fmtWait(40), NF.fmtWait(128), NF.fmtWait(1090), NF.fmtWait(4000)], ["40 分钟", "2 小时", "18 小时", "3 天"]); });
+test("中英文文案：键一一对应，没有空的", () => { const {zh, en} = NF.STR;
+  eq(Object.keys(zh).filter(k => !(k in en)), [], "only in zh:"); eq(Object.keys(en).filter(k => !(k in zh)), [], "only in en:");
+  eq(Object.keys(zh).filter(k => !zh[k] || !en[k]), [], "empty:"); });
+test("示例数据用到的每个文案键都存在", () => { const need = new Set(); const S0 = NF.seed;
+  S0.items.forEach(i => { need.add("need." + i.reason); if (i.severity) need.add("sev." + i.severity); if (i.cause){ need.add("critic." + i.cause.critic); need.add("location." + i.cause.location); }
+    (i.needChecks || []).forEach(c => need.add("why." + c.why)); (i.plan ? i.plan.steps : []).forEach(s => need.add("tier." + s.tier)); });
+  Object.values(S0.evidence).forEach(e => need.add("peek." + e.src)); S0.runs.forEach(r => { if (r.stateKey) need.add(r.stateKey); });
+  eq([...need].filter(k => !(k in NF.STR.zh)), []); });
+test("示例数据自洽：证据、简报、星图的引用都对得上", () => { const S0 = NF.seed;
+  S0.items.forEach(i => { ((i.cause ? i.cause.ev : i.ev) || []).forEach(e => yes(S0.evidence[e], `${i.ref} cites ${e}`)); const b = NF.briefs[i.kind]; yes(b && b.ask && b.body && b.buttons, `${i.ref}: brief «${i.kind}»`);
+    yes(NF.GROUP_OF[i.reason], `${i.ref}: reason ${i.reason}`); });
+  S0.hot.forEach(h => yes(S0.clusters[h.cl], `hot ${h.name}`)); });
+test("每种简报都能画出来，开头都有「需要你做什么」", () => { NF.store = NF.createStore(NF.seed, fakeClock());
+  NF.store.items.forEach(i => { const b = NF.briefs[i.kind]; yes(b.ask(i).length > 4, i.ref + " ask"); yes(b.body(i).includes('class="sec"'), i.ref + " body"); yes(b.buttons(i).includes("<button"), i.ref + " buttons"); }); });
+
+/* contrast: every text colour on every surface, both themes (WCAG 2 formula) */
+function contrastRows(theme){
+  const cs = getComputedStyle(document.getElementById("probe-" + theme)), v = n => cs.getPropertyValue(n).trim();
+  const rgb = c => { if (c.startsWith("#")){ const h = c.slice(1); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)).concat(1); }
+    const m = c.match(/[\d.]+/g).map(Number); return [m[0], m[1], m[2], m[3] === undefined ? 1 : m[3]]; };
+  const over = (f, b) => [0, 1, 2].map(i => f[i] * f[3] + b[i] * (1 - f[3])).concat(1);
+  const lum = c => { const f = x => { x /= 255; return x <= .03928 ? x / 12.92 : ((x + .055) / 1.055) ** 2.4; }; return .2126 * f(c[0]) + .7152 * f(c[1]) + .0722 * f(c[2]); };
+  const cr = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
+  const page = rgb(v("--ink")), bgs = {page, deck: over(rgb(v("--deck")), page), solid: rgb(v("--solid")), raise: rgb(v("--raise"))};
+  const rows = [];
+  ["chalk", "dim", "faint", "amber", "mint", "red", "violet"].forEach(fg => Object.keys(bgs).forEach(bg => rows.push({theme, fg, bg, ratio: cr(rgb(v("--" + fg)), bgs[bg])})));
+  rows.push({theme, fg: "fill-ink", bg: "fill", ratio: cr(rgb(v("--fill-ink")), rgb(v("--fill")))});
+  return rows;
+}
+NF.contrastRows = contrastRows;
+["night", "day"].forEach(th => test(`对比度：${th === "night" ? "夜间" : "白天"}主题下每种文字色在每种底色上都 ≥ 4.5:1`, () => {
+  const low = contrastRows(th).filter(r => r.ratio < 4.5).map(r => `${r.fg} on ${r.bg} ${r.ratio.toFixed(2)}`); eq(low, []); }));
+
+const pass = results.filter(r => r.ok).length, fail = results.length - pass;
+const rows = ["night", "day"].flatMap(contrastRows), worst = rows.reduce((a, b) => b.ratio < a.ratio ? b : a);
+window.__selftest = {pass, fail, failures: results.filter(r => !r.ok), worstContrast: `${worst.theme} ${worst.fg} on ${worst.bg} ${worst.ratio.toFixed(2)}`};
+document.title = (fail ? "FAIL " : "PASS ") + pass + "/" + results.length + " · new-UI-face 自测";
+document.getElementById("sum").innerHTML = `<span class="${fail ? "bad" : "ok"}">${fail ? "有失败" : "全部通过"}</span>　${pass} / ${results.length}　<small>最低的对比度：${window.__selftest.worstContrast}</small>`;
+document.getElementById("out").innerHTML = results.map(r => `<li class="${r.ok ? "" : "bad"}">${r.ok ? "✓" : "✕"} ${NF.esc(r.name)}${r.ok ? "" : `<br><small>${NF.esc(r.why)}</small>`}</li>`).join("");
+})();
+</script>
+</body>
+</html>

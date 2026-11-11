@@ -88,8 +88,9 @@ textarea.field{resize:vertical;line-height:1.5}
 .tabs button{display:flex;align-items:center;gap:7px;height:30px;padding:0 11px;border-radius:7px;color:var(--dim);font-size:var(--fs-sm);white-space:nowrap}
 .tabs button[aria-selected="true"]{background:var(--raise);color:var(--chalk);font-weight:600}
 .tabs .n{font-family:var(--num);color:var(--amber);font-weight:400}
+.tabs .cnt{font-family:var(--num);font-weight:400;color:var(--dim);margin-left:-1px}
 .pills{display:flex;flex-wrap:wrap;gap:4px}
-.pills button{height:26px;padding:0 9px;border:1px solid var(--line);border-radius:999px;font-size:var(--fs-xs);color:var(--dim);background:var(--deck)}
+.pills button{height:26px;padding:0 8px;white-space:nowrap;flex:none;border:1px solid var(--line);border-radius:999px;font-size:var(--fs-xs);color:var(--dim);background:var(--deck)}
 .pills button[aria-pressed="true"]{color:var(--chalk);border-color:var(--amber);background:var(--solid)}
 .pills .n{font-family:var(--num);margin-left:4px;color:var(--faint)}
 
@@ -163,11 +164,13 @@ main{position:fixed;inset:var(--top) 0 var(--bar) 0;z-index:2}
 .dev .pop b{font-weight:600;color:var(--dim)} .dev .row{display:grid;gap:4px}
 
 /* ── decide ─────────────────────────────────────────────────────────────── */
-#decide{display:grid;grid-template-columns:232px minmax(0,720px) 232px;justify-content:center;gap:18px;align-items:start}
+#decide{display:grid;grid-template-columns:244px minmax(0,720px) 232px;justify-content:center;gap:18px;align-items:start}
 @media (min-width:1400px){ #decide{transition:transform var(--mo) ease-out} body.peeking #decide{transform:translateX(-104px)} }
 .rail-title{display:flex;align-items:baseline;justify-content:space-between;font-size:var(--fs-xs);color:var(--faint);padding:6px 4px 8px}
 .rail-title b{font-family:var(--num);font-size:var(--fs-2xl);font-weight:400;color:var(--amber)}
 .side-q{display:flex;flex-direction:column;max-height:calc(100dvh - var(--top) - var(--bar) - 22px)}
+.side-q .pills{flex:none;gap:3px}                                   /* one row in zh, wraps to two in en */
+.side-q .pills button{padding:0 6px}
 .queue{display:flex;flex-direction:column;gap:6px;overflow:auto;margin-top:8px;padding-right:2px}
 .q{position:relative;display:block;width:100%;text-align:left;padding:8px 10px 8px 14px;border:1px solid var(--line);border-radius:var(--r-2);background:var(--deck);backdrop-filter:blur(12px);flex:none}
 .q::before{content:"";position:absolute;left:5px;top:9px;bottom:9px;width:3px;border-radius:2px;background:var(--faint)}
@@ -318,8 +321,8 @@ main{position:fixed;inset:var(--top) 0 var(--bar) 0;z-index:2}
   .view{padding:8px 10px 4px}
   #decide{display:block}
   .side-q{max-height:none;margin-bottom:8px}
-  .side-q .pills{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
   .rail-title{padding:0 2px 6px}
+  .side-q .pills{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
   .queue{flex-direction:row;overflow-x:auto;gap:6px;padding-bottom:2px;scrollbar-width:none}
   .q{flex:0 0 150px} .q .t{-webkit-line-clamp:1} .q .need{display:none}
   .brief{padding:16px 16px 0;max-height:calc(100dvh - var(--top) - var(--bar) - 132px)}
