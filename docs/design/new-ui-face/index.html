@@ -9,6 +9,10 @@
 </head>
 <body class="app" data-theme="night">
 <canvas id="sky" aria-hidden="true"></canvas>
+<!-- the 3D view of «全景»: its canvas and the names laid over it. Empty until someone switches to 3D (the engine loads then). -->
+<div id="g3d" hidden></div>
+<div id="clabels" hidden aria-hidden="true"></div>
+<div id="labels" hidden aria-hidden="true"></div>
 
 <header class="top">
   <div class="tabs" id="lens" role="tablist"></div>
@@ -42,8 +46,9 @@
   </section>
 
   <section class="view" id="world" hidden>
-    <div class="wleft" id="wleft"><div class="wtools card" id="wtools"></div><div class="happen card" id="happen"></div></div>
+    <div class="wleft" id="wleft"><div class="wtools card" id="wtools"></div><div class="wcheck card" id="wcheck"></div><div class="happen card" id="happen"></div></div>
     <p class="wpast" id="wpast" hidden></p>
+    <p class="wpast whint" id="whint" hidden></p>
     <aside class="nodecard card" id="nodecard" hidden></aside>
     <div class="legend" id="legend"></div>
     <div class="wstate card" id="wstate" hidden></div>
@@ -76,6 +81,7 @@
 <script src="model-live.js"></script>
 <script src="model-world.js"></script>
 <script src="screens/sky.js"></script>
+<script src="screens/sky3d.js"></script>
 <script src="screens/briefs-core.js"></script>
 <script src="screens/briefs-recovery.js"></script>
 <script src="screens/briefs-change.js"></script>

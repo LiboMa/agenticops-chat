@@ -180,6 +180,14 @@ function render(el, name){
     <div class="scrub card" style="position:static;transform:none;width:100%;margin-top:10px"><div class="row"><button class="btn sm"><span class="t">◂</span><kbd>[</kbd></button><button class="btn sm"><span class="t">回放 24 小时</span><kbd>P</kbd></button><button class="btn sm"><span class="t">▸</span><kbd>]</kbd></button><b>03:52 UTC（2 小时前）</b></div>
       <div class="ticks"><i class="signal" style="left:20%"></i><i class="agent" style="left:44%"></i><i class="change cause" style="left:88%"></i><i class="decision" style="left:92%"></i></div><input type="range" min="0" max="240" value="215" aria-label="时间"></div></div>
 
+  <div class="gsec"><h3>全景：两种看法，一份数据</h3>
+    <div class="tabs wview" style="max-width:300px"><button aria-selected="true">平面</button><button aria-selected="false">3D</button><kbd>V</kbd></div>
+    <div class="wcheck card" style="margin-top:8px"><h2>数据核对</h2><p>${prov(true)}1,623 个资源在看着，另有 3 个已经不见了；3,244 条关系，其中 118 条是模型推断的。</p>
+      <p>${prov(true)}资源和关系是 06:08 UTC 那次扫描的结果，之后的变化还不在图上。</p><p class="ok">${prov(true)}3D图画出来的和数据一致：193 个亮着的资源、9 个环、3,244 条连线。</p></div>
+    <div class="wcheck card bad" style="margin-top:8px"><h2>数据核对</h2><p class="mis">画面和数据不一致：环应为 9，画出来是 8</p></div>
+    <div style="display:grid;gap:4px;font-size:var(--fs-sm);margin-top:8px"><span><i class="hdot gone"></i><s>i-1657</s>　已经不见了（不算在「在看着的」里，也不从图上消失）</span></div>
+    <p class="rule">两种看法画的是同一份结果，面板上的数字也从那一份里来。每次变化之后，页面去问画布实际画了什么，和数据逐项对一遍；对不上就变红，并说出是哪一项。</p></div>
+
   <div class="gsec"><h3>表格</h3><table class="grid"><tr><th>编号</th><th>什么事</th><th>级别</th><th>现在</th></tr><tr><td class="num">I#12</td><td>SSH 对公网开放</td><td>严重</td><td>等你批准</td></tr><tr><td class="num">I#37</td><td>lambda-pay 错误率升高</td><td>高</td><td>agent 正在查</td></tr></table></div>
 
   <div class="gsec"><h3>一块数据的四种状态</h3>

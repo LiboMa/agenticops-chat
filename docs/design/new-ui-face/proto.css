@@ -363,6 +363,16 @@ button.f:hover{border-color:var(--faint)}
 .wf{display:flex;gap:6px;flex:1 1 100%}
 .wf select{flex:1;min-width:0;min-height:32px;padding:2px 6px;font-size:var(--fs-sm)}
 .wcount{font-size:var(--fs-xs);color:var(--faint);margin-left:auto}
+.wview{flex:1 1 100%;align-items:center;padding:3px} .wview button{flex:1} .wview kbd{margin:0 6px} .wview.busy{opacity:.55}
+.wcheck{padding:10px 14px;font-size:var(--fs-xs);flex:none}
+.wcheck h2{font-size:var(--fs-sm);color:var(--faint);font-weight:600;margin:0 0 2px}
+.wcheck p{margin:4px 0 0;color:var(--dim)} .wcheck .ok{color:var(--chalk)}
+.wcheck.bad{border-color:var(--red)} .wcheck .mis{color:var(--red)}
+.ties{margin-top:8px}
+.linkish{color:var(--amber);text-decoration:underline;font-size:inherit}
+.btn.on{border-color:var(--amber);color:var(--chalk)}
+.hdot.gone{background:transparent;border:1px dashed var(--dim)}
+.whint .chain{font-family:var(--mono);font-size:var(--fs-xs);color:var(--mint)} .whint .btn{vertical-align:middle;margin-left:4px}
 .chip-btn[aria-pressed="true"]{border-color:var(--amber);color:var(--chalk)}
 .happen{padding:12px 14px;border-radius:14px;flex:none}
 .happen h2{font-size:var(--fs-sm);color:var(--faint);font-weight:600;margin:0 0 6px}
@@ -394,10 +404,13 @@ button.f:hover{border-color:var(--faint)}
 .legend{position:absolute;right:16px;bottom:12px;display:grid;gap:4px;padding:8px 10px;border-radius:var(--r-2);background:var(--deck);font-size:var(--fs-xs);color:var(--dim)}
 .legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
 .legend i.dash{width:14px;height:0;border-radius:0;border-top:1px dashed var(--dim);vertical-align:middle}
+.legend i.curve{width:14px;height:6px;border-radius:50% 50% 0 0;border:1px solid var(--dim);border-bottom:0;background:transparent;vertical-align:middle}
+.legend i.gonei{background:transparent;border:1px dashed var(--dim)}
+.legend .sch{color:var(--faint);max-width:230px}
 #tip{position:fixed;z-index:20;pointer-events:none;background:var(--solid);border:1px solid var(--line);border-radius:7px;padding:4px 9px;font-size:var(--fs-xs)}
 
-/* ── the 3D preview (preview-3d.html): the same panels over a WebGL canvas ─────────────── */
-#g3d{position:fixed;inset:0;cursor:grab}
+/* ── the 3D view of «全景»: a WebGL canvas under the same panels, with names and rings as page elements ───── */
+#g3d{position:fixed;inset:0;z-index:1;cursor:grab}
 #labels,#clabels{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:1}
 .c3{position:absolute;left:0;top:0;font-size:var(--fs-xs);color:var(--dim);white-space:nowrap}
 .l3{position:absolute;left:0;top:0;display:flex;align-items:flex-start;will-change:transform}
@@ -406,21 +419,10 @@ button.f:hover{border-color:var(--faint)}
 .l3.t-red i{border-color:var(--red)} .l3.t-amber i{border-color:var(--amber)} .l3.t-mint i{border-color:var(--mint)} .l3.t-violet i{border-color:var(--violet)}
 .l3[class*="t-"] i{animation:ring3 2.4s ease-in-out infinite}
 .l3.sel i{width:28px;height:28px;margin:-14px 0 0 -14px;border:2px solid var(--chalk);animation:none}
-.l3.off{opacity:.22}
+.l3.off{opacity:.22} .l3.mute span{display:none}
+.l3.gone i{border-style:dashed} .l3.gone span{text-decoration:line-through;color:var(--dim)}
 @keyframes ring3{50%{transform:scale(1.4);opacity:.5}}
-.p3top{z-index:5} .p3top .chip-btn{flex:none;white-space:nowrap}
-.p3title{display:flex;flex-direction:column;min-width:0;line-height:1.3}
-.p3title b{font-size:var(--fs-md)} .p3title span{font-size:var(--fs-xs);color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#p3{inset:var(--top) 0 0 0;pointer-events:none} #p3 > *{pointer-events:auto}
-.p3types{flex:1 1 100%;display:grid;grid-template-columns:1fr 1fr;gap:4px}
-.p3types button{display:flex;justify-content:space-between;gap:6px;padding:4px 8px;border:1px solid var(--line);border-radius:var(--r-1);font-size:var(--fs-xs);color:var(--dim)}
-.p3types button[aria-pressed="true"]{border-color:var(--amber);color:var(--chalk)}
-.p3types small{color:var(--faint);font-size:var(--fs-xs)}
-.p3bar{bottom:14px} .p3bar .btn[aria-pressed="true"]{border-color:var(--amber);color:var(--chalk)}
-.p3perf{display:inline-flex;align-items:center;gap:8px;padding-left:10px;border-left:1px dashed var(--line);font-size:var(--fs-xs);color:var(--dim)}
-.p3hint .chain{font-family:var(--mono);font-size:var(--fs-xs);color:var(--mint)}
-.p3hint .btn{vertical-align:middle;margin-left:4px}
-a.btn,a.chip-btn{text-decoration:none;display:inline-flex;align-items:center;color:inherit}
+body.view3d main,body.view3d #world{pointer-events:none}            /* let the pointer reach the 3D canvas wherever no panel is */
 @media (prefers-reduced-motion:reduce){ .l3 i{animation:none !important} }
 
 /* ── responsive ─────────────────────────────────────────────────────────── */

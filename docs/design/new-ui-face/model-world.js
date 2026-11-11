@@ -71,14 +71,27 @@ NF.buildSky = (seed, opts = {}) => {
     for (let i = lo; i < hi; i++){ const n = nodes[i]; if (n.hub) continue; const s = subs.reduce((a, b) => d2(n, b.x, b.y) < d2(n, a.x, a.y) ? b : a); edges.push([s.i, n.i, 4]); }
   });
   roots.slice(0, -1).forEach(r => edges.push([roots[roots.length - 1].i, r.i, 1]));      // each cluster's root is linked to the shared one
+  /* Resources a complete scan no longer lists (the product marks them absent; it never deletes them). They stay on the
+     map, drawn as gone, and are not counted among the resources being watched. Appended last, from their own random
+     stream, so nothing above moves. `gone.h` = how many hours ago they were last seen. */
+  let gs = 20261112;
+  const Gr = () => { gs |= 0; gs = gs + 0x6D2B79F5 | 0; let t = Math.imul(gs ^ gs >>> 15, 1 | gs); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  [[0, "i-", "compute", 1.1], [0, "vol-", "storage", 1.1], [1, "elb-", "network", 6.5]].forEach(([ci, pre, type, h]) => {
+    const c = C[ci], i = nodes.length, n = {i, x: c.cx + (Gr() - .5) * c.sp * 2.4, y: c.cy + (Gr() - .5) * c.sp * 2.4, cl: ci, r: .9, ph: Gr() * 6.28, b: i % 6,
+      name: pre + (0x1000 + i).toString(16), type, account: c.account, region: c.region, gone: {h}};
+    nodes.push(n);
+    const sub = nodes.filter(m => m.hub === 1 && m.cl === ci).reduce((a, b) => (b.x - n.x) ** 2 + (b.y - n.y) ** 2 < (a.x - n.x) ** 2 + (a.y - n.y) ** 2 ? b : a);
+    edges.push([sub.i, n.i, 4]);
+  });
   /* depth, for a 3D view: its own random stream, so the flat layout above stays exactly as it was */
   let zs = 20261111;
   const Z = () => { zs |= 0; zs = zs + 0x6D2B79F5 | 0; let t = Math.imul(zs ^ zs >>> 15, 1 | zs); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
   nodes.forEach(n => { const c = C[n.cl]; n.z = (c.cz || 0) + (Z() + Z() + Z() + Z() - 2) / 2 * c.sp * 1.5; });
   return {nodes, edges, hot};
 };
-/* who is linked to whom: adj[i] = [[j, flags], …], built once per map */
-const adjOf = sky => sky.adj || (sky.adj = (() => { const a = sky.nodes.map(() => []); sky.edges.forEach(([x, y, f]) => { a[x].push([y, f]); a[y].push([x, f]); }); return a; })());
+/* who is linked to whom: adj[i] = [[j, flags, out], …] — out: 1 = the link runs from i to j, 0 = from j to i. Built once per map. */
+const adjOf = sky => sky.adj || (sky.adj = (() => { const a = sky.nodes.map(() => []); sky.edges.forEach(([x, y, f]) => { a[x].push([y, f, 1]); a[y].push([x, f, 0]); }); return a; })());
+const OPEN = ["critical", "warning", "notice"];
 
 NF.world = {
   adj: adjOf,
@@ -109,22 +122,77 @@ NF.world = {
     if (hoursAgo === 0 && it && CLOSED.includes(it.status)) return false;
     return hoursAgo <= h.from && hoursAgo >= h.to;
   },
-  health(node, hoursAgo, store){ const h = node.hot; return !h || !NF.world.active(h, hoursAgo, store) ? "unknown" : TONE[h.tone] || "notice"; },
+  /* five answers: critical | warning | notice | unknown (no open issue — never «healthy») | gone (a complete scan no longer lists it) */
+  health(node, hoursAgo, store){
+    if (node.gone && hoursAgo <= node.gone.h) return "gone";
+    const h = node.hot; return !h || !NF.world.active(h, hoursAgo, store) ? "unknown" : TONE[h.tone] || "notice";
+  },
+  present: sky => sky.nodes.filter(n => !n.gone),
+  /* A link runs from its first end to its second — upstream to downstream, container to member — unless a model inferred it:
+     an inferred relation has no known direction, and none is drawn. */
+  dir: e => e[2] & 2 ? 0 : 1,
+  relation: ([, f, out]) => f & 2 ? "inferred" : out ? "down" : "up",          // what the neighbour is to the resource whose list it is in
+  totals(sky){
+    const T = sky.totals; if (T) return T;
+    const inferred = sky.edges.filter(e => e[2] & 2).length, gone = sky.nodes.filter(n => n.gone).length;
+    return sky.totals = {nodes: sky.nodes.length, present: sky.nodes.length - gone, gone, links: sky.edges.length, inferred, rule: sky.edges.length - inferred,
+      contain: sky.edges.filter(e => e[2] & 4).length, cross: sky.edges.filter(e => e[2] & 1).length};
+  },
   abnormal: (sky, hoursAgo, store) => sky.hot.filter(h => NF.world.active(h, hoursAgo, store)),
   /* f = {account?, type?, onlyAbnormal?}; ctx = {hoursAgo, store} */
   match(node, f, ctx){
     if (f.account && node.account !== f.account) return false;
     if (f.type && node.type !== f.type) return false;
-    if (f.onlyAbnormal && NF.world.health(node, ctx.hoursAgo, ctx.store) === "unknown") return false;
+    if (f.onlyAbnormal && !OPEN.includes(NF.world.health(node, ctx.hoursAgo, ctx.store))) return false;
     return true;
   },
   /* By name, type or I# / C#. Resources with something open come first. */
   search(sky, q, ctx, limit = 8){
     q = (q || "").trim().toLowerCase(); if (!q) return [];
     const ref = q.replace("#", "").toUpperCase(), typeHit = NF.TYPES.filter(t => t.id.includes(q) || NF.t("type." + t.id).toLowerCase().includes(q)).map(t => t.id);
-    const open = n => NF.world.health(n, ctx.hoursAgo, ctx.store) !== "unknown" ? 0 : 1;
+    const open = n => OPEN.includes(NF.world.health(n, ctx.hoursAgo, ctx.store)) ? 0 : 1;
     return sky.nodes.filter(n => n.name.toLowerCase().includes(q) || typeHit.includes(n.type) || (n.hot && n.hot.ref === ref))
       .sort((a, b) => open(a) - open(b) || (b.name.toLowerCase().startsWith(q) - a.name.toLowerCase().startsWith(q)) || a.i - b.i).slice(0, limit);
+  },
+  /* ── ONE result for both views ─────────────────────────────────────────────────────────────────────────────
+     Everything the flat map and the 3D map show comes from here, and so do the numbers in the panels: neither view
+     decides anything by itself. F = what the person asked for: {q, account, type, onlyAbnormal, sel, focus, a, b}.
+     A path beats «only what is around it», which beats the filters. A search highlights; it never hides. */
+  scene(sky, F, ctx){
+    const W = NF.world, at = ctx.hoursAgo, store = ctx.store;
+    const path = F.a && F.b ? W.path(sky, F.a, F.b) : null, pathSet = path ? new Set(path) : null;
+    const around = !pathSet && F.focus && F.sel ? W.around(sky, F.sel, 1) : null;
+    const filtered = !!(F.account || F.type || F.onlyAbnormal);
+    let dim = null;
+    if (pathSet || around || filtered){
+      dim = new Set();
+      sky.nodes.forEach(n => { if (!(pathSet ? pathSet.has(n.i) : around ? around.has(n.i) : W.match(n, F, ctx))) dim.add(n.i); });
+    }
+    const gone = new Set(); sky.nodes.forEach(n => { if (n.gone && at <= n.gone.h) gone.add(n.i); });
+    const open = W.abnormal(sky, at, store);
+    const rings = open.map(h => ({node: h.node, tone: h.tone, dim: !!dim && dim.has(h.node.i)}));      // every resource that is not normal wears a ring; outside the view, faintly
+    const hits = W.search(sky, F.q, ctx), labels = new Map();
+    rings.forEach(r => { if (!r.dim) labels.set(r.node.i, r.node); }); hits.forEach(n => labels.set(n.i, n)); (path || []).forEach(i => labels.set(i, sky.nodes[i]));
+    [F.b, F.a, F.sel].forEach(n => { if (n){ labels.delete(n.i); labels.set(n.i, n); } });           // the ones being looked at come last, so their names end up on top
+    let shown = 0; sky.nodes.forEach(n => { if (!gone.has(n.i) && !(dim && dim.has(n.i))) shown++; });
+    /* How the map relates to the queue, so the two numbers can be told apart: of what waits on a person now, which items wear a
+       ring, which sit on a resource that is back to normal (an acceptance, say), and which are on no resource of the map at all. */
+    const onMap = new Set(sky.hot.map(h => h.ref)), ringRefs = new Set(open.map(h => h.ref)), waiting = at === 0 ? store.waiting() : [];
+    return { dim, gone, shown, rings, hits, path, pathSet, around, labels: [...labels.values()], totals: W.totals(sky), at,
+      abnormal: open.filter(h => W.match(h.node, F, ctx)),                                              // what the panel lists: the filters apply, a focus or a path does not
+      ringed: waiting.filter(i => ringRefs.has(i.id)), quiet: waiting.filter(i => onMap.has(i.id) && !ringRefs.has(i.id)), offMap: waiting.filter(i => !onMap.has(i.id)) };
+  },
+  /* What a view must have on its canvas for this result. The flat map shows containment as the cluster itself, so it draws
+     no containment lines; the 3D map draws every link. */
+  expected(sc, view){
+    const T = sc.totals;
+    return { nodes: T.nodes, bright: sc.shown, gone: sc.gone.size, rings: sc.rings.length, ringsBright: sc.rings.filter(r => !r.dim).length,
+             links: view === "2d" ? T.links - T.contain : T.links, named: sc.labels.length };
+  },
+  /* The check: what the view says it drew against what the data says. [] = they agree. */
+  reconcile(sc, view, drawn){
+    const want = NF.world.expected(sc, view);
+    return Object.keys(want).filter(k => drawn[k] !== want[k]).map(k => ({what: k, want: want[k], got: drawn[k]}));
   },
   /* The next event further back (dir -1) or closer to now (dir +1); past the latest one is «now» (0). */
   stepEvent(events, hoursAgo, dir){

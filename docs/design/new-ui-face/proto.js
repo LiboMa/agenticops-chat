@@ -208,7 +208,7 @@ NF.stateBlock = (view, failKey = "state.failed.p") => view === "loading"        
 NF.setLens = l => {
   S.lens = l; NF.closePeek && NF.closePeek(); NF.closeSheet && NF.closeSheet();
   ["decide", "live", "world", "story"].forEach(x => { $("#" + x).hidden = x !== l; });
-  if (l !== "world"){ S.hoursAgo = 0; }
+  if (l !== "world"){ S.hoursAgo = 0; if (NF.screens.world && NF.screens.world.leave) NF.screens.world.leave(); }
   NF.render(true);
 };
 NF.render = swap => {
@@ -218,7 +218,7 @@ NF.render = swap => {
   NF.syncHash();
 };
 NF.syncHash = () => {
-  const h = S.lens === "story" ? "#/story/" + S.story : S.lens === "decide" && S.cur ? "#/decide/" + S.cur : S.lens === "live" && S.liveSel ? "#/live/" + S.liveSel : "#/" + S.lens;
+  const h = S.lens === "story" ? "#/story/" + S.story : S.lens === "decide" && S.cur ? "#/decide/" + S.cur : S.lens === "live" && S.liveSel ? "#/live/" + S.liveSel : S.lens === "world" && S.world && S.world.view === "3d" ? "#/world/3d" : "#/" + S.lens;
   if (location.hash !== h) history.replaceState(null, "", h);
 };
 NF.readHash = () => {
@@ -226,6 +226,7 @@ NF.readHash = () => {
   const it = m[2] && NF.store.get(m[2]);
   if (m[1] === "story"){ if (it){ S.lens = "story"; S.story = it.id; } return; }
   S.lens = m[1]; if (m[1] === "live"){ if (m[2]){ S.liveSel = m[2]; S.liveOpen = true; } return; }
+  if (m[1] === "world"){ S.want3d = m[2] === "3d"; return; }
   if (it) S.cur = it.id;
 };
 
@@ -259,7 +260,7 @@ NF.openHelp = () => {
   const rows = [[K("J", "K"), "help.move"], [K("A"), "help.primary"], [K("R"), "help.reject"], [K("D"), "help.close"], [K("E"), "help.ask"], [K("S"), "help.snooze"],
                 [K(NF.t("key.space")), "help.peek"], [K("X"), "help.tick"], [K("Y", "P", "N", "M"), "help.verdict"], [K("1", "2", "3"), "help.lens"],
                 [K("/"), "help.cmd"], [K("Z"), "help.undo"], [K("T"), "help.theme"],
-                [K("E", "A"), "help.live"], [K("F", "P", "[", "]", "0"), "help.world"]];
+                [K("E", "A"), "help.live"], [K("F", "P", "[", "]", "0"), "help.world"], [K("V", "G", "L", "H"), "help.world2"]];
   $("#help").innerHTML = `<div class="dialog" role="dialog" aria-modal="true" aria-label="${NF.t("keys.open")}"><h2>${NF.t("help.title")}</h2><p>${NF.t("help.p")}</p>
     <div class="keys">${rows.map(r => `<div>${r[0]}<span>${NF.t(r[1])}</span></div>`).join("")}</div>
     <p style="margin-top:14px">${NF.prov(true)}${NF.t("prov.code")}　${NF.prov(false)}${NF.t("prov.model")}。${NF.t("help.prov")}</p>
@@ -303,10 +304,10 @@ Object.assign(NF.on, {
     if (k === "role") NF.store.role = v;
     NF.renderDev(); NF.render(true);
   },
-  devMap: el => { S.mapSize = +el.dataset.v; NF.sky.rebuild(S.mapSize); if (S.world) S.world.sel = null; NF.renderDev(); NF.render(true); },
+  devMap: el => { S.mapSize = +el.dataset.v; NF.sky.rebuild(S.mapSize); if (S.world) Object.assign(S.world, {sel: null, focus: false, pathMode: false, a: null, b: null}); NF.renderDev(); NF.render(true); },
   devReset: () => {
     NF.boot(); S.cur = null; S.curIdx = 0; S.filter = "all"; S.onlyCritical = false; S.view = "ready"; S.hoursAgo = 0; S.liveSel = null; S.liveOpen = false; S.mapSize = 0;
-    if (S.world) Object.assign(S.world, {q: "", account: "", type: "", onlyAbnormal: false, sel: null, playing: false});
+    if (S.world) Object.assign(S.world, {q: "", account: "", type: "", onlyAbnormal: false, sel: null, focus: false, pathMode: false, a: null, b: null, playing: false});
     NF.sky.rebuild(); $("#toast").hidden = true; NF.renderDev(); NF.render(true);
   },
 });

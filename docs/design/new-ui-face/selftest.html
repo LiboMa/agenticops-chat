@@ -256,14 +256,14 @@ test("扫描走到 100% 记为完成；现场分三组，每一条都有 agent �
 /* ── D3: the «全景» lens ─────────────────────────────────────────────── */
 const sky = NF.buildSky(NF.seed);
 test("星图：节点数等于资源数，每个节点有名字、类型、账户和区域；同一份数据每次画出来一样", () => {
-  eq(sky.nodes.length, NF.seed.watch.resources); eq(sky.nodes.length, NF.seed.clusters.reduce((a, c) => a + c.n, 0));
+  eq(NF.world.present(sky).length, NF.seed.watch.resources); eq(NF.world.present(sky).length, NF.seed.clusters.reduce((a, c) => a + c.n, 0));
   sky.nodes.forEach(n => yes(n.name && NF.TYPES.some(t => t.id === n.type) && n.account && n.region, "node " + n.i));
   eq(new Set(sky.nodes.map(n => n.name)).size, sky.nodes.length, "names are unique:");
   sky.edges.forEach(e => yes(sky.nodes[e[0]] && sky.nodes[e[1]] && e[0] !== e[1], "edge")); yes(sky.edges.some(e => e[2] & 2), "some edges are model-inferred");
   sky.hot.forEach(h => yes(h.node && h.node.name === h.name, "hot " + h.name)); eq(sky.hot.length, NF.seed.hot.length);
   const again = NF.buildSky(NF.seed); eq(again.nodes.slice(0, 50).map(n => [n.x, n.y, n.type]), sky.nodes.slice(0, 50).map(n => [n.x, n.y, n.type])); eq(again.edges.length, sky.edges.length); });
 test("星图按比例放大到 1,900 和 5,000 个节点也建得出来", () => { [1900, 5000].forEach(c => { const s2 = NF.buildSky(NF.seed, {count: c});
-  eq(s2.nodes.length, c); yes(s2.edges.length > c * .8, "edges"); eq(s2.hot.length, NF.seed.hot.length); }); });
+  eq(NF.world.present(s2).length, c); yes(s2.edges.length > c * .8, "edges"); eq(s2.hot.length, NF.seed.hot.length); }); });
 test("资源的健康是四个值：没有未结问题是「未知」，不是「健康」", () => { const {store} = fresh(), W = NF.world;
   const plain = sky.nodes.find(n => !n.hot), sg = sky.hot.find(h => h.ref === "I12").node, db = sky.hot.find(h => h.ref === "I8").node, fn = sky.hot.find(h => h.ref === "I37").node;
   eq([W.health(plain, 0, store), W.health(sg, 0, store), W.health(db, 0, store), W.health(fn, 0, store)], ["unknown", "critical", "warning", "notice"]);
@@ -274,6 +274,7 @@ test("某个时刻哪些资源不正常，按那个时刻算；现在已经修�
   A.close(store, "I12", "故意开的"); clock.advance(NF.UNDO_MS); eq(W.health(sg, 0, store), "unknown", "dismissed now:"); eq(W.health(sg, 1, store), "critical", "an hour ago it still was:"); });
 test("全景的筛选：账户、类型、只看不正常的，可以叠加", () => { const {store} = fresh(), W = NF.world, ctx = {hoursAgo: 0, store};
   const all = sky.nodes.filter(n => W.match(n, {}, ctx)).length; eq(all, sky.nodes.length);
+  yes(sky.nodes.filter(n => n.gone).every(n => !W.match(n, {onlyAbnormal: true}, ctx)), "a resource that is gone is not «not normal»");
   const prod = sky.nodes.filter(n => W.match(n, {account: "prod"}, ctx)), db = sky.nodes.filter(n => W.match(n, {type: "database"}, ctx)), both = sky.nodes.filter(n => W.match(n, {account: "prod", type: "database"}, ctx));
   yes(prod.length > 0 && prod.length < all && prod.every(n => n.account === "prod")); yes(db.length > 0 && db.every(n => n.type === "database")); eq(both.length, prod.filter(n => n.type === "database").length);
   const abn = sky.nodes.filter(n => W.match(n, {onlyAbnormal: true}, ctx)); eq(abn.length, W.abnormal(sky, 0, store).length); });
@@ -306,10 +307,49 @@ test("两个资源之间找一条路：给出最短的那条；连不到就是�
 test("包含关系：每个资源属于一个子容器，子容器属于集群的根；两个不相干的资源因此只隔几步", () => { const W = NF.world;
   const hubs = sky.nodes.filter(n => n.hub), roots = hubs.filter(n => n.hub === 2); eq(roots.length, NF.seed.clusters.length); yes(hubs.every(n => !n.hot), "a named resource is never a container");
   const contain = sky.edges.filter(e => e[2] & 4); eq(contain.length, sky.nodes.length - roots.length, "every resource but the roots has exactly one container:");
+  yes(contain.every(e => sky.nodes[e[0]].hub), "a containment link runs from the container to its member");
   eq(new Set(sky.nodes.map(n => n.name)).size, sky.nodes.length, "names stay unique:");
   const by = ref => sky.hot.find(h => h.ref === ref).node, same = W.path(sky, by("I12"), by("I31")), cross = W.path(sky, by("I12"), by("I8"));
   yes(same && same.length - 1 <= 4, "two resources of one cluster: " + (same && same.length - 1)); yes(cross && cross.length - 1 <= 8, "across clusters: " + (cross && cross.length - 1));
   eq(W.around(sky, sky.nodes[0], 9999).size, sky.nodes.length, "the whole map is one piece:"); });
+/* ── data accuracy: one result for both views, and a check that what was drawn is what the data says ───────── */
+test("关系有方向：从上游到下游；模型推断的关系没有方向，不画流向", () => { const W = NF.world;
+  const g = tiny([[0, 1, 0], [1, 2, 2], [3, 1, 4]]); eq([W.dir(g.edges[0]), W.dir(g.edges[1]), W.dir(g.edges[2])], [1, 0, 1]);
+  const rel = (i, j) => { const e = W.adj(g)[i].find(x => x[0] === j); return W.relation(e); };
+  eq([rel(0, 1), rel(1, 0), rel(1, 2), rel(2, 1), rel(1, 3), rel(3, 1)], ["down", "up", "inferred", "inferred", "up", "down"]);
+  ["up", "down", "inferred"].forEach(k => yes(("rel." + k) in NF.STR.zh && ("rel." + k) in NF.STR.en, k)); });
+test("不见了的资源：不算进「在看着的」，但也不从图上消失；回到它还在的时候，它就还在", () => { const {store} = fresh(), W = NF.world, gone = sky.nodes.filter(n => n.gone);
+  eq(gone.length, 3); eq(sky.nodes.length, NF.seed.watch.resources + 3); yes(gone.every(n => !n.hot && !n.hub && n.name));
+  eq(W.health(gone[0], 0, store), "gone"); eq(W.health(gone[0], gone[0].gone.h + 1, store), "unknown", "an hour before it disappeared:");
+  yes("health.gone" in NF.STR.zh && "health.gone" in NF.STR.en); eq(W.totals(sky).present, NF.seed.watch.resources); });
+const scn = (F, at = 0, st) => { const {store} = st ? {store: st} : fresh(); return NF.world.scene(sky, Object.assign({q: "", account: "", type: "", onlyAbnormal: false, sel: null, focus: false, a: null, b: null}, F), {hoursAgo: at, store}); };
+test("两种看法共用一份结果：不筛选时，全部资源都亮，每个不正常的资源一个环，数字对得上", () => { const sc = scn({}), T = sc.totals;
+  eq(sc.dim, null); eq(sc.shown, NF.seed.watch.resources); eq(sc.rings.length, 9); eq(sc.abnormal.length, 9); eq(sc.gone.size, 3);
+  eq([T.nodes, T.present, T.gone], [sky.nodes.length, NF.seed.watch.resources, 3]); eq(T.links, sky.edges.length); eq(T.rule + T.inferred, T.links); yes(T.inferred > 0 && T.contain > 0);
+  yes(sc.rings.every(r => sc.labels.includes(r.node)), "every ring has its name"); });
+test("筛选、时间、只看周围、找路：亮着的资源数就是筛出来的数；环只给那个时刻不正常的", () => { const W = NF.world, by = r => sky.hot.find(h => h.ref === r).node;
+  const db = scn({type: "database"}); eq(db.shown, W.present(sky).filter(n => n.type === "database").length); eq(db.abnormal.map(h => h.name), ["database-demo"]);
+  yes(db.rings.filter(r => !r.dim).every(r => r.node.type === "database")); eq(db.rings.length, 9, "a ring outside the filter stays, faintly:");
+  const only = scn({onlyAbnormal: true}); eq(only.shown, 9); eq(only.rings.filter(r => !r.dim).length, 9);
+  const past = scn({}, 12); eq(past.rings.length, 4); eq(past.gone.size, 0, "12 hours ago nothing had disappeared yet:"); eq(past.shown, NF.seed.watch.resources + 3);
+  const sg = by("I12"), foc = scn({sel: sg, focus: true}); eq(foc.shown, W.around(sky, sg, 1).size); yes(!foc.dim.has(sg.i));
+  const path = scn({a: sg, b: by("I8")}); eq(path.path.length, 7); eq(path.shown, 7); yes(path.path.every(i => path.labels.includes(sky.nodes[i])), "every step of the path is named");
+  const both = scn({a: sg, b: by("I8"), sel: sg, focus: true, type: "database"}); eq(both.shown, 7, "a path beats a focus beats the filters:");
+  const none = scn({a: sg, b: sg}); eq([none.path, none.dim], [null, null]); const hits = scn({q: "sg_web"}); eq([hits.dim, hits.hits[0].name], [null, "sg_web"], "a search highlights, it does not hide:"); });
+test("数据核对：画出来的和结果一样就没有话说；差一个都要说出是哪一项", () => { const W = NF.world, sc = scn({type: "database"});
+  const good = W.expected(sc, "3d"); eq(W.reconcile(sc, "3d", good), []);
+  eq(W.expected(sc, "2d").links, sc.totals.links - sc.totals.contain, "the flat map does not draw containment lines:"); eq(good.links, sc.totals.links);
+  eq(W.reconcile(sc, "3d", Object.assign({}, good, {bright: good.bright - 1})).map(m => m.what), ["bright"]);
+  eq(W.reconcile(sc, "3d", Object.assign({}, good, {rings: good.rings + 1, links: 0})).map(m => m.what).sort(), ["links", "rings"]);
+  const m = W.reconcile(sc, "2d", Object.assign({}, W.expected(sc, "2d"), {nodes: 1}))[0]; eq([m.what, m.want, m.got], ["nodes", sc.totals.nodes, 1]); });
+test("事实只有一个出处：简报里说的资源、全景上的环、列表里的条数，指的是同一批", () => { const {store} = fresh(), W = NF.world, sc = scn({}, 0, store);
+  const refs = sc.rings.map(r => r.node.hot.ref).sort(); eq(new Set(refs).size, refs.length);
+  refs.forEach(r => { const it = store.get(r); yes(!it || !["fixed", "done", "closed", "cancelled"].includes(it.status), r + " is still open"); });
+  store.items.filter(i => i.node).forEach(i => yes(sky.hot.some(h => h.ref === i.id && h.name === i.node), i.ref + " names " + i.node + ", and the map has it under that name"));
+  const off = sc.offMap.map(i => i.ref).sort(); eq(off, ["C#5", "C#7", "C#8", "I#19", "I#40", "I#44", "I#58"], "what waits on you but sits on no resource of the map is said, not hidden:");
+  eq([sc.ringed.length, sc.quiet.map(i => i.ref), off.length], [8, ["I#934"], 7]);
+  eq(sc.ringed.length + sc.quiet.length + off.length, store.waiting().length, "the 16 that wait = 8 with a ring + 1 whose resource is back to normal (it waits for acceptance) + 7 off the map:");
+  eq(sc.rings.length - sc.ringed.length, 1, "and one ring is an item an agent is on, not one that waits on you:"); });
 
 /* contrast: every text colour on every surface, both themes (WCAG 2 formula) */
 function contrastRows(theme){
