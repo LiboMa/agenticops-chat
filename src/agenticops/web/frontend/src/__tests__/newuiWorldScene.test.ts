@@ -73,8 +73,8 @@ describe("a path says which of its links a model only inferred", () => {
   });
 
   it("says which way each link is written — a path may run against it", () => {
-    // found in the browser on the real graph: «sg_web —contains→ project-vpc» read as the group holding the VPC,
-    // while the build wrote «project-vpc contains sg_web». The arrow is the relation's, not the path's.
+    // found in the browser on the real graph: «a security group —contains→ its VPC» read as the group holding the
+    // VPC, while the build wrote «the VPC contains the group». The arrow is the relation's, not the path's.
     const sc = scene(g, ask({ a: at(31), b: at(50) }), null);         // instance 31 ← subnet 20 ← VPC 10 → subnet 21 → database 50
     expect(sc.pathHops!.map((h) => [h.r, h.fwd])).toEqual([["contains", false], ["contains", false], ["contains", true], ["contains", true]]);
     expect(sc.pathHops!.map((h) => hopMarks(h).join("contains"))).toEqual(["←contains—", "←contains—", "—contains→", "—contains→"]);

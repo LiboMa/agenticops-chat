@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 
 /** The pages put a full-width space (U+3000) between a sentence and what follows it. Written bare at the start or the
  *  end of a JSX text line it never reaches the page: the build trims a line's edges, and to it U+3000 is whitespace —
- *  «…weblab-ec2-role» ran straight into the next sentence (found in the browser after the final review). Mid-line it
+ *  a resource's name ran straight into the next sentence (found in the browser after the final review). Mid-line it
  *  survives. So at a line's edge the space is written as an expression: {"　"}. */
 function sources(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
