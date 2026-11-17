@@ -77,9 +77,12 @@ _HARMLESS_REDIRECT = re.compile(r"(?:[12]?>{1,2}\s*/dev/null|&>\s*/dev/null|2>&1
 
 
 def _shell_would_split(text: str) -> bool:
-    """True when a shell would read more than one simple command in `text`, or send its output somewhere: an
-    unquoted ; & | < > ( ), a backtick or $( outside single quotes. Quoted text is data (a JMESPath `--query` is
-    full of | & > and backticks) and `2>/dev/null` / `2>&1` change nothing, so neither counts."""
+    """True when a shell would read more than one simple command in `text`, send its output somewhere, or when the
+    line carries a comment: an unquoted ; & | < > ( ), a backtick or $( outside single quotes, a # that begins a
+    word. Quoted text is data (a JMESPath `--query` is full of | & > and backticks) and `2>/dev/null` / `2>&1`
+    change nothing, so neither counts. A comment changes nothing for a shell, but it is free text beside the
+    command — the code cannot classify it, and the agent that runs the step reads it («… # then archive the
+    finding»): such a line is not «one command»."""
     text = _HARMLESS_REDIRECT.sub(" ", text)
     quote, i = None, 0
     while i < len(text):
@@ -98,6 +101,8 @@ def _shell_would_split(text: str) -> bool:
             quote = c
         elif c in ";&|<>()`":
             return True
+        elif c == "#" and (i == 0 or text[i - 1].isspace()):
+            return True                              # a comment (a # inside a word is not one)
         i += 1
     return False
 
@@ -116,25 +121,31 @@ def _host_entry(lowered: str) -> str:
 def command_tier(command: str) -> str:
     """The execution tier ('blocked' | 'write' | 'readonly' | 'unknown') of the tool that would run `command`.
 
-    The tools' classifiers read how the line begins. 'readonly' is therefore kept only for a line that is ONE
-    command a shell would not split, redirect or substitute into, on one line — and, on a host, one whose first
-    words cannot write whatever follows (HOST_CANNOT_WRITE). Anything else that began like a read is 'unknown'.
-    A write or a blocked command stays what it is: the checks only move a step toward «a person looks»."""
+    The tools' classifiers read how the line begins, in lower case. 'readonly' is therefore kept only for a line
+    that is ONE command a shell would not split, redirect, substitute into or comment, on one line, written as the
+    command is — in its own case: «Free up disk by deleting old logs» and «Kubectl get pods and delete the stuck
+    ones» are sentences, not `free` and `kubectl get` — and, on a host, one whose first words cannot write whatever
+    follows (HOST_CANNOT_WRITE). Anything else that began like a read is 'unknown'. A write or a blocked command
+    stays what it is: the checks only move a step toward «a person looks»."""
     from agenticops.skills.security import classify_kubectl_command, classify_shell_command
     from agenticops.tools.aws_cli_tool import _classify_command
 
     text = _CONTINUED.sub(" ", command or "")
     flat = " ".join(text.split())
-    head = flat.split(None, 1)[0].lower() if flat else ""
+    written = flat.split(None, 1)[0] if flat else ""
+    head = written.lower()
     if head == "aws":
-        tier = _classify_command(flat)
+        tier, as_written = _classify_command(flat), written == head
     elif head == "kubectl":
-        tier = classify_kubectl_command(flat)
+        tier, as_written = classify_kubectl_command(flat), written == head
     else:
         tier = classify_shell_command(flat)
-        if tier == "readonly" and _host_entry(flat.lower()) not in HOST_CANNOT_WRITE:
+        entry = _host_entry(flat.lower())
+        as_written = bool(entry) and flat.startswith(entry)
+        if tier == "readonly" and entry not in HOST_CANNOT_WRITE:
             tier = "unknown"
-    if tier == "readonly" and (len([line for line in text.splitlines() if line.strip()]) > 1 or _shell_would_split(text)):
+    if tier == "readonly" and (not as_written or len([line for line in text.splitlines() if line.strip()]) > 1
+                               or _shell_would_split(text)):
         tier = "unknown"
     return tier
 
