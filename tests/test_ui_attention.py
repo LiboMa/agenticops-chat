@@ -423,3 +423,54 @@ def test_the_endpoint_takes_sort_decision(db):
         assert c.get("/api/ui/attention?sort=x").status_code == 422
     finally:
         app.dependency_overrides.clear()
+
+
+# ── NewUI (MVP-2.9.0): every row the queue can carry has a brief ─────────────────────────────────────────────
+
+BRIEFS = json.loads((Path(__file__).parent / "fixtures" / "attention_brief_kinds.json").read_text())
+_LISTED = {(r["kind"], r["reason"], r["reason_detail"]) for r in BRIEFS["rows"]}
+
+
+def _kind(item) -> str:
+    """The work item behind a row, as NewUI reads it (newui/lib/briefKind.itemKind)."""
+    return "change" if item["entity"]["entity_type"] == "change_request" else "issue"
+
+
+def _emittable_rows() -> set:
+    """Every (work item, reason, reason_detail) the rows can carry: the two tables, plus each detail _issue_items /
+    _change_items assigns by hand — read from their source, so a new one cannot slip past this table."""
+    import inspect
+    import re
+    rows = {("issue", r, d) for r, d, _a in att.ISSUE_ROWS.values()}
+    rows |= {("change", r, d) for r, d, _a in att.CHANGE_ROWS.values()}
+    for kind, fn, table in (("issue", att._issue_items, att.ISSUE_ROWS), ("change", att._change_items, att.CHANGE_ROWS)):
+        src = inspect.getsource(fn)
+        by_hand = re.findall(r'if phase\.sub == "(\w+)"[^\n]*:\n\s+detail = "(\w+)"', src)
+        assert len(by_hand) == len(re.findall(r'\bdetail = ', src)), "a detail is assigned in a shape this test cannot read"
+        rows |= {(kind, table[sub][0], detail) for sub, detail in by_hand}
+    return rows
+
+
+def test_every_row_the_queue_can_carry_is_listed_with_a_brief():
+    assert _emittable_rows() == _LISTED
+    assert len(BRIEFS["rows"]) == len(_LISTED)                                   # no row listed twice
+    assert {r["brief"] for r in BRIEFS["rows"]} == set(BRIEFS["briefs"])         # every brief is used, none unknown
+    assert len(BRIEFS["briefs"]) == len(set(BRIEFS["briefs"]))
+
+
+def test_real_rows_are_in_the_brief_table(db):
+    """Issues and changes side by side: what the endpoint returns maps into the table by the client's own rule."""
+    _issue("fix_planned", plan="pending_approval")
+    _issue("root_cause_identified", rca=0.3)
+    _issue("root_cause_identified", rca=None)
+    _issue("fix_executed", plan="executed", run=("succeeded", "pending_acceptance"))
+    _change("draft")
+    _change("planned", requested_by="user:bob")
+    _change("needs_clarification")
+    items = _items(ALICE, limit=100)
+    seen = {(_kind(i), i["reason"], i["reason_detail"]) for i in items}
+    assert seen <= _LISTED
+    assert {("issue", "approval_required", None), ("issue", "review_required", "rca_gate"),
+            ("issue", "review_required", "rca_missing"), ("issue", "verification_required", "acceptance"),
+            ("change", "review_required", "change_draft"), ("change", "approval_required", None),
+            ("change", "clarification_required", None)} <= seen

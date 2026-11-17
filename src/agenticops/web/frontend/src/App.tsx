@@ -36,6 +36,8 @@ const Security = lazy(() => import("@/pages/Security"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 const Users = lazy(() => import("@/pages/Users"));
 const ApiKeys = lazy(() => import("@/pages/ApiKeys"));
+// NewUI (MVP-2.9.0): the new interface, a chunk of its own, outside the classic shell
+const NewApp = lazy(() => import("@/newui/NewApp"));
 
 /** Settings is all configuration: a viewer whose account may not view it gets the not-found page. */
 function SettingsGate({ children }: { children: React.ReactNode }) {
@@ -81,6 +83,7 @@ export default function App() {
               </Suspense>
             }
           />
+          <Route path="/app/new/*" element={<RequireAuth><Suspense fallback={<Spinner />}><NewApp /></Suspense></RequireAuth>} />
           <Route path="/app" element={<RequireAuth><AppShell /></RequireAuth>}>
             {/* /app: a pinned home, the last place, or Chat (MVP-2.7.0); the dashboard lives at /app/overview */}
             <Route index element={<HomeResolver />} />

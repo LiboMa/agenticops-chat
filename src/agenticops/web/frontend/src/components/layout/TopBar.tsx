@@ -16,7 +16,7 @@ import { countLabel } from "@/lib/attention";
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
-function initials(name: string | null | undefined, email: string | null | undefined): string {
+export function initials(name: string | null | undefined, email: string | null | undefined): string {
   const src = (name || email || "?").trim();
   const words = src.split(/[\s@._-]+/).filter(Boolean);
   return ((words[0]?.[0] ?? "?") + (words[1]?.[0] ?? "")).toUpperCase();
@@ -144,6 +144,8 @@ function AvatarMenu() {
             </DropdownMenu.RadioGroup>
             <ScopeMenuItems item={item} />
             <DropdownMenu.Separator className="my-1 h-px bg-border" />
+            {/* MVP-2.9.0: the new interface lives beside this one */}
+            <DropdownMenu.Item className={item} onSelect={() => navigate("/app/new")}>{t("newui.entry")}</DropdownMenu.Item>
             <DropdownMenu.Item className={item} onSelect={() => setHomeOpen(true)}>{t("home.prefsTitle")}</DropdownMenu.Item>
             {/* MVP-2.8.0: every signed-in person's own API keys — a viewer's too (read-only keys) */}
             {user && <DropdownMenu.Item className={item} onSelect={() => navigate("/app/account/api-keys")}>{t("apiKeys.menu")}</DropdownMenu.Item>}

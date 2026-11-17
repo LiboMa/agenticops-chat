@@ -88,6 +88,12 @@ export function Sidebar() {
         <img src={`${import.meta.env.BASE_URL}logo-icon.svg`} alt="" className="h-6 w-6 shrink-0" />
         <span className="truncate">AgenticOps</span>
       </Link>
+      {/* MVP-2.9.0: the way into the new interface — fixed, not one of the draggable entries */}
+      <Link to="/app/new" title={t("newui.entryHint")}
+            className="mb-4 flex items-center justify-between gap-2 rounded-[6px] border border-primary/25 bg-selected px-[11px] py-2 text-[12px] font-medium text-primary hover:border-primary/50">
+        <span className="truncate">{t("newui.entry")}</span>
+        <span aria-hidden="true">→</span>
+      </Link>
 
       {/* a flex column, so the bottom group (administration) sits at the foot — after everything when the list scrolls */}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -273,6 +279,7 @@ export function MobileNav() {
           </optgroup>
         );
       })}
+      <option value="/app/new">{t("newui.entry")}</option>
     </select>
   );
 }

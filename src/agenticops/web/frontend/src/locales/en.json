@@ -1552,5 +1552,7 @@
   "cases.waiting.empty": "Nothing is waiting on you right now.",
   "cases.waiting.viewerEmpty": "A read-only account has nothing to handle.",
   "cases.waiting.change": "Change",
-  "cases.waiting.queue": "Waiting on me"
+  "cases.waiting.queue": "Waiting on me",
+  "newui.entry": "New interface (NewUI)",
+  "newui.entryHint": "The new one-decision-per-page interface; you can come back here any time"
 }

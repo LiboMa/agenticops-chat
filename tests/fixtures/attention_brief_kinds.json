@@ -1,0 +1,22 @@
+{
+  "_comment": "MVP-2.9.0 NewUI: every (work item, reason, reason_detail) a row of GET /api/ui/attention can carry, and the brief NewUI shows for it. One table for both sides: services/attention (pytest: the rows the code can emit are exactly these) and newui/lib/briefKind (vitest: every row has that brief). The work item is a change when entity.entity_type is change_request, else an issue (an issue's approval and not-started rows carry its fix plan as the entity).",
+  "briefs": ["approve", "accept", "resolve", "confirm", "rerun", "generate", "replan", "failed", "not_started", "start_review", "clarify"],
+  "rows": [
+    {"kind": "issue", "reason": "approval_required", "reason_detail": null, "brief": "approve"},
+    {"kind": "issue", "reason": "verification_required", "reason_detail": "acceptance", "brief": "accept"},
+    {"kind": "issue", "reason": "verification_required", "reason_detail": "resolve", "brief": "resolve"},
+    {"kind": "issue", "reason": "review_required", "reason_detail": "rca_gate", "brief": "confirm"},
+    {"kind": "issue", "reason": "review_required", "reason_detail": "rca_missing", "brief": "rerun"},
+    {"kind": "issue", "reason": "review_required", "reason_detail": "rca_rejected", "brief": "rerun"},
+    {"kind": "issue", "reason": "review_required", "reason_detail": "rca_confirmed", "brief": "generate"},
+    {"kind": "issue", "reason": "review_required", "reason_detail": "rca_ready", "brief": "generate"},
+    {"kind": "issue", "reason": "review_required", "reason_detail": "plan_rejected", "brief": "replan"},
+    {"kind": "issue", "reason": "execution_failed", "reason_detail": "run_failed", "brief": "failed"},
+    {"kind": "issue", "reason": "execution_not_started", "reason_detail": null, "brief": "not_started"},
+    {"kind": "change", "reason": "review_required", "reason_detail": "change_draft", "brief": "start_review"},
+    {"kind": "change", "reason": "clarification_required", "reason_detail": null, "brief": "clarify"},
+    {"kind": "change", "reason": "approval_required", "reason_detail": null, "brief": "approve"},
+    {"kind": "change", "reason": "execution_not_started", "reason_detail": null, "brief": "not_started"},
+    {"kind": "change", "reason": "verification_required", "reason_detail": "acceptance", "brief": "accept"}
+  ]
+}

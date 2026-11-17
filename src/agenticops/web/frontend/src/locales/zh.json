@@ -1552,5 +1552,7 @@
   "cases.waiting.empty": "现在没有在等你的事。",
   "cases.waiting.viewerEmpty": "只读账户没有需要你处理的事。",
   "cases.waiting.change": "变更",
-  "cases.waiting.queue": "在等我的事"
+  "cases.waiting.queue": "在等我的事",
+  "newui.entry": "新界面 NewUI",
+  "newui.entryHint": "一页一个决定的新界面；随时可以回到这里"
 }
