@@ -793,6 +793,12 @@ class FixExecution(Base):
     accepted_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     acceptance_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # MVP-2.9.0 N9: a person asked for this run to stop (services/run_tickets.request_stop). The record stays
+    # `running` — the agent must still be able to roll back and record — and agents/run_guard lets through only
+    # reads, the recording tools and this plan's own rollback commands. NULL = nobody stopped it.
+    stop_requested_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    stop_requested_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    stop_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
@@ -1705,6 +1711,8 @@ _ADD_COLUMNS_2_7_0: dict[str, dict[str, Optional[str]]] = {
                 "owner_user_id": None, "visibility": "NOT NULL DEFAULT 'workspace'"},
     # MVP-2.8.0: soft-deleted users (NULL on existing rows = not deleted)
     "users": {"deleted_at": None},
+    # MVP-2.9.0 N9: a person's stop request on a run (NULL on existing rows = never stopped)
+    "fix_executions": {"stop_requested_at": None, "stop_requested_by": None, "stop_note": None},
 }
 _migrated_2_7_0_urls: set[str] = set()
 _migrate_2_7_0_lock = threading.Lock()

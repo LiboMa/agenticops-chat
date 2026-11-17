@@ -23,6 +23,7 @@ const TABLE: Record<string, BriefKind> = {
   "issue|review_required|rca_ready": "generate",
   "issue|review_required|plan_rejected": "replan",
   "issue|execution_failed|run_failed": "failed",
+  "issue|execution_failed|run_stopped": "failed",        // a person stopped the run (N9): the same page, other words
   "issue|execution_not_started|": "not_started",
   "change|review_required|change_draft": "start_review",
   "change|clarification_required|": "clarify",

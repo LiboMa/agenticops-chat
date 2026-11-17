@@ -1,6 +1,7 @@
 import type { FixExecution, FixPlan } from "@/api/types";
 import { formatElapsed } from "@/lib/formatDate";
 import { runSummary } from "@/lib/runSummary";
+import { stopOf, type StopVm } from "./run";
 
 /** Acceptance: a run that succeeded but that the code could not call «passed» — a declared check has no result, more
  *  than one, or a warning — waits for a person's verdict. The rules are the classic page's (lib/runSummary). */
@@ -27,6 +28,8 @@ export interface AcceptVm {
   passed: { id: string | null; label: string }[];
   toVerify: { id: string | null; label: string; state: "pending" | "warning" }[];
   failed: { id: string | null; label: string }[];
+  /** a person asked this run to stop (N9); it is here, so it was still recorded as a success */
+  stop: StopVm | null;
 }
 
 export function acceptVm(run: FixExecution, runPlan: FixPlan | null): AcceptVm {
@@ -45,5 +48,6 @@ export function acceptVm(run: FixExecution, runPlan: FixPlan | null): AcceptVm {
     toVerify: s.checks.filter((c) => c.state === "pending" || c.state === "warning")
       .map(({ id, label, state }) => ({ id, label, state: state as "pending" | "warning" })),
     failed: pick("failed"),
+    stop: stopOf(run),
   };
 }

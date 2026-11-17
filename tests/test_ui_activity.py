@@ -327,3 +327,21 @@ def test_the_endpoint_serves_any_signed_in_user_and_nobody_else(db):
         assert client.get("/api/ui/activity?account_id=0").status_code == 422
     finally:
         app.dependency_overrides.clear()
+
+
+def test_a_run_lane_names_its_run_record_and_says_when_a_person_stopped_it(db):
+    """MVP-2.9.0 N9: «现场» can only stop a run it can name — and must say so when somebody already did."""
+    exe = _issue("fix_executing", "restart nginx")
+    pid = _plan(exe, "executing")
+    ex = _add(FixExecution(fix_plan_id=pid, health_issue_id=exe, status="running", started_at=ago(minutes=2), created_at=ago(minutes=2)))
+    crun = _change("executing", ago(minutes=4), title="Scale out")
+    cplan = _add(FixPlan(plan_kind="change", change_request_id=crun, risk_level="L1", title="p", summary="s", status="executing"))
+    cex = _add(FixExecution(fix_plan_id=cplan, status="running", started_at=ago(minutes=4), created_at=ago(minutes=4),
+                            stop_requested_at=ago(seconds=30), stop_requested_by="user:alice"))
+    diag = _issue("investigating", "disk full")
+    _event(diag, "rca_started", ago(minutes=3))
+    lanes = _by_kind(_lanes())
+    assert lanes["run"]["execution"] == {"id": ex, "status": "running", "stop_requested_at": None, "stop_requested_by": None}
+    assert lanes["change_run"]["execution"] == {"id": cex, "status": "running", "stop_requested_at": "2026-11-17T11:59:30Z",
+                                                "stop_requested_by": "user:alice"}
+    assert "execution" not in lanes["diagnosis"]                     # only a run has a run record

@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { ApiError } from "@/api/client";
 import { useAccountScope } from "@/components/layout/AccountScope";
+import { useReadOnly } from "@/hooks/useBootstrap";
 import { parseItem } from "@/lib/inbox";
-import { DecideContext, type DecideApi } from "../decide/briefs/briefContext";
+import { DecideContext, errorText, type DecideApi } from "../decide/briefs/briefContext";
+import { useHold } from "../decide/widgets/useHold";
 import { usePeek } from "../decide/widgets/usePeek";
 import { useActivity } from "../hooks/useActivity";
 import { useMyItem } from "../hooks/useMyItem";
+import { useStopExecution } from "../hooks/useStopExecution";
 import { useNfT } from "../i18n";
-import { lanePath, laneViews, pickLane, recentCut, staleSince } from "../lib/live";
+import type { HoldTarget } from "../lib/hold";
+import { lanePath, laneViews, pickLane, recentCut, staleSince, stopState } from "../lib/live";
 import { step } from "../lib/queue";
 import { storyPath } from "../lib/story";
 import { Message, StateBlock } from "../shell/StateBlock";
@@ -17,7 +22,8 @@ import { Stream } from "./Stream";
 
 /** «现场»: what agents are doing now, what is due next and what ended in the last day — one lane each, and the lane
  *  you opened. Everything is the server's own record (GET /api/ui/activity), refreshed every ten seconds; the agents'
- *  steps are not streamed, and the page says so. The lane lives in the address (`/app/new/live/I12%3Adiagnosis`). */
+ *  steps are not streamed, and the page says so. The lane lives in the address (`/app/new/live/I12%3Adiagnosis`).
+ *  A run in progress can be stopped from here (N9): hold «A» — the same hold as an approval, on the run's record. */
 export function LiveLens() {
   const t = useNfT();
   const navigate = useNavigate();
@@ -37,6 +43,30 @@ export function LiveLens() {
   const staleAt = staleSince({ isError: q.isError, hasData: !!q.data, dataUpdatedAt: q.dataUpdatedAt });
   const mine = useMyItem(lane?.item ?? null).data ?? null;
   const peek = usePeek(lane?.id ?? null);
+
+  // stopping the run of the lane on the page: held, and only the run record the hold began on (`planId` carries the
+  // RUN's id here) — a lane that changed under the hand, or a new run of the same item, lets go
+  const readOnly = useReadOnly();
+  const stopRun = useStopExecution();
+  const stopping = stopState(lane);
+  const [stopError, setStopError] = useState<{ lane: string; text: string } | null>(null);
+  const shownLane = useRef<string | null>(null);
+  shownLane.current = lane?.id ?? null;
+  const stopTarget: HoldTarget | null = lane?.execution && stopping === "can" && !readOnly && !stopRun.isPending
+    ? { itemId: lane.id, planId: lane.execution.id, hash: "stop" } : null;
+  const stopRef = lane?.ref ?? lane?.title ?? "";
+  const hold = useHold(stopTarget, (tg) => {
+    setStopError(null);
+    stopRun.mutate({ id: tg.planId }, {
+      onSuccess: () => notify(t("toast.stopAsked", { ref: stopRef })),
+      onError: (e) => {
+        const code = e instanceof ApiError ? e.code : undefined;
+        const text = code === "not_running" ? t("stop.notRunning") : code === "already_stopping" ? t("stop.already") : t("err.failed", { msg: errorText(e) });
+        setStopError({ lane: tg.itemId, text });
+        if (shownLane.current !== tg.itemId) notify(`${stopRef}　${text}`);       // the page moved on: it is still said
+      },
+    });
+  });
 
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -70,11 +100,13 @@ export function LiveLens() {
   useLensKeys({
     onKey: (key, _e, repeat) => {
       if (peek.onKey(key)) return true;
+      if (key === "a" && stopTarget) { if (!repeat) hold.down("a"); return true; }
       if (key === "j" || key === "arrowdown") { move(1); return true; }
       if (key === "k" || key === "arrowup") { move(-1); return true; }
       if (key === "enter" && lane?.item) { if (!repeat) toStory(lane.item); return true; }
       return false;
     },
+    onKeyUp: (key) => { if (key === "a") hold.up(); },
     onEscape: () => {
       if (peek.open) { peek.close(); return true; }
       if (!laneParam) return false;
@@ -104,6 +136,9 @@ export function LiveLens() {
             )
             : !lane ? <Message big={t("live.empty.big")}><p>{t("live.empty.p")}</p></Message>
             : <Stream lane={lane} moved={moved} mine={mine} now={now} onBack={() => navigate(lanePath(null))}
+                      stop={stopping ? { state: stopping, offered: !readOnly, busy: stopRun.isPending, holding: hold.holding, hint: hold.hint,
+                                         error: stopError?.lane === lane.id ? stopError.text : null,
+                                         onDown: hold.down, onUp: hold.up, onCancel: hold.cancel } : null}
                       onStory={() => { if (lane.item) toStory(lane.item); }} onDecide={() => { if (lane.item) toDecide(lane.item); }} />}
         </article>
       </section>

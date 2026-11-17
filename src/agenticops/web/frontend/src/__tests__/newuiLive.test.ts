@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Activity, ActivityLane, ActivityRecent } from "@/newui/lib/activity";
-import { atWork, lanePath, laneViews, pickLane, recentCut, staleSince, type LaneView } from "@/newui/lib/live";
+import { atWork, lanePath, laneViews, pickLane, recentCut, staleSince, type LaneView, stopState } from "@/newui/lib/live";
 
 const running = (over: Partial<ActivityLane>): ActivityLane => ({
   id: "I12:diagnosis", kind: "diagnosis", agent: "rca", item: "I12", ref: "I#12", title: "disk full", account_id: 1,
@@ -147,3 +147,36 @@ describe("recentCut — «ended in the last day» says when it shows only some",
   });
 });
 
+
+describe("stopState — whether the opened lane's run can be stopped (N9)", () => {
+  const run = (over: Partial<Activity["running"][number]> = {}) => laneViews({
+    running: [{ id: "I5:run", kind: "run", agent: "executor", item: "I5", ref: "I#5", title: "t", account_id: 1, since: "2026-11-17T11:58:00Z",
+                basis: "run", requested_by: null, overdue: false, route: "/app/issues/5",
+                execution: { id: 41, status: "running", stop_requested_at: null, stop_requested_by: null }, ...over }],
+    upcoming: [], recent: [], generated_at: "2026-11-17T12:00:00Z",
+  })[0];
+
+  it("a run in progress that has its record can be stopped", () => {
+    expect(run().execution).toEqual({ id: 41, status: "running", stopRequestedAt: null, stopRequestedBy: null });
+    expect(stopState(run())).toBe("can");
+    expect(stopState(run({ id: "C3:change_run", kind: "change_run", item: "C3" }))).toBe("can");
+  });
+
+  it("one a person already asked to stop is stopping — it cannot be asked again", () => {
+    const lane = run({ execution: { id: 41, status: "running", stop_requested_at: "2026-11-17T11:59:30Z", stop_requested_by: "user:alice" } });
+    expect(stopState(lane)).toBe("stopping");
+    expect(lane.execution?.stopRequestedBy).toBe("user:alice");
+    expect([run().tone, lane.tone]).toEqual(["run", "bad"]);                   // the red edge: a person stopped it
+  });
+
+  it("a run the page cannot name, or one that has not started, offers no stop", () => {
+    expect(stopState(run({ execution: undefined, basis: "status" }))).toBeNull();           // a status alone: no record to stop
+    expect(stopState(run({ execution: { id: 41, status: "pending", stop_requested_at: null, stop_requested_by: null } }))).toBeNull();
+  });
+
+  it("nothing but a run in progress is stopped: not a diagnosis, not a lane that ended, not no lane", () => {
+    expect(stopState(run({ kind: "diagnosis", execution: undefined }))).toBeNull();
+    expect(stopState({ ...run(), group: "recent" })).toBeNull();
+    expect(stopState(null)).toBeNull();
+  });
+});

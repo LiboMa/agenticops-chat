@@ -19,6 +19,9 @@ export interface ActivityLane {
   /** it outlived its own watchdog */
   overdue: boolean;
   route: string | null;
+  /** a run lane's run record (N9): what a stop names — and who already asked it to stop. Absent when the server
+   *  knows of the run by a status or an event alone. */
+  execution?: { id: number; status: string; stop_requested_at: string | null; stop_requested_by: string | null };
 }
 export interface ActivityUpcoming { id: string; kind: string; agent: string; title: string; at: string; route: string | null }
 export interface ActivityRecent {

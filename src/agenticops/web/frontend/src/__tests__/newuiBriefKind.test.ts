@@ -16,7 +16,7 @@ describe("briefKind — which page a waiting item gets (shared table with servic
   });
 
   it("gives every row the server can send its brief", () => {
-    expect(shared.rows.length).toBe(16);
+    expect(shared.rows.length).toBe(17);
     for (const r of shared.rows) {
       const item = { entity: entity(r.kind, r.reason), reason: r.reason, reason_detail: r.reason_detail };
       expect(itemKind(item), JSON.stringify(r)).toBe(r.kind);

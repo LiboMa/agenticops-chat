@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { executeState, failedVm, resolveVm, runStepsVm } from "@/newui/lib/briefs/run";
+import { executeState, failedVm, resolveVm, runStepsVm, stopOf } from "@/newui/lib/briefs/run";
 import type { FixExecution, FixPlan, PostCheckBinding } from "@/api/types";
 
 const bind = (id: string, status: PostCheckBinding["result_status"], problem: PostCheckBinding["problem"] = null): PostCheckBinding =>
@@ -44,6 +44,31 @@ describe("failedVm — why a run ended as a failure", () => {
   it("claims no step when none reported a failure", () => {
     expect(failedVm(run({ step_results: [{ status: "success" }] }), plan()).failedAt).toBeNull();
   });
+  it("a person stopped it: who, when, what they wrote, and how many steps had been done by then (N9)", () => {
+    const vm = failedVm(run({ status: "rolled_back", step_results: [{ status: "success" }], rollback_results: [{ status: "success" }],
+      stop_requested_at: "2026-11-17T01:00:00Z", stop_requested_by: "user:alice", stop_note: "wrong change window" }), plan());
+    expect(vm.stopped).toEqual({ by: "user:alice", at: "2026-11-17T01:00:00Z", note: "wrong change window", done: 1, reported: 1, late: false });
+    expect(vm.rollback).toEqual({ ran: 1, failed: 0 });
+  });
+  it("a stopped run whose executor recorded nothing: no step is claimed done — none was reported at all", () => {
+    const vm = failedVm(run({ status: "failed", step_results: undefined, stop_requested_at: "2026-11-17T01:00:00Z", stop_requested_by: "user:alice" }), plan());
+    expect(vm.stopped).toMatchObject({ done: 0, reported: 0, note: null });
+  });
+  it("a run nobody stopped has no stop to tell", () => {
+    expect(failedVm(run({ step_results: [{ status: "failed" }] }), plan()).stopped).toBeNull();
+  });
+});
+
+describe("stopOf — a person asked the run to stop (N9)", () => {
+  it("is nothing when nobody asked", () => {
+    expect(stopOf(run({}))).toBeNull();
+  });
+  it("says who and when; a stop that came after the steps were done was too late — the run ended as a success", () => {
+    const asked = { stop_requested_at: "2026-11-17T01:00:00Z", stop_requested_by: "user:alice", stop_note: "" };
+    expect(stopOf(run({ status: "rolled_back", ...asked }))).toEqual({ by: "user:alice", at: "2026-11-17T01:00:00Z", note: null, late: false });
+    expect(stopOf(run({ status: "succeeded", ...asked }))?.late).toBe(true);
+    expect(stopOf(run({ status: "running", ...asked }))?.late).toBe(false);          // still going: not known yet
+  });
 });
 
 describe("resolveVm — a run that ended, waiting to be closed by a person", () => {
@@ -52,6 +77,11 @@ describe("resolveVm — a run that ended, waiting to be closed by a person", () 
       post_check_binding: [bind("pc-1", "pass"), bind("pc-2", "pass")] }), plan());
     expect(vm).toMatchObject({ variant: "passed", runId: 47, done: 3, total: 3, version: 3, hash8: "01234567", matchesApproved: true });
     expect(vm.passed).toEqual([{ id: "pc-1", label: "check pc-1" }, { id: "pc-2", label: "check pc-2" }]);
+  });
+  it("carries a stop a person asked for (N9)", () => {
+    expect(resolveVm(run({ status: "succeeded" }), plan()).stop).toBeNull();
+    expect(resolveVm(run({ status: "succeeded", stop_requested_at: "2026-11-17T01:00:00Z", stop_requested_by: "user:bob" }), plan()).stop)
+      .toMatchObject({ by: "user:bob", late: true });
   });
   it("unverified: the run left no verdict at all", () => {
     expect(resolveVm(run({ status: "succeeded", verification_status: null }), plan()).variant).toBe("unverified");

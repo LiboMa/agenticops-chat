@@ -286,6 +286,10 @@ export interface FixExecution {
   accepted_by: string | null;
   accepted_at: string | null;
   acceptance_note: string | null;
+  // MVP-2.9.0 N9: a person asked this run to stop — who, when, what they wrote. null / absent = nobody did
+  stop_requested_at?: string | null;
+  stop_requested_by?: string | null;
+  stop_note?: string | null;
   created_at: string;
   // MVP-2.7.0: the run's results paired with its own plan's declared checks (verification.bind_results)
   post_check_binding?: PostCheckBinding[];

@@ -17,6 +17,7 @@ import { parseItem } from "@/lib/inbox";
 import { currentFixPlan } from "@/lib/issuePhases";
 import { fillPlaceholders } from "@/lib/placeholders";
 import { Cause, Prov } from "../decide/widgets/Cause";
+import { HoldButton } from "../decide/widgets/HoldButton";
 import { PlanSection } from "../decide/widgets/PlanSection";
 import { Steps } from "../decide/widgets/Steps";
 import { useNfT } from "../i18n";
@@ -24,7 +25,7 @@ import { whoText } from "../lib/activity";
 import { causeVm } from "../lib/briefs/cause";
 import { requestVm } from "../lib/briefs/change";
 import { stepsVm } from "../lib/briefs/plan";
-import type { LaneView } from "../lib/live";
+import type { LaneView, StopState } from "../lib/live";
 import { utcStamp } from "../lib/time";
 import { RunList } from "../story/StoryBits";
 import { LANE_CLASS, agentName, laneState } from "./Lanes";
@@ -153,13 +154,22 @@ function ChangeLane({ lane, changeId, now }: { lane: LaneView; changeId: number;
   );
 }
 
+/** Stopping the lane's run (N9). `state` = lib/live.stopState; `offered` = this person is offered the control (not
+ *  a read-only account — who may stop is the server's answer, and its refusal is `error`). */
+export interface StopControl {
+  state: NonNullable<StopState>; offered: boolean; busy: boolean; holding: boolean; hint: boolean; error: string | null;
+  onDown: (key?: string) => void; onUp: () => void; onCancel: () => void;
+}
+
 /** The opened lane: who is doing what, since when and how the server knows — then what there is to show of it. */
-export function Stream({ lane, moved, mine, now, onBack, onStory, onDecide }: {
+export function Stream({ lane, moved, mine, now, stop, onBack, onStory, onDecide }: {
   lane: LaneView;
   /** the address named a lane that has ended; this is what it left behind */
   moved: boolean;
   /** the lane's item as it stands on this person's own list; null = it does not wait on them */
   mine: AttentionItem | null;
+  /** null = this lane is not a run that can be stopped, and nobody stopped it */
+  stop: StopControl | null;
   now: number; onBack: () => void; onStory: () => void; onDecide: () => void;
 }) {
   const t = useNfT();
@@ -185,14 +195,26 @@ export function Stream({ lane, moved, mine, now, onBack, onStory, onDecide }: {
         </p>
       )}
       {lane.overdue && !lane.stopped && <p className="note err"><Prov code />{t("live.overdue")}</p>}
+      {stop?.state === "stopping" && (
+        <p className="note err" role="status">
+          <Prov code />{t("live.stoppingNote", { who: whoText(lane.execution?.stopRequestedBy, user?.email, t) || t("who.someone"),
+                                                 t: utcStamp(lane.execution?.stopRequestedAt ?? null, now) })}
+        </p>
+      )}
+      {stop?.state === "can" && stop.offered && <p className="note">{t("live.noSteer")}</p>}
       {lane.group === "upcoming" && <p className="note"><Prov code />{t("live.upcoming", { t: utcStamp(lane.at, now) })}</p>}
       {lane.group === "recent" && !target && <p className="note"><Prov code />{t("live.ended", { t: utcStamp(lane.at, now), outcome: t(`outcome.${lane.outcome ?? "done"}`) })}</p>}
       {target?.kind === "issue" && <IssueLane key={lane.id} lane={lane} issueId={target.id} now={now} />}
       {target?.kind === "change" && <ChangeLane key={lane.id} lane={lane} changeId={target.id} now={now} />}
       <div className="controls">
+        {stop?.state === "can" && stop.offered && (
+          <HoldButton danger label={t("live.stop")} disabled={stop.busy} holding={stop.holding} hint={stop.hint}
+                      onDown={stop.onDown} onUp={stop.onUp} onCancel={stop.onCancel} />
+        )}
         {target && mine && <button type="button" className="btn primary" onClick={onDecide}><span className="t">{t("story.goDecide")}</span></button>}
         {target && <button type="button" className="btn" onClick={onStory}><span className="t">{t("live.openStory")}</span><kbd>↵</kbd></button>}
         {!target && classicRoute && <Link className="btn" to={classicRoute}><span className="t">{t("live.openClassic")}</span></Link>}
+        {stop?.error && <p className="note err wide" role="alert">{stop.error}</p>}
       </div>
     </>
   );

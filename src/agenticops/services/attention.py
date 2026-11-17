@@ -206,6 +206,8 @@ def _issue_items(s, actor, account_id, now) -> list[dict]:
             detail = "rca_missing"
         if phase.sub == "toGenerate" and getattr(rca, "human_verdict", None) != "correct":
             detail = "rca_ready"   # passed the gate, auto-fix off: nobody confirmed it, nobody asks the SRE agent
+        if phase.sub == "needsNewPlan" and getattr(run, "stop_requested_at", None) is not None:
+            detail = "run_stopped"   # a person stopped the run (N9): the brief says so, not «the run failed»
         entity = {"entity_type": "health_issue", "entity_id": issue.id, "content_version": None}
         route = f"/app/issues/{issue.id}#{anchor}" if anchor else None
         if reason == "approval_required":

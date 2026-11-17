@@ -1636,6 +1636,14 @@ def save_execution_result(
             _UNCOVERED_REFUSED.discard(run_key)
         verdict, why = evaluate(status, plan.post_checks, parsed_post, parsed_steps, error_message,
                                 plan_changed=approval_drift(session, plan) is not None)
+        # A person stopped this run (MVP-2.9.0 N9): the reason says so, and a run that did not succeed for that
+        # reason says nothing about the diagnosis — it is not disputed below.
+        stopped_by = None
+        if rc.execution_id:
+            stopped_by = (session.query(FixExecution.stop_requested_by)
+                          .filter(FixExecution.id == rc.execution_id, FixExecution.stop_requested_at.isnot(None)).scalar())
+        if stopped_by and status != "succeeded":
+            why = f"stopped by {stopped_by}: {why}"
 
         now = datetime.now(timezone.utc)
         # The run's duration is measured (E2E obs. 5: both live runs reported 45000): from when executor_agent
@@ -1729,7 +1737,7 @@ def save_execution_result(
                     issue_status = target
                 except InvalidStatusTransition as e:  # moved concurrently: left where it is
                     issue_note = f" HealthIssue #{issue_id} left where it is: {e}."
-                if issue_status is not None and verdict == FAILED:
+                if issue_status is not None and verdict == FAILED and not stopped_by:
                     disputed = dispute_rca(session, issue_id, rc.execution_id or execution.id, why)
         execution_ref = rc.execution_id or execution.id
         auto_resolved = issue_status == "resolved"

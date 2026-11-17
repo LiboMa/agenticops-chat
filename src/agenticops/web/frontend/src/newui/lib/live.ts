@@ -21,7 +21,8 @@ export interface LaneView {
   title: string;
   /** running: since when · upcoming: when it is due · recent: when it ended; null = nothing on record says */
   at: string | null;
-  /** the lane's edge: at work · outlived its own limit · scheduled · ended well · failed · ended and waits on a person */
+  /** the lane's edge: at work · outlived its own limit · scheduled · ended well · failed, or a run a person
+   *  stopped (the design's red: stop and roll back) · ended and waits on a person */
   tone: "run" | "late" | "wait" | "done" | "bad" | "you";
   /** how the server knows a running lane is running */
   basis: string | null;
@@ -34,6 +35,8 @@ export interface LaneView {
   route: string | null;
   /** the row that ended (a run, a diagnosis, a plan, a schedule run) — what a recent lane's result is fetched by */
   row: number | null;
+  /** a run in flight: its run record — what «stop» names, and who already asked it to stop (N9) */
+  execution: { id: number; status: string; stopRequestedAt: string | null; stopRequestedBy: string | null } | null;
 }
 
 const OUTCOME_TONE = { done: "done", failed: "bad", needs_you: "you" } as const;
@@ -49,19 +52,35 @@ export function laneViews(activity: Activity | undefined): LaneView[] {
   return [
     ...live.map((l): LaneView => ({
       id: l.id, group: stopped(l) ? "stalled" : "running", kind: l.kind, agent: l.agent, item: l.item, ref: l.ref, title: l.title, at: l.since,
-      tone: l.overdue ? "late" : "run", basis: l.basis, requestedBy: l.requested_by, overdue: l.overdue, stopped: stopped(l),
+      tone: l.execution?.stop_requested_at ? "bad" : l.overdue ? "late" : "run", basis: l.basis, requestedBy: l.requested_by,
+      overdue: l.overdue, stopped: stopped(l),
       outcome: null, route: l.route, row: null,
+      execution: l.execution ? { id: l.execution.id, status: l.execution.status, stopRequestedAt: l.execution.stop_requested_at,
+                                 stopRequestedBy: l.execution.stop_requested_by } : null,
     })),
     ...activity.upcoming.map((l): LaneView => ({
       id: `next:${l.id}`, group: "upcoming", kind: l.kind, agent: l.agent, item: null, ref: null, title: l.title, at: l.at,
       tone: "wait", basis: null, requestedBy: null, overdue: false, stopped: false, outcome: null, route: l.route, row: null,
+      execution: null,
     })),
     ...activity.recent.map((l): LaneView => ({
       id: l.id, group: "recent", kind: l.kind, agent: l.agent, item: l.item, ref: l.ref, title: l.title, at: l.at,
       tone: OUTCOME_TONE[l.outcome] ?? "done", basis: null, requestedBy: null, overdue: false, stopped: false, outcome: l.outcome, route: l.route,
-      row: rowOf(l.id),
+      row: rowOf(l.id), execution: null,
     })),
   ];
+}
+
+/** Whether the opened lane's run can be stopped (N9). "can": a run in progress whose record the page can name and
+ *  nobody has stopped yet. "stopping": a person already asked — the executor finishes the command it is on and may
+ *  then only roll back. null: anything else — a diagnosis, a run known by its status alone or not started yet, a
+ *  lane that ended. Who MAY stop is the server's answer (plan.execute); a read-only account is not offered it. */
+export type StopState = "can" | "stopping" | null;
+export function stopState(lane: LaneView | null): StopState {
+  if (!lane || lane.group !== "running" || (lane.kind !== "run" && lane.kind !== "change_run")) return null;
+  const x = lane.execution;
+  if (!x || x.status !== "running") return null;
+  return x.stopRequestedAt ? "stopping" : "can";
 }
 
 /** How many lanes are at work within their own time limit — the number beside the «现场» tab. A diagnosis that

@@ -12,6 +12,7 @@
     {"kind": "issue", "reason": "review_required", "reason_detail": "rca_ready", "brief": "generate"},
     {"kind": "issue", "reason": "review_required", "reason_detail": "plan_rejected", "brief": "replan"},
     {"kind": "issue", "reason": "execution_failed", "reason_detail": "run_failed", "brief": "failed"},
+    {"kind": "issue", "reason": "execution_failed", "reason_detail": "run_stopped", "brief": "failed"},
     {"kind": "issue", "reason": "execution_not_started", "reason_detail": null, "brief": "not_started"},
     {"kind": "change", "reason": "review_required", "reason_detail": "change_draft", "brief": "start_review"},
     {"kind": "change", "reason": "clarification_required", "reason_detail": null, "brief": "clarify"},

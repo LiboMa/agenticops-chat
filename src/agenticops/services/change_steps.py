@@ -202,6 +202,12 @@ def rollback_steps(rollback_plan) -> list:
     return out
 
 
+def rollback_commands(rollback_plan) -> frozenset[str]:
+    """The commands of a plan's rollback steps, whitespace-collapsed — what a stopped run may still run
+    (agents/run_guard, MVP-2.9.0 N9). Prose carries no command and adds nothing."""
+    return frozenset(c for c in (_command(s) for s in rollback_steps(rollback_plan)) if c)
+
+
 def unclassified_commands(*step_lists) -> list[str]:
     """Every step, across the given step lists, that no execution tool can classify: its command's tier is
     'unknown', or it has no command, so the executor would decide what to run (2.7.0 E2E observation 3).

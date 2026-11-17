@@ -532,3 +532,15 @@ def test_real_rows_are_in_the_brief_table(db):
             ("issue", "review_required", "rca_missing"), ("issue", "verification_required", "acceptance"),
             ("change", "review_required", "change_draft"), ("change", "approval_required", None),
             ("change", "clarification_required", None)} <= seen
+
+
+def test_a_run_a_person_stopped_comes_back_saying_so(db):
+    """MVP-2.9.0 N9: the issue returns as «execution failed», and the row says a person stopped it — the brief then
+    reads «you stopped this run», not «the run failed»."""
+    issue_id, pid = _issue("root_cause_identified", plan="failed", run=("rolled_back", "failed"))
+    assert _row(ALICE, f"I{issue_id}")["reason_detail"] == "run_failed"
+    s = get_session()
+    s.query(FixExecution).filter_by(fix_plan_id=pid).update({"stop_requested_at": NOW, "stop_requested_by": "user:alice"})
+    s.commit(); s.close()
+    row = _row(ALICE, f"I{issue_id}")
+    assert (row["reason"], row["reason_detail"]) == ("execution_failed", "run_stopped")

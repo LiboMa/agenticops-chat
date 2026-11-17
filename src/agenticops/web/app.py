@@ -3268,6 +3268,61 @@ async def api_cancel_execution(execution_id: int, actor: Actor = Depends(current
     raise HTTPException(status_code=400, detail="Execution not found or not in running state")
 
 
+class StopExecutionBody(BaseModel):
+    reason: str = Field(default="", max_length=2000)
+
+
+@app.post("/api/fix-executions/{execution_id}/stop", response_model=FixExecutionResponse)
+def api_stop_execution(execution_id: int, body: StopExecutionBody = Body(default_factory=StopExecutionBody),
+                       actor: Actor = Depends(current_actor)):
+    """A person stops a run in progress (MVP-2.9.0 N9). Unlike cancel, the run's record stays `running`: the
+    executor finishes the command it is on, is refused every further step of the plan, may run only the plan's own
+    rollback commands and read-only checks (agents/run_guard), and records what it did. Authorized like a cancel
+    — plan.execute for a fix plan, change.execute for a change plan — so a request through an API key is refused
+    (a human decision). 404 no such run · 403 · 409 `not_running` / `already_stopping`."""
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    from agenticops.auth import authz
+    from agenticops.services.run_tickets import request_stop
+    with get_db_session() as session:
+        ex = session.get(FixExecution, execution_id)
+        plan = session.get(FixPlan, ex.fix_plan_id) if ex is not None else None
+        if ex is None or plan is None:
+            raise HTTPException(status_code=404, detail="Execution not found")
+        plan_id, plan_kind = plan.id, plan.plan_kind or "fix"
+        issue_id, change_id = plan.health_issue_id, plan.change_request_id
+        try:
+            if plan_kind == "change":
+                authz.check(actor, "change.execute", subject=plan.change_request)
+            else:
+                authz.check(actor, "plan.execute", subject=plan)
+        except authz.AuthzDenied as e:
+            raise HTTPException(status_code=403, detail=authz.http_detail(e))
+        if ex.status != "running":
+            raise HTTPException(status_code=409, detail={
+                "detail": f"This run is not in progress (it is '{ex.status}'); there is nothing to stop.",
+                "code": "not_running", "status": ex.status})
+        if ex.stop_requested_at is not None:
+            raise HTTPException(status_code=409, detail={
+                "detail": f"{ex.stop_requested_by or 'Someone'} already asked this run to stop.",
+                "code": "already_stopping", "by": ex.stop_requested_by})
+    if not request_stop(execution_id, by=actor.key, note=body.reason.strip()):
+        with get_db_session() as session:          # it ended, or someone else stopped it, between the read and the write
+            ex = session.get(FixExecution, execution_id)
+            code = "already_stopping" if ex is not None and ex.status == "running" else "not_running"
+            raise HTTPException(status_code=409, detail={
+                "detail": "This run ended, or was stopped by someone else, a moment ago.", "code": code,
+                "status": ex.status if ex is not None else None})
+    from agenticops.services.pipeline_events import log_event
+    log_event(issue_id, "execution_stop_requested", "execution", "completed",
+              detail={"execution_id": execution_id, "plan_id": plan_id, "by": actor.key,
+                      **({"note": body.reason.strip()[:2000]} if body.reason.strip() else {})},
+              actor=actor.key, change_request_id=change_id if plan_kind == "change" else None)
+    AuditService.log(Actions.PLAN_EXECUTION_STOP_REQUESTED, EntityTypes.FIX_PLAN, str(plan_id), actor=actor.key,
+                     user_id=actor.user_id, details={"execution_id": execution_id, "plan_kind": plan_kind})
+    with get_db_session() as session:
+        return FixExecutionResponse.model_validate(session.get(FixExecution, execution_id))
+
+
 @app.post("/api/fix-executions/{execution_id}/accept", response_model=FixExecutionResponse)
 def api_accept_execution(execution_id: int, data: ExecutionAcceptBody, actor: Actor = Depends(current_actor)):
     """Accept or reject an execution pending acceptance (MVP-2.6.1): a fix moves its issue (fix_executed →

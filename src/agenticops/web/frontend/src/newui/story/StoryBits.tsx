@@ -8,12 +8,12 @@ import type { AttentionItem } from "@/lib/attention";
 import { executionStatusLabel } from "@/lib/issueDetail";
 import { fillPlaceholders } from "@/lib/placeholders";
 import { Prov } from "../decide/widgets/Cause";
-import { Quote, RunSteps } from "../decide/widgets/RunSteps";
+import { Quote, RunSteps, StopLine } from "../decide/widgets/RunSteps";
 import { useNfT } from "../i18n";
 import { whoText } from "../lib/activity";
 import { briefKind } from "../lib/briefKind";
 import { lanePath } from "../lib/live";
-import { failedVm, runStepsVm } from "../lib/briefs/run";
+import { failedVm, runStepsVm, stopOf } from "../lib/briefs/run";
 import { waitedParts } from "../lib/queue";
 import { runLine, type SpineState, type WaitKey } from "../lib/story";
 import { utcStamp } from "../lib/time";
@@ -195,6 +195,7 @@ export function RunList({ runs, planOf, now }: { runs: FixExecution[]; planOf: (
               </summary>
               <RunSteps steps={runStepsVm(run, runPlan)} />
             </details>
+            <StopLine stop={stopOf(run)} now={now} />
             {run.error_message && <p className="note err"><Prov code />{t("ran.error", { msg: run.error_message })}</p>}
             {f && f.failedChecks.length > 0 && (
               <ul className="checks" style={{ marginTop: 8 }}>

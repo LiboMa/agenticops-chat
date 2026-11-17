@@ -1,6 +1,6 @@
 import { laneLabel } from "../decide/Feed";
 import { useNfT, type NfT } from "../i18n";
-import { LANE_GROUPS, type LaneView, type recentCut } from "../lib/live";
+import { LANE_GROUPS, stopState, type LaneView, type recentCut } from "../lib/live";
 import { utcStamp } from "../lib/time";
 
 /** A lane's edge colour, as the stylesheet names it. */
@@ -12,9 +12,11 @@ export function agentName(agent: string, t: NfT): string {
   return name === `by.${agent}` ? agent : name;
 }
 
-/** What a lane is doing, in a few words: «诊断 · 已经 3 分钟», «诊断停了 · 42 天前», «13:00 UTC 开始», «执行 · 失败». */
+/** What a lane is doing, in a few words: «诊断 · 已经 3 分钟», «诊断停了 · 42 天前», «13:00 UTC 开始», «执行 · 失败»,
+ *  «执行 · 已叫停» (a person stopped the run; it is still winding down). */
 export function laneState(lane: LaneView, now: number, t: NfT): string {
   if (lane.group === "upcoming") return t("live.due", { t: utcStamp(lane.at, now) });
+  if (stopState(lane) === "stopping") return t("lane.stopping", { what: t(`lane.${lane.kind}`) });
   if (lane.group === "recent") {
     const what = t(`lane.${lane.kind}`) === `lane.${lane.kind}` ? lane.kind : t(`lane.${lane.kind}`);
     return `${what} · ${t(`outcome.${lane.outcome ?? "done"}`)}`;

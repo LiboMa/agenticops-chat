@@ -56,6 +56,13 @@ def _route(item: Optional[str]) -> Optional[str]:
     return f"/app/issues/{item[1:]}" if item[0] == "I" else f"/app/changes/{item[1:]}"
 
 
+def _execution(x) -> dict:
+    """The run record behind a run lane (MVP-2.9.0 N9): the page can only stop a run it can name, and says so when
+    a person already asked it to stop."""
+    return {"id": x.id, "status": x.status, "stop_requested_at": _iso(x.stop_requested_at),
+            "stop_requested_by": x.stop_requested_by}
+
+
 def _lane(lane_id: str, kind: str, agent: str, title: str, *, now: datetime, basis: str, item: Optional[str] = None,
           account_id: Optional[int] = None, since: Optional[datetime] = None, limit: Optional[float] = None,
           requested_by: Optional[str] = None, route: Optional[str] = None) -> dict:
@@ -147,8 +154,9 @@ def activity(actor, *, account_id: Optional[int] = None, now: Optional[datetime]
             if issue is None or issue.id in taken:
                 continue
             taken.add(issue.id)
-            running.append(_lane(f"I{issue.id}:run", "run", "executor", issue.title, now=now, basis="run", item=f"I{issue.id}",
-                                 account_id=issue.account_id, since=x.started_at or x.created_at, limit=run_limit))
+            running.append({**_lane(f"I{issue.id}:run", "run", "executor", issue.title, now=now, basis="run",
+                                    item=f"I{issue.id}", account_id=issue.account_id,
+                                    since=x.started_at or x.created_at, limit=run_limit), "execution": _execution(x)})
         for issue in issues.values():
             if issue.id in taken:
                 continue
@@ -178,13 +186,24 @@ def activity(actor, *, account_id: Optional[int] = None, now: Optional[datetime]
             changes = s.query(ChangeRequest).filter(ChangeRequest.status.in_(("under_review", "executing")))
             if account_id is not None:
                 changes = changes.filter(ChangeRequest.account_id == account_id)
+            changes = changes.all()
+            # the run record of a change that is executing: its plan's pending / running row (already loaded)
+            open_runs = {x.fix_plan_id: x for x in run_rows if x.health_issue_id is None}
+            run_of: dict[int, FixExecution] = {}
+            if open_runs and any(cr.status == "executing" for cr in changes):
+                for plan_id, cr_id in (s.query(FixPlan.id, FixPlan.change_request_id)
+                                       .filter(FixPlan.id.in_(list(open_runs)), FixPlan.plan_kind == "change")):
+                    run_of[cr_id] = open_runs[plan_id]
             for cr in changes:
                 review = cr.status == "under_review"
-                running.append(_lane(f"C{cr.id}:{'change_review' if review else 'change_run'}",
-                                     "change_review" if review else "change_run", "sre" if review else "executor", cr.title,
-                                     now=now, basis="status", item=f"C{cr.id}", account_id=cr.account_id,
-                                     since=cr.updated_at or cr.created_at,
-                                     limit=settings.change_review_timeout_seconds if review else run_limit))
+                lane = _lane(f"C{cr.id}:{'change_review' if review else 'change_run'}",
+                             "change_review" if review else "change_run", "sre" if review else "executor", cr.title,
+                             now=now, basis="status", item=f"C{cr.id}", account_id=cr.account_id,
+                             since=cr.updated_at or cr.created_at,
+                             limit=settings.change_review_timeout_seconds if review else run_limit)
+                if not review and cr.id in run_of:
+                    lane["execution"] = _execution(run_of[cr.id])
+                running.append(lane)
 
         for ex, schedule in (s.query(ScheduleExecution, Schedule).join(Schedule, Schedule.id == ScheduleExecution.schedule_id)
                              .filter(ScheduleExecution.status.in_(("running", "retrying")))):

@@ -526,6 +526,10 @@ class FixExecutionResponse(BaseModel):
     accepted_by: Optional[str] = None
     accepted_at: Optional[datetime] = None
     acceptance_note: Optional[str] = None
+    # MVP-2.9.0 N9: a person asked this run to stop — who, when and what they wrote. NULL = nobody did.
+    stop_requested_at: Optional[datetime] = None
+    stop_requested_by: Optional[str] = None
+    stop_note: Optional[str] = None
     created_at: datetime
     # One row per declared post-check of this run's own plan, then stray results (verification.bind_results):
     # {check_id, check, result_status, results, problem: null|missing|duplicate|undeclared|unbound}

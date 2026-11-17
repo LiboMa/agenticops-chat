@@ -115,10 +115,39 @@ def close_ticket(execution_id: int, ticket_status: str, message: str) -> bool:
     return True
 
 
-def ticket_state(execution_id: int) -> Optional[dict]:
-    """What the run's record says now: {"status", "fix_plan_id"} — None when there is no such record."""
+def request_stop(execution_id: int, *, by: str, note: str = "") -> bool:
+    """A person asks for a run in progress to stop (MVP-2.9.0 N9). The record is NOT closed: a closed record takes
+    no result, and the agent must still be able to roll back and record what it did. From the next tool call on,
+    agents/run_guard lets through only reads, the recording tools and the plan's own rollback commands.
+    A compare-and-set: False when the record is missing, not running, or already has a stop request."""
+    from sqlalchemy import update
     from agenticops.models import FixExecution, get_db_session
+    from agenticops.security.redaction import redact_obj
     with get_db_session() as session:
-        row = (session.query(FixExecution.status, FixExecution.fix_plan_id)
+        done = session.execute(
+            update(FixExecution)
+            .where(FixExecution.id == execution_id, FixExecution.status == "running",
+                   FixExecution.stop_requested_at.is_(None))
+            .values(stop_requested_at=datetime.now(timezone.utc), stop_requested_by=(by or "")[:255],
+                    stop_note=redact_obj((note or "")[:2000]) or None)
+        )
+        return done.rowcount == 1
+
+
+def ticket_state(execution_id: int) -> Optional[dict]:
+    """What the run's record says now — None when there is no such record:
+    {"status", "fix_plan_id", "stopped_by": the actor who asked it to stop or None,
+     "rollback": the plan's rollback commands (only read once a stop was asked: what may still run)}."""
+    from agenticops.models import FixExecution, FixPlan, get_db_session
+    with get_db_session() as session:
+        row = (session.query(FixExecution.status, FixExecution.fix_plan_id, FixExecution.stop_requested_at,
+                             FixExecution.stop_requested_by)
                .filter(FixExecution.id == execution_id).first())
-    return {"status": row[0], "fix_plan_id": row[1]} if row else None
+        if not row:
+            return None
+        stopped_by, rollback = None, frozenset()
+        if row[2] is not None:
+            from agenticops.services.change_steps import rollback_commands
+            stopped_by = row[3] or "a person"
+            rollback = rollback_commands(session.query(FixPlan.rollback_plan).filter_by(id=row[1]).scalar())
+    return {"status": row[0], "fix_plan_id": row[1], "stopped_by": stopped_by, "rollback": rollback}

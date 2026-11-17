@@ -45,4 +45,9 @@ describe("acceptVm — what ran, what the code checked, what a person must look 
   it("claims nothing about the approval when the run's plan is unknown", () => {
     expect(acceptVm(run({}), null)).toMatchObject({ planVersion: null, hash8: null, matchesApproved: null, stepsTotal: 2 });
   });
+  it("says when a person asked the run to stop and it was still recorded as a success (N9)", () => {
+    expect(acceptVm(run({}), plan).stop).toBeNull();
+    expect(acceptVm(run({ stop_requested_at: "2026-11-17T00:01:00Z", stop_requested_by: "user:alice" }), plan).stop)
+      .toEqual({ by: "user:alice", at: "2026-11-17T00:01:00Z", note: null, late: true });
+  });
 });

@@ -986,6 +986,7 @@
   "attention.reason.execution_not_started": "已批准，但执行没有开始",
   "attention.reason.unknown": "需要你处理",
   "attention.detail.run_failed": "执行失败，需要新方案",
+  "attention.detail.run_stopped": "执行被人叫停了，需要新方案",
   "attention.detail.plan_rejected": "方案已驳回，需要生成新方案",
   "attention.detail.rca_missing": "尚无诊断，需要重跑 RCA",
   "attention.detail.rca_gate": "诊断未过自动修复闸门，需要复核",

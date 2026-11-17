@@ -29,6 +29,9 @@ export function FailedBrief({ item, frame }: BriefProps) {
   const [closing, setClosing] = useState(false);
   const runPlan = planQ.data ?? null;
   const vm = run ? failedVm(run, runPlan) : null;
+  // a person stopped it (N9): the same page, in other words — who stopped it, what had been done, what was rolled back
+  const stop = vm?.stopped ?? null;
+  const stopWho = stop ? whoText(stop.by, user?.email, t) || t("who.someone") : "";
 
   useBriefKeys({
     onKey: (key, _e, repeat) => {
@@ -53,7 +56,7 @@ export function FailedBrief({ item, frame }: BriefProps) {
     </>
   );
   return (
-    <BriefFrame item={item} {...frame} ask={t("ask.failed")} actions={actions}>
+    <BriefFrame item={item} {...frame} ask={stop ? t("ask.stopped", { who: stopWho }) : t("ask.failed")} actions={actions}>
       <AgentAtWork lane={agent.lane} now={frame.now} />
       {runsQ.isPending ? <StateBlock kind="loading" />
         : runsQ.isError ? <StateBlock kind="failed" failKey="sec.failedLoad" onRetry={() => void runsQ.refetch()} />
@@ -61,15 +64,18 @@ export function FailedBrief({ item, frame }: BriefProps) {
         : (
           <>
             <div className="sec">
-              <h2>{t("sec.failedStep")}</h2>
-              <p><Prov code />{t(`ran.failed.${vm.variant === "step" && vm.failedAt === null ? "other" : vm.variant}`, { run: vm.runId, n: vm.failedAt, duration: vm.duration })}</p>
+              <h2>{t(stop ? "sec.stoppedAt" : "sec.failedStep")}</h2>
+              <p><Prov code />{stop
+                ? t(stop.reported ? "ran.stopped" : "ran.stopped.noSteps", { who: stopWho, t: utcStamp(stop.at), run: vm.runId, n: stop.done, duration: vm.duration })
+                : t(`ran.failed.${vm.variant === "step" && vm.failedAt === null ? "other" : vm.variant}`, { run: vm.runId, n: vm.failedAt, duration: vm.duration })}</p>
+              {stop?.note && <Quote text={stop.note} cite={t("stop.cite", { by: stopWho, t: utcStamp(stop.at) })} />}
               {vm.error && <p className="note err"><Prov code />{t("ran.error", { msg: vm.error })}</p>}
               {vm.failedChecks.length > 0 && (
                 <ul className="checks" style={{ marginTop: 8 }}>
                   {vm.failedChecks.map((c) => <li key={c.id ?? c.label}><span className="pc">{c.id}</span><span>{c.label}</span><span className="st bad">{t("st.failed")}</span></li>)}
                 </ul>
               )}
-              <details className="more" open={vm.variant === "step"}>
+              <details className="more" open={stop ? stop.reported > 0 : vm.variant === "step"}>
                 <summary>{t("sec.steps")}</summary>
                 <RunSteps steps={runStepsVm(run, runPlan)} />
               </details>
@@ -82,7 +88,9 @@ export function FailedBrief({ item, frame }: BriefProps) {
             )}
             <div className="sec">
               <h2>{t("sec.stateNow")}</h2>
-              <p><Prov code />{vm.rollback.ran === 0 ? t("rollback.none") : vm.rollback.failed ? t("rollback.failed", { n: vm.rollback.ran, f: vm.rollback.failed }) : t("rollback.ran", { n: vm.rollback.ran })}</p>
+              <p><Prov code />{vm.rollback.ran > 0 ? t(vm.rollback.failed ? "rollback.failed" : "rollback.ran", { n: vm.rollback.ran, f: vm.rollback.failed })
+                : !stop ? t("rollback.none")
+                : t(!stop.reported ? "rollback.none.stoppedUnknown" : stop.done ? "rollback.none.stopped" : "rollback.none.stoppedClean", { n: stop.done })}</p>
             </div>
           </>
         )}

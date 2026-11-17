@@ -29,6 +29,14 @@ export function runStepsVm(run: Pick<FixExecution, "step_results">, runPlan: Fix
 
 const succeeded = (run: Pick<FixExecution, "status">) => run.status === "succeeded" || run.status === "success";
 
+/** A person asked this run to stop (N9): who, when and what they wrote. `late` = the run ended as a success all the
+ *  same — its steps were already done when the stop arrived, so nothing was held back. null = nobody asked. */
+export interface StopVm { by: string | null; at: string; note: string | null; late: boolean }
+export function stopOf(run: Pick<FixExecution, "status" | "stop_requested_at" | "stop_requested_by" | "stop_note">): StopVm | null {
+  if (!run.stop_requested_at) return null;
+  return { by: run.stop_requested_by ?? null, at: run.stop_requested_at, note: run.stop_note || null, late: succeeded(run) };
+}
+
 export interface FailedVm {
   runId: number;
   /** step = the run itself failed · check = it ran, a declared check failed · rejected = a person turned the result
@@ -44,6 +52,10 @@ export interface FailedVm {
   by: string | null;
   at: string | null;
   note: string | null;
+  /** a person stopped the run (N9): who, when, what they wrote; `reported` = how many step results the executor
+   *  left (0 = it recorded none: which steps ran before the stop is then not known), `done` = how many of those
+   *  reported success. null = nobody stopped it — it failed by itself */
+  stopped: (StopVm & { done: number; reported: number }) | null;
 }
 
 export function failedVm(run: FixExecution, runPlan: FixPlan | null): FailedVm {
@@ -51,6 +63,7 @@ export function failedVm(run: FixExecution, runPlan: FixPlan | null): FailedVm {
   const firstBad = steps.findIndex((s) => s.outcome === "fail");
   const rollback = (Array.isArray(run.rollback_results) ? run.rollback_results : []).map(resultRow);
   const failedChecks = runSummary(run, runPlan).checks.filter((c) => c.state === "failed").map(({ id, label }) => ({ id, label }));
+  const stop = stopOf(run);
   const variant = !succeeded(run) ? (firstBad >= 0 || run.error_message ? "step" : "other")
     : run.accepted_by ? "rejected" : failedChecks.length ? "check" : "other";
   return {
@@ -58,6 +71,7 @@ export function failedVm(run: FixExecution, runPlan: FixPlan | null): FailedVm {
     error: run.error_message, failedChecks,
     rollback: { ran: rollback.length, failed: rollback.filter((r) => r.outcome === "fail").length },
     by: run.accepted_by, at: run.accepted_at, note: run.acceptance_note,
+    stopped: stop ? { ...stop, done: steps.filter((s) => s.outcome === "pass").length, reported: steps.length } : null,
   };
 }
 
@@ -72,6 +86,8 @@ export interface ResolveVm {
   hash8: string | null;
   matchesApproved: boolean | null;
   passed: { id: string | null; label: string }[];
+  /** a person asked this run to stop (N9); it ended as a success all the same */
+  stop: StopVm | null;
 }
 
 export function resolveVm(run: FixExecution, runPlan: FixPlan | null): ResolveVm {
@@ -81,6 +97,7 @@ export function resolveVm(run: FixExecution, runPlan: FixPlan | null): ResolveVm
     done: s.stepsDone, total: s.stepsTotal, duration: formatElapsed(run.duration_ms),
     version: s.version, hash8: s.hash8, matchesApproved: s.matchesApproved,
     passed: s.checks.filter((c) => c.state === "passed").map(({ id, label }) => ({ id, label })),
+    stop: stopOf(run),
   };
 }
 

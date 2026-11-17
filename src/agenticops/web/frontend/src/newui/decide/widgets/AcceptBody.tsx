@@ -6,6 +6,7 @@ import { runSummary } from "@/lib/runSummary";
 import { useNfT } from "../../i18n";
 import { acceptVm } from "../../lib/briefs/accept";
 import { Prov } from "./Cause";
+import { StopLine } from "./RunSteps";
 
 /** The acceptance checklist of one run: a box per declared check still to verify (no result, or a warning), then
  *  one overall confirmation — the classic page's rules (lib/acceptChecklist). The ticks start empty for every run. */
@@ -49,6 +50,7 @@ export function AcceptBody({ list, readOnly, why }: { list: ReturnType<typeof us
                 { v: vm.planVersion, hash: vm.hash8 ?? "—" })
         }</p>
         {reason && <p className="note"><Prov code />{t("ran.why", { reason })}</p>}
+        <StopLine stop={vm.stop} />
       </div>
       {vm.failed.length > 0 && (
         <div className="sec">

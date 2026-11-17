@@ -986,6 +986,7 @@
   "attention.reason.execution_not_started": "Approved, but the run has not started",
   "attention.reason.unknown": "Needs your action",
   "attention.detail.run_failed": "The run failed — a new plan is needed",
+  "attention.detail.run_stopped": "The run was stopped by a person — a new plan is needed",
   "attention.detail.plan_rejected": "The plan was rejected — generate a new one",
   "attention.detail.rca_missing": "No diagnosis yet — run RCA",
   "attention.detail.rca_gate": "Diagnosis below the auto-fix gate — review it",

@@ -11,6 +11,7 @@ import { Message, StateBlock } from "../../shell/StateBlock";
 import { BriefFrame } from "../BriefFrame";
 import { Prov } from "../widgets/Cause";
 import { HoldButton } from "../widgets/HoldButton";
+import { StopLine } from "../widgets/RunSteps";
 import { useHold } from "../widgets/useHold";
 import { useBriefKeys, useDecision, type BriefProps } from "./briefContext";
 
@@ -69,6 +70,7 @@ export function ResolveBrief({ item, frame }: BriefProps) {
                   : t(vm.matchesApproved === true ? "ran.bind.match" : vm.matchesApproved === false ? "ran.bind.drift" : "ran.bind.unknown", { v: vm.version, hash: vm.hash8 ?? "—" })
               }</p>
               {vm.variant === "unverified" && <p className="note"><Prov code />{t("resolve.unverified")}</p>}
+              <StopLine stop={vm.stop} />
             </div>
             {vm.variant === "passed" && (
               <div className="sec">
