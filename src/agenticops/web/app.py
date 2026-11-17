@@ -1890,16 +1890,27 @@ _INFRA_TYPES = {"VPC", "Subnet", "SecurityGroup", "RouteTable", "IGW", "NAT", "T
 
 
 
+def _issues_of_resource(resource: CloudResource):
+    """Which issues belong to a resource: the ones anchored to it (`resource_ref`, MVP-2.6.1 — within the resource's
+    own account: SQLite does not enforce ON DELETE SET NULL, so a stale ref may point at an id another account's row
+    now uses; `health_overlay` has the same guard), and — the older tie — the ones whose alarm carried the row's own
+    resource id. The alarm's id is often an ARN or an alarm name: the string alone missed every such issue while the
+    map and the resource table (by `resource_ref`) counted it (MVP-2.9.0)."""
+    from sqlalchemy import and_
+    return or_(and_(HealthIssue.resource_ref == resource.id, HealthIssue.account_id == resource.account_id),
+               HealthIssue.resource_id == resource.resource_id)
+
+
 @app.get("/api/resources/{resource_id}/issues", response_model=List[HealthIssueResponse])
 def api_resource_issues(resource_id: int, limit: int = Query(default=20, le=100)):
-    """List health issues for a resource."""
+    """List health issues for a resource: anchored to it, or carrying its resource id."""
     with get_db_session() as session:
         resource = session.query(CloudResource).filter_by(id=resource_id).first()
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
         issues = (
             session.query(HealthIssue)
-            .filter(HealthIssue.resource_id == resource.resource_id)
+            .filter(_issues_of_resource(resource))
             .order_by(HealthIssue.detected_at.desc())
             .limit(limit)
             .all()
@@ -1918,7 +1929,7 @@ async def api_resource_fix_plans(resource_id: int, limit: int = Query(default=20
             session.query(FixPlan)
             .options(joinedload(FixPlan.fix_executions))
             .join(HealthIssue, FixPlan.health_issue_id == HealthIssue.id)
-            .filter(HealthIssue.resource_id == resource.resource_id)
+            .filter(_issues_of_resource(resource))
             .order_by(FixPlan.created_at.desc())
             .limit(limit)
             .all()

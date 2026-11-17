@@ -7,6 +7,7 @@ import { LiveLens } from "./live/LiveLens";
 import { NewShell } from "./shell/NewShell";
 import { Message } from "./shell/StateBlock";
 import { StoryLens } from "./story/StoryLens";
+import { WorldLens } from "./world/WorldLens";
 import "./newui.css";
 
 /** NewUI (MVP-2.9.0): the new interface, at /app/new, beside the classic one. It sits outside the classic shell, so it
@@ -22,18 +23,13 @@ export default function NewApp() {
           <Route path="story/:item" element={<StoryLens />} />
           <Route path="live" element={<LiveLens />} />
           <Route path="live/:lane" element={<LiveLens />} />
-          <Route path="world/*" element={<Soon />} />
+          <Route path="world" element={<WorldLens />} />
           <Route path="*" element={<Lost />} />
         </Routes>
       </NewShell>
       <ShellEffects />
     </AccountScopeProvider>
   );
-}
-
-function Soon() {
-  const t = useNfT();
-  return <section className="view"><div className="card pane"><Message big={t("shell.soon.big")}><p>{t("shell.soon.p")}</p></Message></div></section>;
 }
 
 function Lost() {

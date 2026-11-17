@@ -14,6 +14,7 @@ import { useNfT } from "../i18n";
 import { focusContext, keyIntent, type Lens } from "../lib/keys";
 import { atWork } from "../lib/live";
 import { groupCounts } from "../lib/queue";
+import { WorldLayer } from "../world/WorldData";
 import { Help } from "./Help";
 import { ShellContext, type LensKeys, type ShellApi } from "./shellContext";
 
@@ -151,6 +152,7 @@ export function NewShell({ children }: { children: ReactNode }) {
   return (
     <ShellContext.Provider value={api}>
       <div className={["nf", "nobar", ...flags].join(" ")} data-theme={nfTheme}>
+        <WorldLayer>
         <header className="top">
           <div className="tabs" role="tablist" aria-label={t("lens.label")}>
             {LENSES.map((l, i) => (
@@ -205,6 +207,7 @@ export function NewShell({ children }: { children: ReactNode }) {
         <main>{children}</main>
         {notice && <div className="toast" role="status"><span className="spark" aria-hidden="true" /><span className="msg">{notice}</span></div>}
         {help && <Help onClose={() => setHelp(false)} />}
+        </WorldLayer>
       </div>
     </ShellContext.Provider>
   );

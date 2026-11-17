@@ -1,0 +1,215 @@
+import { Link } from "react-router-dom";
+import type { RefObject } from "react";
+import { useResourceIssues } from "@/hooks/useResourceDetail";
+import type { AttentionItem } from "@/lib/attention";
+import { Prov } from "../decide/widgets/Cause";
+import { useNfT, type NfT } from "../i18n";
+import type { WNode, WorldGraph } from "../lib/world/graph";
+import { side } from "../lib/world/relations";
+import { expected, type Ask, type Drawn, type Scene } from "../lib/world/scene";
+import { utcStamp } from "../lib/time";
+
+const num = (v: number) => v.toLocaleString("en-US");
+const TONE: Record<string, string> = { critical: "var(--red)", warning: "var(--amber)", notice: "var(--mint)" };
+
+/** A resource's health as a dot: the three open levels in colour, no open issue in star white, gone as a hollow ring. */
+export function Dot({ node }: { node: Pick<WNode, "health" | "absent"> }) {
+  return node.absent ? <i className="hdot gone" /> : <i className="hdot" style={{ background: TONE[node.health] ?? "rgb(var(--star))" }} />;
+}
+export const Name = ({ node }: { node: Pick<WNode, "name" | "absent"> }) => (node.absent ? <s>{node.name}</s> : <>{node.name}</>);
+export const healthKey = (n: Pick<WNode, "health" | "absent">) => `health.${n.absent ? "gone" : n.health}`;
+
+/** Search, filters, and how much of the map is in view. */
+export function Tools({ g, ask, sc, search, pathMode, onAsk, onPick, onPath, onHome }: {
+  g: WorldGraph; ask: Ask; sc: Scene; search: RefObject<HTMLInputElement>; pathMode: boolean;
+  onAsk: (patch: Partial<Ask>) => void; onPick: (i: number) => void; onPath: () => void; onHome: () => void;
+}) {
+  const t = useNfT();
+  const types = [...g.nodes.reduce((m, n) => m.set(n.type, (m.get(n.type) ?? 0) + 1), new Map<string, number>())].sort((a, b) => a[0].localeCompare(b[0]));
+  return (
+    <div className="wtools card">
+      <label className="wsearch">
+        <input ref={search} className="field" type="search" autoComplete="off" spellCheck={false} value={ask.q} placeholder={t("world.search")}
+               aria-label={t("world.search")} onChange={(e) => onAsk({ q: e.target.value })}
+               onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing && sc.hits[0] !== undefined) { e.currentTarget.blur(); onPick(sc.hits[0]); } }} />
+        <kbd>F</kbd>
+      </label>
+      <div id="wres" role="listbox" aria-label={t("world.results")}>
+        {ask.q.trim() && (sc.hits.length === 0 ? <p className="note" style={{ margin: "6px 2px 0" }}>{t("world.noMatch")}</p>
+          : sc.hits.map((i) => (
+            <button key={i} type="button" role="option" aria-selected={ask.sel === i} onClick={() => onPick(i)}>
+              <Dot node={g.nodes[i]} /><span><Name node={g.nodes[i]} /></span><small>{g.nodes[i].type}</small>
+            </button>
+          )))}
+      </div>
+      <div className="wf">
+        <select className="field" aria-label={t("node.type")} value={ask.type ?? ""} onChange={(e) => onAsk({ type: e.target.value || null })}>
+          <option value="">{t("world.allTypes")}</option>
+          {types.map(([type, n]) => <option key={type} value={type}>{type} · {n}</option>)}
+        </select>
+        <select className="field" aria-label={t("world.group")} value={ask.group ?? ""} onChange={(e) => onAsk({ group: e.target.value || null })}>
+          <option value="">{t("world.allGroups")}</option>
+          {g.groups.map((x) => <option key={x.id} value={x.id}>{x.type}: {x.name} · {x.count}</option>)}
+        </select>
+      </div>
+      <button type="button" className="chip-btn" aria-pressed={ask.onlyAbnormal} onClick={() => onAsk({ onlyAbnormal: !ask.onlyAbnormal })}>{t("world.onlyAbnormal")}</button>
+      <span className="wcount num">{t("world.showing", { n: num(sc.shown), total: num(sc.totals.present) })}</span>
+      <div className="wf">
+        <button type="button" className={`btn sm${pathMode ? " on" : ""}`} aria-pressed={pathMode} onClick={onPath}><span className="t">{t("world.path")}</span><kbd>L</kbd></button>
+        <button type="button" className="btn sm quiet" onClick={onHome}><span className="t">{t("world.home")}</span><kbd>H</kbd></button>
+      </div>
+    </div>
+  );
+}
+
+/** «数据核对»: what the build holds, how every relation of it is shown, how old it is — and whether the canvas drew
+ *  exactly that. `bad` = the numbers that differ; null = not checked yet. */
+export function Check({ sc, bad, perf, buildId, builtAt, building, now }: {
+  sc: Scene; bad: { what: keyof Drawn; want: number; got: number }[] | null; perf: { fps: number; ms: number } | null;
+  buildId: number | null; builtAt: string | null; building: boolean; now: number;
+}) {
+  const t = useNfT();
+  const T = sc.totals, want = expected(sc);
+  return (
+    <div className={`wcheck card${bad?.length ? " bad" : ""}`} data-ok={bad === null ? "" : bad.length ? "0" : "1"} data-fps={perf?.fps ?? ""} data-ms={perf ? perf.ms.toFixed(2) : ""}>
+      <h2>{t("check.title")}</h2>
+      <p><Prov code />{t("check.totals", { present: num(T.present), gone: num(T.gone), open: sc.goneOpen, links: num(T.links), inferred: num(T.inferred) })}</p>
+      <p><Prov code />{t("check.relations", { relations: num(T.relations), lines: num(T.lines), contain: num(T.contain), ofAccount: num(T.ofAccount), ofGroup: num(T.ofGroup) })}
+        {T.dropped > 0 ? t("check.dropped", { n: T.dropped }) : ""}</p>
+      <p><Prov code />{builtAt ? t("check.fresh", { t: utcStamp(builtAt, now), id: buildId }) : t("check.fresh.unknown", { id: buildId })}{building ? t("check.building") : ""}</p>
+      {bad === null ? <p>{t("check.pending")}</p>
+        : bad.length ? <p className="mis" role="alert">{t("check.bad")}{bad.map((m) => t("check.item", { what: t(`check.${m.what}`), want: num(m.want), got: num(m.got) })).join("；")}</p>
+        : <p className="ok"><Prov code />{t("check.ok", { n: num(want.bright), r: want.rings, rb: want.ringsBright, l: num(want.links), named: want.named })}</p>}
+    </div>
+  );
+}
+
+const LIST_MAX = 8;
+
+/** How many resources are not normal now, which, and how the map relates to the queue. */
+export function Happen({ g, sc, complete, readOnly, onPick, onDecide }: {
+  g: WorldGraph; sc: Scene;
+  /** the whole queue was read; false = it was cut, the numbers are of what was read */
+  complete: boolean;
+  /** a read-only account is never handed a decision: there is no queue to tie the map to */
+  readOnly: boolean;
+  onPick: (i: number) => void; onDecide: () => void;
+}) {
+  const t = useNfT();
+  const ties = sc.ties;
+  const waiting = ties ? ties.ringed.length + ties.quiet.length + ties.offMap.length : 0;
+  return (
+    <div className="happen card">
+      <h2>{t("world.now")}</h2>
+      <div className="abn num">{num(sc.abnormal.length)}<small>{t("world.abnormal")}</small></div>
+      {sc.abnormal.length ? (
+        <ul className="abnlist">
+          {sc.abnormal.slice(0, LIST_MAX).map((i) => (
+            <li key={i}><button type="button" onClick={() => onPick(i)}><Dot node={g.nodes[i]} /><span>{g.nodes[i].name}</span><small>{g.nodes[i].type}</small></button></li>
+          ))}
+        </ul>
+      ) : <p className="note">{t("world.noneAbnormal")}</p>}
+      {sc.abnormal.length > LIST_MAX && <p className="note">{t("node.more", { n: num(sc.abnormal.length - LIST_MAX) })}</p>}
+      {readOnly ? <p className="note ties">{t("world.ties.readOnly")}</p>
+        : ties && waiting === 0 ? <p className="note ties"><Prov code />{t("world.ties.none")}</p>
+        : ties ? (
+        <p className="note ties">
+          <Prov code />{t("world.ties", { n: waiting, ring: ties.ringed.length, quiet: ties.quiet.length, off: ties.offMap.length })}
+          {!complete && t("world.ties.cut")}　
+          <button type="button" className="linkish" onClick={onDecide}>{t("world.tiesGo")}</button>
+        </p>
+      ) : <p className="note ties">{t("world.ties.unknown")}</p>}
+    </div>
+  );
+}
+
+const NB_MAX = 7, ISSUES_MAX = 5;
+const CLOSED = new Set(["resolved", "dismissed"]);
+
+/** The open resource: what it is, how it is, what is open on it, what it is linked to and how. */
+export function NodeCard({ g, i, ask, mine, accountName, now, onPick, onClose, onFocus, onPathFrom, onStory, onDecide }: {
+  g: WorldGraph; i: number; ask: Ask;
+  /** the items waiting on this person that sit on this resource */
+  mine: AttentionItem[];
+  accountName: (id: number | null) => string;
+  now: number;
+  onPick: (i: number) => void; onClose: () => void; onFocus: () => void; onPathFrom: () => void;
+  onStory: (item: string) => void; onDecide: (item: string) => void;
+}) {
+  const t = useNfT();
+  const n = g.nodes[i], nb = g.adj[i], llm = nb.filter(([, k]) => g.edges[k].llm).length;
+  const issues = useResourceIssues(n.ref, true);
+  const open = (issues.data ?? []).filter((x) => !CLOSED.has(x.status));
+  const groups = n.groups.map((id) => g.groups.find((x) => x.id === id)).filter((x): x is NonNullable<typeof x> => !!x);
+  return (
+    <aside className="nodecard card" aria-label={t("node.resource")}>
+      <button type="button" className="x" onClick={onClose} aria-label={t("peek.close")}>×</button>
+      <h3><Name node={n} /></h3>
+      <div className="sub">{n.type}　·　{accountName(n.acct)}</div>
+      <p><Prov code /><Dot node={n} /><b>{t(healthKey(n))}</b></p>
+      {n.absent ? <p className="note"><Prov code />{t(n.health !== "unknown" ? "node.gone.open" : "node.gone")}</p>
+        : n.health === "unknown" ? <p className="note">{t("node.none")}</p> : null}
+      {issues.isError ? <p className="note err">{t("sec.failedLoad")}</p> : open.length > 0 && (
+        <ul className="nb">
+          {open.slice(0, ISSUES_MAX).map((x) => (
+            <li key={x.id}><button type="button" onClick={() => onStory(`I${x.id}`)}><i className="hdot" style={{ background: "transparent" }} /><span>{x.title}</span><small className="num">I#{x.id}</small></button></li>
+          ))}
+        </ul>
+      )}
+      {open.length > ISSUES_MAX && <p className="note">{t("node.more", { n: open.length - ISSUES_MAX })}</p>}
+      <p><Prov code />{t("node.links", { n: nb.length })}{llm ? t("node.linksLlm", { n: llm }) : ""}</p>
+      <ul className="nb">
+        {nb.slice(0, NB_MAX).map(([j, k, out]) => {
+          const e = g.edges[k], rel = side({ r: e.r, p: e.llm ? "llm" : "rule" }, out);
+          return (
+            <li key={`${j}:${k}`}>
+              <button type="button" onClick={() => onPick(j)} title={e.llm && e.ev ? e.ev : undefined}>
+                <Dot node={g.nodes[j]} /><span><Name node={g.nodes[j]} /></span><small>{t(`rel.${rel}`)} · {e.r}</small>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {nb.length > NB_MAX && <p className="note">{t("node.more", { n: nb.length - NB_MAX })}</p>}
+      {groups.length > 0 && <p className="note">{t("node.groups", { groups: groups.map((x) => `${x.type}: ${x.name}`).join("、") })}</p>}
+      <p className="note">{t("node.asOf", { t: utcStamp(now, now) })}</p>
+      <div className="acts">
+        {mine.map((item) => (
+          <button key={item.id} type="button" className="btn primary sm" onClick={() => onDecide(item.id)}><span className="t">{t("node.go")}　{item.ref}</span></button>
+        ))}
+        <button type="button" className={`btn sm${ask.focus ? " on" : ""}`} aria-pressed={ask.focus} onClick={onFocus}><span className="t">{t("world.focus")}</span><kbd>G</kbd></button>
+        <button type="button" className="btn sm" onClick={onPathFrom}><span className="t">{t("path.from")}</span></button>
+        <Link className="btn sm quiet" to={`/app/resources/${n.ref}`}><span className="t">{t("node.classic")}</span></Link>
+      </div>
+    </aside>
+  );
+}
+
+/** While finding a path: what to click next, the chain once there is one, and what a path is not. */
+export function PathHint({ g, ask, sc, onExit }: { g: WorldGraph; ask: Ask; sc: Scene; onExit: () => void }) {
+  const t = useNfT();
+  const name = (i: number) => g.nodes[i].name;
+  return (
+    <p className="wpast whint" role="status">
+      {ask.a === null ? t("path.pick1") : ask.b === null ? t("path.pick2", { a: name(ask.a) })
+        : sc.path ? <><Prov code />{t("path.found", { n: sc.path.length - 1 })}<span className="chain">{sc.path.map(name).join(" → ")}</span>　{t("path.caveat")}</>
+        : <><Prov code />{t("path.none", { a: name(ask.a), b: name(ask.b) })}</>}
+      　<button type="button" className="btn sm quiet" onClick={onExit}><span className="t">{t("path.exit")}</span><kbd>Esc</kbd></button>
+    </p>
+  );
+}
+
+export function Legend({ t }: { t: NfT }) {
+  return (
+    <div className="legend">
+      <span><i style={{ background: "var(--red)" }} />{t("health.critical")}</span>
+      <span><i style={{ background: "var(--amber)" }} />{t("health.warning")}</span>
+      <span><i style={{ background: "var(--mint)" }} />{t("health.notice")}</span>
+      <span><i style={{ background: "rgb(var(--star))", opacity: 0.6 }} />{t("legend.none")}</span>
+      <span><i className="gonei" />{t("legend.gone")}</span>
+      <span><i className="dash" />{t("legend.llm")}</span>
+      <span><i style={{ background: "var(--mint)", width: 5, height: 5 }} />{t("legend.flow")}</span>
+      <span className="sch">{t("legend.schematic")}</span>
+    </div>
+  );
+}

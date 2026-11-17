@@ -1,0 +1,16 @@
+{
+  "_comment": "Which way a fault travels along a relation written src -> dst (graph/relations.PROPAGATION). Shared by the back end and NewUI's map (newui/lib/world/relations.ts): pytest proves the registry is exactly this table, vitest that the map's copy is. forward = src -> dst, reverse = dst -> src, both, none = not known (shown without a direction).",
+  "propagation": {
+    "contains": "forward",
+    "secured_by": "reverse",
+    "attached_to": "forward",
+    "routes_to": "reverse",
+    "manages": "both",
+    "uses": "reverse",
+    "restricts": "forward",
+    "runs_on": "reverse",
+    "same_as": "both",
+    "references": "none",
+    "inferred_group": "none"
+  }
+}

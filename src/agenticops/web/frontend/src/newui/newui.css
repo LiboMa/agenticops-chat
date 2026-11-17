@@ -559,3 +559,19 @@
 .nf .stream .lsteps .cmd{color:var(--faint)}
 .nf .stream > .note{margin-top:6px}
 .nf .lanes .note{font-size:var(--fs-xs);color:var(--faint)}
+
+/* ── world (N5): what the real graph needs beyond the design's sample ──── */
+.nf .wleft{overflow-x:hidden}
+.nf #wres button,.nf .abnlist button,.nf .nb button{grid-template-columns:14px minmax(0,1fr) auto}
+.nf #wres button > span,.nf .abnlist button > span,.nf .nb button > span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nf .nb button small,.nf .abnlist button small,.nf #wres button small{white-space:nowrap}
+.nf .wtools .wf .btn{flex:1;justify-content:center}
+.nf .wcheck p{overflow-wrap:anywhere}
+.nf .nodecard .sub{overflow-wrap:anywhere}
+.nf .nodecard .nb + p{margin-top:6px}
+.nf #world{touch-action:none;user-select:none}
+.nf #world .card{user-select:text}
+@media (max-width:760px){
+  .nf .nodecard{bottom:10px;max-height:30vh}                      /* no time bar under it here */
+  .nf .wtools .wf kbd{display:none}
+}

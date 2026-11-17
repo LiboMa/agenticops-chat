@@ -105,6 +105,48 @@ def test_resource_fix_plans(client, seed_data):
     assert data[0]["executions"][0]["status"] == "succeeded"
 
 
+def _anchored(seed_data, raw_id, *, account_matches=True, plan=False):
+    """An issue whose alarm carried `raw_id` (an ARN, an alarm name — not the row's own id) and whose anchor
+    resolved to the seeded resource."""
+    with get_db_session() as db:
+        res = db.query(CloudResource).filter_by(id=seed_data["resource_id"]).one()
+        issue = HealthIssue(resource_id=raw_id, severity="critical", source="cloudwatch_alarm", title="Anchored by the resolver",
+                            description="d", status="open", detected_at=datetime.now(timezone.utc) + timedelta(minutes=1),
+                            resource_ref=res.id, anchor_status="anchored",
+                            account_id=res.account_id if account_matches else res.account_id + 100)
+        db.add(issue)
+        db.flush()
+        if plan:
+            rca = RCAResult(health_issue_id=issue.id, root_cause="x", confidence=0.9)
+            db.add(rca); db.flush()
+            db.add(FixPlan(health_issue_id=issue.id, rca_result_id=rca.id, risk_level="L1", title="Plan of the anchored issue",
+                           summary="s", steps=[], rollback_plan={}, status="draft", created_at=datetime.now(timezone.utc) + timedelta(minutes=2)))
+        return issue.id
+
+
+def test_resource_issues_include_the_ones_anchored_to_it(client, seed_data):
+    """MVP-2.9.0: an issue is tied to its resource by its anchor (`resource_ref`, MVP-2.6.1) — the alarm's own
+    resource id is often an ARN or an alarm name and matches no row. The resource's list missed every such issue
+    while the map and the resource table (the health overlay, by `resource_ref`) counted it."""
+    iid = _anchored(seed_data, f"arn:aws:ec2:us-east-1:123456789012:instance/{seed_data['aws_resource_id']}")
+    data = client.get(f"/api/resources/{seed_data['resource_id']}/issues").json()
+    assert [i["id"] for i in data] == [iid, seed_data["issue1_id"], seed_data["issue2_id"]]      # newest first; the legacy matches stay
+
+
+def test_resource_issues_leave_out_a_stale_anchor_of_another_account(client, seed_data):
+    """SQLite does not enforce ON DELETE SET NULL: a stale resource_ref may point at an id another account's row now
+    uses (health_overlay has the same guard)."""
+    _anchored(seed_data, "arn:aws:ec2:us-east-1:999:instance/i-else", account_matches=False)
+    data = client.get(f"/api/resources/{seed_data['resource_id']}/issues").json()
+    assert [i["title"] for i in data] == ["CPU spike", "Disk full"]
+
+
+def test_resource_fix_plans_include_the_plans_of_anchored_issues(client, seed_data):
+    _anchored(seed_data, "alarm:cpu-high-web-prod", plan=True)
+    data = client.get(f"/api/resources/{seed_data['resource_id']}/fix-plans").json()
+    assert [p["title"] for p in data] == ["Plan of the anchored issue", "Cleanup disk"]
+
+
 def test_resource_issues_404(client):
     resp = client.get("/api/resources/99999/issues")
     assert resp.status_code == 404
