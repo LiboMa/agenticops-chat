@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 import en from "@/newui/locales/en.json";
 import zh from "@/newui/locales/zh.json";
 import { fill, nfT } from "@/newui/i18n";
@@ -38,5 +40,56 @@ describe("nfT", () => {
     expect(nfT("en", "lens.decide")).toBe("Decide");
     expect(nfT("en", "no.such.key")).toBe("no.such.key");
     expect(nfT("zh", "pos", { i: 2, n: 9 })).toBe("2 / 9");
+  });
+});
+
+/** The keys the code asks for. A key that is missing shows as its own name on the page («story.rca.none»), in both
+ *  languages, and nothing else fails — so the code is read here: every key written as a literal in a `t(…)` call
+ *  must exist, and every key built from a prefix (t(`phase.${id}`)) must have at least one key under that prefix. */
+function sources(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? sources(join(dir, e.name)) : /\.tsx?$/.test(e.name) ? [join(dir, e.name)] : []);
+}
+
+function askedKeys(code: string): { literals: string[]; prefixes: string[] } {
+  const literals: string[] = [], prefixes: string[] = [];
+  for (const call of code.matchAll(/\bt\(/g)) {
+    let depth = 1, j = call.index! + call[0].length;
+    const from = j;
+    while (j < code.length && depth) { if (code[j] === "(") depth++; else if (code[j] === ")") depth--; j++; }
+    const key = code.slice(from, j - 1).split(", {")[0];                 // the key expression, without the variables
+    for (const m of key.matchAll(/"([a-zA-Z]\w*(?:\.\w+)+)"/g)) literals.push(m[1]);
+    for (const m of key.matchAll(/`([a-zA-Z][\w.]*)\.\$\{/g)) prefixes.push(m[1]);
+  }
+  return { literals, prefixes };
+}
+
+describe("every key the NewUI code asks for exists", () => {
+  const root = resolve(__dirname, "../newui");
+  const asked = sources(root).map((f) => ({ file: f.slice(root.length + 1), ...askedKeys(readFileSync(f, "utf8")) }));
+
+  it("reads the code", () => {
+    expect(asked.length).toBeGreaterThan(40);
+    expect(asked.flatMap((a) => a.literals).length).toBeGreaterThan(300);
+  });
+
+  it("has every literal key", () => {
+    const missing = asked.flatMap((a) => a.literals.filter((k) => !(k in Z)).map((k) => `${a.file}: ${k}`));
+    expect([...new Set(missing)]).toEqual([]);
+  });
+
+  it("has at least one key under every prefix a key is built from", () => {
+    const keys = Object.keys(Z);
+    const missing = asked.flatMap((a) => a.prefixes.filter((p) => !keys.some((k) => k.startsWith(`${p}.`))).map((p) => `${a.file}: ${p}.*`));
+    expect([...new Set(missing)]).toEqual([]);
+  });
+
+  it("has a sentence for each of the six steps, each step state, and each kind of ask on the story page", () => {
+    for (const k of [
+      ...["found", "rca", "plan", "approve", "run", "accept", "request", "review"].map((s) => `phase.${s}`),
+      ...["done", "now", "bad", "closed", "todo"].map((s) => `spine.${s}`),
+      ...["approve", "accept", "resolve", "confirm", "rerun", "generate", "replan", "failed", "not_started", "start_review", "clarify", "generic"].map((s) => `story.ask.${s}`),
+      "wait.you", "wait.person", "wait.agent", "wait.agentIdle", "wait.executor", "wait.none",
+    ]) expect(Z[k], k).toBeTruthy();
   });
 });

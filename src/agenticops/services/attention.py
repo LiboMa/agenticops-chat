@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
+from sqlalchemy import func
+
 from agenticops.config import settings
 from agenticops.models import (ChangeRequest, CloudResource, FixExecution, FixPlan, HealthIssue, PipelineEvent, RCAResult,
                                get_db_session)
@@ -47,6 +49,9 @@ CHANGE_ROWS = {
 _PRIMARY_ACTION = {"generatePlan": "generate_plan", "rerunRca": "rerun_rca", "reviewRca": "review_rca",
                    "acceptResult": "accept", "markResolved": "mark_resolved", "startReview": "start_review",
                    "answerReviewer": "clarify", "markCompleted": "resolve_review"}
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)      # «no status move on record»: earlier than any real time
 
 
 def _aware(ts: Optional[datetime]) -> Optional[datetime]:
@@ -130,10 +135,15 @@ def _since(issue, sub, plan, run, rca, now) -> datetime:
 
 
 def issue_waits(s, issues, *, now: datetime) -> dict[int, IssueWait]:
-    """Phase + waiting-since for each issue, in a fixed number of queries (plans, RCAs, runs, run events)."""
+    """Phase + waiting-since for each issue, in a fixed number of queries (plans, RCAs, runs, run events, last
+    status moves). `since` is never earlier than the issue's last status move (MVP-2.9.0): a reopened issue has
+    not waited since its old diagnosis — it was dismissed in between."""
     if not issues:
         return {}
     ids = [i.id for i in issues]
+    moved = dict(s.query(PipelineEvent.health_issue_id, func.max(PipelineEvent.created_at))
+                 .filter(PipelineEvent.health_issue_id.in_(ids), PipelineEvent.event_type == "status_changed")
+                 .group_by(PipelineEvent.health_issue_id).all())
     plans_by = _group(s.query(FixPlan).filter(FixPlan.health_issue_id.in_(ids), FixPlan.plan_kind == "fix").all(),
                       "health_issue_id")
     rcas = _first_by(s.query(RCAResult).filter(RCAResult.health_issue_id.in_(ids))
@@ -155,8 +165,8 @@ def issue_waits(s, issues, *, now: datetime) -> dict[int, IssueWait]:
         phase = wp.issue_phase(issue.status, rca=rca, threshold=settings.rca_min_confidence_for_autofix,
                                plan=plan, latest_run=run, auto_run_in_flight=auto,
                                auto_fix_enabled=bool(settings.auto_fix_enabled))
-        out[issue.id] = IssueWait(phase, _since(issue, phase.sub, plan, run, rca, now), plan, plans, run, rca,
-                                  events, auto)
+        since = max(_since(issue, phase.sub, plan, run, rca, now), _aware(moved.get(issue.id)) or _EPOCH)
+        out[issue.id] = IssueWait(phase, since, plan, plans, run, rca, events, auto)
     return out
 
 
@@ -305,18 +315,21 @@ def _sort_key(sort: str):
 
 
 def attention_page(actor, *, account_id: Optional[int] = None, reason: Optional[list[str]] = None,
-                   q: Optional[str] = None, sort: str = "waiting_longest", limit: int = 25, offset: int = 0,
-                   now: Optional[datetime] = None) -> dict:
+                   q: Optional[str] = None, item: Optional[str] = None, sort: str = "waiting_longest", limit: int = 25,
+                   offset: int = 0, now: Optional[datetime] = None) -> dict:
     """The actor's work items. `counts` = items per reason after the account scope and the search, before the
     reason filter — so a workbench tab's number does not move with the selected tab. Sort: the longest wait first
     (default), newest, severity (a change ranks by its risk level), or decision (grouped as DECISION_GROUPS, then
-    the longest wait first)."""
+    the longest wait first). `item` ("I12" / "C3", MVP-2.9.0) keeps that one work item: whether it is on this
+    actor's list, and as what — `q` cannot say (it also matches titles, resources and I#1 for I#10's digits)."""
     if reason and not set(reason) <= REASONS:
         raise ValueError(f"unknown reason {sorted(set(reason) - REASONS)}; expected one of {sorted(REASONS)}")
     if sort not in SORTS:
         raise ValueError(f"unknown sort {sort!r}; expected one of {list(SORTS)}")
     now = now or datetime.now(timezone.utc)
     items = attention_items(actor, account_id=account_id, now=now)
+    if item:
+        items = [i for i in items if i["id"] == item]
     if q:
         items = [i for i in items if _matches(i, q)]
     counts: dict[str, int] = {}

@@ -6,8 +6,11 @@ import { parseItem } from "@/lib/inbox";
 import { useNfT } from "../../i18n";
 import { approveState } from "../../lib/briefs/plan";
 import type { HoldTarget } from "../../lib/hold";
+import { planBasis } from "../../lib/story";
+import { utcStamp } from "../../lib/time";
 import { StateBlock } from "../../shell/StateBlock";
 import { BriefFrame } from "../BriefFrame";
+import { Prov } from "../widgets/Cause";
 import { CauseSection, useCause } from "../widgets/CauseSection";
 import { HoldButton } from "../widgets/HoldButton";
 import { ImpactSection } from "../widgets/ImpactSection";
@@ -37,6 +40,7 @@ export function ApproveBrief({ item, frame }: BriefProps) {
 
   const plan = planQ.data;
   const state = plan ? approveState(plan) : null;
+  const basis = plan ? planBasis(plan, source.rca) : "unknown";     // an approver should know a plan was not written from the diagnosis above it
   const canReject = !!plan && !!findAction(plan.available_actions, "reject")?.allowed;
   const target: HoldTarget | null = plan && state?.can && plan.content_hash && !frame.readOnly && !form && !approve.isPending
     ? { itemId: item.id, planId: plan.id, hash: plan.content_hash } : null;
@@ -94,7 +98,12 @@ export function ApproveBrief({ item, frame }: BriefProps) {
       <CauseSection heading={t("sec.why")} source={source} />
       {planQ.isPending ? <div className="sec"><h2>{t("sec.plan")}</h2><StateBlock kind="loading" /></div>
         : planQ.isError || !plan ? <div className="sec"><h2>{t("sec.plan")}</h2><StateBlock kind="failed" failKey="sec.failedLoad" onRetry={() => void planQ.refetch()} /></div>
-        : <PlanSection plan={plan} heading={t("sec.plan")} kind="fix" />}
+        : (
+          <PlanSection plan={plan} heading={t("sec.plan")} kind="fix">
+            {basis === "older" && <p className="note"><Prov code />{t("plan.basis.older")}</p>}
+            {basis === "rewritten" && <p className="note"><Prov code />{t("plan.basis.rewritten", { t: utcStamp(plan.created_at, frame.now) })}</p>}
+          </PlanSection>
+        )}
       <ImpactSection subject={{ issueId }} tone={item.severity === "critical" ? "red" : "amber"} />
       {plan && <ChecksSection plan={plan} />}
     </BriefFrame>

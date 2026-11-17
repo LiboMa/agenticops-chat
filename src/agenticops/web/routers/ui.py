@@ -145,15 +145,17 @@ def api_ui_attention(account_id: Optional[int] = Query(None, ge=1), limit: int =
                      cursor: Optional[str] = Query(None, pattern=r"^\d{1,6}$"),
                      reason: Optional[str] = Query(None, max_length=200),
                      q: Optional[str] = Query(None, max_length=200),
+                     item: Optional[str] = Query(None, pattern=r"^[IC][1-9]\d{0,8}$"),
                      sort: str = Query("waiting_longest", pattern="^(waiting_longest|newest|severity|decision)$"),
                      actor: Actor = Depends(current_actor), _user=Depends(signed_in_user)) -> dict:
     """Work that waits on this actor (contract workspace-ui-1 AttentionPage, plus `ref` / `reason_detail` and the
     reasons review_required / execution_not_started). MVP-2.8.0 S2: `reason` (comma list) / `q` / `sort`, and each
-    item's severity / risk level / resource / region / waiting_on, `counts` per reason. Plain def: DB work (S1)."""
+    item's severity / risk level / resource / region / waiting_on, `counts` per reason. MVP-2.9.0: `item` (I12 / C3)
+    = that one work item, when it is on this actor's list. Plain def: DB work (S1)."""
     from agenticops.services.attention import attention_page
     reasons = [r for r in (reason or "").split(",") if r] or None
     try:
-        return attention_page(actor, account_id=account_id, reason=reasons, q=q, sort=sort, limit=limit,
+        return attention_page(actor, account_id=account_id, reason=reasons, q=q, item=item, sort=sort, limit=limit,
                               offset=int(cursor or 0))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

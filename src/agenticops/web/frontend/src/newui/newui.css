@@ -525,3 +525,37 @@
 .nf .f:not(.run) .h{color:var(--faint)}
 .nf .actions .reason-in{flex:1 1 240px;min-width:0}
 .nf .notes li{overflow-wrap:anywhere}
+
+/* ── story (N3): what the real records need beyond the design's sample ─── */
+.nf .sr{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.nf .story .statusline{margin-top:4px}
+.nf .story .ask .btn{margin-left:4px}
+.nf .spine .box{padding:8px 12px;border:1px solid var(--line);border-radius:var(--r-2);background:var(--raise)}
+.nf .spine .box > p:first-child,.nf .spine .box > .more:first-child{margin-top:0}
+.nf .spine .trust{margin-top:8px}
+.nf .spine .quote{margin-top:6px}
+.nf .spine .sec{padding:10px 0 0;margin-top:8px}
+.nf .spine .more > .sec:first-of-type{border-top:0;padding-top:4px;margin-top:4px}
+.nf .spine .back{display:block;margin:4px 0 0}
+.nf .spine .checks li{background:var(--solid)}
+.nf .reasons{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px;color:var(--dim)}
+.nf .whole{margin-top:6px;padding-top:12px;border-top:1px solid var(--line)}
+.nf .rec{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:6px;font-size:var(--fs-sm)}
+.nf .rec li{display:grid;grid-template-columns:92px minmax(0,1fr);gap:0 10px;color:var(--dim)}
+.nf .rec time{font-family:var(--num);font-size:var(--fs-xs);color:var(--faint);white-space:nowrap;padding-top:2px}
+.nf .rec li > span,.nf .rec small{grid-column:2}
+.nf .rec small{font-size:var(--fs-xs);color:var(--faint)}
+.nf .rec li.bad > span:first-of-type{color:var(--red)} .nf .rec li.warn > span:first-of-type{color:var(--amber)}
+.nf .rec .said{white-space:pre-wrap;margin-top:2px;padding:4px 8px;border-left:3px solid var(--line);background:var(--raise);color:var(--chalk)}
+.nf .notes li{white-space:pre-wrap}
+.nf .note-add{display:flex;gap:6px;align-items:flex-end;margin-top:8px}
+.nf .note-add .field{flex:1;min-height:36px;padding:6px 10px}
+.nf .facts a{color:var(--mint);text-decoration:underline;text-underline-offset:2px}
+.nf .meta .story-link:hover{color:var(--chalk)}
+.nf .meta .story-link kbd{font-size:10px}
+.nf .statusline .story-link{margin-left:auto;color:var(--mint);text-decoration:underline;text-underline-offset:2px}
+.nf .stream .sec:first-of-type{margin-top:10px}
+.nf .stream .lsteps{margin-top:4px}
+.nf .stream .lsteps .cmd{color:var(--faint)}
+.nf .stream > .note{margin-top:6px}
+.nf .lanes .note{font-size:var(--fs-xs);color:var(--faint)}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAccountScope } from "@/components/layout/AccountScope";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useReadOnly } from "@/hooks/useBootstrap";
@@ -11,6 +11,7 @@ import {
   currentItem, deepLinkState, emptyKind, flattenPages, groupCounts, parseFilter, pruneHandled, situation, step, withoutHandled,
   type QueueFilter,
 } from "../lib/queue";
+import { storyPath } from "../lib/story";
 import { Message, StateBlock } from "../shell/StateBlock";
 import { useLensKeys, useShell } from "../shell/shellContext";
 import { DecideContext, type BriefKeys, type DecideApi } from "./briefs/briefContext";
@@ -28,6 +29,7 @@ const place = (id: string | null, filter: QueueFilter) =>
 export function DecideLens() {
   const t = useNfT();
   const navigate = useNavigate();
+  const location = useLocation();
   const { notify } = useShell();
   const { item: itemParam = null } = useParams();
   const [search] = useSearchParams();
@@ -81,6 +83,8 @@ export function DecideLens() {
     pick(items[at].id);
   }, [items, cur, pick]);
   const setFilter = (f: QueueFilter) => { lastIndex.current = 0; navigate(place(null, f)); };
+  // «经过»: the item's whole record; it comes back to this very place
+  const openStory = (id: string) => navigate(storyPath(id), { state: { from: "decide", back: location.pathname + location.search } });
 
   const curId = cur?.item.id ?? null;
   const peek = usePeek(curId);
@@ -104,6 +108,7 @@ export function DecideLens() {
       if (peek.onKey(key)) return true;
       if (key === "j" || key === "arrowdown") { move(1); return true; }
       if (key === "k" || key === "arrowup") { move(-1); return true; }
+      if (key === "enter" && curId) { if (!repeat) openStory(curId); return true; }
       return briefKeys.current?.onKey?.(key, e, repeat);
     },
     onKeyUp: (key) => briefKeys.current?.onKeyUp?.(key),
@@ -128,7 +133,7 @@ export function DecideLens() {
         <p>{t("gone.p")}</p>
         <p className="row">
           {items.length > 0 && <button type="button" className="btn primary" onClick={() => move(1)}><span className="t">{t("gone.next")}</span><kbd>J</kbd></button>}
-          {gone && <Link className="btn" to={gone.kind === "issue" ? `/app/issues/${gone.id}` : `/app/changes/${gone.id}`}><span className="t">{t("gone.open")}</span></Link>}
+          {gone && itemParam && <button type="button" className="btn" onClick={() => openStory(itemParam)}><span className="t">{t("gone.story")}</span></button>}
         </p>
       </Message>
     );

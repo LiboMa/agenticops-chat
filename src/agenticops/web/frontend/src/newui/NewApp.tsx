@@ -5,6 +5,7 @@ import { DecideLens } from "./decide/DecideLens";
 import { useNfT } from "./i18n";
 import { NewShell } from "./shell/NewShell";
 import { Message } from "./shell/StateBlock";
+import { StoryLens } from "./story/StoryLens";
 import "./newui.css";
 
 /** NewUI (MVP-2.9.0): the new interface, at /app/new, beside the classic one. It sits outside the classic shell, so it
@@ -17,6 +18,7 @@ export default function NewApp() {
           <Route index element={<Navigate to="decide" replace />} />
           <Route path="decide" element={<DecideLens />} />
           <Route path="decide/:item" element={<DecideLens />} />
+          <Route path="story/:item" element={<StoryLens />} />
           <Route path="live/*" element={<Soon />} />
           <Route path="world/*" element={<Soon />} />
           <Route path="*" element={<Lost />} />

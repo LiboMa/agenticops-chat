@@ -10,6 +10,7 @@ const ROWS: [string[], string][] = [
   [["X"], "help.tick"],
   [["Y", "P", "N", "F", "M"], "help.verdict"],
   [["Space"], "help.peek"],
+  [["↵"], "help.story"],
   [["1", "2", "3"], "help.lens"],
   [["T"], "help.theme"],
   [["?"], "help.helpKey"],

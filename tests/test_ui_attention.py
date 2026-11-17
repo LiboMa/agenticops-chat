@@ -320,6 +320,31 @@ def test_issue_waits_gives_every_issue_its_phase_and_since(db):
     assert w.phase.sub in ("notQueued", "executing") and w.since is not None
 
 
+def test_waiting_since_is_never_before_the_issue_entered_its_present_status(db):
+    """MVP-2.9.0: a reopened issue has not waited since its old diagnosis — it was dismissed in between. «Since» is
+    never earlier than the issue's last status move (NewUI's «经过» page said «44 days» a minute after a reopen)."""
+    iid, _ = _issue("open")
+    other, _ = _issue("open")
+    s = get_session()
+    try:
+        for rca in s.query(RCAResult).all():
+            rca.created_at = NOW - timedelta(days=44)
+        s.add(PipelineEvent(health_issue_id=iid, event_type="status_changed", stage="issue", status="completed",
+                            detail=json.dumps({"from": "open", "to": "dismissed", "reason": "noise"}), actor="user:alice",
+                            created_at=NOW - timedelta(days=3)))
+        s.add(PipelineEvent(health_issue_id=iid, event_type="status_changed", stage="issue", status="completed",
+                            detail=json.dumps({"from": "dismissed", "to": "open", "reason": "reopened"}), actor="user:alice",
+                            created_at=NOW - timedelta(minutes=2)))
+        s.add(PipelineEvent(health_issue_id=iid, event_type="note_added", stage="note", status="recorded",
+                            detail=json.dumps({"content": "x"}), actor="user:alice", created_at=NOW - timedelta(minutes=1)))
+        s.commit()
+        waits = att.issue_waits(s, s.query(HealthIssue).order_by(HealthIssue.id).all(), now=NOW)
+    finally:
+        s.close()
+    assert waits[iid].since == NOW - timedelta(minutes=2)       # the reopen — not the note after it, not the old RCA
+    assert waits[other].since == NOW - timedelta(days=44)        # no move on record: as before
+
+
 def test_the_endpoint_takes_reason_q_and_sort_and_refuses_an_unknown_reason(db):
     from agenticops.web import deps
     from agenticops.web.app import app
@@ -429,6 +454,39 @@ def test_the_endpoint_takes_sort_decision(db):
 
 BRIEFS = json.loads((Path(__file__).parent / "fixtures" / "attention_brief_kinds.json").read_text())
 _LISTED = {(r["kind"], r["reason"], r["reason_detail"]) for r in BRIEFS["rows"]}
+
+
+def test_one_item_by_its_exact_id(db):
+    """MVP-2.9.0: NewUI's «经过» page asks whether ONE item is on this actor's list (`item=I12`). The search (`q`)
+    cannot answer that: it also matches titles, resources, and I#1 when asked for I#10's digits."""
+    ids = [_issue("fix_planned", plan="pending_approval", title=f"issue {n}")[0] for n in range(12)]
+    first, tenth = ids[0], ids[9]
+    page = att.attention_page(ADMIN, now=NOW, item=f"I{first}")
+    assert [i["id"] for i in page["items"]] == [f"I{first}"] and page["total"] == 1
+    assert page["counts"] == {"approval_required": 1}
+    assert [i["id"] for i in att.attention_page(ADMIN, now=NOW, item=f"I{tenth}")["items"]] == [f"I{tenth}"]
+    cid = _change("planned", requested_by="user:alice")
+    assert [i["id"] for i in att.attention_page(ADMIN, now=NOW, item=f"C{cid}")["items"]] == [f"C{cid}"]
+    assert att.attention_page(ADMIN, now=NOW, item="I9999")["items"] == []        # not on the list: no row
+    assert att.attention_page(READER, now=NOW, item=f"I{first}")["items"] == []   # nor one that waits on somebody else
+
+
+def test_the_endpoint_takes_item_and_refuses_a_malformed_one(db):
+    from agenticops.web import deps
+    from agenticops.web.app import app
+    from agenticops.web.routers import ui as ui_router
+    _issue("fix_planned", plan="pending_approval")
+    iid, _ = _issue("fix_planned", plan="pending_approval")      # the second one: without the filter, limit=1 gives the first
+    app.dependency_overrides[deps.current_actor] = lambda: ADMIN
+    app.dependency_overrides[ui_router.signed_in_user] = lambda: SimpleNamespace(id=3)
+    try:
+        c = TestClient(app)
+        r = c.get(f"/api/ui/attention?item=I{iid}&limit=1")
+        assert r.status_code == 200 and [i["id"] for i in r.json()["items"]] == [f"I{iid}"]
+        for bad in ("12", "X12", "I0", "I1;drop", "I#1"):
+            assert c.get("/api/ui/attention", params={"item": bad}).status_code == 422, bad
+    finally:
+        app.dependency_overrides.clear()
 
 
 def _kind(item) -> str:
