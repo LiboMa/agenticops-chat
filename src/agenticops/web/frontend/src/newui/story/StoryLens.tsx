@@ -8,7 +8,6 @@ import { DecideContext, type BriefKeys, type DecideApi } from "../decide/briefs/
 import { usePeek } from "../decide/widgets/usePeek";
 import { useMyItem } from "../hooks/useMyItem";
 import { useNfT } from "../i18n";
-import { focusContext } from "../lib/keys";
 import { storyOrigin } from "../lib/story";
 import { Message } from "../shell/StateBlock";
 import { useLensKeys, useShell } from "../shell/shellContext";
@@ -69,7 +68,6 @@ export function StoryLens() {
     },
     onEscape: () => {
       if (peek.open) { peek.close(); return true; }
-      if (focusContext(document.activeElement).inField) return false;      // in the note box, Esc leaves the box, not the page
       back();
       return true;
     },

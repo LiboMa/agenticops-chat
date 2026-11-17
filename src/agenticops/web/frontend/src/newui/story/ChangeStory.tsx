@@ -27,6 +27,16 @@ const TONE: Record<string, string> = { L3: "crit", L2: "warn", L1: "info", L0: "
  *  (lib/changeDetailModel), laid out on six steps; every sentence comes from the request's own records. */
 export function ChangeStory({ id, frame }: { id: number; frame: StoryFrame }) {
   const t = useNfT();
+  const q = useChange(id);
+  // a change that does not exist: its timeline is not asked for every ten seconds
+  if (q.error instanceof ApiError && q.error.status === 404) {
+    return <article className="story card"><BackOnly frame={frame} /><Message big={t("story.none.big")}><p>{t("story.none.p")}</p></Message></article>;
+  }
+  return <ChangeRecord id={id} frame={frame} />;
+}
+
+function ChangeRecord({ id, frame }: { id: number; frame: StoryFrame }) {
+  const t = useNfT();
   const { t: classic } = useLocale();
   const { user } = useAuth();
   const q = useChange(id);
@@ -38,12 +48,10 @@ export function ChangeStory({ id, frame }: { id: number; frame: StoryFrame }) {
   if (q.isPending) return <article className="story card"><BackOnly frame={frame} /><StateBlock kind="loading" /></article>;
   const cr = q.data;
   if (!cr) {
-    const missing = q.error instanceof ApiError && q.error.status === 404;
     return (
       <article className="story card">
         <BackOnly frame={frame} />
-        {missing ? <Message big={t("story.none.big")}><p>{t("story.none.p")}</p></Message>
-          : <StateBlock kind="failed" failKey="story.failed.p" onRetry={() => void q.refetch()} />}
+        <StateBlock kind="failed" failKey="story.failed.p" onRetry={() => void q.refetch()} />
       </article>
     );
   }

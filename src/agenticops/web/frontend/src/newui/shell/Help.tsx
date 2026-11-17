@@ -13,6 +13,7 @@ const ROWS: [string[], string][] = [
   [["↵"], "help.story"],
   [["F", "G", "L", "H", "V"], "help.world"],
   [["1", "2", "3"], "help.lens"],
+  [["/"], "help.cmd"],
   [["T"], "help.theme"],
   [["?"], "help.helpKey"],
   [["Esc"], "help.esc"],

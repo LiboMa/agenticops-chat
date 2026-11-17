@@ -39,6 +39,17 @@ const LONG = 420;
  *  (lib/issueDetailModel), laid out on six steps; every sentence comes from the issue's own records. */
 export function IssueStory({ id, frame }: { id: number; frame: StoryFrame }) {
   const t = useNfT();
+  const issueQ = useAnomaly(id);
+  // an issue that does not exist: nothing else is asked about it — its timeline would be fetched every 15 seconds for
+  // as long as the page stayed open. (While the answer is on its way the rest loads alongside, not after.)
+  if (issueQ.error instanceof ApiError && issueQ.error.status === 404) {
+    return <article className="story card"><BackOnly frame={frame} /><Message big={t("story.none.big")}><p>{t("story.none.p")}</p></Message></article>;
+  }
+  return <IssueRecord id={id} frame={frame} />;
+}
+
+function IssueRecord({ id, frame }: { id: number; frame: StoryFrame }) {
+  const t = useNfT();
   const { t: classic } = useLocale();
   const { user } = useAuth();
   const { notify } = useShell();
@@ -77,12 +88,10 @@ export function IssueStory({ id, frame }: { id: number; frame: StoryFrame }) {
 
   if (issueQ.isPending) return <article className="story card"><BackOnly frame={frame} /><StateBlock kind="loading" /></article>;
   if (!issue || !model) {
-    const missing = issueQ.error instanceof ApiError && issueQ.error.status === 404;
     return (
       <article className="story card">
         <BackOnly frame={frame} />
-        {missing ? <Message big={t("story.none.big")}><p>{t("story.none.p")}</p></Message>
-          : <StateBlock kind="failed" failKey="story.failed.p" onRetry={() => void issueQ.refetch()} />}
+        <StateBlock kind="failed" failKey="story.failed.p" onRetry={() => void issueQ.refetch()} />
       </article>
     );
   }

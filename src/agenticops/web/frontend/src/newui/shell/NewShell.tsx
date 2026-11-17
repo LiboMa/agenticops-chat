@@ -11,10 +11,11 @@ import { savePreferences } from "@/lib/preferences";
 import { useActivity } from "../hooks/useActivity";
 import { useWaitingCounts } from "../hooks/useDecideQueue";
 import { useNfT } from "../i18n";
-import { focusContext, keyIntent, type Lens } from "../lib/keys";
+import { escapeStep, focusContext, keyIntent, type Lens } from "../lib/keys";
 import { atWork } from "../lib/live";
 import { groupCounts } from "../lib/queue";
 import { WorldLayer } from "../world/WorldData";
+import { CommandBar } from "./CommandBar";
 import { Help } from "./Help";
 import { ShellContext, type LensKeys, type ShellApi } from "./shellContext";
 
@@ -55,6 +56,7 @@ export function NewShell({ children }: { children: ReactNode }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [flags, setFlags] = useState<readonly string[]>([]);
   const lensKeys = useRef<LensKeys | null>(null);
+  const command = useRef<HTMLInputElement>(null);
   const lastPlace = useRef<Partial<Record<Lens, string>>>({});
   const avatar = useRef<HTMLButtonElement>(null);
   const menuBox = useRef<HTMLDivElement>(null);
@@ -85,13 +87,14 @@ export function NewShell({ children }: { children: ReactNode }) {
       const intent = keyIntent(e, { ...focusContext(document.activeElement), modal: help || menu, singleKeys });
       if (!intent) return;
       if (intent.type === "escape") {
-        if (help) return setHelp(false);
-        if (menu) return closeMenu(true);
-        if (lensKeys.current?.onEscape?.()) return;
-        if (focusContext(document.activeElement).inField) (document.activeElement as HTMLElement).blur();
+        const step = escapeStep({ help, menu, inField: focusContext(document.activeElement).inField });
+        if (step === "help") return setHelp(false);
+        if (step === "menu") return closeMenu(true);
+        if (step === "blur") return (document.activeElement as HTMLElement).blur();
+        lensKeys.current?.onEscape?.();
         return;
       }
-      if (intent.type === "command") return;                       // the command bar arrives with its own stage
+      if (intent.type === "command") { e.preventDefault(); command.current?.focus(); return; }
       if (intent.type === "help") return setHelp(true);
       if (intent.type === "theme") return toggle();
       if (intent.type === "lens") return go(intent.lens);
@@ -151,7 +154,7 @@ export function NewShell({ children }: { children: ReactNode }) {
 
   return (
     <ShellContext.Provider value={api}>
-      <div className={["nf", "nobar", ...flags].join(" ")} data-theme={nfTheme}>
+      <div className={["nf", ...flags].join(" ")} data-theme={nfTheme}>
         <WorldLayer>
         <header className="top">
           <div className="tabs" role="tablist" aria-label={t("lens.label")}>
@@ -205,6 +208,7 @@ export function NewShell({ children }: { children: ReactNode }) {
           </div>
         </header>
         <main>{children}</main>
+        <CommandBar input={command} lens={lens} onTheme={toggle} onHelp={() => setHelp(true)} />
         {notice && <div className="toast" role="status"><span className="spark" aria-hidden="true" /><span className="msg">{notice}</span></div>}
         {help && <Help onClose={() => setHelp(false)} />}
         </WorldLayer>

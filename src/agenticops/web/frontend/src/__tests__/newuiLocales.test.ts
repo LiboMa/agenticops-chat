@@ -93,3 +93,17 @@ describe("every key the NewUI code asks for exists", () => {
     ]) expect(Z[k], k).toBeTruthy();
   });
 });
+
+describe("no wording is left behind", () => {
+  // The design prototype's whole word list was ported at the start; what no screen ended up using was deleted.
+  // A key counts as used when it is written, quoted, somewhere in the NewUI code — or sits under a prefix a key is
+  // built from (t(`phase.${id}`)).
+  const root = resolve(__dirname, "../newui");
+  const code = sources(root).map((f) => readFileSync(f, "utf8")).join("\n");
+  const prefixes = [...new Set([...code.matchAll(/`([a-zA-Z][\w.]*)\.\$\{/g)].map((m) => m[1]))];
+  const used = (k: string) => [`"${k}"`, `'${k}'`, `\`${k}\``].some((q) => code.includes(q)) || prefixes.some((p) => k.startsWith(`${p}.`));
+
+  it("has no key that nothing uses", () => {
+    expect(Object.keys(Z).filter((k) => !used(k))).toEqual([]);
+  });
+});

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { keyIntent, type KeyContext, type KeyEventLike } from "@/newui/lib/keys";
+import { escapeStep, keyIntent, type KeyContext, type KeyEventLike } from "@/newui/lib/keys";
 
 const ev = (key: string, over: Partial<KeyEventLike> = {}): KeyEventLike => ({
   key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, repeat: false, isComposing: false, ...over,
@@ -65,5 +65,19 @@ describe("keyIntent — what a key press means in NewUI", () => {
     for (const k of ["a", "j", "1", "t", "/", "?", " ", "Enter", "ArrowDown"]) expect(keyIntent(ev(k), off), k).toBeNull();
     expect(keyIntent(ev("Escape"), off)).toEqual({ type: "escape" });
     expect(keyIntent(ev("k", { ctrlKey: true }), off)).toEqual({ type: "command" });
+  });
+});
+
+describe("escapeStep — what Escape does, one layer at a time", () => {
+  const nothing = { help: false, menu: false, inField: false };
+  it("closes the keyboard list or the account menu first", () => {
+    expect(escapeStep({ ...nothing, help: true, inField: true })).toBe("help");
+    expect(escapeStep({ ...nothing, menu: true })).toBe("menu");
+  });
+  it("while typing, only leaves the field — it never closes a page or an open resource under the person's hands", () => {
+    expect(escapeStep({ ...nothing, inField: true })).toBe("blur");
+  });
+  it("otherwise belongs to the lens", () => {
+    expect(escapeStep(nothing)).toBe("lens");
   });
 });

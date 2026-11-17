@@ -42,7 +42,12 @@ export function Tools({ g, ask, sc, search, pathMode, view, busy, turning, onVie
       <label className="wsearch">
         <input ref={search} className="field" type="search" autoComplete="off" spellCheck={false} value={ask.q} placeholder={t("world.search")}
                aria-label={t("world.search")} onChange={(e) => onAsk({ q: e.target.value })}
-               onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing && sc.hits[0] !== undefined) { e.currentTarget.blur(); onPick(sc.hits[0]); } }} />
+               onKeyDown={(e) => {
+                 if (e.key !== "Enter" || e.nativeEvent.isComposing || sc.hits[0] === undefined) return;
+                 e.nativeEvent.stopPropagation();          // this Enter is the search's: leaving the field must not hand it to the lens
+                 e.currentTarget.blur();
+                 onPick(sc.hits[0]);
+               }} />
         <kbd>F</kbd>
       </label>
       <div id="wres" role="listbox" aria-label={t("world.results")}>

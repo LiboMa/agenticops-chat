@@ -480,8 +480,6 @@
 }
 
 /* ── NewUI only (not in the design prototype): what the classic shell gave for free, and what real data needs ───── */
-.nf.nobar{--bar:14px}                                       /* until the command bar is in */
-.nf.nobar .toast{bottom:14px}
 .nf .top .gap{flex:1}
 .nf .who select.scope{height:30px;max-width:170px;padding:0 8px;border-radius:var(--sp-2);background-color:var(--deck);color:var(--dim);font-size:var(--fs-xs)}
 .nf a.chip-btn,.nf a.btn{display:inline-flex;align-items:center;text-decoration:none;color:var(--dim)}
@@ -512,7 +510,6 @@
 .nf .note.err{color:var(--red)}
 .nf .actions .note.wide{flex-basis:100%;margin:0}
 .nf .impact svg{display:block}
-.nf.nobar .peek{bottom:0}
 .nf .res.rb{display:block;margin-top:6px} .nf .res.rb > div{padding:6px 0;border-top:1px solid var(--line)} .nf .res.rb dt{font-size:var(--fs-xs)} .nf .res.rb dd{color:var(--dim)}
 .nf .brief,.nf .story,.nf .stream,.nf .peek,.nf .facts{overflow-wrap:anywhere}      /* real ids, ARNs and commands have no spaces to break at */
 .nf .checks li > span:not(.pc):not(.st){min-width:0;flex:1 1 auto}      /* the check text gives way; its state label never does */
@@ -552,7 +549,6 @@
 .nf .note-add .field{flex:1;min-height:36px;padding:6px 10px}
 .nf .facts a{color:var(--mint);text-decoration:underline;text-underline-offset:2px}
 .nf .meta .story-link:hover{color:var(--chalk)}
-.nf .meta .story-link kbd{font-size:10px}
 .nf .statusline .story-link{margin-left:auto;color:var(--mint);text-decoration:underline;text-underline-offset:2px}
 .nf .stream .sec:first-of-type{margin-top:10px}
 .nf .stream .lsteps{margin-top:4px}
@@ -577,3 +573,8 @@
 }
 .nf .wtools .wf{flex-wrap:wrap}
 .nf .wtools .wf .btn{flex:1 1 40%}
+.nf .sugg-note{margin:6px 10px;font-size:var(--fs-sm);color:var(--faint)}
+@media (max-width:760px){
+  .nf kbd{display:none}                                            /* no keyboard on a phone: the hints are noise */
+  .nf .dialog kbd{display:inline-flex}                             /* …except in the list that explains them */
+}

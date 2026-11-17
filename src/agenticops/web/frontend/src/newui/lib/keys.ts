@@ -53,3 +53,10 @@ export function focusContext(active: Element | null): Pick<KeyContext, "inField"
     onControl: /^(BUTTON|A|SUMMARY)$/.test(tag) || active?.getAttribute?.("role") === "button",
   };
 }
+
+/** What Escape does, one layer at a time: the keyboard list, the account menu — then, while the person is typing,
+ *  it only leaves the field (a page must not close, nor an open resource, under their hands; a field that owns its
+ *  Escape — a reason box, the command bar — handles it before it gets here) — and only then is it the lens's. */
+export function escapeStep(s: { help: boolean; menu: boolean; inField: boolean }): "help" | "menu" | "blur" | "lens" {
+  return s.help ? "help" : s.menu ? "menu" : s.inField ? "blur" : "lens";
+}
