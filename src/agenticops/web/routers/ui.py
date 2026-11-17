@@ -159,6 +159,16 @@ def api_ui_attention(account_id: Optional[int] = Query(None, ge=1), limit: int =
         raise HTTPException(status_code=422, detail=str(e))
 
 
+@router.get("/api/ui/activity")
+def api_ui_activity(account_id: Optional[int] = Query(None, ge=1), actor: Actor = Depends(current_actor),
+                    _user=Depends(signed_in_user)) -> dict:
+    """What agents are doing now, what is scheduled next and what ended in the last day (MVP-2.9.0, NewUI «现场»;
+    services/activity): `running` / `upcoming` / `recent`, each from state that can be checked — an `open` issue is
+    not an agent at work. Any signed-in user. Plain def: DB work."""
+    from agenticops.services.activity import activity
+    return activity(actor, account_id=account_id)
+
+
 @router.get("/api/ui/nav-counts")
 def api_ui_nav_counts(account_id: Optional[int] = Query(None, ge=1), actor: Actor = Depends(current_actor),
                       _user=Depends(signed_in_user)) -> dict:

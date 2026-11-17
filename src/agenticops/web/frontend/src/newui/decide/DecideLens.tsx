@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAccountScope } from "@/components/layout/AccountScope";
 import { useAccounts } from "@/hooks/useAccounts";
@@ -6,29 +6,19 @@ import { useReadOnly } from "@/hooks/useBootstrap";
 import { parseItem } from "@/lib/inbox";
 import { useDecideQueue } from "../hooks/useDecideQueue";
 import { useNfT } from "../i18n";
-import { briefKind, itemKind, type BriefKind, type ItemKind } from "../lib/briefKind";
-import type { EvidenceVm } from "../lib/briefs/cause";
+import { briefKind, itemKind } from "../lib/briefKind";
 import {
   currentItem, deepLinkState, emptyKind, flattenPages, groupCounts, parseFilter, pruneHandled, situation, step, withoutHandled,
   type QueueFilter,
 } from "../lib/queue";
 import { Message, StateBlock } from "../shell/StateBlock";
 import { useLensKeys, useShell } from "../shell/shellContext";
-import { AcceptBrief } from "./briefs/AcceptBrief";
-import { ApproveBrief } from "./briefs/ApproveBrief";
-import { ConfirmBrief } from "./briefs/ConfirmBrief";
-import { DecideContext, type BriefKeys, type BriefProps, type DecideApi } from "./briefs/briefContext";
+import { DecideContext, type BriefKeys, type DecideApi } from "./briefs/briefContext";
+import { BRIEFS } from "./briefs/registry";
+import { Feed } from "./Feed";
 import { GenericBrief } from "./GenericBrief";
-import { Peek } from "./widgets/Peek";
+import { usePeek } from "./widgets/usePeek";
 import { Queue } from "./Queue";
-
-/** The page of each kind of waiting item. A kind without one (not built yet, or a row this client does not know)
- *  gets the generic brief. */
-const BRIEFS: Partial<Record<BriefKind, Partial<Record<ItemKind, ComponentType<BriefProps>>>>> = {
-  approve: { issue: ApproveBrief },
-  accept: { issue: AcceptBrief },
-  confirm: { issue: ConfirmBrief },
-};
 
 const place = (id: string | null, filter: QueueFilter) =>
   ({ pathname: id ? `/app/new/decide/${id}` : "/app/new/decide", search: filter === "all" ? "" : `?f=${filter}` });
@@ -38,7 +28,7 @@ const place = (id: string | null, filter: QueueFilter) =>
 export function DecideLens() {
   const t = useNfT();
   const navigate = useNavigate();
-  const { notify, setRootFlag } = useShell();
+  const { notify } = useShell();
   const { item: itemParam = null } = useParams();
   const [search] = useSearchParams();
   const filter = parseFilter(search.get("f"));
@@ -92,11 +82,8 @@ export function DecideLens() {
   }, [items, cur, pick]);
   const setFilter = (f: QueueFilter) => { lastIndex.current = 0; navigate(place(null, f)); };
 
-  // the evidence panel beside the brief; it belongs to the item it was opened on
-  const [peek, setPeek] = useState<{ evidence: EvidenceVm[]; index: number; item: string } | null>(null);
   const curId = cur?.item.id ?? null;
-  const peeking = !!peek && peek.item === curId;
-  useEffect(() => { setRootFlag("peeking", peeking); return () => setRootFlag("peeking", false); }, [peeking, setRootFlag]);
+  const peek = usePeek(curId);
 
   const briefKeys = useRef<BriefKeys | null>(null);
   const api = useMemo<DecideApi>(() => ({
@@ -109,26 +96,19 @@ export function DecideLens() {
       if (at >= 0) setHandled((old) => new Map(old).set(items[at].id, situation(items[at])));
       navigate(place(next ? next.id : null, filter), { replace: true });
     },
-    openPeek: (evidence, index) => { if (curId) setPeek({ evidence, index, item: curId }); },
-  }), [notify, navigate, items, curId, filter]);
+    openPeek: peek.show,
+  }), [notify, navigate, items, curId, filter, peek.show]);
 
   useLensKeys({
     onKey: (key, e, repeat) => {
-      if (peeking && peek) {
-        if (key === "arrowright" || key === "arrowleft") {
-          const n = peek.evidence.length;
-          setPeek({ ...peek, index: (peek.index + (key === "arrowright" ? 1 : -1) + n) % n });
-          return true;
-        }
-        if (key === " ") { setPeek(null); return true; }
-      }
+      if (peek.onKey(key)) return true;
       if (key === "j" || key === "arrowdown") { move(1); return true; }
       if (key === "k" || key === "arrowup") { move(-1); return true; }
       return briefKeys.current?.onKey?.(key, e, repeat);
     },
     onKeyUp: (key) => briefKeys.current?.onKeyUp?.(key),
     onEscape: () => {
-      if (peeking) { setPeek(null); return true; }
+      if (peek.open) { peek.close(); return true; }
       return briefKeys.current?.onEscape?.() ?? false;
     },
   });
@@ -188,8 +168,9 @@ export function DecideLens() {
                staleSince={loaded && q.isError ? q.dataUpdatedAt : null} total={total} hasMore={!!hasNextPage}
                loadingMore={isFetchingNextPage} now={now} onFilter={setFilter} onPick={pick} onMore={() => void fetchNextPage()} />
         <article key={key} className="brief card swap" aria-live="polite" aria-label={t("brief.label")}>{body}</article>
+        <Feed now={now} />
       </section>
-      {peeking && peek && <Peek evidence={peek.evidence} index={peek.index} onClose={() => setPeek(null)} />}
+      {peek.node}
     </DecideContext.Provider>
   );
 }

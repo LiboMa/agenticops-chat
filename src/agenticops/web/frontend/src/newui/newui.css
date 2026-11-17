@@ -519,3 +519,9 @@
 .nf .checks .pc,.nf .checks .st{flex:none}
 .nf .clamp{display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}
 .nf .more-btn{color:var(--amber);font-size:var(--fs-sm);text-decoration:underline;text-underline-offset:2px}
+.nf .side-live{display:flex;flex-direction:column;max-height:calc(100dvh - var(--top) - var(--bar) - 22px);overflow:auto}
+.nf .f .b{display:block;margin-top:2px;overflow-wrap:anywhere}
+.nf .f.late .dot{background:var(--amber);animation:none} .nf .f .late-note{color:var(--amber);font-size:var(--fs-xs)}
+.nf .f:not(.run) .h{color:var(--faint)}
+.nf .actions .reason-in{flex:1 1 240px;min-width:0}
+.nf .notes li{overflow-wrap:anywhere}

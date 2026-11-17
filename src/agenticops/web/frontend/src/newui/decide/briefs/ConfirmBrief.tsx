@@ -5,15 +5,16 @@ import { useSettings } from "@/hooks/useSettings";
 import { useRcaFeedback } from "@/hooks/useSignals";
 import { parseItem } from "@/lib/inbox";
 import { choiceAvailable, noteRequired, remainingRequests, verdictRequests, type VerdictChoice, type VerdictRequests } from "@/lib/verdict";
-import { useTriggerRca } from "../../hooks/useIssueDecisions";
 import { useNfT } from "../../i18n";
 import { causeVm, pct } from "../../lib/briefs/cause";
 import { StateBlock } from "../../shell/StateBlock";
 import { useShell } from "../../shell/shellContext";
 import { BriefFrame } from "../BriefFrame";
+import { AgentAtWork } from "../widgets/AgentAtWork";
 import { Cause } from "../widgets/Cause";
 import { ReasonForm } from "../widgets/ReasonForm";
 import { errorText, useBriefKeys, useDecide, type BriefProps } from "./briefContext";
+import { useAgentAsk } from "./shared";
 
 const CHOICES: [VerdictChoice, string][] = [["correct", "Y"], ["partial", "P"], ["rcaWrong", "N"], ["falsePositive", "F"]];
 
@@ -28,7 +29,7 @@ export function ConfirmBrief({ item, frame }: BriefProps) {
   const settings = useSettings();
   const rcaFb = useRcaFeedback(issueId);
   const issueFb = useIssueFeedback();
-  const rerun = useTriggerRca(issueId);
+  const agent = useAgentAsk(item);
   const [asking, setAsking] = useState<VerdictChoice | null>(null);     // a choice that needs a reason: the box is open
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,12 +74,7 @@ export function ConfirmBrief({ item, frame }: BriefProps) {
     setError(null);
     if (noteRequired(choice)) setAsking(choice); else void send(verdictRequests(choice, rca, ""), choice);
   };
-  const again = async () => {
-    if (rerun.isPending || frame.readOnly) return;
-    setError(null);
-    try { await rerun.mutateAsync(); notify(t("toast.sentRca", { ref: item.ref })); }
-    catch (e) { setError(t("err.failed", { msg: errorText(e) })); }
-  };
+  const again = () => { if (!frame.readOnly) void agent.ask("rca"); };
 
   useBriefKeys({
     onKey: (key) => {
@@ -86,7 +82,7 @@ export function ConfirmBrief({ item, frame }: BriefProps) {
       if (key === " " && cause?.evidence.length) { openPeek(cause.evidence, 0); return true; }
       const hit = CHOICES.find(([, k]) => k.toLowerCase() === key);
       if (hit) { choose(hit[0]); return true; }
-      if (key === "m") { void again(); return true; }
+      if (key === "m") { again(); return true; }
       return false;
     },
     onEscape: () => { if (!asking) return false; setAsking(null); return true; },
@@ -98,14 +94,15 @@ export function ConfirmBrief({ item, frame }: BriefProps) {
                 onSubmit={(reason) => void send(verdictRequests(asking, rca, reason), asking)} />
   ) : (
     <>
-      <button type="button" className="btn" disabled={rerun.isPending} onClick={() => void again()}><span className="t">{t("verdict.rerun")}</span><kbd>M</kbd></button>
+      <button type="button" className="btn" disabled={agent.busy} onClick={again}><span className="t">{t("verdict.rerun")}</span><kbd>M</kbd></button>
       {remaining && <button type="button" className="btn" disabled={busy} onClick={() => void send(remaining.req, remaining.choice)}><span className="t">{t("act.retrySend")}</span></button>}
-      {error && <p className="note err wide" role="alert">{error}</p>}
+      {(error ?? agent.error) && <p className="note err wide" role="alert">{error ?? agent.error}</p>}
     </>
   );
 
   return (
     <BriefFrame item={item} {...frame} ask={t("ask.confirm")} actions={actions}>
+      <AgentAtWork lane={agent.lane} now={frame.now} />
       <div className="sec">
         <h2>{t("sec.judgement")}</h2>
         {rcaQ.isPending ? <StateBlock kind="loading" />

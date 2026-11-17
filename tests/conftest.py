@@ -132,6 +132,19 @@ def _command_ledger_off(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_agent_runs():
+    """The manual RCA / fix-plan triggers claim their issue in this process (services/agent_runs, MVP-2.9.0) and
+    the agent thread releases the claim. A test that stands in for `threading.Thread` never runs that thread, and
+    every test's database restarts ids at 1 — a claim left behind would answer the next test's trigger with 409."""
+    import sys
+
+    mod = sys.modules.get("agenticops.services.agent_runs")
+    if mod is not None:
+        mod.clear()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _fresh_uncovered_refusals():
     """save_execution_result refuses an uncovering result once per (plan, execution) — process-local state.
     Every test's database restarts ids at 1, so a refusal left by one test would change the next one's."""

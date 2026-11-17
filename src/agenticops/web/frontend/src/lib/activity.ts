@@ -4,7 +4,7 @@ import type { PipelineEvent } from "@/api/types";
 const KNOWN = new Set([
   "issue_created", "signal_gated", "issue_resource_merged", "status_changed",
   "rca_started", "rca_completed", "rca_evidence_check", "rca_critic", "rca_needs_review", "rca_human_feedback",
-  "rca_disputed", "fix_approved", "execution_started", "execution_completed", "resolved", "post_resolution",
+  "rca_disputed", "fix_plan_requested", "fix_approved", "execution_started", "execution_completed", "resolved", "post_resolution",
   "change_requested", "change_review_started", "policy_decision", "change_reviewed", "review_failed",
   "change_clarified", "change_approved", "change_rejected", "change_cancelled", "change_review_resolved",
   "change.requested", "change.reviewed", "change.clarified", "change.approved", "change.rejected", "change.cancelled",

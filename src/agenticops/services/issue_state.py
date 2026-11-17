@@ -57,7 +57,8 @@ def transition_issue(session, issue_id: int, new_status: str, *, actor: str, rea
         set_committed_value(issue, key, value)
     session.add(PipelineEvent(
         health_issue_id=issue_id, event_type="status_changed", stage="issue", status="completed",
-        detail=json.dumps({"from": current, "to": new_status, "reason": (reason or "")[:500]}),
+        # 2000: a person's own reason (a dismissal's, MVP-2.9.0) is kept whole, as a plan's rejection reason is
+        detail=json.dumps({"from": current, "to": new_status, "reason": (reason or "")[:2000]}),
         actor=actor[:100] if actor else actor, trace_id=issue.trace_id,  # the column is String(100)
     ))
     return current

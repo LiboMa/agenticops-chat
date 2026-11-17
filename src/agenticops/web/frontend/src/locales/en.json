@@ -705,6 +705,7 @@
   "activity.type.status_changed": "Status changed",
   "activity.type.rca_started": "RCA started",
   "activity.type.rca_completed": "RCA finished",
+  "activity.type.fix_plan_requested": "A fix plan was requested",
   "activity.type.rca_evidence_check": "Evidence check",
   "activity.type.rca_critic": "Reviewer verdict",
   "activity.type.rca_needs_review": "Needs a person: auto-fix paused",
