@@ -97,3 +97,23 @@ export function deepLinkState({ item, items, ready, hasMore }:
   if (items.some((i) => i.id === item)) return "found";
   return !ready || hasMore ? "loading" : "gone";
 }
+
+/** What an item waits for, as far as a decision is concerned: its reason and detail, the entity and its version. */
+export function situation(item: Pick<AttentionItem, "reason" | "reason_detail" | "entity">): string {
+  const e = item.entity;
+  return `${item.reason}|${item.reason_detail ?? ""}|${e.entity_type}:${e.entity_id}|${e.content_version ?? ""}`;
+}
+
+/** The list without the items decided a moment ago (`handled`: id → the situation it was decided in). The server's
+ *  list catches up at the next refresh; an item that comes back as ANOTHER situation — approved, then «did not start»
+ *  — is shown again at once. */
+export function withoutHandled(items: AttentionItem[], handled: ReadonlyMap<string, string>): AttentionItem[] {
+  return handled.size ? items.filter((i) => handled.get(i.id) !== situation(i)) : items;
+}
+
+/** The marks still worth keeping: an item the list still shows as it was. The same map when nothing is forgotten. */
+export function pruneHandled(items: AttentionItem[], handled: ReadonlyMap<string, string>): ReadonlyMap<string, string> {
+  const live = new Map(items.map((i) => [i.id, situation(i)]));
+  const kept = new Map([...handled].filter(([id, s]) => live.get(id) === s));
+  return kept.size === handled.size ? handled : kept;
+}

@@ -4,6 +4,12 @@ import { useNfT } from "../i18n";
 /** The keys that work today, in the order a person meets them. A stage that adds a key adds its row. */
 const ROWS: [string[], string][] = [
   [["J", "K"], "help.move"],
+  [["A"], "help.primary"],
+  [["R"], "help.reject"],
+  [["D"], "help.close"],
+  [["X"], "help.tick"],
+  [["Y", "P", "N", "F", "M"], "help.verdict"],
+  [["Space"], "help.peek"],
   [["1", "2", "3"], "help.lens"],
   [["T"], "help.theme"],
   [["?"], "help.helpKey"],

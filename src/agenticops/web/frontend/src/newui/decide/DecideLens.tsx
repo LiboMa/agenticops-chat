@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAccountScope } from "@/components/layout/AccountScope";
 import { useAccounts } from "@/hooks/useAccounts";
@@ -6,12 +6,29 @@ import { useReadOnly } from "@/hooks/useBootstrap";
 import { parseItem } from "@/lib/inbox";
 import { useDecideQueue } from "../hooks/useDecideQueue";
 import { useNfT } from "../i18n";
-import { currentItem, deepLinkState, emptyKind, flattenPages, groupCounts, parseFilter, step, type QueueFilter } from "../lib/queue";
+import { briefKind, itemKind, type BriefKind, type ItemKind } from "../lib/briefKind";
+import type { EvidenceVm } from "../lib/briefs/cause";
+import {
+  currentItem, deepLinkState, emptyKind, flattenPages, groupCounts, parseFilter, pruneHandled, situation, step, withoutHandled,
+  type QueueFilter,
+} from "../lib/queue";
 import { Message, StateBlock } from "../shell/StateBlock";
-import { useLensKeys } from "../shell/shellContext";
-import { BriefFrame } from "./BriefFrame";
-import { GenericActions, GenericBody } from "./GenericBrief";
+import { useLensKeys, useShell } from "../shell/shellContext";
+import { AcceptBrief } from "./briefs/AcceptBrief";
+import { ApproveBrief } from "./briefs/ApproveBrief";
+import { ConfirmBrief } from "./briefs/ConfirmBrief";
+import { DecideContext, type BriefKeys, type BriefProps, type DecideApi } from "./briefs/briefContext";
+import { GenericBrief } from "./GenericBrief";
+import { Peek } from "./widgets/Peek";
 import { Queue } from "./Queue";
+
+/** The page of each kind of waiting item. A kind without one (not built yet, or a row this client does not know)
+ *  gets the generic brief. */
+const BRIEFS: Partial<Record<BriefKind, Partial<Record<ItemKind, ComponentType<BriefProps>>>>> = {
+  approve: { issue: ApproveBrief },
+  accept: { issue: AcceptBrief },
+  confirm: { issue: ConfirmBrief },
+};
 
 const place = (id: string | null, filter: QueueFilter) =>
   ({ pathname: id ? `/app/new/decide/${id}` : "/app/new/decide", search: filter === "all" ? "" : `?f=${filter}` });
@@ -21,6 +38,7 @@ const place = (id: string | null, filter: QueueFilter) =>
 export function DecideLens() {
   const t = useNfT();
   const navigate = useNavigate();
+  const { notify, setRootFlag } = useShell();
   const { item: itemParam = null } = useParams();
   const [search] = useSearchParams();
   const filter = parseFilter(search.get("f"));
@@ -29,7 +47,11 @@ export function DecideLens() {
   const readOnly = useReadOnly();
   const q = useDecideQueue({ accountId, filter });
 
-  const items = useMemo(() => flattenPages(q.data?.pages), [q.data]);
+  // what was decided a moment ago leaves the list at once; the server's list catches up at its next refresh
+  const [handled, setHandled] = useState<ReadonlyMap<string, string>>(new Map());
+  const listed = useMemo(() => flattenPages(q.data?.pages), [q.data]);
+  useEffect(() => { setHandled((old) => pruneHandled(listed, old)); }, [listed]);
+  const items = useMemo(() => withoutHandled(listed, handled), [listed, handled]);
   const first = q.data?.pages[0];
   const counts = groupCounts(first?.counts);
   const total = first?.total ?? null;
@@ -70,11 +92,44 @@ export function DecideLens() {
   }, [items, cur, pick]);
   const setFilter = (f: QueueFilter) => { lastIndex.current = 0; navigate(place(null, f)); };
 
+  // the evidence panel beside the brief; it belongs to the item it was opened on
+  const [peek, setPeek] = useState<{ evidence: EvidenceVm[]; index: number; item: string } | null>(null);
+  const curId = cur?.item.id ?? null;
+  const peeking = !!peek && peek.item === curId;
+  useEffect(() => { setRootFlag("peeking", peeking); return () => setRootFlag("peeking", false); }, [peeking, setRootFlag]);
+
+  const briefKeys = useRef<BriefKeys | null>(null);
+  const api = useMemo<DecideApi>(() => ({
+    setBriefKeys: (keys) => { briefKeys.current = keys; },
+    // the item that was decided leaves the list now, and the one after it takes the page
+    done: (message) => {
+      notify(message);
+      const at = items.findIndex((i) => i.id === curId);
+      const next = at < 0 ? null : items[at + 1] ?? items[at - 1] ?? null;
+      if (at >= 0) setHandled((old) => new Map(old).set(items[at].id, situation(items[at])));
+      navigate(place(next ? next.id : null, filter), { replace: true });
+    },
+    openPeek: (evidence, index) => { if (curId) setPeek({ evidence, index, item: curId }); },
+  }), [notify, navigate, items, curId, filter]);
+
   useLensKeys({
-    onKey: (key) => {
+    onKey: (key, e, repeat) => {
+      if (peeking && peek) {
+        if (key === "arrowright" || key === "arrowleft") {
+          const n = peek.evidence.length;
+          setPeek({ ...peek, index: (peek.index + (key === "arrowright" ? 1 : -1) + n) % n });
+          return true;
+        }
+        if (key === " ") { setPeek(null); return true; }
+      }
       if (key === "j" || key === "arrowdown") { move(1); return true; }
       if (key === "k" || key === "arrowup") { move(-1); return true; }
-      return false;
+      return briefKeys.current?.onKey?.(key, e, repeat);
+    },
+    onKeyUp: (key) => briefKeys.current?.onKeyUp?.(key),
+    onEscape: () => {
+      if (peeking) { setPeek(null); return true; }
+      return briefKeys.current?.onEscape?.() ?? false;
     },
   });
 
@@ -118,22 +173,23 @@ export function DecideLens() {
     );
   } else {
     const item = cur.item;
-    key = item.id;
-    body = (
-      <BriefFrame item={item} index={cur.index} total={total ?? items.length} now={now} readOnly={readOnly}
-                  accountName={accounts.data?.find((a) => a.id === item.account_id)?.name ?? null}
-                  ask={t("generic.ask")} actions={<GenericActions item={item} />}>
-        <GenericBody item={item} />
-      </BriefFrame>
-    );
+    const kind = briefKind(item);
+    const Brief = (kind && BRIEFS[kind]?.[itemKind(item)]) || GenericBrief;
+    // the brief is a new component when the item's situation changes (a confirmed diagnosis becomes «generate the plan»)
+    key = `${item.id}:${kind ?? "generic"}`;
+    body = <Brief item={item} frame={{ index: cur.index, total: total ?? items.length, now, readOnly,
+                                       accountName: accounts.data?.find((a) => a.id === item.account_id)?.name ?? null }} />;
   }
 
   return (
-    <section className="view" id="decide">
-      <Queue items={items} currentId={cur?.item.id ?? null} filter={filter} counts={counts} view={view}
-             staleSince={loaded && q.isError ? q.dataUpdatedAt : null} total={total} hasMore={!!hasNextPage}
-             loadingMore={isFetchingNextPage} now={now} onFilter={setFilter} onPick={pick} onMore={() => void fetchNextPage()} />
-      <article key={key} className="brief card swap" aria-live="polite" aria-label={t("brief.label")}>{body}</article>
-    </section>
+    <DecideContext.Provider value={api}>
+      <section className="view" id="decide">
+        <Queue items={items} currentId={curId} filter={filter} counts={counts} view={view}
+               staleSince={loaded && q.isError ? q.dataUpdatedAt : null} total={total} hasMore={!!hasNextPage}
+               loadingMore={isFetchingNextPage} now={now} onFilter={setFilter} onPick={pick} onMore={() => void fetchNextPage()} />
+        <article key={key} className="brief card swap" aria-live="polite" aria-label={t("brief.label")}>{body}</article>
+      </section>
+      {peeking && peek && <Peek evidence={peek.evidence} index={peek.index} onClose={() => setPeek(null)} />}
+    </DecideContext.Provider>
   );
 }

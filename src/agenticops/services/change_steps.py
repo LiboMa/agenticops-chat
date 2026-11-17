@@ -52,6 +52,19 @@ def command_tier(command: str) -> str:
     return classify_shell_command(command)
 
 
+def step_tier(step) -> str:
+    """One plan step's tier as a page shows it beside the step: its command's tier, and 'unknown' for a step with
+    no command — the executor would decide what to run, which is how the auto-approval floor reads it too
+    (unclassified_commands)."""
+    command = _command(step)
+    return command_tier(command) if command else "unknown"
+
+
+def step_tiers(steps) -> list[str]:
+    """One tier per step of a plan's steps column, in order (MVP-2.9.0: FixPlanResponse.step_tiers)."""
+    return [step_tier(s) for s in plan_steps(steps)]
+
+
 def blocked_commands(*step_lists) -> list[str]:
     """Every command, across the given step lists, that its execution tool refuses outright."""
     seen: list[str] = []

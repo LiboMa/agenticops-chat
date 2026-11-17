@@ -509,3 +509,13 @@
   .nf .q-more{flex:0 0 110px;height:auto}
   .nf .q-note{display:none}
 }
+.nf .note.err{color:var(--red)}
+.nf .actions .note.wide{flex-basis:100%;margin:0}
+.nf .impact svg{display:block}
+.nf.nobar .peek{bottom:0}
+.nf .res.rb{display:block;margin-top:6px} .nf .res.rb > div{padding:6px 0;border-top:1px solid var(--line)} .nf .res.rb dt{font-size:var(--fs-xs)} .nf .res.rb dd{color:var(--dim)}
+.nf .brief,.nf .story,.nf .stream,.nf .peek,.nf .facts{overflow-wrap:anywhere}      /* real ids, ARNs and commands have no spaces to break at */
+.nf .checks li > span:not(.pc):not(.st){min-width:0;flex:1 1 auto}      /* the check text gives way; its state label never does */
+.nf .checks .pc,.nf .checks .st{flex:none}
+.nf .clamp{display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical;overflow:hidden}
+.nf .more-btn{color:var(--amber);font-size:var(--fs-sm);text-decoration:underline;text-underline-offset:2px}

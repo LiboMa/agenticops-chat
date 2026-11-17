@@ -16,9 +16,11 @@ export interface ShellApi {
   notify: (text: string) => void;
   /** single-key shortcuts are on (the account menu switches them off) */
   singleKeys: boolean;
+  /** a state class on NewUI's root, for layout that depends on what a lens has open (`peeking`, `lane-open`, `view3d`) */
+  setRootFlag: (flag: string, on: boolean) => void;
 }
 
-export const ShellContext = createContext<ShellApi>({ setLensKeys: () => {}, notify: () => {}, singleKeys: true });
+export const ShellContext = createContext<ShellApi>({ setLensKeys: () => {}, notify: () => {}, singleKeys: true, setRootFlag: () => {} });
 export const useShell = () => useContext(ShellContext);
 
 /** The lens's keys, registered while it is on the page. The handlers may be new functions on every render. */

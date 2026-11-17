@@ -49,6 +49,7 @@ export function NewShell({ children }: { children: ReactNode }) {
   const [menu, setMenu] = useState(false);
   const [singleKeys, setSingleKeys] = useState(() => readFlag(SINGLE_KEYS));
   const [notice, setNotice] = useState<string | null>(null);
+  const [flags, setFlags] = useState<readonly string[]>([]);
   const lensKeys = useRef<LensKeys | null>(null);
   const lastPlace = useRef<Partial<Record<Lens, string>>>({});
   const avatar = useRef<HTMLButtonElement>(null);
@@ -136,14 +137,17 @@ export function NewShell({ children }: { children: ReactNode }) {
       {(accounts.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
     </select>
   );
+  const setRootFlag = useCallback((flag: string, on: boolean) => {
+    setFlags((old) => (old.includes(flag) === on ? old : on ? [...old, flag] : old.filter((f) => f !== flag)));
+  }, []);
   const api = useMemo<ShellApi>(() => ({
-    setLensKeys: (keys) => { lensKeys.current = keys; }, notify, singleKeys,
-  }), [notify, singleKeys]);
+    setLensKeys: (keys) => { lensKeys.current = keys; }, notify, singleKeys, setRootFlag,
+  }), [notify, singleKeys, setRootFlag]);
   const nfTheme = theme === "dark" ? "night" : "day";
 
   return (
     <ShellContext.Provider value={api}>
-      <div className="nf nobar" data-theme={nfTheme}>
+      <div className={["nf", "nobar", ...flags].join(" ")} data-theme={nfTheme}>
         <header className="top">
           <div className="tabs" role="tablist" aria-label={t("lens.label")}>
             {LENSES.map((l, i) => (

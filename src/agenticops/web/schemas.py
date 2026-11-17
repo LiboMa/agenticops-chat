@@ -7,7 +7,7 @@ routers a dependency-leaf module to import from (avoids app<->router import cycl
 from datetime import datetime
 from typing import Annotated, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 from agenticops.credentials.store import REDACTED_VALUE  # an edit that sends it back keeps the stored value
 
@@ -475,6 +475,15 @@ class FixPlanResponse(BaseModel):
         The same function gives the verdict its post-checks, so the page and the verdict count the same ones."""
         from agenticops.services.verification import decode_legacy_json
         return decode_legacy_json(value, dict if info.field_name == "rollback_plan" else list)
+
+    @computed_field
+    @property
+    def step_tiers(self) -> List[str]:
+        """MVP-2.9.0 read context: how the CODE classifies each step's command — write | readonly | blocked |
+        unknown, one per step (services/change_steps.step_tier, the classifier the auto-approval floor uses; a step
+        with no command is unknown). Computed on the way out: never stored, never part of the content hash."""
+        from agenticops.services.change_steps import step_tiers
+        return step_tiers(self.steps)
 
 
 class FixExecutionResponse(BaseModel):

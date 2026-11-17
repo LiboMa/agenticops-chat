@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { groupOf } from "@/lib/inbox";
 import {
-  FILTERS, currentItem, deepLinkState, emptyKind, flattenPages, groupCounts, parseFilter, reasonsParam, step, toneOf,
-  waitedParts,
+  FILTERS, currentItem, deepLinkState, emptyKind, flattenPages, groupCounts, parseFilter, pruneHandled, reasonsParam, situation, step,
+  toneOf, waitedParts, withoutHandled,
 } from "@/newui/lib/queue";
 import type { AttentionItem } from "@/lib/attention";
 
@@ -149,5 +149,35 @@ describe("deepLinkState — an address that names an item", () => {
   });
   it("is not waiting on you once every page is in and it is not there", () => {
     expect(deepLinkState({ item: "I9", items, ready: true, hasMore: false })).toBe("gone");
+  });
+});
+
+describe("handled items — what was just decided leaves the list at once, without waiting for the next refresh", () => {
+  const approval = item("I10");
+  const notStarted = item("I10", { reason: "execution_not_started" });
+  const handled = new Map([["I10", situation(approval)]]);
+
+  it("drops an item decided a moment ago while the server still lists it as it was", () => {
+    expect(withoutHandled([item("I1"), approval, item("C3")], handled).map((i) => i.id)).toEqual(["I1", "C3"]);
+    expect(withoutHandled([approval], new Map())).toEqual([approval]);
+  });
+
+  it("shows it again as soon as it is another situation — approved, then «did not start»", () => {
+    expect(withoutHandled([notStarted], handled)).toEqual([notStarted]);
+  });
+
+  it("tells situations apart by reason, detail, the entity and its version", () => {
+    const base = situation(approval);
+    expect(situation(item("I10", { reason_detail: "x" }))).not.toBe(base);
+    expect(situation(item("I10", { entity: { entity_type: "fix_plan", entity_id: 2, content_version: 1 } }))).not.toBe(base);
+    expect(situation(item("I10", { entity: { entity_type: "fix_plan", entity_id: 1, content_version: 2 } }))).not.toBe(base);
+    expect(situation(item("I10", { title: "another title", occurred_at: "2026-01-01T00:00:00Z" }))).toBe(base);
+  });
+
+  it("forgets a mark once the list no longer has the item as it was", () => {
+    expect([...pruneHandled([approval], handled)]).toEqual([["I10", situation(approval)]]);    // still listed as it was: keep
+    expect(pruneHandled([notStarted], handled).size).toBe(0);                                  // came back changed
+    expect(pruneHandled([item("I1")], handled).size).toBe(0);                                  // gone
+    expect(pruneHandled([approval], handled)).toBe(handled);                                   // nothing to forget: the same map
   });
 });

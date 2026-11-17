@@ -257,6 +257,9 @@ export interface FixPlan {
   issue_status?: IssueStatus | null;
   target?: FixPlanTarget | null;
   available_actions?: UiAction[];
+  /** MVP-2.9.0: how the code classifies each step's command (services/change_steps.step_tier), one per step:
+   *  write | readonly | blocked | unknown. Read context, never part of the content hash. */
+  step_tiers?: string[];
 }
 
 export interface FixExecution {
