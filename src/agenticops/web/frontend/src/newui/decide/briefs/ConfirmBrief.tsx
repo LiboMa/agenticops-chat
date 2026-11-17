@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { useIssueFeedback } from "@/hooks/useAgentMemory";
-import { useAnomalyRca } from "@/hooks/useAnomalyRca";
+import { ApiError } from "@/api/client";
 import { useSettings } from "@/hooks/useSettings";
-import { useRcaFeedback } from "@/hooks/useSignals";
 import { parseItem } from "@/lib/inbox";
 import { choiceAvailable, noteRequired, remainingRequests, verdictRequests, type VerdictChoice, type VerdictRequests } from "@/lib/verdict";
+import { useIssueVerdict, useRcaVerdict } from "../../hooks/useIssueDecisions";
+import { useFreshRca } from "../../hooks/useItemData";
 import { useNfT } from "../../i18n";
 import { causeVm, pct } from "../../lib/briefs/cause";
 import { StateBlock } from "../../shell/StateBlock";
@@ -19,16 +19,19 @@ import { useAgentAsk } from "./shared";
 const CHOICES: [VerdictChoice, string][] = [["correct", "Y"], ["partial", "P"], ["rcaWrong", "N"], ["falsePositive", "F"]];
 
 /** A diagnosis that did not pass the auto-fix gate: a person says whether it is right. The four answers are the
- *  product's own (lib/verdict) and go to the same two endpoints as the classic page's «Your verdict». */
+ *  product's own (lib/verdict) and go to the same two endpoints as the classic page's «Your verdict».
+ *  The verdict is about the diagnosis ON THE PAGE: it is read again when the brief opens (never from a cache — after
+ *  «diagnose again» the cache held the old one), the choices are not armed while that read is in flight, and the
+ *  request names the diagnosis so the server refuses it when a newer one exists. */
 export function ConfirmBrief({ item, frame }: BriefProps) {
   const t = useNfT();
   const { notify } = useShell();
-  const { done, openPeek } = useDecide();
+  const { done, failed, openPeek } = useDecide();
   const issueId = parseItem(item.id)?.id ?? 0;
-  const rcaQ = useAnomalyRca(issueId);
+  const rcaQ = useFreshRca(issueId);
   const settings = useSettings();
-  const rcaFb = useRcaFeedback(issueId);
-  const issueFb = useIssueFeedback();
+  const rcaFb = useRcaVerdict(issueId);
+  const issueFb = useIssueVerdict(issueId);
   const agent = useAgentAsk(item);
   const [asking, setAsking] = useState<VerdictChoice | null>(null);     // a choice that needs a reason: the box is open
   const [busy, setBusy] = useState(false);
@@ -36,12 +39,13 @@ export function ConfirmBrief({ item, frame }: BriefProps) {
   const [remaining, setRemaining] = useState<{ req: VerdictRequests; choice: VerdictChoice } | null>(null);
 
   const rca = rcaQ.data;
+  const fresh = rcaQ.isSuccess && !rcaQ.isFetching;                    // the server's answer to this page, nothing newer on its way
   const gate = settings.data?.rca_min_confidence_for_autofix;
   const cause = causeVm(rca, gate);
   const gateNote = !cause ? null : cause.belowGate ? t("gate.note", { gate: pct(gate) }) : cause.critic === "refuted" ? t("gate.critic") : t("gate.manual");
 
   const finish = (choice: VerdictChoice) => {
-    if (choice === "falsePositive") return done(t("toast.closed", { ref: item.ref }));          // the item is dismissed: on to the next
+    if (choice === "falsePositive") return done(item, t("toast.closed", { ref: item.ref }));    // the item is dismissed: on to the next
     // the item stays with you — as «generate the plan» after «right», as «diagnose again» after «wrong»
     notify(choice === "rcaWrong" ? t("toast.verdict", { ref: item.ref, v: t("verdict.rcaWrong") }) : t("toast.verdict.correct", { ref: item.ref }));
   };
@@ -49,18 +53,24 @@ export function ConfirmBrief({ item, frame }: BriefProps) {
     setBusy(true);
     setError(null);
     try {
-      if (req.rcaFeedback) await rcaFb.mutateAsync(req.rcaFeedback);
+      if (req.rcaFeedback && rca) await rcaFb.mutateAsync({ ...req.rcaFeedback, rca_id: rca.id });
     } catch (e) {
-      setError(t("err.failed", { msg: errorText(e) }));
+      // a newer diagnosis exists: nothing was recorded; the page re-reads it (the mutation settles into a refresh)
+      const text = e instanceof ApiError && e.code === "rca_changed" ? t("err.rcaChanged") : t("err.failed", { msg: errorText(e) });
+      setError(text);
+      failed(item, text);
       setBusy(false);
       return;
     }
     try {
-      if (req.issueFeedback) await issueFb.mutateAsync({ issueId, feedback: req.issueFeedback });
+      if (req.issueFeedback) await issueFb.mutateAsync(req.issueFeedback);
     } catch (e) {
       const rest = remainingRequests(req, "issueFeedback");       // the diagnosis verdict is saved: only the rest is retried
       setRemaining(rest ? { req: rest, choice } : null);
-      setError(t(rest ? "err.partial" : "err.failed", { msg: errorText(e) }));
+      const text = t(rest ? "err.partial" : "err.failed", { msg: errorText(e) });
+      setError(text);
+      // the saved verdict changes the item's situation, so this brief is about to be replaced: say it where it stays
+      if (rest) notify(`${item.ref}　${text}`); else failed(item, text);
       setBusy(false);
       return;
     }
@@ -70,7 +80,7 @@ export function ConfirmBrief({ item, frame }: BriefProps) {
     finish(choice);
   };
   const choose = (choice: VerdictChoice) => {
-    if (busy || frame.readOnly || !choiceAvailable(choice, rca)) return;
+    if (busy || frame.readOnly || !fresh || !choiceAvailable(choice, rca)) return;
     setError(null);
     if (noteRequired(choice)) setAsking(choice); else void send(verdictRequests(choice, rca, ""), choice);
   };
@@ -114,7 +124,7 @@ export function ConfirmBrief({ item, frame }: BriefProps) {
           <h2>{t("sec.verdict")}</h2>
           <div className="choices">
             {CHOICES.filter(([c]) => choiceAvailable(c, rca)).map(([c, k]) => (
-              <button key={c} type="button" className="choice" disabled={busy} onClick={() => choose(c)}><kbd>{k}</kbd>{t(`verdict.${c}`)}</button>
+              <button key={c} type="button" className="choice" disabled={busy || !fresh} onClick={() => choose(c)}><kbd>{k}</kbd>{t(`verdict.${c}`)}</button>
             ))}
           </div>
           <p className="note">{t("verdict.note")}</p>

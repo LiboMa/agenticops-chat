@@ -1,8 +1,8 @@
 import ForceGraph3D, { type ForceGraph3DInstance } from "3d-force-graph";
-import { ALPHA, depths, marks, nodeAlpha, readAlpha, type Mark } from "../lib/world/depth";
+import { ALPHA, LINK_ALPHA, depths, linkLook, marks, nodeAlpha, readAlpha, type Mark } from "../lib/world/depth";
 import type { WorldGraph } from "../lib/world/graph";
 import type { Disc, Layout } from "../lib/world/layout";
-import { flow } from "../lib/world/relations";
+import { engineEnds } from "../lib/world/relations";
 import type { Drawn, RingTone, Scene } from "../lib/world/scene";
 
 /** The 3D view of «全景». Like the flat map it decides nothing: it draws the result lib/world/scene hands it, and
@@ -94,10 +94,10 @@ export class Sky3 {
       return { id: n.i, x, y, z: d, fx: x, fy: y, fz: d };
     });
     // a dot runs from a link's source to its target: for a relation whose fault travels the other way round, the
-    // link is handed to the engine reversed (a / b stay as the build wrote them)
+    // link is handed to the engine reversed (a / b stay as the build wrote them) — lib/world/relations.engineEnds
     const links: L3[] = (g?.edges ?? []).map((e, k) => {
-      const back = flow({ r: e.r, p: e.llm ? "llm" : "rule" }) === "reverse";
-      return { source: back ? e.b : e.a, target: back ? e.a : e.b, a: e.a, b: e.b, k };
+      const ends = engineEnds({ r: e.r, p: e.llm ? "llm" : "rule" }, e.a, e.b);
+      return { source: ends.source, target: ends.target, a: e.a, b: e.b, k };
     });
     this.G.graphData({ nodes: this.nodes, links });
     this.discs = this.discs.map((d) => ({ ...d, x: (d.x - cx) * SCALE, y: -(d.y - cy) * SCALE, r: d.r * SCALE }));
@@ -112,20 +112,17 @@ export class Sky3 {
     const g = this.g, sc = this.scOf === g ? this.sc : null, sel = sc ? this.sel : null, C = this.colors;
     if (!g) return;
     const ring = new Map(sc?.rings.map((r) => [r.i, r] as const));
-    const dim = (i: number) => !!sc?.dim && sc.dim.has(i);
-    const onPath = (l: L3) => !!sc?.path && sc.path.some((i, k) => k > 0 && ((sc.path![k - 1] === l.a && i === l.b) || (sc.path![k - 1] === l.b && i === l.a)));
-    const ofSel = (l: L3) => sel !== null && !sc?.path && (l.a === sel || l.b === sel);
+    const look = (l: L3) => linkLook(sc, sel, g.edges[l.k], l.k);        // which links are the path's, the open resource's, …
     this.G
       .nodeColor((d) => { const r = ring.get(d.id); return r && !r.dim ? C[TONE_VAR[r.tone]] : `rgba(${C.star},${sc ? nodeAlpha(sc, d.id) : ALPHA.plain})`; })
       .nodeVal((d) => (ring.has(d.id) ? 14 : this.holders.has(d.id) ? 6 : 1.4))
-      .linkColor((l) => onPath(l) ? C.mint : ofSel(l) ? C.chalk : dim(l.a) || dim(l.b) ? `rgba(${C.star},.03)`
-        : `rgba(${C.star},${g.edges[l.k].contain ? 0.1 : g.edges[l.k].llm ? 0.5 : 0.28})`)
-      .linkWidth((l) => (onPath(l) ? 2.2 : ofSel(l) ? 1 : 0))
-      .linkCurvature((l) => (g.edges[l.k].llm ? 0.32 : 0))                // a relation a model inferred is a curve (the flat map dashes it)
+      .linkColor((l) => { const w = look(l); return w === "path" ? C.mint : w === "own" ? C.chalk : `rgba(${C.star},${LINK_ALPHA[w]})`; })
+      .linkWidth((l) => { const w = look(l); return w === "path" ? 2.2 : w === "own" ? 1 : 0; })
+      .linkCurvature((l) => (g.edges[l.k].llm ? 0.32 : 0))                // a relation a model inferred is a curve (the flat map dashes it) — on a path too
       // a dot only where the direction is known and one-way: a two-way relation gets none rather than one that picks a side
       .linkDirectionalParticles((l) => {
-        const way = flow({ r: g.edges[l.k].r, p: g.edges[l.k].llm ? "llm" : "rule" });
-        return ofSel(l) && !this.still && (way === "forward" || way === "reverse") ? 2 : 0;
+        const e = g.edges[l.k];
+        return look(l) === "own" && !this.still && engineEnds({ r: e.r, p: e.llm ? "llm" : "rule" }, e.a, e.b).particles ? 2 : 0;
       });
     this.list = sc ? marks(sc, sel) : [];
   }

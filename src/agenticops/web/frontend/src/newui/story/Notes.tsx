@@ -14,7 +14,11 @@ const MAX = 8000;      // services/issue_notes.MAX_NOTE_CHARS
 
 /** What people wrote on the issue, oldest first, and the box to add one. A note is kept as written: it is never
  *  edited or deleted, and it does not move the issue. */
-export function Notes({ issueId, events, canNote, now }: { issueId: number; events: PipelineEvent[] | undefined; canNote: boolean; now: number }) {
+export function Notes({ issueId, events, failed, canNote, now }: {
+  issueId: number; events: PipelineEvent[] | undefined;
+  /** the timeline could not be read: that is not «no notes» */
+  failed: boolean; canNote: boolean; now: number;
+}) {
   const t = useNfT();
   const { user } = useAuth();
   const add = useAddIssueNote(issueId);
@@ -36,7 +40,8 @@ export function Notes({ issueId, events, canNote, now }: { issueId: number; even
         <ul className="notes">
           {notes.map((n) => <li key={n.id}>{n.text}<small>{t("note.cite", { by: whoText(n.by, user?.email, t), t: utcStamp(n.at, now) })}</small></li>)}
         </ul>
-      ) : <p className="note" style={{ margin: 0 }}>{t("note.none")}</p>}
+      ) : events === undefined ? (failed ? <p className="note err" style={{ margin: 0 }}>{t("sec.failedLoad")}</p> : <div className="skel" style={{ height: 18 }} />)
+        : <p className="note" style={{ margin: 0 }}>{t("note.none")}</p>}
       {canNote && (
         <form className="note-add" onSubmit={(e) => { e.preventDefault(); void send(); }}>
           <textarea className="field" rows={2} value={value} maxLength={MAX} placeholder={t("note.ph")} aria-label={t("note.label")}

@@ -1,5 +1,4 @@
 import { useRef, useState } from "react";
-import { ApiError } from "@/api/client";
 import type { ChangeRequestDetail } from "@/api/types";
 import { useAuth } from "@/hooks/useAuth";
 import { useChange, useChangeAction } from "@/hooks/useChanges";
@@ -7,8 +6,8 @@ import { useLocale } from "@/i18n/LocaleContext";
 import { activeChangePlan, planStepMarks, policyActionLabel, verdictLabel } from "@/lib/changeDetail";
 import { useNfT } from "../../i18n";
 import { whoText } from "../../lib/activity";
-import { canClarify, clarifyMessage, requestVm } from "../../lib/briefs/change";
-import { approveState } from "../../lib/briefs/plan";
+import { canClarify, clarifyMessage, clarifyOverflow, requestVm } from "../../lib/briefs/change";
+import { approveState, approvedToastKey } from "../../lib/briefs/plan";
 import type { HoldTarget } from "../../lib/hold";
 import { Message, StateBlock } from "../../shell/StateBlock";
 import { BriefFrame } from "../BriefFrame";
@@ -20,8 +19,8 @@ import { ChecksSection, PlanSection } from "../widgets/PlanSection";
 import { ReasonForm } from "../widgets/ReasonForm";
 import { Steps } from "../widgets/Steps";
 import { useHold } from "../widgets/useHold";
-import { refusal } from "./ApproveBrief";
-import { errorText, useBriefKeys, useDecide, type BriefProps } from "./briefContext";
+import { approveError, refusal } from "./ApproveBrief";
+import { useBriefKeys, useDecision, type BriefProps } from "./briefContext";
 
 /** «What is asked for»: the request in the requester's words, who asked, the resources it resolved to and the names
  *  that matched nothing. */
@@ -35,7 +34,7 @@ function RequestSection({ cr }: { cr: ChangeRequestDetail }) {
       <p>{r.text}</p>
       {r.why && <p className="note">{t("request.why", { why: r.why })}</p>}
       <p className="note">
-        {t("request.by", { by: whoText(r.by, user?.email, t) })}{r.emergency ? `　${t("request.emergency")}` : ""}　
+        {t("request.by", { by: whoText(r.by, user?.email, t) })}{r.emergency ? `　${t("request.emergency")}` : ""}{"　"}
         {r.targets.length ? t("request.targets", { targets: r.targets.map((x) => `${x.type} ${x.id}${x.region ? ` (${x.region})` : ""}`).join("、") }) : t("request.noTargets")}
       </p>
       {r.unresolved.length > 0 && <p className="note err">{t("request.unresolved", { hints: r.unresolved.join("、") })}</p>}
@@ -56,13 +55,13 @@ function useChangeBrief(id: number) {
 export function StartReviewBrief({ item, frame }: BriefProps) {
   const id = item.entity.entity_id;
   const { t, cr, state } = useChangeBrief(id);
-  const { done } = useDecide();
+  const decide = useDecision(item);
   const action = useChangeAction();
   const [form, setForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const send = async (what: () => Promise<unknown>, toast: string) => {
     setError(null);
-    try { await what(); done(toast); } catch (e) { setError(t("err.failed", { msg: errorText(e) })); }
+    setError(await decide(what, toast));
   };
   const start = () => { if (!action.isPending && !frame.readOnly && cr) void send(() => action.mutateAsync({ id, action: "review" }), t("toast.sentReview", { ref: item.ref })); };
   useBriefKeys({
@@ -107,17 +106,18 @@ export function StartReviewBrief({ item, frame }: BriefProps) {
 export function ClarifyBrief({ item, frame }: BriefProps) {
   const id = item.entity.entity_id;
   const { t, cr, state } = useChangeBrief(id);
-  const { done } = useDecide();
+  const decide = useDecision(item);
   const action = useChangeAction();
   const [answers, setAnswers] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const questions = cr?.review_reasons ?? [];
   const ready = !!cr && canClarify(questions, answers);
+  const over = cr ? clarifyOverflow(questions, answers) : 0;       // the server takes one message of a fixed size: too long is not sent, never cut
   const submit = async () => {
     if (!ready || action.isPending || frame.readOnly) return;
     setError(null);
-    try { await action.mutateAsync({ id, action: "clarify", body: { message: clarifyMessage(questions, answers) } }); done(t("toast.answered", { ref: item.ref })); }
-    catch (e) { setError(t("err.failed", { msg: errorText(e) })); }
+    setError(await decide(() => action.mutateAsync({ id, action: "clarify", body: { message: clarifyMessage(questions, answers) } }),
+                          t("toast.answered", { ref: item.ref })));
   };
   useBriefKeys({ onKey: (key, _e, repeat) => { if (key !== "a") return false; if (!repeat) void submit(); return true; } });
   const field = (k: number) => frame.readOnly ? null : (
@@ -127,7 +127,7 @@ export function ClarifyBrief({ item, frame }: BriefProps) {
   const actions = (
     <>
       <button type="button" className="btn primary" disabled={!ready || action.isPending} onClick={() => void submit()}><span className="t">{t("act.submitAnswers")}</span><kbd>A</kbd></button>
-      {!ready && cr && <span className="readonly-note">{t("clarify.required")}</span>}
+      {!ready && cr && <span className="readonly-note" role={over ? "alert" : undefined}>{over ? t("clarify.tooLong", { n: over }) : t("clarify.required")}</span>}
       {error && <p className="note err wide" role="alert">{error}</p>}
     </>
   );
@@ -155,7 +155,7 @@ export function ChangeApproveBrief({ item, frame }: BriefProps) {
   const id = item.entity.entity_id;
   const { t, cr, state: loadState } = useChangeBrief(id);
   const { t: classic } = useLocale();
-  const { done } = useDecide();
+  const decide = useDecision(item);
   const action = useChangeAction();
   const [reason, setReason] = useState("");
   const [nudge, setNudge] = useState(false);
@@ -171,48 +171,54 @@ export function ChangeApproveBrief({ item, frame }: BriefProps) {
   const target: HoldTarget | null = armed && reason.trim() ? { itemId: item.id, planId: plan!.id, hash: plan!.content_hash! } : null;
   const hold = useHold(target, async (tg) => {
     setError(null);
-    try {
-      await action.mutateAsync({ id, action: "approve", body: { reason: reasonNow.current.trim(), content_hash: tg.hash } });
-      done(t(state?.runs ? "toast.approved.run" : "toast.approved.only", { ref: item.ref }));
-    } catch (e) {
-      setError(e instanceof ApiError && e.status === 409 ? t("err.changed") : t("err.failed", { msg: errorText(e) }));
-    }
+    setError(await decide(
+      () => action.mutateAsync({ id, action: "approve", body: { reason: reasonNow.current.trim(), content_hash: tg.hash } }),
+      // the answer is the change as it now stands: «executing» = its run was queued, «approved» = it was not
+      (res) => t(approvedToastKey("status" in res && (res.status === "executing" || res.status === "approved") ? res.status === "executing" : undefined,
+                                  state?.effect ?? "unknown"), { ref: item.ref }),
+      (e) => approveError(e, t)));
   });
-  const down = () => {
-    if (armed && !reason.trim()) { setNudge(true); reasonBox.current?.focus(); return; }     // the reason comes first
-    hold.down();
+  // the reason comes first. The focus moves to its box when the key comes UP: a key still held would repeat into
+  // the box («aaaa…» as the reason) on systems that repeat letters
+  const wantReason = useRef(false);
+  const down = (key?: string) => {
+    if (armed && !reason.trim()) { setNudge(true); if (key === "a") wantReason.current = true; else reasonBox.current?.focus(); return; }
+    hold.down(key);
   };
 
   useBriefKeys({
     onKey: (key, _e, repeat) => {
       if (form) return false;
-      if (key === "a") { if (!repeat) down(); return true; }
+      if (key === "a") { if (!repeat) down("a"); return true; }
       hold.cancel();
       if (frame.readOnly) return false;
       if (key === "d" && cr) { setError(null); setForm(true); return true; }
       return false;
     },
-    onKeyUp: (key) => { if (key === "a") hold.up(); },
+    onKeyUp: (key) => {
+      if (key !== "a") return;
+      hold.up();
+      if (wantReason.current) { wantReason.current = false; reasonBox.current?.focus(); }
+    },
     onEscape: () => { if (!form) return false; setForm(false); return true; },
   });
 
   const marks = cr ? planStepMarks(cr.steps_diff) : null;
   const ask = !state ? t("ask.approve.loading") : !state.can ? t("ask.approve.cannot", { why: plan ? refusal(state.why, t) : t("plan.none") })
-    : t(state.runs ? "ask.approve.run" : "ask.approve.only");
+    : t(`ask.approve.${state.effect}`);
   const actions = form ? (
     <ReasonForm label={t("close.label")} placeholder={t("rejectChange.placeholder")} note={t("rejectChange.note")} submit={t("act.rejectChange")}
                 busy={action.isPending} error={error} onCancel={() => setForm(false)}
                 onSubmit={async (why) => {
                   setError(null);
-                  try { await action.mutateAsync({ id, action: "reject", body: { reason: why } }); done(t("toast.rejectedChange", { ref: item.ref })); }
-                  catch (e) { setError(t("err.failed", { msg: errorText(e) })); }
+                  setError(await decide(() => action.mutateAsync({ id, action: "reject", body: { reason: why } }), t("toast.rejectedChange", { ref: item.ref })));
                 }} />
   ) : (
     <>
       <input ref={reasonBox} className="field reason-in" value={reason} maxLength={2000} disabled={!armed} placeholder={t("approve.reason.ph")}
              aria-label={t("approve.reason.label")} aria-invalid={nudge && !reason.trim()}
              onChange={(e) => { setReason(e.target.value); setNudge(false); }} />
-      <HoldButton label={t(state?.runs ? "act.approve" : "act.approveOnly")} disabled={!armed} holding={hold.holding} hint={hold.hint}
+      <HoldButton label={t(state?.effect === "run" ? "act.approve" : "act.approveOnly")} disabled={!armed} holding={hold.holding} hint={hold.hint}
                   onDown={down} onUp={hold.up} onCancel={hold.cancel} />
       <span className="spacer" />
       <button type="button" className="btn quiet" disabled={!cr} onClick={() => { setError(null); setForm(true); }}><span className="t">{t("act.rejectChange")}</span><kbd>D</kbd></button>
@@ -254,7 +260,7 @@ export function ChangeApproveBrief({ item, frame }: BriefProps) {
 export function ChangeAcceptBrief({ item, frame }: BriefProps) {
   const id = item.entity.entity_id;
   const { t, cr, state } = useChangeBrief(id);
-  const { done } = useDecide();
+  const decide = useDecision(item);
   const action = useChangeAction();
   const run = cr ? [...cr.executions].sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id)[0] ?? null : null;
   const runPlan = run && cr ? cr.plans.find((p) => p.id === run.fix_plan_id) ?? null : null;
@@ -263,12 +269,9 @@ export function ChangeAcceptBrief({ item, frame }: BriefProps) {
   const [error, setError] = useState<string | null>(null);
   const send = async (outcome: "completed" | "failed", reason: string) => {
     setError(null);
-    try {
-      await action.mutateAsync({ id, action: "resolve-review", body: { outcome, reason, ...(outcome === "completed" ? { confirmed_checks: list.confirmed() } : {}) } });
-      done(t(outcome === "completed" ? "toast.completed" : "toast.changeFailed", { ref: item.ref }));
-    } catch (e) {
-      setError(t("err.failed", { msg: errorText(e) }));
-    }
+    setError(await decide(
+      () => action.mutateAsync({ id, action: "resolve-review", body: { outcome, reason, ...(outcome === "completed" ? { confirmed_checks: list.confirmed() } : {}) } }),
+      t(outcome === "completed" ? "toast.completed" : "toast.changeFailed", { ref: item.ref })));
   };
   const complete = () => { if (list.ready && !action.isPending) void send("completed", list.reason()); };
   useBriefKeys({

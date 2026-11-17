@@ -16,7 +16,7 @@ import { useActivity } from "../hooks/useActivity";
 import { useNfT } from "../i18n";
 import { agentOn, whoText } from "../lib/activity";
 import { requestVm } from "../lib/briefs/change";
-import { changeSpine, planLine, waitKey, type ChangeStep } from "../lib/story";
+import { changeSpine, planLine, runLine, waitKey, waitSince, type ChangeStep } from "../lib/story";
 import { utcStamp } from "../lib/time";
 import { Message, StateBlock } from "../shell/StateBlock";
 import { BackOnly, FactList, RunList, Spine, StoryHead, WholeRecord, type FactView, type StepView, type StoryFrame } from "./StoryBits";
@@ -60,10 +60,13 @@ function ChangeRecord({ id, frame }: { id: number; frame: StoryFrame }) {
   const sub = model.phase.sub;
   const plan = model.plan;
   const latest = model.latestRun;
-  const steps = changeSpine(sub, model.phase.current, !!cr.approved_at);
+  // «failed» with a run that itself ended well = a person judged it failed when accepting it
+  const failedAtAcceptance = sub === "failed" && !!latest && !runLine(latest, null).bad && !!latest.completed_at;
+  const steps = changeSpine(sub, model.phase.current, !!cr.approved_at, failedAtAcceptance);
   const who = (actor: string | null | undefined) => whoText(actor, user?.email, t);
   const planOf = (run: FixExecution): FixPlan | null => cr.plans.find((p) => p.id === run.fix_plan_id) ?? null;
-  const wait = waitKey(model.phase.waitingFor, !!frame.mine, activity ? !!lane : null);
+  const closed = ["completed", "failed", "rolled_back", "rejected", "cancelled"].includes(cr.status);
+  const wait = waitKey(model.phase.waitingFor, !!frame.mine, !activity ? null : !lane ? false : lane.overdue ? "overdue" : true, closed);
   const closedAt = steps.find((s) => s.state === "closed")?.id ?? null;
   const r = requestVm(cr);
   const line = plan ? planLine(plan) : null;
@@ -167,7 +170,7 @@ function ChangeRecord({ id, frame }: { id: number; frame: StoryFrame }) {
         <StoryHead frame={frame} refText={`C#${id}`} tone={TONE[cr.risk_level ?? ""] ?? ""}
                    sev={`${t("sev.change")}${cr.risk_level ? ` ${cr.risk_level}` : ""}`} title={cr.title}
                    state={state} wait={wait} stuck={!!lane?.overdue} liveLane={lane?.id}
-                   since={wait === "wait.agent" && lane?.since ? lane.since : cr.waiting_since ?? null} place={[accountName, region].filter(Boolean).join("　")} />
+                   since={waitSince(wait, cr.waiting_since, lane?.since)} place={[accountName, region].filter(Boolean).join("　")} />
         <Spine steps={view} now={frame.now} />
         <WholeRecord events={timeline.data ? toPipelineEvents(timeline.data) : undefined} failed={timeline.isError} now={frame.now} />
       </article>

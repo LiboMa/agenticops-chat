@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GalaxyGraph, GalaxyGraphEdge, GalaxyGraphNode } from "@/api/types";
-import { depths, marks, nodeAlpha, ALPHA, readAlpha } from "@/newui/lib/world/depth";
+import { depths, linkLook, marks, nodeAlpha, ALPHA, readAlpha } from "@/newui/lib/world/depth";
 import { indexGraph } from "@/newui/lib/world/graph";
 import { layout } from "@/newui/lib/world/layout";
 import { NO_ASK, expected, scene } from "@/newui/lib/world/scene";
@@ -94,6 +94,15 @@ describe("marks — the rings and names laid over the 3D canvas", () => {
     const m = marks(scene(g, { ...NO_ASK, type: "EC2" }, null), null);
     expect(m.map((x) => [g.nodes[x.i].ref, x.off, x.named])).toEqual([[50, true, false], [70, true, false], [30, false, true]]);
   });
+  it("names what the person asked about even outside the view — exactly the names the flat map draws", () => {
+    // final review: a resource with a ring that was open (or found) and then filtered out lost its name in 3D only,
+    // and the check card went red on an ordinary path: «named should be 2, drew 1»
+    const sc = scene(g, { ...NO_ASK, sel: at(50), type: "EC2" }, null);           // the database is open; the filter shows instances
+    const m = marks(sc, at(50));
+    expect(m.find((x) => g.nodes[x.i].ref === 50)).toMatchObject({ off: true, named: true, sel: true });
+    expect(m.filter((x) => x.named).length).toBe(sc.labels.length);
+    expect(m.filter((x) => x.named).length).toBe(expected(sc, "3d").named);
+  });
   it("marks a named resource that is gone", () => {
     const m = marks(scene(g, { ...NO_ASK, sel: at(60) }, null), at(60));
     expect(m.find((x) => g.nodes[x.i].ref === 60)).toMatchObject({ gone: true, ring: null, sel: true });
@@ -109,3 +118,42 @@ describe("expected — what each view must have on its canvas", () => {
     expect({ ...expected(sc, "3d"), links: 0 }).toEqual({ ...expected(sc, "2d"), links: 0 });      // everything else is the same result
   });
 });
+
+describe("linkLook — how the 3D view draws a link", () => {
+  const at = (g: ReturnType<typeof indexGraph>, ref: number) => g.byId.get(`res:${ref}`)!;
+  const looks = (g: ReturnType<typeof indexGraph>, sc: ReturnType<typeof scene> | null, sel: number | null) =>
+    g.edges.map((e, k) => [g.nodes[e.a].ref, g.nodes[e.b].ref, e.r, linkLook(sc, sel, e, k)] as const);
+
+  it("draws a link by what it is when nothing is asked: containment, a rule relation, a model's guess", () => {
+    const g = indexGraph(payload), sc = scene(g, { ...NO_ASK }, null);
+    const got = looks(g, sc, null);
+    expect(got.find(([a, b]) => a === 10 && b === 20)![3]).toBe("contain");
+    expect(got.find(([a, b]) => a === 30 && b === 40)![3]).toBe("rule");
+    expect(got.find(([a, b]) => a === 80 && b === 70)![3]).toBe("inferred");
+    expect(looks(g, null, null).map((x) => x[3])).toEqual(got.map((x) => x[3]));            // no result yet: the same plain picture
+  });
+
+  it("lights the links of the open resource, and none of them while a path is shown", () => {
+    const g = indexGraph(payload), sel = at(g, 30);
+    const own = looks(g, scene(g, { ...NO_ASK, sel }, null), sel).filter((x) => x[3] === "own").map(([a, b]) => [a, b]);
+    expect(own).toEqual([[20, 30], [30, 40]]);
+    const sc = scene(g, { ...NO_ASK, a: at(g, 31), b: at(g, 50) }, null);
+    expect(looks(g, sc, at(g, 31)).filter((x) => x[3] === "own")).toEqual([]);
+  });
+
+  it("lights exactly the links the path takes — not another link between the same two resources", () => {
+    // final review: «找路» must say which links are a model's guess. The rule link and the guess between the same two
+    // resources are two different links: only the one the path took is part of it.
+    const twice = { ...payload, edges: [...payload.edges, edge(30, 40, "references", "llm")] };
+    const g = indexGraph(twice), sc = scene(g, { ...NO_ASK, a: at(g, 30), b: at(g, 40) }, null);
+    const path = looks(g, sc, null).filter((x) => x[3] === "path");
+    expect(path.map(([a, b, r]) => [a, b, r])).toEqual([[30, 40, "secured_by"]]);
+    expect(sc.pathInferred).toBe(0);
+  });
+
+  it("dims a link with an end outside the view", () => {
+    const g = indexGraph(payload), sc = scene(g, { ...NO_ASK, type: "EC2" }, null);
+    expect(looks(g, sc, null).find(([a, b]) => a === 50 && b === 40)![3]).toBe("faint");
+  });
+});
+

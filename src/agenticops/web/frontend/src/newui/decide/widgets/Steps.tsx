@@ -9,10 +9,11 @@ export function Steps({ steps }: { steps: StepVm[] }) {
       {steps.map((s, i) => (
         <li key={i}>
           <span className="say">
-            {s.say || (s.cmd ? "" : "—")}
+            {s.say || (s.cmd || s.raw ? "" : "—")}
             {s.tier && <span className={`tier${s.tier === "write" || s.tier === "blocked" || s.tier === "unknown" ? " w" : ""}`}>{t(`tier.${s.tier}`)}</span>}
           </span>
           {s.cmd && <code className="cmd">{s.cmd}</code>}
+          {s.raw && <><code className="cmd">{s.raw}</code><span className="note">{t("plan.rawStep")}</span></>}
         </li>
       ))}
     </ol>

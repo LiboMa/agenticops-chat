@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { groupOf } from "@/lib/inbox";
 import {
   FILTERS, currentItem, deepLinkState, emptyKind, flattenPages, groupCounts, parseFilter, pruneHandled, reasonsParam, situation, step,
-  toneOf, waitedParts, withoutHandled,
+  settle, toneOf, waitedParts, withoutHandled,
 } from "@/newui/lib/queue";
 import type { AttentionItem } from "@/lib/attention";
 
@@ -181,3 +181,30 @@ describe("handled items — what was just decided leaves the list at once, witho
     expect(pruneHandled([approval], handled)).toBe(handled);                                   // nothing to forget: the same map
   });
 });
+
+describe("settle — the answer to a decision arrives, possibly after the person moved on", () => {
+  const list = [item("I12"), item("I13"), item("I14")];
+  const shows = (id: string | null, of: AttentionItem | null = id ? list.find((i) => i.id === id) ?? null : null) =>
+    ({ id, situation: of ? situation(of) : null });
+
+  it("a decision that went through hides the item, says so, and moves on when the page still shows it", () => {
+    expect(settle(list, shows("I12"), list[0], true)).toEqual({ handled: true, toast: true, goTo: "I13" });
+    expect(settle(list, shows("I14"), list[2], true)).toEqual({ handled: true, toast: true, goTo: "I13" });   // the last one: back one
+    expect(settle([list[0]], shows("I12"), list[0], true)).toEqual({ handled: true, toast: true, goTo: null }); // the only one: the empty page
+  });
+
+  it("never drags the page back to an item the person has left", () => {
+    // approved I#12, pressed J twice, reading I#14 when the answer arrives
+    expect(settle(list, shows("I14"), list[0], true)).toEqual({ handled: true, toast: true, goTo: undefined });
+    expect(settle(list, shows(null), list[0], true)).toEqual({ handled: true, toast: true, goTo: undefined });  // on another lens
+  });
+
+  it("a decision that failed is always said in a toast, wherever the person is — and nothing moves", () => {
+    // the brief shows the failure on its own line too, but a brief can be replaced the next moment (the refresh a
+    // refusal triggers may move the item to a page of the list that is not loaded yet): the toast is what stays
+    expect(settle(list, shows("I12"), list[0], false)).toEqual({ handled: false, toast: true, goTo: undefined });
+    expect(settle(list, shows("I13"), list[0], false)).toEqual({ handled: false, toast: true, goTo: undefined });
+    expect(settle(list, shows(null), list[0], false)).toEqual({ handled: false, toast: true, goTo: undefined });
+  });
+});
+

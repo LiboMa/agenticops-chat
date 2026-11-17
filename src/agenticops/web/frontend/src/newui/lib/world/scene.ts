@@ -42,6 +42,11 @@ export interface Scene {
   goneOpen: number;
   hits: number[];
   path: number[] | null;
+  /** the links the path runs over, in order: which relation each is, whether a model only inferred it, and whether
+   *  the path runs the way the relation is written (`fwd`) or against it */
+  pathHops: Hop[] | null;
+  /** how many of them are inferred; > 0 only when no route over rule relations exists */
+  pathInferred: number;
   around: Set<number> | null;
   /** whose names are drawn; the ones being looked at come last, so they end up on top */
   labels: number[];
@@ -69,21 +74,32 @@ export function around(g: WorldGraph, i: number, hops = 1): Set<number> {
   return seen;
 }
 
-/** The shortest chain of links from a to b (indexes, ends included); null when there is none within `maxHops`. */
-export function path(g: WorldGraph, a: number, b: number, maxHops = 8): number[] | null {
-  if (a === b) return null;
-  const from = new Map<number, number>([[a, -1]]);
+/** One link of a path. `fwd` = the path goes the way the build wrote the relation (source → target); false = it runs
+ *  against it: «a ←contains— b» is «b contains a». */
+export interface Hop { k: number; r: string; llm: boolean; fwd: boolean }
+export interface Route { nodes: number[]; hops: Hop[] }
+
+/** What goes on either side of a relation's name in a chain, so the arrow is the RELATION's and not the path's. */
+export function hopMarks(h: { fwd: boolean }): [string, string] {
+  return h.fwd ? ["—", "→"] : ["←", "—"];
+}
+
+function shortest(g: WorldGraph, a: number, b: number, maxHops: number, inferredToo: boolean): Route | null {
+  const from = new Map<number, [number, number, boolean]>([[a, [-1, -1, true]]]);   // node → [the node before it, the link taken, taken the way it is written]
   let edge = [a];
   for (let h = 0; h < maxHops && edge.length; h++) {
     const next: number[] = [];
     for (const i of edge) {
-      for (const [j] of [...g.adj[i]].sort((x, y) => x[0] - y[0])) {          // the lowest id first: the same path every time
-        if (from.has(j)) continue;
-        from.set(j, i);
+      for (const [j, k, out] of [...g.adj[i]].sort((x, y) => x[0] - y[0] || x[1] - y[1])) {      // the lowest id first: the same path every time
+        if (from.has(j) || (!inferredToo && g.edges[k].llm)) continue;
+        from.set(j, [i, k, out]);
         if (j === b) {
-          const out = [j];
-          for (let k = i; k !== -1; k = from.get(k)!) out.push(k);
-          return out.reverse();
+          const nodes = [j], hops: Route["hops"] = [];
+          for (let [p, link, fwd] = from.get(j)!; p !== -1; [p, link, fwd] = from.get(p)!) {
+            hops.push({ k: link, r: g.edges[link].r, llm: g.edges[link].llm, fwd });
+            nodes.push(p);
+          }
+          return { nodes: nodes.reverse(), hops: hops.reverse() };
         }
         next.push(j);
       }
@@ -91,6 +107,20 @@ export function path(g: WorldGraph, a: number, b: number, maxHops = 8): number[]
     edge = next;
   }
   return null;
+}
+
+/** How two resources are linked: the shortest chain of relations the RULES found, and only when there is none the
+ *  shortest chain that also uses relations a model inferred — those are guesses, and a one-link guess must not be
+ *  shown in place of a three-link fact. Each hop says which relation it is and whether it is inferred. null when
+ *  there is no chain within `maxHops`. */
+export function route(g: WorldGraph, a: number, b: number, maxHops = 8): Route | null {
+  if (a === b) return null;
+  return shortest(g, a, b, maxHops, false) ?? shortest(g, a, b, maxHops, true);
+}
+
+/** The resources along that chain (indexes, ends included). */
+export function path(g: WorldGraph, a: number, b: number, maxHops = 8): number[] | null {
+  return route(g, a, b, maxHops)?.nodes ?? null;
 }
 
 function matches(n: WNode, ask: Ask): boolean {
@@ -116,7 +146,8 @@ export function search(g: WorldGraph, q: string, waiting: Waiting[] | null, limi
 }
 
 export function scene(g: WorldGraph, ask: Ask, waiting: Waiting[] | null): Scene {
-  const way = ask.a !== null && ask.b !== null ? path(g, ask.a, ask.b) : null;
+  const found = ask.a !== null && ask.b !== null ? route(g, ask.a, ask.b) : null;
+  const way = found?.nodes ?? null;
   const waySet = way ? new Set(way) : null;
   const near = !waySet && ask.focus && ask.sel !== null ? around(g, ask.sel) : null;
   const filtered = ask.account !== null || !!ask.type || !!ask.group || ask.onlyAbnormal;
@@ -149,7 +180,8 @@ export function scene(g: WorldGraph, ask: Ask, waiting: Waiting[] | null): Scene
   };
 
   return {
-    dim, gone, shown, rings, hits, path: way, around: near, labels: [...labels.keys()], ties, totals: g.totals,
+    dim, gone, shown, rings, hits, path: way, pathHops: found?.hops ?? null, pathInferred: found?.hops.filter((h) => h.llm).length ?? 0,
+    around: near, labels: [...labels.keys()], ties, totals: g.totals,
     goneOpen: g.nodes.filter((n) => n.absent && n.health !== "unknown").length,
     abnormal: ringed.filter((n) => matches(n, ask)).sort((x, y) => (RANK[x.health] ?? 3) - (RANK[y.health] ?? 3) || x.i - y.i).map((n) => n.i),
   };
@@ -167,8 +199,21 @@ export function expected(sc: Scene, view: View = "2d"): Drawn {
            links: view === "3d" ? sc.totals.links : sc.totals.lines, named: sc.labels.length };
 }
 
-/** The check: what the view says it drew against what the data says. [] = they agree. */
-export function reconcile(sc: Scene, drawn: Drawn, view: View = "2d"): { what: keyof Drawn; want: number; got: number }[] {
-  const want = expected(sc, view);
-  return (Object.keys(want) as (keyof Drawn)[]).filter((k) => drawn[k] !== want[k]).map((k) => ({ what: k, want: want[k], got: drawn[k] }));
+/** The check: what the view says it put on its canvas against what the data says. [] = they agree.
+ *  `off` = what the view left out because it lies off the screen (the flat map skips those; the 3D view keeps every
+ *  object in its scene and has none): drawn + off the screen must be what the scene asks for, so a resource that is
+ *  in neither count is missed, and one that was skipped is never reported as drawn. */
+export interface Mismatch { what: keyof Drawn; want: number; got: number }
+
+export function reconcile(sc: Scene, drawn: Drawn, view: View = "2d", off?: Drawn): Mismatch[] {
+  const want = expected(sc, view), got = (k: keyof Drawn) => drawn[k] + (off?.[k] ?? 0);
+  return (Object.keys(want) as (keyof Drawn)[]).filter((k) => got(k) !== want[k]).map((k) => ({ what: k, want: want[k], got: got(k) }));
+}
+
+/** What the card shows after a check. Agreement shows at once; a mismatch only when the check before it found one
+ *  too — the 3D engine builds its objects over a few frames and one check can land in between. `show` undefined =
+ *  leave the card as it is; `strikes` = how many checks in a row have disagreed (0 after a new result). */
+export function confirm(found: Mismatch[], strikes: number): { show: Mismatch[] | undefined; strikes: number } {
+  if (!found.length) return { show: [], strikes: 0 };
+  return { show: strikes >= 1 ? found : undefined, strikes: strikes + 1 };
 }

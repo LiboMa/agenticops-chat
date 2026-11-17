@@ -32,15 +32,21 @@ export function requestVm(cr: ChangeRequest): RequestVm {
 /** POST /api/changes/{id}/clarify takes one message of at most this many characters. */
 export const CLARIFY_MAX = 4000;
 
-/** Every question answered; with no specific question, the one free answer. */
-export function canClarify(questions: string[], answers: string[]): boolean {
-  return questions.length ? questions.every((_, i) => !!answers[i]?.trim()) : !!answers[0]?.trim();
-}
-
-/** The answers as the one message the server takes: each answer under its numbered question. */
+/** The answers as the one message the server takes: each answer under its numbered question. Whole — a message
+ *  that is too long is not sent (clarifyOverflow), never cut: the tail it would lose is the last answers. */
 export function clarifyMessage(questions: string[], answers: string[]): string {
-  const text = questions.length
+  return questions.length
     ? questions.map((q, i) => `${i + 1}. ${q}\n   ${(answers[i] ?? "").trim()}`).join("\n\n")
     : (answers[0] ?? "").trim();
-  return text.slice(0, CLARIFY_MAX);
+}
+
+/** By how many characters the message is over what the server takes; 0 = it fits. */
+export function clarifyOverflow(questions: string[], answers: string[]): number {
+  return Math.max(0, clarifyMessage(questions, answers).length - CLARIFY_MAX);
+}
+
+/** Every question answered — with no specific question, the one free answer — and the whole fits in one message. */
+export function canClarify(questions: string[], answers: string[]): boolean {
+  const answered = questions.length ? questions.every((_, i) => !!answers[i]?.trim()) : !!answers[0]?.trim();
+  return answered && clarifyOverflow(questions, answers) === 0;
 }

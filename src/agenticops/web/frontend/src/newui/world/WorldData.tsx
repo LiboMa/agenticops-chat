@@ -2,25 +2,34 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useAccounts } from "@/hooks/useAccounts";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
-import type { GalaxyGraph } from "@/api/types";
+import type { GalaxyGraph, GalaxyHealthRead } from "@/api/types";
 import { useGalaxyStatus } from "@/hooks/useGalaxy";
 import { useTheme } from "@/hooks/useTheme";
-import { indexGraph, type WorldGraph } from "../lib/world/graph";
+import { applyHealth, indexGraph, type WorldGraph } from "../lib/world/graph";
 import { layout as layOut, type Layout } from "../lib/world/layout";
 import { Sky } from "./Sky";
 import type { Sky3, Sky3Handlers } from "./Sky3";
 
 /** The map's data and its one canvas, for the whole of NewUI: «全景» draws it in full, the other lenses have it as a
- *  faint backdrop. The graph is the latest COMPLETED build of the relation graph (GET /api/galaxy/graph) — a snapshot;
- *  `builtAt` says of when. */
+ *  faint backdrop. Two ages live on one map. The RELATIONS are the latest COMPLETED build of the relation graph (GET
+ *  /api/galaxy/graph) — a snapshot, `builtAt` says of when. HEALTH and «gone» are not the build's: they are read
+ *  again every HEALTH_POLL_MS (GET /api/galaxy/health) and after every decision, and put onto the same graph, so a
+ *  ring follows its issue and not the next build; `healthAt` says when they were last read. */
 export interface WorldApi {
   status: "loading" | "failed" | "empty" | "ready";
   graph: WorldGraph | null;
   layout: Layout | null;
   /** when the build the map shows finished (API time string); null = not known */
   builtAt: string | null;
+  /** when health and «gone» were last read (API time string); null = not known */
+  healthAt: string | null;
+  /** goes up each time a reading changed some resource's health or «gone»: what depends on them is worked out again */
+  healthRev: number;
   /** a newer build is running right now */
   building: boolean;
+  /** the newest build is not the one on the map and did not complete: it failed (with when), so the map is older
+   *  than the schedule would make it */
+  newerFailed: { id: number; at: string | null } | null;
   /** the last good answer is older than the newest attempt: when it came (epoch ms) */
   staleAt: number | null;
   sky: Sky | null;
@@ -33,11 +42,14 @@ export interface WorldApi {
   want: () => void;
 }
 
-const Ctx = createContext<WorldApi>({ status: "loading", graph: null, layout: null, builtAt: null, building: false, staleAt: null, sky: null, sky3: null,
-                                      load3d: async () => false, retry: () => {}, want: () => {} });
+const Ctx = createContext<WorldApi>({ status: "loading", graph: null, layout: null, builtAt: null, healthAt: null, healthRev: 0, building: false,
+                                      newerFailed: null, staleAt: null, sky: null, sky3: null, load3d: async () => false, retry: () => {}, want: () => {} });
 export const useWorld = () => useContext(Ctx);
 
 const BACKDROP_DELAY_MS = 1500;
+/** How often health and «gone» are read again while NewUI is open (the browser pauses it in a hidden tab). */
+export const HEALTH_POLL_MS = 30_000;
+export const HEALTH_QUERY_KEY = ["galaxy-health"] as const;
 
 export function WorldLayer({ children }: { children: ReactNode }) {
   // elsewhere than on «全景» the map is only a backdrop: it must not compete with the page's own first requests
@@ -60,6 +72,17 @@ export function WorldLayer({ children }: { children: ReactNode }) {
     const graph = indexGraph(q.data, names);
     return { graph, layout: layOut(graph) };
   }, [q.data, names]);
+
+  // health and «gone», read again on their own and put onto the same graph (no new layout, the camera stays)
+  const health = useQuery({ queryKey: [...HEALTH_QUERY_KEY], queryFn: () => apiFetch<GalaxyHealthRead>("/galaxy/health"),
+                            enabled: !!built, refetchInterval: HEALTH_POLL_MS, staleTime: 5_000 });
+  const [healthRev, setHealthRev] = useState(0);
+  const [healthAt, setHealthAt] = useState<string | null>(null);
+  useEffect(() => {
+    if (!built) return;
+    if (health.data && applyHealth(built.graph, health.data)) setHealthRev((r) => r + 1);
+    setHealthAt(built.graph.healthAt);              // the graph's own reading when there is no newer one
+  }, [built, health.data]);
 
   useEffect(() => {
     const el = canvas.current, root = el?.closest<HTMLElement>(".nf");
@@ -94,12 +117,16 @@ export function WorldLayer({ children }: { children: ReactNode }) {
   const api = useMemo<WorldApi>(() => ({
     status: built ? (built.graph.nodes.length ? "ready" : "empty") : q.isError ? "failed" : "loading",
     graph: built?.graph ?? null, layout: built?.layout ?? null,
-    // the status names the newest build, which may be one still running: only the build the map shows has a time here
-    builtAt: status.data?.build && status.data.build.id === q.data?.build_id ? status.data.build.finished_at : null,
+    // the graph says when its own build finished; an older server does not, and then only the status of that very
+    // build has a time (the status names the newest build, which may be one still running, or one that failed)
+    builtAt: built?.graph.builtAt ?? (status.data?.build && status.data.build.id === q.data?.build_id ? status.data.build.finished_at : null),
+    healthAt, healthRev,
     building: status.data?.build?.status === "running",
+    newerFailed: status.data?.build && status.data.build.status === "failed" && q.data?.build_id != null && status.data.build.id !== q.data.build_id
+      ? { id: status.data.build.id, at: status.data.build.finished_at } : null,
     staleAt: q.isError && q.data ? q.dataUpdatedAt : null,
     sky, sky3, load3d, retry, want,
-  }), [built, q.isError, q.data, q.dataUpdatedAt, status.data, sky, sky3, load3d, retry, want]);
+  }), [built, q.isError, q.data, q.dataUpdatedAt, status.data, healthAt, healthRev, sky, sky3, load3d, retry, want]);
 
   return (
     <Ctx.Provider value={api}>

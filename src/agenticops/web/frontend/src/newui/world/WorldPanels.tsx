@@ -1,12 +1,14 @@
 import { Link } from "react-router-dom";
-import type { RefObject } from "react";
-import { useResourceIssues } from "@/hooks/useResourceDetail";
+import { Fragment, type RefObject } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { apiFetch } from "@/api/client";
+import type { HealthIssue } from "@/api/types";
 import type { AttentionItem } from "@/lib/attention";
 import { Prov } from "../decide/widgets/Cause";
 import { useNfT, type NfT } from "../i18n";
 import type { WNode, WorldGraph } from "../lib/world/graph";
 import { side } from "../lib/world/relations";
-import { expected, type Ask, type Drawn, type Scene, type View } from "../lib/world/scene";
+import { expected, hopMarks, type Ask, type Drawn, type Mismatch, type Scene, type View } from "../lib/world/scene";
 import { utcStamp } from "../lib/time";
 
 const num = (v: number) => v.toLocaleString("en-US");
@@ -81,11 +83,20 @@ export function Tools({ g, ask, sc, search, pathMode, view, busy, turning, onVie
   );
 }
 
-/** «数据核对»: what the build holds, how every relation of it is shown, how old it is — and whether the canvas drew
- *  exactly that. `bad` = the numbers that differ; null = not checked yet. */
-export function Check({ sc, view, bad, perf, buildId, builtAt, building, now }: {
-  sc: Scene; view: View; bad: { what: keyof Drawn; want: number; got: number }[] | null; perf: { fps: number; ms: number | null } | null;
-  buildId: number | null; builtAt: string | null; building: boolean; now: number;
+/** «数据核对»: what the build holds, how every relation of it is shown, how old each part is — and whether the canvas
+ *  holds exactly this result. `bad` = the numbers that differ; null = not checked yet. What the check proves is said on
+ *  the card: the COUNTS the view reports for what it put on the canvas — not a colour, not a position. */
+export function Check({ sc, view, bad, off, perf, buildId, builtAt, healthAt, building, newerFailed, now }: {
+  sc: Scene; view: View; bad: Mismatch[] | null; perf: { fps: number; ms: number | null } | null;
+  /** what the flat map left out because it is off the screen; null = the view leaves nothing out (3D) or not checked yet */
+  off: Drawn | null;
+  buildId: number | null; builtAt: string | null;
+  /** when health and «gone» were last read; null = not known */
+  healthAt: string | null;
+  building: boolean;
+  /** the newest build failed: the map is of an older one */
+  newerFailed: { id: number; at: string | null } | null;
+  now: number;
 }) {
   const t = useNfT();
   const T = sc.totals, want = expected(sc, view);
@@ -93,12 +104,17 @@ export function Check({ sc, view, bad, perf, buildId, builtAt, building, now }: 
     <div className={`wcheck card${bad?.length ? " bad" : ""}`} data-ok={bad === null ? "" : bad.length ? "0" : "1"} data-view={view} data-fps={perf?.fps ?? ""} data-ms={perf?.ms != null ? perf.ms.toFixed(2) : ""}>
       <h2>{t("check.title")}</h2>
       <p><Prov code />{t("check.totals", { present: num(T.present), gone: num(T.gone), open: sc.goneOpen, links: num(T.links), inferred: num(T.inferred) })}</p>
-      <p><Prov code />{t("check.relations", { relations: num(T.relations), lines: num(T.lines), contain: num(T.contain), ofAccount: num(T.ofAccount), ofGroup: num(T.ofGroup) })}
+      <p><Prov code />{t("check.relations", { relations: num(T.relations), lines: num(T.lines), circles: num(T.contain - T.containExtra),
+                                              ofAccount: num(T.ofAccount), ofGroup: num(T.ofGroup) })}
+        {T.containExtra > 0 ? t("check.containExtra", { n: num(T.containExtra) }) : ""}
         {T.dropped > 0 ? t("check.dropped", { n: T.dropped }) : ""}</p>
-      <p><Prov code />{builtAt ? t("check.fresh", { t: utcStamp(builtAt, now), id: buildId }) : t("check.fresh.unknown", { id: buildId })}{building ? t("check.building") : ""}</p>
+      <p><Prov code />{builtAt ? t("check.fresh", { t: utcStamp(builtAt, now), id: buildId }) : t("check.fresh.unknown", { id: buildId })}
+        {healthAt ? t("check.health", { t: utcStamp(healthAt, now) }) : t("check.health.unknown")}
+        {building ? t("check.building") : ""}{newerFailed ? t("check.newerFailed", { id: newerFailed.id, t: newerFailed.at ? utcStamp(newerFailed.at, now) : "—" }) : ""}</p>
       {bad === null ? <p>{t("check.pending")}</p>
         : bad.length ? <p className="mis" role="alert">{t("check.bad")}{bad.map((m) => t("check.item", { what: t(`check.${m.what}`), want: num(m.want), got: num(m.got) })).join("；")}</p>
-        : <p className="ok"><Prov code />{t("check.ok", { view: t(`view.${view}`), n: num(want.bright), r: want.rings, rb: want.ringsBright, l: num(want.links), named: want.named })}</p>}
+        : <p className="ok"><Prov code />{t("check.ok", { view: t(`view.${view}`), n: num(want.bright), r: want.rings, rb: want.ringsBright, l: num(want.links), named: want.named })}
+            {off && off.nodes + off.rings + off.links > 0 ? t("check.culled", { nodes: num(off.nodes), total: num(want.nodes), rings: off.rings, links: num(off.links) }) : ""}{t("check.scope")}</p>}
     </div>
   );
 }
@@ -129,12 +145,13 @@ export function Happen({ g, sc, complete, readOnly, onPick, onDecide }: {
         </ul>
       ) : <p className="note">{t("world.noneAbnormal")}</p>}
       {sc.abnormal.length > LIST_MAX && <p className="note">{t("node.more", { n: num(sc.abnormal.length - LIST_MAX) })}</p>}
+      {sc.goneOpen > 0 && <p className="note"><Prov code />{t("world.goneOpen", { n: sc.goneOpen })}</p>}
       {readOnly ? <p className="note ties">{t("world.ties.readOnly")}</p>
         : ties && waiting === 0 ? <p className="note ties"><Prov code />{t("world.ties.none")}</p>
         : ties ? (
         <p className="note ties">
           <Prov code />{t("world.ties", { n: waiting, ring: ties.ringed.length, quiet: ties.quiet.length, off: ties.offMap.length })}
-          {!complete && t("world.ties.cut")}　
+          {!complete && t("world.ties.cut")}{"　"}
           <button type="button" className="linkish" onClick={onDecide}>{t("world.tiesGo")}</button>
         </p>
       ) : <p className="note ties">{t("world.ties.unknown")}</p>}
@@ -143,22 +160,37 @@ export function Happen({ g, sc, complete, readOnly, onPick, onDecide }: {
 }
 
 const NB_MAX = 7, ISSUES_MAX = 5;
-const CLOSED = new Set(["resolved", "dismissed"]);
+
+/** The resource's OPEN issues (GET /api/resources/{id}/issues?open=true): the ones anchored to it — what its health
+ *  on the map is made of — and the ones tied to it only by the alarm's resource id, which the health does not count.
+ *  Open ones only: the newest twenty of any status could leave the one open issue out. */
+function useOpenIssues(ref: number) {
+  return useQuery({
+    queryKey: ["resourceIssues", ref, "open"],
+    queryFn: () => apiFetch<HealthIssue[]>(`/resources/${ref}/issues?open=true&limit=50`),
+    enabled: ref > 0,
+    staleTime: 15_000,
+  });
+}
 
 /** The open resource: what it is, how it is, what is open on it, what it is linked to and how. */
-export function NodeCard({ g, i, ask, mine, accountName, now, onPick, onClose, onFocus, onPathFrom, onStory, onDecide }: {
+export function NodeCard({ g, i, ask, mine, accountName, now, healthAt, onPick, onClose, onFocus, onPathFrom, onStory, onDecide }: {
   g: WorldGraph; i: number; ask: Ask;
   /** the items waiting on this person that sit on this resource */
   mine: AttentionItem[];
   accountName: (id: number | null) => string;
   now: number;
+  /** when health and «gone» were last read; null = not known */
+  healthAt: string | null;
   onPick: (i: number) => void; onClose: () => void; onFocus: () => void; onPathFrom: () => void;
   onStory: (item: string) => void; onDecide: (item: string) => void;
 }) {
   const t = useNfT();
   const n = g.nodes[i], nb = g.adj[i], llm = nb.filter(([, k]) => g.edges[k].llm).length;
-  const issues = useResourceIssues(n.ref, true);
-  const open = (issues.data ?? []).filter((x) => !CLOSED.has(x.status));
+  const others = new Set(nb.map(([j]) => j)).size;             // two relations to the same resource are one neighbour
+  const issues = useOpenIssues(n.ref);
+  const open = issues.data ?? [];
+  const anchored = open.filter((x) => x.resource_ref === n.ref), byId = open.filter((x) => x.resource_ref !== n.ref);
   const groups = n.groups.map((id) => g.groups.find((x) => x.id === id)).filter((x): x is NonNullable<typeof x> => !!x);
   return (
     <aside className="nodecard card" aria-label={t("node.resource")}>
@@ -168,15 +200,20 @@ export function NodeCard({ g, i, ask, mine, accountName, now, onPick, onClose, o
       <p><Prov code /><Dot node={n} /><b>{t(healthKey(n))}</b></p>
       {n.absent ? <p className="note"><Prov code />{t(n.health !== "unknown" ? "node.gone.open" : "node.gone")}</p>
         : n.health === "unknown" ? <p className="note">{t("node.none")}</p> : null}
-      {issues.isError ? <p className="note err">{t("sec.failedLoad")}</p> : open.length > 0 && (
-        <ul className="nb">
-          {open.slice(0, ISSUES_MAX).map((x) => (
-            <li key={x.id}><button type="button" onClick={() => onStory(`I${x.id}`)}><i className="hdot" style={{ background: "transparent" }} /><span>{x.title}</span><small className="num">I#{x.id}</small></button></li>
-          ))}
-        </ul>
-      )}
-      {open.length > ISSUES_MAX && <p className="note">{t("node.more", { n: open.length - ISSUES_MAX })}</p>}
-      <p><Prov code />{t("node.links", { n: nb.length })}{llm ? t("node.linksLlm", { n: llm }) : ""}</p>
+      {issues.isPending ? <div className="skel" style={{ height: 18 }} />
+        : issues.isError ? <p className="note err">{t("sec.failedLoad")}</p>
+        : [[anchored, null] as const, [byId, "node.byId"] as const].map(([list, note]) => list.length > 0 && (
+          <Fragment key={note ?? "anchored"}>
+            {note && <p className="note"><Prov code />{t(note, { n: list.length })}</p>}
+            <ul className="nb">
+              {list.slice(0, ISSUES_MAX).map((x) => (
+                <li key={x.id}><button type="button" onClick={() => onStory(`I${x.id}`)}><i className="hdot" style={{ background: "transparent" }} /><span>{x.title}</span><small className="num">I#{x.id}</small></button></li>
+              ))}
+            </ul>
+            {list.length > ISSUES_MAX && <p className="note">{t("node.more", { n: list.length - ISSUES_MAX })}</p>}
+          </Fragment>
+        ))}
+      <p><Prov code />{t("node.links", { n: others, links: nb.length })}{llm ? t("node.linksLlm", { n: llm }) : ""}</p>
       <ul className="nb">
         {nb.slice(0, NB_MAX).map(([j, k, out]) => {
           const e = g.edges[k], rel = side({ r: e.r, p: e.llm ? "llm" : "rule" }, out);
@@ -191,7 +228,7 @@ export function NodeCard({ g, i, ask, mine, accountName, now, onPick, onClose, o
       </ul>
       {nb.length > NB_MAX && <p className="note">{t("node.more", { n: nb.length - NB_MAX })}</p>}
       {groups.length > 0 && <p className="note">{t("node.groups", { groups: groups.map((x) => `${x.type}: ${x.name}`).join("、") })}</p>}
-      <p className="note">{t("node.asOf", { t: utcStamp(now, now) })}</p>
+      <p className="note">{healthAt ? t("node.asOf", { t: utcStamp(healthAt, now) }) : t("node.asOf.unknown")}</p>
       <div className="acts">
         {mine.map((item) => (
           <button key={item.id} type="button" className="btn primary sm" onClick={() => onDecide(item.id)}><span className="t">{t("node.go")}　{item.ref}</span></button>
@@ -211,9 +248,22 @@ export function PathHint({ g, ask, sc, onExit }: { g: WorldGraph; ask: Ask; sc: 
   return (
     <p className="wpast whint" role="status">
       {ask.a === null ? t("path.pick1") : ask.b === null ? t("path.pick2", { a: name(ask.a) })
-        : sc.path ? <><Prov code />{t("path.found", { n: sc.path.length - 1 })}<span className="chain">{sc.path.map(name).join(" → ")}</span>　{t("path.caveat")}</>
+        : sc.path ? (
+          <>
+            <Prov code />{t("path.found", { n: sc.path.length - 1 })}
+            <span className="chain">
+              {sc.path.map((i, k) => {
+                // the relation between this resource and the one before it, by name, with the arrow the way the BUILD
+                // wrote it («a ←contains— b» = b contains a); a guess is said to be one
+                const hop = k ? sc.pathHops?.[k - 1] : null, [l, r] = hop ? hopMarks(hop) : ["", ""];
+                return <Fragment key={i}>{hop && <small className={hop.llm ? "hop llm" : "hop"}> {l}{hop.r}{hop.llm ? t("path.inferredHop") : ""}{r} </small>}{name(i)}</Fragment>;
+              })}
+            </span>
+            {"　"}{sc.pathInferred > 0 && <b>{t("path.inferred", { n: sc.pathInferred })}</b>}{t("path.caveat")}
+          </>
+        )
         : <><Prov code />{t("path.none", { a: name(ask.a), b: name(ask.b) })}</>}
-      　<button type="button" className="btn sm quiet" onClick={onExit}><span className="t">{t("path.exit")}</span><kbd>Esc</kbd></button>
+      {"　"}<button type="button" className="btn sm quiet" onClick={onExit}><span className="t">{t("path.exit")}</span><kbd>Esc</kbd></button>
     </p>
   );
 }
@@ -225,7 +275,8 @@ export function Legend({ t, view }: { t: NfT; view: View }) {
       <span><i style={{ background: "var(--amber)" }} />{t("health.warning")}</span>
       <span><i style={{ background: "var(--mint)" }} />{t("health.notice")}</span>
       <span><i style={{ background: "rgb(var(--star))", opacity: 0.6 }} />{t("legend.none")}</span>
-      <span><i className="gonei" />{t("legend.gone")}</span>
+      {/* the flat map draws a gone resource hollow, the 3D view as a fainter sphere: the legend shows what is drawn */}
+      <span>{view === "3d" ? <i style={{ background: "rgb(var(--star))", opacity: 0.22 }} /> : <i className="gonei" />}{t(view === "3d" ? "legend.gone3d" : "legend.gone")}</span>
       <span><i className={view === "3d" ? "curve" : "dash"} />{t(view === "3d" ? "legend.llm3d" : "legend.llm")}</span>
       <span><i style={{ background: "var(--mint)", width: 5, height: 5 }} />{t(view === "3d" ? "legend.flow3d" : "legend.flow")}</span>
       <span className="sch">{t("legend.schematic")}</span>

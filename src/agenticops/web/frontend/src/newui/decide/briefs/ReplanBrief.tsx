@@ -9,6 +9,7 @@ import { StateBlock } from "../../shell/StateBlock";
 import { BriefFrame } from "../BriefFrame";
 import { AgentAtWork } from "../widgets/AgentAtWork";
 import { CauseSection, useCause } from "../widgets/CauseSection";
+import { Prov } from "../widgets/Cause";
 import { PlanSection } from "../widgets/PlanSection";
 import { Quote } from "../widgets/RunSteps";
 import { useBriefKeys, useDecide, type BriefProps } from "./briefContext";
@@ -27,6 +28,9 @@ export function ReplanBrief({ item, frame }: BriefProps) {
   const plan = currentFixPlan(plansQ.data);
   const sentBack = plan && plan.status === "rejected" ? plan : null;
   const reason = sentBack?.rejection_reason?.trim() ?? "";
+  // the server's own rule (rejection_is_feedback): a person wrote it about the plan. A plan withdrawn by code —
+  // «content changed after approval» — has a reason too, but nobody said it and no agent is given it
+  const feedback = !!reason && sentBack?.rejection_is_feedback === true;
 
   useBriefKeys({
     onKey: (key, _e, repeat) => {
@@ -43,7 +47,7 @@ export function ReplanBrief({ item, frame }: BriefProps) {
   const actions = closing ? <DismissForm item={item} onCancel={() => setClosing(false)} /> : (
     <>
       <button type="button" className="btn primary" disabled={agent.busy} onClick={() => void agent.ask("plan")}>
-        <span className="t">{t(reason ? "act.replan" : "act.newPlan")}</span><kbd>A</kbd>
+        <span className="t">{t(feedback ? "act.replan" : "act.newPlan")}</span><kbd>A</kbd>
       </button>
       <span className="spacer" />
       <button type="button" className="btn quiet" onClick={() => setClosing(true)}><span className="t">{t("act.close")}</span><kbd>D</kbd></button>
@@ -59,12 +63,13 @@ export function ReplanBrief({ item, frame }: BriefProps) {
           <>
             <div className="sec">
               <h2>{t("sec.whoRejected")}</h2>
-              {reason ? (
+              {feedback ? (
                 <>
                   <Quote text={reason} cite={t("rejected.cite", { by: whoText(sentBack.rejected_by, user?.email, t), t: utcStamp(sentBack.rejected_at) })} />
                   <p className="note">{t("replan.note")}</p>
                 </>
-              ) : <p className="note">{t("replan.noReason")}</p>}
+              ) : reason ? <p className="note"><Prov code />{t("replan.byCode", { reason, t: utcStamp(sentBack.rejected_at) })}</p>
+                : <p className="note">{t("replan.noReason")}</p>}
             </div>
             <PlanSection plan={sentBack} heading={t("sec.rejectedPlan", { v: sentBack.plan_version || 1 })} kind="fix" rollback={false} />
           </>

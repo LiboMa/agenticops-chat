@@ -12,13 +12,13 @@ import { useShell } from "../../shell/shellContext";
 import { triggerError, useAgentOn } from "../widgets/AgentAtWork";
 import { ReasonForm } from "../widgets/ReasonForm";
 import { Quote } from "../widgets/RunSteps";
-import { errorText, useDecide } from "./briefContext";
+import { useDecision } from "./briefContext";
 
 /** The reason box for dismissing an issue: the reason is kept with the status change; the note under the box says
  *  what else a dismissal does. */
 export function DismissForm({ item, onCancel }: { item: AttentionItem; onCancel: () => void }) {
   const t = useNfT();
-  const { done } = useDecide();
+  const decide = useDecision(item);
   const dismiss = useDismissIssue(parseItem(item.id)?.id ?? 0);
   const [error, setError] = useState<string | null>(null);
   return (
@@ -26,8 +26,7 @@ export function DismissForm({ item, onCancel }: { item: AttentionItem; onCancel:
                 busy={dismiss.isPending} error={error} onCancel={onCancel}
                 onSubmit={async (reason) => {
                   setError(null);
-                  try { await dismiss.mutateAsync(reason); done(t("toast.closed", { ref: item.ref })); }
-                  catch (e) { setError(t("err.failed", { msg: errorText(e) })); }
+                  setError(await decide(() => dismiss.mutateAsync(reason), t("toast.closed", { ref: item.ref })));
                 }} />
   );
 }

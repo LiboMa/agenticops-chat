@@ -11,9 +11,10 @@ import { savePreferences } from "@/lib/preferences";
 import { useActivity } from "../hooks/useActivity";
 import { useWaitingCounts } from "../hooks/useDecideQueue";
 import { useNfT } from "../i18n";
-import { escapeStep, focusContext, keyIntent, type Lens } from "../lib/keys";
+import { endsTyping, escapeStep, focusContext, keyIntent, stillTyping, toastMs, type Lens } from "../lib/keys";
 import { atWork } from "../lib/live";
 import { groupCounts } from "../lib/queue";
+import { pageTitle } from "../lib/story";
 import { WorldLayer } from "../world/WorldData";
 import { CommandBar } from "./CommandBar";
 import { Help } from "./Help";
@@ -61,6 +62,7 @@ export function NewShell({ children }: { children: ReactNode }) {
   const avatar = useRef<HTMLButtonElement>(null);
   const menuBox = useRef<HTMLDivElement>(null);
   const noticeTimer = useRef<number | null>(null);
+  const lastFieldKey = useRef<number | null>(null);        // when a key last went into a field
 
   // each lens remembers where you were in it: «1» from the map goes back to the item you were reading
   useEffect(() => {
@@ -68,12 +70,12 @@ export function NewShell({ children }: { children: ReactNode }) {
   }, [lens, location.pathname, location.search]);
   const go = useCallback((l: Lens) => navigate(lastPlace.current[l] ?? `/app/new/${l}`), [navigate]);
 
-  useEffect(() => { document.title = `AgenticOps · ${t(`lens.${lens}`)}`; }, [lens, t]);
+  useEffect(() => { document.title = pageTitle(location.pathname, t(`lens.${lens}`), t("act.story")); }, [location.pathname, lens, t]);
 
   const notify = useCallback((text: string) => {
     if (noticeTimer.current) window.clearTimeout(noticeTimer.current);
     setNotice(text);
-    noticeTimer.current = window.setTimeout(() => { noticeTimer.current = null; setNotice(null); }, 2600);
+    noticeTimer.current = window.setTimeout(() => { noticeTimer.current = null; setNotice(null); }, toastMs(text));
   }, []);
   useEffect(() => () => { if (noticeTimer.current) window.clearTimeout(noticeTimer.current); }, []);
 
@@ -84,10 +86,15 @@ export function NewShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      const intent = keyIntent(e, { ...focusContext(document.activeElement), modal: help || menu, singleKeys });
+      const at = focusContext(document.activeElement), now = performance.now();
+      // a key that goes into a field starts a moment in which keys are still typing — the field may be taken away
+      // under the hands (lib/keys.stillTyping); each key swallowed that way renews it, Enter / Esc / Tab end it
+      const typing = !at.inField && stillTyping(lastFieldKey.current, now);
+      if (at.inField || typing) lastFieldKey.current = endsTyping(e.key) ? null : now;
+      const intent = keyIntent(e, { ...at, typing, modal: help || menu, singleKeys });
       if (!intent) return;
       if (intent.type === "escape") {
-        const step = escapeStep({ help, menu, inField: focusContext(document.activeElement).inField });
+        const step = escapeStep({ help, menu, inField: at.inField });
         if (step === "help") return setHelp(false);
         if (step === "menu") return closeMenu(true);
         if (step === "blur") return (document.activeElement as HTMLElement).blur();

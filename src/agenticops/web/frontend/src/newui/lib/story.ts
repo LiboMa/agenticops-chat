@@ -9,7 +9,9 @@ import { planHead, stepsVm } from "./briefs/plan";
  *  comes from the classic pages' own rules (lib/issuePhases, lib/changePhases) — this file only lays their answer
  *  out on the six steps of the design (the classic pages draw four and five). */
 
-export type SpineState = "done" | "now" | "bad" | "closed" | "todo";
+/** "skipped" = the item ended without ever taking this step (an issue resolved straight from «open» was never
+ *  diagnosed, planned, approved or run): shown as not taken, never as done. */
+export type SpineState = "done" | "now" | "bad" | "closed" | "todo" | "skipped";
 export interface SpineStep<S extends string = string> { id: S; state: SpineState }
 
 export const ISSUE_STEPS = ["found", "rca", "plan", "approve", "run", "accept"] as const;
@@ -36,7 +38,12 @@ const ISSUE_AT: Partial<Record<IssueSub, [IssueStep, SpineState]>> = {
 const furthest = (r: Reached): IssueStep => (r.run ? "run" : r.approved ? "approve" : r.plan ? "plan" : r.rca ? "rca" : "found");
 
 export function issueSpine(sub: IssueSub, reached: Reached): SpineStep<IssueStep>[] {
-  if (sub === "resolved") return ISSUE_STEPS.map((id) => ({ id, state: "done" }));
+  if (sub === "resolved") {
+    // found and closed, certainly; in between only what the record holds — an alarm that recovered, or a person
+    // marking an open issue resolved, must not draw an approval and a run that never happened
+    const took: Record<IssueStep, boolean> = { found: true, rca: reached.rca, plan: reached.plan, approve: reached.approved, run: reached.run, accept: true };
+    return ISSUE_STEPS.map((id) => ({ id, state: took[id] ? "done" : "skipped" }));
+  }
   if (sub === "dismissed") return lay(ISSUE_STEPS, furthest(reached), "closed");       // it stops where it had got to
   const at = ISSUE_AT[sub];
   if (at) return lay(ISSUE_STEPS, at[0], at[1]);
@@ -45,8 +52,9 @@ export function issueSpine(sub: IssueSub, reached: Reached): SpineStep<IssueStep
   return ISSUE_STEPS.map((id, k) => ({ id, state: k <= last ? "done" : "todo" }));
 }
 
-/** `current` is the classic page's phase (its «run» covers the approval); `approved` tells the two apart. */
-export function changeSpine(sub: ChangeSub, current: ChangePhaseId, approved: boolean): SpineStep<ChangeStep>[] {
+/** `current` is the classic page's phase (its «run» covers the approval); `approved` tells the two apart;
+ *  `failedAtAcceptance` = the run finished and a person judged the change failed when accepting it. */
+export function changeSpine(sub: ChangeSub, current: ChangePhaseId, approved: boolean, failedAtAcceptance = false): SpineStep<ChangeStep>[] {
   switch (sub) {
     case "draft": return lay(CHANGE_STEPS, "request", "now");
     case "reviewing":
@@ -56,7 +64,7 @@ export function changeSpine(sub: ChangeSub, current: ChangePhaseId, approved: bo
     case "executing": return lay(CHANGE_STEPS, "run", "now");
     case "awaitingAcceptance": return lay(CHANGE_STEPS, "accept", "now");
     case "completed": return CHANGE_STEPS.map((id) => ({ id, state: "done" }));
-    case "failed":
+    case "failed": return lay(CHANGE_STEPS, failedAtAcceptance ? "accept" : "run", "bad");
     case "rolledBack": return lay(CHANGE_STEPS, "run", "bad");
     case "rejected":
     case "cancelled": {
@@ -67,17 +75,38 @@ export function changeSpine(sub: ChangeSub, current: ChangePhaseId, approved: bo
   }
 }
 
-export type WaitKey = "wait.you" | "wait.person" | "wait.agent" | "wait.agentIdle" | "wait.executor" | "wait.none";
+export type WaitKey = "wait.you" | "wait.person" | "wait.agent" | "wait.agentOverdue" | "wait.agentIdle" | "wait.executor" | "wait.none";
 
 /** The status line's «who it waits on». «You» only when the item is on this person's own list — an approval
  *  somebody else must give waits on a person, not on you. «An agent is on it» only when the server's record shows
  *  one at work (`agentAtWork`; null = that record is not loaded, so nothing is said): hundreds of open issues wait
- *  for an agent that nobody started. */
-export function waitKey(waitingFor: WaitingFor, mine: boolean, agentAtWork: boolean | null): WaitKey | null {
-  if (waitingFor === null) return "wait.none";
-  if (waitingFor === "rca_agent" || waitingFor === "sre_agent") return agentAtWork === null ? null : agentAtWork ? "wait.agent" : "wait.agentIdle";
+ *  for an agent that nobody started — and not when that work has outlived its own limit ("overdue": the record
+ *  shows a start and no end; most likely nothing is working on it any more). «Nobody has to do anything» only for
+ *  an item that is `closed`: the classic model also answers «nobody» while its data is loading or failed to load,
+ *  and then the page says nothing. */
+export function waitKey(waitingFor: WaitingFor, mine: boolean, agentAtWork: boolean | "overdue" | null, closed = false): WaitKey | null {
+  if (waitingFor === null) return closed ? "wait.none" : null;
+  if (waitingFor === "rca_agent" || waitingFor === "sre_agent") {
+    return agentAtWork === null ? null : agentAtWork === "overdue" ? "wait.agentOverdue" : agentAtWork ? "wait.agent" : "wait.agentIdle";
+  }
   if (waitingFor === "executor") return "wait.executor";
   return mine ? "wait.you" : "wait.person";
+}
+
+/** The time behind «for how long» on the status line; null = none is shown. A person's wait is the item's own
+ *  waiting time. An agent's or the executor's turn has a duration only when a record of the work gives its start
+ *  (`laneSince`) — the item's waiting time is then something else (for an undiagnosed issue, the alarm's last
+ *  repeat), and «an agent's turn, already 5 minutes» would be made up. */
+export function waitSince(wait: WaitKey | null, itemSince: string | null | undefined, laneSince: string | null | undefined): string | null {
+  if (wait === "wait.you" || wait === "wait.person") return itemSince ?? null;
+  if (wait === "wait.agent" || wait === "wait.agentOverdue" || wait === "wait.executor") return laneSince ?? null;
+  return null;
+}
+
+/** The browser tab's title: a story is named by its item, a lens by itself. */
+export function pageTitle(pathname: string, lensLabel: string, storyLabel: string): string {
+  const m = /^\/app\/new\/story\/([IC])([1-9]\d*)$/.exec(pathname);
+  return m ? `AgenticOps · ${m[1]}#${m[2]} ${storyLabel}` : `AgenticOps · ${lensLabel}`;
 }
 
 /** An item's «经过» page. */
@@ -151,23 +180,35 @@ const detailOf = (e: PipelineEvent): Record<string, unknown> => {
 };
 const newer = (a: PipelineEvent, b: PipelineEvent) => (a.created_at ?? "").localeCompare(b.created_at ?? "") || a.id - b.id;
 
-export interface Closure { by: string; at: string; reason: string }
+export interface Closure {
+  by: string;
+  at: string;
+  /** the status it moved from; "" when the record does not say */
+  from: string;
+  /** what the PERSON wrote with the move — the event's `note`, which the server sets only for text a person typed.
+   *  The event's `reason` is often the code's own sentence («marked as a false positive», «anomaly status update»,
+   *  «edited via the API») and is never quoted under anybody's name */
+  note: string;
+}
 
-/** What the status endpoint records as the reason when the person gave none (web/app.api_update_anomaly_status):
- *  the server's filler, not anybody's words — never quoted. */
-const NO_REASON = "anomaly status update";
-
-/** Who moved the issue to `to` last, when, and the reason recorded with the move (the timeline's `status_changed`). */
+/** Who moved the issue to `to` last, when, from which status, and what they wrote (the timeline's `status_changed`). */
 export function lastMove(events: PipelineEvent[] | undefined, to: string): Closure | null {
   const moves = (events ?? []).filter((e) => e.event_type === "status_changed" && detailOf(e).to === to).sort(newer);
   const last = moves[moves.length - 1];
   if (!last) return null;
-  const reason = detailOf(last).reason;
-  return { by: last.actor, at: last.created_at ?? "", reason: typeof reason === "string" && reason !== NO_REASON ? reason : "" };
+  const { from, note } = detailOf(last);
+  return { by: last.actor, at: last.created_at ?? "", from: typeof from === "string" ? from : "", note: typeof note === "string" ? note : "" };
 }
 
-/** Who dismissed the issue, when, and the reason they gave: the newest move to `dismissed`. */
+/** Who dismissed the issue, when, and what they wrote: the newest move to `dismissed`. */
 export const closure = (events: PipelineEvent[] | undefined): Closure | null => lastMove(events, "dismissed");
+
+/** When a plan was last rewritten: the newest «plan updated» on the timeline that names it (a draft is updated in
+ *  place and its row's own times do not move). null = no rewrite on record. */
+export function planRewrittenAt(events: PipelineEvent[] | undefined, planId: number): string | null {
+  const hits = (events ?? []).filter((e) => e.event_type === "fix_plan_updated" && detailOf(e).plan_id === planId).sort(newer);
+  return hits.length ? hits[hits.length - 1].created_at ?? null : null;
+}
 
 export interface Note { id: number; by: string; at: string; text: string }
 

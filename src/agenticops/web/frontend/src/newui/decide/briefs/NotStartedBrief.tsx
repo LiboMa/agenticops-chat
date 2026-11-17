@@ -19,7 +19,7 @@ import { ChecksSection, PlanSection } from "../widgets/PlanSection";
 import { ReasonForm } from "../widgets/ReasonForm";
 import { useHold } from "../widgets/useHold";
 import { refusal } from "./ApproveBrief";
-import { errorText, useBriefKeys, useDecide, type BriefProps } from "./briefContext";
+import { useBriefKeys, useDecision, type BriefProps } from "./briefContext";
 
 interface ViewProps extends BriefProps {
   kind: "fix" | "change";
@@ -28,8 +28,8 @@ interface ViewProps extends BriefProps {
   /** the actions the server offers for running it (`execute`) and for taking the approval back */
   actions: UiAction[] | undefined;
   canWithdraw: boolean;
-  /** run it now — the approved plan, bound to the hash the page showed */
-  run: () => Promise<unknown>;
+  /** run it now — the plan the hold began on (its id), never one read again from the page */
+  run: (planId: number) => Promise<unknown>;
   withdraw: (reason: string) => Promise<unknown>;
   withdrawn: { label: string; placeholder: string; note: string; toast: string };
 }
@@ -39,7 +39,7 @@ interface ViewProps extends BriefProps {
 function NotStartedView({ item, frame, kind, query, plan, actions, canWithdraw, run, withdraw, withdrawn }: ViewProps) {
   const t = useNfT();
   const { user } = useAuth();
-  const { done } = useDecide();
+  const decide = useDecision(item);
   const [form, setForm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,14 +49,15 @@ function NotStartedView({ item, frame, kind, query, plan, actions, canWithdraw, 
   const act = async (what: () => Promise<unknown>, toast: string) => {
     setBusy(true);
     setError(null);
-    try { await what(); done(toast); } catch (e) { setError(t("err.failed", { msg: errorText(e) })); } finally { setBusy(false); }
+    setError(await decide(what, toast));
+    setBusy(false);
   };
-  const hold = useHold(target, () => void act(run, t("toast.queued", { ref: item.ref })));
+  const hold = useHold(target, (tg) => void act(() => run(tg.planId), t("toast.queued", { ref: item.ref })));
 
   useBriefKeys({
     onKey: (key, _e, repeat) => {
       if (form) return false;
-      if (key === "a") { if (!repeat) hold.down(); return true; }
+      if (key === "a") { if (!repeat) hold.down("a"); return true; }
       hold.cancel();
       if (frame.readOnly) return false;
       if (key === "r" && canWithdraw) { setError(null); setForm(true); return true; }
@@ -111,7 +112,7 @@ export function NotStartedBrief(props: BriefProps) {
   return (
     <NotStartedView {...props} kind="fix" query={planQ} plan={plan} actions={plan?.available_actions}
                     canWithdraw={!!findAction(plan?.available_actions, "reject")?.allowed}
-                    run={() => execute.mutateAsync(plan!.id)} withdraw={(reason) => reject.mutateAsync({ id: plan!.id, reason })}
+                    run={(planId) => execute.mutateAsync(planId)} withdraw={(reason) => reject.mutateAsync({ id: plan!.id, reason })}
                     withdrawn={{ label: t("act.withdraw"), placeholder: t("withdraw.placeholder"), note: t("withdraw.note"), toast: t("toast.withdrawn", { ref: props.item.ref }) }} />
   );
 }

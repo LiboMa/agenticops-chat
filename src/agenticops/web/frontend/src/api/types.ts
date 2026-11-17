@@ -260,6 +260,10 @@ export interface FixPlan {
   /** MVP-2.9.0: how the code classifies each step's command (services/change_steps.step_tier), one per step:
    *  write | readonly | blocked | unknown. Read context, never part of the content hash. */
   step_tiers?: string[];
+  /** MVP-2.9.0: whether `rejection_reason` is something a person wrote about this plan (not a reason code wrote) */
+  rejection_is_feedback?: boolean;
+  /** MVP-2.9.0, on the approve response only: whether the approval queued the plan's run */
+  run_queued?: boolean | null;
 }
 
 export interface FixExecution {
@@ -1082,6 +1086,18 @@ export interface GalaxyGraph {
   nodes: GalaxyGraphNode[];
   edges: GalaxyGraphEdge[];
   build_id: number | null;
+  /** MVP-2.9.0: when this build finished (UTC, Z) — the age of the relations */
+  built_at?: string | null;
+  /** MVP-2.9.0: when health and «absent» were read (UTC, Z) — they are not the build's, they are of then */
+  health_at?: string | null;
+}
+/** GET /api/galaxy/health (MVP-2.9.0): health and «absent» alone, as of `at`, for the build the graph endpoint serves.
+ *  A resource node not listed under `health` has no open issue (unknown). */
+export interface GalaxyHealthRead {
+  build_id: number | null;
+  health: Record<string, string>;
+  absent: string[];
+  at: string | null;
 }
 
 // ── Security review (MVP-2.5.0) ────────────────────────────────

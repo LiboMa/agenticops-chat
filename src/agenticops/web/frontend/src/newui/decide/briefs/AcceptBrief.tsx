@@ -9,13 +9,13 @@ import { Message, StateBlock } from "../../shell/StateBlock";
 import { BriefFrame } from "../BriefFrame";
 import { AcceptBody, useAcceptChecklist } from "../widgets/AcceptBody";
 import { ReasonForm } from "../widgets/ReasonForm";
-import { errorText, useBriefKeys, useDecide, type BriefProps } from "./briefContext";
+import { useBriefKeys, useDecision, type BriefProps } from "./briefContext";
 
 /** A run that succeeded but that the code could not call «passed»: a person looks at the checks that have no result
  *  or a warning, ticks each, and accepts — or says what is wrong. The ticked checks go into the audit trail. */
 export function AcceptBrief({ item, frame }: BriefProps) {
   const t = useNfT();
-  const { done } = useDecide();
+  const decide = useDecision(item);
   const issueId = parseItem(item.id)?.id ?? 0;
   const runsQ = useIssueExecutions(issueId);
   const run = runToAccept(runsQ.data);
@@ -28,12 +28,9 @@ export function AcceptBrief({ item, frame }: BriefProps) {
   const send = async (decision: "accepted" | "rejected", reason: string) => {
     if (!run) return;
     setError(null);
-    try {
-      await accept.mutateAsync({ id: run.id, decision, reason, ...(decision === "accepted" ? { confirmed_checks: list.confirmed() } : {}) });
-      done(t(decision === "accepted" ? "toast.accepted" : "toast.notAccepted", { ref: item.ref }));
-    } catch (e) {
-      setError(t("err.failed", { msg: errorText(e) }));
-    }
+    setError(await decide(
+      () => accept.mutateAsync({ id: run.id, decision, reason, ...(decision === "accepted" ? { confirmed_checks: list.confirmed() } : {}) }),
+      t(decision === "accepted" ? "toast.accepted" : "toast.notAccepted", { ref: item.ref })));
   };
   const acceptNow = () => { if (list.ready && !accept.isPending) void send("accepted", list.reason()); };
 

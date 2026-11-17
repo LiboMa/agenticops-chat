@@ -1,6 +1,6 @@
 import { laneLabel } from "../decide/Feed";
 import { useNfT, type NfT } from "../i18n";
-import { LANE_GROUPS, type LaneView } from "../lib/live";
+import { LANE_GROUPS, type LaneView, type recentCut } from "../lib/live";
 import { utcStamp } from "../lib/time";
 
 /** A lane's edge colour, as the stylesheet names it. */
@@ -23,10 +23,12 @@ export function laneState(lane: LaneView, now: number, t: NfT): string {
 }
 
 /** The left rail of «现场»: every lane in its group — at work now, due next, ended in the last day. */
-export function Lanes({ lanes, currentId, view, staleAt, now, onPick, onRetry }: {
+export function Lanes({ lanes, currentId, view, staleAt, cut, now, onPick, onRetry }: {
   lanes: LaneView[]; currentId: string | null; view: "loading" | "failed" | "ready";
   /** the list is older than the newest attempt: when it was fetched (epoch ms) */
   staleAt: number | null;
+  /** «ended in the last day» shows only the newest of what ended (lib/live.recentCut); null = everything is listed */
+  cut: ReturnType<typeof recentCut>;
   now: number; onPick: (id: string) => void; onRetry: () => void;
 }) {
   const t = useNfT();
@@ -38,7 +40,7 @@ export function Lanes({ lanes, currentId, view, staleAt, now, onPick, onRetry }:
       </div>
       {staleAt !== null && (
         <p className="stalebar" role="alert">
-          {t("live.stale", { t: utcStamp(staleAt, now) })}　
+          {t("live.stale", { t: utcStamp(staleAt, now) })}{"　"}
           <button type="button" className="btn sm" onClick={onRetry}><span className="t">{t("state.retry")}</span></button>
         </p>
       )}
@@ -53,6 +55,12 @@ export function Lanes({ lanes, currentId, view, staleAt, now, onPick, onRetry }:
           <div key={g} style={{ display: "contents" }}>
             <h2 className="lgroup">{t(`live.group.${g}`)}<span className="num">{part.length}</span></h2>
             {!part.length && <p className="q-note" style={{ margin: "0 2px 4px" }}>{t("feed.none")}</p>}
+            {g === "recent" && cut && (
+              <p className="q-note" style={{ margin: "0 2px 4px" }}>
+                {[cut.work && t("live.cut.work", { shown: cut.work.shown, total: cut.work.total }),
+                  cut.schedules && t("live.cut.schedules", { shown: cut.schedules.shown, total: cut.schedules.total })].filter(Boolean).join("　")}
+              </p>
+            )}
             {part.map((l) => (
               <button key={l.id} type="button" className={`lane ${LANE_CLASS[l.tone]}`} aria-selected={l.id === currentId} onClick={() => onPick(l.id)}>
                 <span className="lt"><span className="ag">{agentName(l.agent, t)}</span><span className="st">{laneState(l, now, t)}</span></span>

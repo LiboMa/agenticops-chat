@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { FixPlan } from "@/api/types";
 import { useNfT } from "../../i18n";
-import { planHead, postChecksVm, rollbackVm, stepsVm } from "../../lib/briefs/plan";
+import { checksVm, planHead, rollbackVm, stepsVm, type CheckVm } from "../../lib/briefs/plan";
 import { Prov } from "./Cause";
 import { Steps } from "./Steps";
 
@@ -36,18 +36,37 @@ export function PlanSection({ plan, heading, kind, rollback = true, children }: 
   );
 }
 
-/** «How we know it worked»: the plan's declared checks, named as the executor reports them. */
+function CheckList({ checks, when }: { checks: CheckVm[]; when: string }) {
+  return (
+    <ul className="checks">
+      {checks.map((c) => (
+        <li key={c.id}>
+          <span className="pc">{c.id}</span>
+          <span>{c.text}{c.cmd && <code className="cmd">{c.cmd}</code>}</span>
+          <span className="st">{when}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** «How we know it worked» — and what is checked before anything runs: the plan's declared checks of both lists,
+ *  each with its command. Both are part of what an approval's hash covers, so an approver sees both, whole. */
 export function ChecksSection({ plan }: { plan: FixPlan }) {
   const t = useNfT();
-  const checks = postChecksVm(plan);
+  const pre = checksVm(plan, "pre"), post = checksVm(plan, "post");
   return (
     <div className="sec">
       <h2>{t("sec.done")}</h2>
-      {checks.length > 0 ? (
+      {pre.length > 0 && (
         <>
-          <ul className="checks">
-            {checks.map((c) => <li key={c.id}><span className="pc">{c.id}</span><span>{c.text}</span><span className="st">{t("checks.after")}</span></li>)}
-          </ul>
+          <p className="note" style={{ marginTop: 0 }}>{t("checks.preNote")}</p>
+          <CheckList checks={pre} when={t("checks.before")} />
+        </>
+      )}
+      {post.length > 0 ? (
+        <>
+          <CheckList checks={post} when={t("checks.after")} />
           <p className="note">{t("checks.note")}</p>
         </>
       ) : <p className="note">{t("checks.none")}</p>}

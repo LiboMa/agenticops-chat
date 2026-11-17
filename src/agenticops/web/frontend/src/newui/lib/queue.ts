@@ -117,3 +117,26 @@ export function pruneHandled(items: AttentionItem[], handled: ReadonlyMap<string
   const kept = new Map([...handled].filter(([id, s]) => live.get(id) === s));
   return kept.size === handled.size ? handled : kept;
 }
+
+export interface Settled {
+  /** hide the item from the list now (the server's list catches up at its next refresh) */
+  handled: boolean;
+  /** say it in a toast — the brief that asked may no longer be on the page */
+  toast: boolean;
+  /** where the page goes: an item id, null = the empty page, undefined = stay where the person is */
+  goTo: string | null | undefined;
+}
+
+/** The answer to a decision on `item` has arrived — possibly after the person moved on. `shown` is what the page
+ *  shows NOW: the lens reads it when the answer arrives, never from the moment the request was sent. A decision
+ *  that went through is always said and hides the item, but only moves the page when the page still shows that
+ *  item. One that failed is always said in a toast too — the brief shows it on its own line, but a brief can be
+ *  replaced the next moment, and then nothing would say the decision did not happen. */
+export function settle(items: AttentionItem[], shown: { id: string | null }, item: AttentionItem, ok: boolean): Settled {
+  if (!ok) return { handled: false, toast: true, goTo: undefined };
+  if (shown.id !== item.id) return { handled: true, toast: true, goTo: undefined };
+  const at = items.findIndex((i) => i.id === item.id);
+  const next = at < 0 ? null : items[at + 1] ?? items[at - 1] ?? null;
+  return { handled: true, toast: true, goTo: next ? next.id : null };
+}
+

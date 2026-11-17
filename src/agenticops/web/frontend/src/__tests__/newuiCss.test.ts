@@ -73,6 +73,15 @@ describe("newui.css stays inside .nf", () => {
     expect([...used].filter((u) => !keyframes.includes(u))).toEqual([]);
   });
 
+  it("sets no text below 12 px — the design's floor", () => {
+    // sizes are the --fs-* scale or a px literal; anything else would need this test to learn it
+    const sizes = [...css.matchAll(/(?:font-size|--fs-[\w-]+)\s*:\s*([^;}]+)/g)].map((m) => m[1].trim());
+    expect(sizes.length).toBeGreaterThan(100);
+    const odd = sizes.filter((v) => !/^(\d+(\.\d+)?px|var\(--fs-[\w-]+\)|inherit)$/.test(v));
+    expect(odd).toEqual([]);
+    expect(sizes.filter((v) => v.endsWith("px") && parseFloat(v) < 12)).toEqual([]);
+  });
+
   it("does not use a class name Tailwind already gives a meaning to", () => {
     // `grid` is Tailwind's display:grid — a <table class="grid"> would stop being a table
     const bare = rules.flatMap((r) => r.selectors).filter((s) => /\.(grid|flex|block|hidden|table|fixed|absolute|relative|sticky|truncate|container|border|shadow|ring|filter|blur|transition|transform|outline|underline|italic|uppercase|visible|invisible|collapse|contents|inline|static|resize|grow|shrink)(?![\w-])/.test(s));

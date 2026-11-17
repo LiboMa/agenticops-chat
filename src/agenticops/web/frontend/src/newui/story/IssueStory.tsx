@@ -2,7 +2,6 @@ import { useState } from "react";
 import { ApiError } from "@/api/client";
 import type { FixExecution, FixPlan } from "@/api/types";
 import { useAnomaly } from "@/hooks/useAnomaly";
-import { useAnomalyRca } from "@/hooks/useAnomalyRca";
 import { useAuth } from "@/hooks/useAuth";
 import { useFixPlans } from "@/hooks/useFixPlans";
 import { useIssueExecutions } from "@/hooks/useIssueExecutions";
@@ -21,11 +20,12 @@ import { PlanSection } from "../decide/widgets/PlanSection";
 import { Quote } from "../decide/widgets/RunSteps";
 import { useActivity } from "../hooks/useActivity";
 import { useReopenIssue } from "../hooks/useIssueDecisions";
+import { useFreshRca } from "../hooks/useItemData";
 import { useNfT } from "../i18n";
 import { agentOn, stoppedOn, whoText } from "../lib/activity";
 import { causeVm } from "../lib/briefs/cause";
 import { humanVerdict } from "../lib/briefs/verdict";
-import { closure, issueSpine, lastMove, planBasis, planLine, reachedOf, waitKey, type IssueStep } from "../lib/story";
+import { closure, issueSpine, lastMove, planBasis, planLine, planRewrittenAt, reachedOf, waitKey, waitSince, type IssueStep } from "../lib/story";
 import { utcStamp } from "../lib/time";
 import { Message, StateBlock } from "../shell/StateBlock";
 import { useShell } from "../shell/shellContext";
@@ -55,7 +55,7 @@ function IssueRecord({ id, frame }: { id: number; frame: StoryFrame }) {
   const { notify } = useShell();
   const { openPeek } = useDecide();
   const issueQ = useAnomaly(id);
-  const rcaQ = useAnomalyRca(id);
+  const rcaQ = useFreshRca(id);                            // read again each time the page opens: never a diagnosis from a cache
   const plansQ = useFixPlans({ health_issue_id: id });
   const runsQ = useIssueExecutions(id);
   const timeline = useIssueTimeline(id);
@@ -106,7 +106,12 @@ function IssueRecord({ id, frame }: { id: number; frame: StoryFrame }) {
   const planOf = (run: FixExecution): FixPlan | null => plansQ.data?.find((p) => p.id === run.fix_plan_id) ?? null;
   const verdict = humanVerdict(timeline.data, rca?.id);
   const gone = issue.status === "dismissed" ? closure(timeline.data) : null;
-  const wait = waitKey(model.phase.waitingFor, !!frame.mine, activity ? !!lane : null);
+  const done = issue.status === "resolved" ? lastMove(timeline.data, "resolved") : null;
+  const closed = issue.status === "resolved" || issue.status === "dismissed";
+  // an agent's work that outlived its own limit is not «an agent is on it»
+  const wait = waitKey(model.phase.waitingFor, !!frame.mine, !activity ? null : !lane ? false : lane.overdue ? "overdue" : true, closed);
+  const stateName = (status: string) => (t(`state.issue.${status}`) === `state.issue.${status}` ? status : t(`state.issue.${status}`));
+  const rewrittenAt = plan ? planRewrittenAt(timeline.data, plan.id) : null;
   const source = issueSourceLabel(issue.source, classic);
   const closedAt = steps.find((s) => s.state === "closed")?.id ?? null;
   // why a diagnosis did not go on to a plan by itself: the classic page's own reason (the gate, or the second model)
@@ -160,7 +165,10 @@ function IssueRecord({ id, frame }: { id: number; frame: StoryFrame }) {
                 {line.unclear > 0 ? t("story.plan.unclear", { u: line.unclear }) : ""}
               </p>
               {basis === "older" && <p><Prov code />{t("plan.basis.older")}</p>}
-              {basis === "rewritten" && <p><Prov code />{t("plan.basis.rewritten", { t: utcStamp(plan.created_at, frame.now) })}</p>}
+              {basis === "rewritten" && (
+                <p><Prov code />{t(rewrittenAt ? "plan.basis.rewrittenAt" : "plan.basis.rewritten",
+                                   { t: utcStamp(plan.created_at, frame.now), at: utcStamp(rewrittenAt, frame.now) })}</p>
+              )}
               {model.otherPlans.length > 0 && <p>{t("story.plan.count", { n: model.otherPlans.length + 1 })}</p>}
               <details className="more"><summary>{t("story.plan.steps")}</summary><PlanSection plan={plan} heading={t("sec.plan")} kind="fix" /></details>
               {plan.status === "rejected" && (
@@ -193,6 +201,9 @@ function IssueRecord({ id, frame }: { id: number; frame: StoryFrame }) {
         {sub === "passed" && <p><Prov code />{t("story.accept.passed")}</p>}
         {sub === "unverified" && <p><Prov code />{t("story.accept.noVerdict")}</p>}
         {sub === "resolved" && <p><Prov code />{t("story.resolved", { t: utcStamp(issue.resolved_at, frame.now) })}</p>}
+        {/* it was closed without running a fix: say from where, so «resolved» is not read as «fixed» */}
+        {sub === "resolved" && done?.from && done.from !== "fix_executed" && <p><Prov code />{t("story.resolved.from", { from: stateName(done.from) })}</p>}
+        {sub === "resolved" && done?.note && <Quote text={done.note} cite={`${who(done.by)}　${utcStamp(done.at, frame.now)} UTC`} />}
       </>
     ),
   };
@@ -203,7 +214,7 @@ function IssueRecord({ id, frame }: { id: number; frame: StoryFrame }) {
     approve: { at: plan?.approved_at, who: plan?.approved_at ? who(plan.approved_by) : null },
     run: { at: latest?.started_at ?? latest?.created_at, who: latest?.executed_by },
     // resolved: who marked it, from the timeline (the run's acceptance, if any, stands with its run)
-    accept: sub === "resolved" ? { at: issue.resolved_at, who: who(lastMove(timeline.data, "resolved")?.by) || null }
+    accept: sub === "resolved" ? { at: issue.resolved_at, who: who(done?.by) || null }
       : { at: latest?.accepted_at, who: who(latest?.accepted_by) || null },
   };
   const view: StepView[] = steps.map((s) => ({
@@ -214,7 +225,8 @@ function IssueRecord({ id, frame }: { id: number; frame: StoryFrame }) {
         {s.id === closedAt && (
           <>
             <p><Prov code />{t("story.dismissed")}</p>
-            {gone?.reason && <Quote text={gone.reason} cite={t("story.dismissed.cite", { by: who(gone.by), t: utcStamp(gone.at, frame.now) })} />}
+            {/* only what the person typed is quoted under their name — never the code's own reason */}
+            {gone?.note && <Quote text={gone.note} cite={t("story.dismissed.cite", { by: who(gone.by), t: utcStamp(gone.at, frame.now) })} />}
           </>
         )}
       </>
@@ -222,13 +234,13 @@ function IssueRecord({ id, frame }: { id: number; frame: StoryFrame }) {
   }));
 
   const canReopen = issue.status === "dismissed" && !frame.readOnly;
-  const state = t(`state.issue.${issue.status}`) === `state.issue.${issue.status}` ? issue.status : t(`state.issue.${issue.status}`);
+  const state = stateName(issue.status);
   return (
     <>
       <article className="story card" aria-label={t("story.label")}>
         <StoryHead frame={frame} refText={`I#${id}`} tone={TONE[issue.severity] ?? ""} sev={t(`sev.${issue.severity}`)} title={issue.title}
                    state={state} wait={wait} stuck={!!lane?.overdue} liveLane={(lane ?? halted)?.id}
-                   since={wait === "wait.agent" && lane?.since ? lane.since : issue.waiting_since ?? null}
+                   since={waitSince(wait, issue.waiting_since, lane?.since)}
                    place={[issue.account_name, issueFacts(issue).region].filter(Boolean).join("　")}>
           {canReopen && (
             <p style={{ margin: "10px 0 0" }}>
@@ -250,7 +262,7 @@ function IssueRecord({ id, frame }: { id: number; frame: StoryFrame }) {
             .map((r) => ({ label: classic(r.labelKey), value: r.value, kind: r.kind, href: r.href })),
           ...(issue.occurrence_count > 1 ? [{ label: t("fact.seen"), value: `× ${issue.occurrence_count}` }] : []),
         ]} />
-        <Notes issueId={id} events={timeline.data} canNote={!!findAction(issue.available_actions, "note")?.allowed} now={frame.now} />
+        <Notes issueId={id} events={timeline.data} failed={timeline.isError} canNote={!!findAction(issue.available_actions, "note")?.allowed} now={frame.now} />
       </aside>
     </>
   );

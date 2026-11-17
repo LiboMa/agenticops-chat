@@ -34,6 +34,17 @@ describe("causeVm — the diagnosis as a brief shows it", () => {
     expect(causeVm(rca({ evidence_verified: false }), 0.6)!.evidenceGrounded).toBe(false);
   });
 
+  it("tells the model's own confidence from the figure the gate judged", () => {
+    // final review: «模型自己的把握 54%» was the stored value AFTER the code's penalties — the model had said 90%
+    const failedCheck = causeVm(rca({ confidence: 0.54, evidence_verified: false }), 0.6)!;
+    expect([pct(failedCheck.self), pct(failedCheck.gated), failedCheck.penalized, failedCheck.belowGate]).toEqual(["90%", "54%", true, true]);
+    const refuted = causeVm(rca({ confidence: 0.45, critic_verdict: "refuted" }), 0.6)!;
+    expect([pct(refuted.self), pct(refuted.gated), refuted.penalized]).toEqual(["90%", "45%", true]);
+    const clean = causeVm(rca({ confidence: 0.82, evidence_verified: true, critic_verdict: "supported" }), 0.6)!;
+    expect([pct(clean.self), pct(clean.gated), clean.penalized, clean.belowGate]).toEqual(["82%", "82%", false, false]);
+    expect(causeVm(rca({ confidence: undefined as unknown as number }), 0.6)!.self).toBeNull();
+  });
+
   it("is null without a diagnosis", () => {
     expect(causeVm(null, 0.6)).toBeNull();
     expect(causeVm(undefined, 0.6)).toBeNull();

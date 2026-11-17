@@ -1,12 +1,14 @@
 import type { WorldGraph } from "../lib/world/graph";
 import type { Disc, Layout } from "../lib/world/layout";
-import { flow } from "../lib/world/relations";
+import { dotWays } from "../lib/world/relations";
 import type { Drawn, RingTone, Scene } from "../lib/world/scene";
 
 /** The flat star map: every resource is a star, the ones with something open wear a ring. This file decides nothing:
  *  WHERE things are comes from lib/world/layout, WHAT to show from lib/world/scene. It draws the result it is handed
- *  and counts what it drew while drawing (`stats`), so the lens can check the picture against the data.
- *  Drawing is batched — a handful of paths per frame, not one per star. */
+ *  and counts each thing on the line that puts it on the canvas (`stats`); what it skips because it lies off the
+ *  screen is counted apart (`culled`), so the lens can check the picture against the data: drawn + off the screen
+ *  = what the scene asks for. The counts say how many, not which colour or where — the tests on a recording canvas
+ *  hold those (__tests__/newuiWorldSky.test.ts). Drawing is batched — a handful of paths per frame, not one per star. */
 
 const LABEL = "12px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif";
 const TAU = Math.PI * 2;
@@ -46,6 +48,7 @@ export class Sky {
   private cam = { x: 0, y: 0, z: 1, tx: 0, ty: 0, tz: 1 };
   private free = false;
   private drawn: Drawn = { ...NONE };
+  private off: Drawn = { ...NONE };
   private raf = 0;
   private frames = 0;
   private fpsAt = 0;
@@ -109,8 +112,11 @@ export class Sky {
     this.kick();
   }
 
-  /** What the last frame put on the canvas, counted while drawing. */
+  /** What the last frame put on the canvas, counted where it was drawn. */
   stats(): Drawn { return this.drawn; }
+
+  /** What the last frame left out because it lies off the screen. Names are never left out (the canvas clips them). */
+  culled(): Drawn { return this.off; }
 
   // ── the camera ────────────────────────────────────────────────────────────
   /** px per map unit at which the whole map fits into the free part of the canvas */
@@ -212,8 +218,8 @@ export class Sky {
     cam.x += (cam.tx - cam.x) * 0.12; cam.y += (cam.ty - cam.y) * 0.12; cam.z += (cam.tz - cam.z) * 0.12;
     cx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     cx.clearRect(0, 0, W, H);
-    const D: Drawn = { ...NONE };
-    if (!g || !g.nodes.length || this.mode.off) { this.drawn = D; this.next(); return; }
+    const D: Drawn = { ...NONE }, O: Drawn = { ...NONE };          // on the canvas · off the screen
+    if (!g || !g.nodes.length || this.mode.off) { this.drawn = D; this.off = O; this.next(); return; }
 
     const world = this.mode.world, z = cam.z, ox = W / 2, oy = H / 2, N = g.nodes, sx = this.sx, sy = this.sy, on = this.on;
     const mine = this.scOf === g, R = mine ? this.sc : null, sel = mine ? this.sel : null;
@@ -244,10 +250,9 @@ export class Sky {
     for (let k = 0; k < E.length; k++) {
       const e = E[k];
       if (e.contain) continue;
-      D.links++;
-      if (!on[e.a] && !on[e.b]) continue;
+      if (!on[e.a] && !on[e.b]) { O.links++; continue; }
       const p = faint && (faint.has(e.a) || faint.has(e.b)) ? P[2] : e.llm ? P[1] : P[0];
-      p.moveTo(sx[e.a], sy[e.a]); p.lineTo(sx[e.b], sy[e.b]);
+      p.moveTo(sx[e.a], sy[e.a]); p.lineTo(sx[e.b], sy[e.b]); D.links++;
     }
     cx.lineWidth = 1;
     cx.strokeStyle = this.rgba(world ? 0.2 : 0.06); cx.stroke(P[0]);
@@ -258,12 +263,10 @@ export class Sky {
     const dot = Math.max(1.1, Math.min(4.2, 0.34 * z)), B = Array.from({ length: 6 }, () => new Path2D()), F = new Path2D(), G = new Path2D(), G2 = new Path2D();
     for (let i = 0; i < N.length; i++) {
       const isGone = !!gone && gone.has(i), off = !!faint && faint.has(i);
-      D.nodes++;
-      if (isGone) D.gone++; else if (!off) D.bright++;
-      if (!on[i]) continue;
-      if (isGone) { const p = off ? G2 : G; p.moveTo(sx[i] + 3.2, sy[i]); p.arc(sx[i], sy[i], 3.2, 0, TAU); continue; }
+      if (!on[i]) { O.nodes++; if (isGone) O.gone++; else if (!off) O.bright++; continue; }
+      if (isGone) { const p = off ? G2 : G; p.moveTo(sx[i] + 3.2, sy[i]); p.arc(sx[i], sy[i], 3.2, 0, TAU); D.nodes++; D.gone++; continue; }
       const p = off ? F : B[i % 6];
-      p.moveTo(sx[i] + dot, sy[i]); p.arc(sx[i], sy[i], dot, 0, TAU);
+      p.moveTo(sx[i] + dot, sy[i]); p.arc(sx[i], sy[i], dot, 0, TAU); D.nodes++; if (!off) D.bright++;
     }
     for (let b = 0; b < 6; b++) {
       const tw = this.still ? 0.75 : 0.55 + 0.35 * Math.sin(t * 1.3 + b * 1.047);
@@ -281,33 +284,35 @@ export class Sky {
       cx.fillStyle = C.chalk;
       for (const [j] of g.adj[lit]) { cx.beginPath(); cx.arc(sx[j], sy[j], 2.4, 0, TAU); cx.fill(); }
       if (!this.still) g.adj[lit].forEach(([j, k, out], n) => {
-        const way = flow({ r: E[k].r, p: E[k].llm ? "llm" : "rule" });
-        if (way === "none") return;                                     // no known direction: no dot
         const u = (t * 0.45 + n * 0.37) % 1;
         cx.fillStyle = C.mint;
-        // from this resource outwards, towards it — or, for a two-way relation, one dot each way
-        for (const outward of way === "both" ? [true, false] : [(way === "forward") === out]) {
+        // from this resource outwards, towards it, one dot each way for a two-way relation, none when the direction
+        // is not known — the rule is lib/world/relations.dotWays, tested there against the resource card's wording
+        for (const outward of dotWays({ r: E[k].r, p: E[k].llm ? "llm" : "rule" }, out)) {
           const [fx, fy, tx, ty] = outward ? [sx[lit], sy[lit], sx[j], sy[j]] : [sx[j], sy[j], sx[lit], sy[lit]];
           cx.beginPath(); cx.arc(fx + (tx - fx) * u, fy + (ty - fy) * u, 2.2, 0, TAU); cx.fill();
         }
       });
     }
-    // a path between two resources: how they are linked — not a claim that a fault travels along it
+    // a path between two resources: how they are linked — not a claim that a fault travels along it. A link a
+    // model inferred is drawn as what it is: dashed, like every other inferred line on this map
     if (world && R?.path) {
-      cx.strokeStyle = C.mint; cx.lineWidth = 2.2; cx.beginPath();
-      R.path.forEach((i, k) => { if (k) cx.lineTo(sx[i], sy[i]); else cx.moveTo(sx[i], sy[i]); });
-      cx.stroke();
+      cx.strokeStyle = C.mint; cx.lineWidth = 2.2;
+      for (let k = 1; k < R.path.length; k++) {
+        const a = R.path[k - 1], b = R.path[k];
+        cx.setLineDash(R.pathHops?.[k - 1]?.llm ? [5, 5] : []);
+        cx.beginPath(); cx.moveTo(sx[a], sy[a]); cx.lineTo(sx[b], sy[b]); cx.stroke();
+      }
+      cx.setLineDash([]);
       cx.fillStyle = C.chalk;
       for (const i of R.path) { cx.beginPath(); cx.arc(sx[i], sy[i], 3, 0, TAU); cx.fill(); }
     }
     // resources with something open
     if (R) for (const r of R.rings) {
       const i = r.i, c = C[TONE_VAR[r.tone]], pulse = this.still || !world ? 1 : 1 + 0.3 * Math.sin(t * 2.4 + i);
-      D.rings++;
-      if (!r.dim) D.ringsBright++;
-      if (!on[i]) continue;
+      if (!on[i]) { O.rings++; if (!r.dim) O.ringsBright++; continue; }
       cx.strokeStyle = c; cx.globalAlpha = r.dim ? 0.18 : world ? 0.55 : 0.3; cx.lineWidth = 1.2;
-      cx.beginPath(); cx.arc(sx[i], sy[i], 7 * pulse, 0, TAU); cx.stroke();
+      cx.beginPath(); cx.arc(sx[i], sy[i], 7 * pulse, 0, TAU); cx.stroke(); D.rings++; if (!r.dim) D.ringsBright++;
       cx.globalAlpha = r.dim ? 0.25 : world ? 1 : 0.55; cx.fillStyle = c;
       cx.beginPath(); cx.arc(sx[i], sy[i], Math.max(2.6, dot + 0.6), 0, TAU); cx.fill();
       cx.globalAlpha = 1;
@@ -317,7 +322,7 @@ export class Sky {
       if (sel !== null && sel < N.length) { cx.strokeStyle = C.chalk; cx.lineWidth = 2; cx.beginPath(); cx.arc(sx[sel], sy[sel], 11, 0, TAU); cx.stroke(); }
       for (const i of R.labels) { D.named++; this.label(i, N[i].name, !!gone && gone.has(i)); }
     }
-    this.drawn = D;
+    this.drawn = D; this.off = O;
     this.drawMs += (performance.now() - t0 - this.drawMs) * 0.05;       // what one frame costs, smoothed
     this.next();
   };

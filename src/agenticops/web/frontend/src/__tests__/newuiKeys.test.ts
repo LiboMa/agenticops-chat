@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { escapeStep, keyIntent, type KeyContext, type KeyEventLike } from "@/newui/lib/keys";
+import {
+  SWAP_GUARD_MS, TYPING_GRACE_MS, endsTyping, escapeStep, keyIntent, stillTyping, swapGuard, toastMs, type KeyContext, type KeyEventLike,
+} from "@/newui/lib/keys";
 
 const ev = (key: string, over: Partial<KeyEventLike> = {}): KeyEventLike => ({
   key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, repeat: false, isComposing: false, ...over,
@@ -81,3 +83,49 @@ describe("escapeStep — what Escape does, one layer at a time", () => {
     expect(escapeStep(nothing)).toBe("lens");
   });
 });
+
+describe("typing does not turn into decisions when the field goes away under the hands", () => {
+  // a reason box can disappear mid-sentence: a colleague decided the item, the 30-second refresh replaced the page
+  it("for a moment after a key went into a field, single keys are still typing", () => {
+    expect(stillTyping(1000, 1000 + TYPING_GRACE_MS - 1)).toBe(true);
+    expect(stillTyping(1000, 1000 + TYPING_GRACE_MS)).toBe(false);
+    expect(stillTyping(null, 5000)).toBe(false);
+  });
+
+  it("a key that is still typing means nothing to a lens — but Escape and Cmd/Ctrl+K keep working", () => {
+    const typing = ctx({ typing: true });
+    expect(keyIntent(ev("d"), typing)).toBeNull();
+    expect(keyIntent(ev("Enter"), typing)).toBeNull();
+    expect(keyIntent(ev("1"), typing)).toBeNull();
+    expect(keyIntent(ev("Escape"), typing)).toEqual({ type: "escape" });
+    expect(keyIntent(ev("k", { metaKey: true }), typing)).toEqual({ type: "command" });
+  });
+
+  it("the keys that send or leave a field end the typing: J right after a sent reason must work", () => {
+    expect(["Enter", "Escape", "Tab"].map(endsTyping)).toEqual([true, true, true]);
+    expect(["a", " ", "Backspace", "，"].map(endsTyping)).toEqual([false, false, false, false]);
+  });
+});
+
+describe("swapGuard — a brief the person did not open does not take their keys at once", () => {
+  it("guards when the page changed by itself: the item was decided elsewhere, changed situation, or a decision moved on", () => {
+    expect(swapGuard("I12:approve", "I13:approve", false, 5000)).toBe(5000 + SWAP_GUARD_MS);
+    expect(swapGuard("I12:confirm", "I12:generate", false, 5000)).toBe(5000 + SWAP_GUARD_MS);
+    expect(swapGuard("I12:approve", "gone:I12", false, 5000)).toBe(5000 + SWAP_GUARD_MS);
+  });
+
+  it("does not guard the person's own J / K / click, the first page, or a page that did not change", () => {
+    expect(swapGuard("I12:approve", "I13:approve", true, 5000)).toBeNull();
+    expect(swapGuard(null, "I12:approve", false, 5000)).toBeNull();
+    expect(swapGuard("I12:approve", "I12:approve", false, 5000)).toBeNull();
+  });
+});
+
+describe("toastMs — a toast stays long enough to be read", () => {
+  it("a short line as before, a long refusal longer, never forever", () => {
+    expect(toastMs("已批准 I#12")).toBe(2600);
+    expect(toastMs("x".repeat(60))).toBe(4200);
+    expect(toastMs("x".repeat(400))).toBe(9000);
+  });
+});
+

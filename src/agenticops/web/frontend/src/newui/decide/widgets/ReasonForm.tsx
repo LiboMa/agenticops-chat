@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { isComposingKey } from "@/lib/composerKeys";
 import { useNfT } from "../../i18n";
 
 /** The one reason box of a brief, in place of its action row: every «no» needs a reason. Enter sends, Esc closes
@@ -21,7 +22,10 @@ export function ReasonForm({ label, placeholder, note, submit, busy, error, onSu
       <input ref={input} className="field" autoFocus value={value} maxLength={2000} aria-label={label} aria-invalid={missing}
              placeholder={missing ? t("reject.required") : placeholder}
              onChange={(e) => { setValue(e.target.value); setMissing(false); }}
-             onKeyDown={(e) => { if (e.key === "Escape" && !e.nativeEvent.isComposing) { e.nativeEvent.stopPropagation(); onCancel(); } }} />
+             onKeyDown={(e) => {
+               // Escape that cancels an input method's candidate is the input method's (isComposing, or keyCode 229)
+               if (e.key === "Escape" && !isComposingKey(e.nativeEvent)) { e.nativeEvent.stopPropagation(); onCancel(); }
+             }} />
       <button type="submit" className="btn primary" disabled={busy}><span className="t">{submit}</span><kbd>↵</kbd></button>
       <button type="button" className="btn" onClick={onCancel}><span className="t">{t("act.cancel")}</span><kbd>Esc</kbd></button>
       {note && <p className="note">{note}</p>}

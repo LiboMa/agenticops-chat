@@ -1,4 +1,4 @@
-import type { GalaxyGraph, GalaxyHealth } from "@/api/types";
+import type { GalaxyGraph, GalaxyHealth, GalaxyHealthRead } from "@/api/types";
 import { normalizeHealth } from "@/lib/galaxyHealth";
 
 /** «全景»: the relation graph as the map draws it. GET /api/galaxy/graph sends three kinds of node — accounts,
@@ -50,6 +50,9 @@ export interface WTotals {
   /** of those, drawn as a line on the flat map (everything but containment) */
   lines: number;
   contain: number; rule: number; inferred: number;
+  /** containment that is NOT drawn as a circle: a resource in several holders sits in the circle of one (the lowest
+   *  id); its other containment relations are lines when it is open */
+  containExtra: number;
   /** an account holding a resource — the region label */
   ofAccount: number;
   /** a resource in a tag group — the group filter */
@@ -60,6 +63,10 @@ export interface WTotals {
 
 export interface WorldGraph {
   buildId: number | null;
+  /** when the build finished: the age of the relations (API time string; null = the server did not say) */
+  builtAt: string | null;
+  /** when health and «gone» were read — they are not the build's. Moves with every applyHealth */
+  healthAt: string | null;
   nodes: WNode[];
   edges: WEdge[];
   byId: Map<string, number>;
@@ -84,7 +91,7 @@ export function indexGraph(payload: GalaxyGraph, names?: ReadonlyMap<number, str
 
   const edges: WEdge[] = [];
   const totals: WTotals = { nodes: nodes.length, present: 0, gone: 0, relations: payload.edges.length, links: 0, lines: 0, contain: 0,
-                            rule: 0, inferred: 0, ofAccount: 0, ofGroup: 0, dropped: 0 };
+                            containExtra: 0, rule: 0, inferred: 0, ofAccount: 0, ofGroup: 0, dropped: 0 };
   const parents = new Map<number, number[]>();
   for (const e of payload.edges) {
     const a = byId.get(e.s), b = byId.get(e.t);
@@ -106,6 +113,7 @@ export function indexGraph(payload: GalaxyGraph, names?: ReadonlyMap<number, str
   totals.present = nodes.length - totals.gone;
   totals.links = edges.length;
   totals.contain = edges.filter((e) => e.contain).length;
+  totals.containExtra = totals.contain - nodes.filter((n) => n.parent >= 0).length;
   totals.inferred = edges.filter((e) => e.llm).length;
   totals.rule = edges.length - totals.inferred;
   totals.lines = edges.length - totals.contain;
@@ -113,7 +121,7 @@ export function indexGraph(payload: GalaxyGraph, names?: ReadonlyMap<number, str
   const count = <K,>(keys: K[]) => keys.reduce((m, k) => m.set(k, (m.get(k) ?? 0) + 1), new Map<K, number>());
   const perAccount = count(nodes.map((n) => n.acct)), perGroup = count(nodes.flatMap((n) => n.groups));
   return {
-    buildId: payload.build_id, nodes, edges, byId, adj, totals,
+    buildId: payload.build_id, builtAt: payload.built_at ?? null, healthAt: payload.health_at ?? null, nodes, edges, byId, adj, totals,
     accounts: payload.nodes.filter((n) => n.kind === "account")
       .map((n) => ({ id: Number(n.id.slice(5)), name: n.name || n.id }))
       .map((a) => ({ id: a.id, name: names?.get(a.id) ?? a.name, count: perAccount.get(a.id) ?? 0 })).sort((a, b) => a.id - b.id),
@@ -122,3 +130,23 @@ export function indexGraph(payload: GalaxyGraph, names?: ReadonlyMap<number, str
       .sort((a, b) => a.id.localeCompare(b.id)),
   };
 }
+
+/** Health and «gone» read again (GET /api/galaxy/health), put onto the SAME graph: the rings follow the issues
+ *  instead of waiting for the next build, and the map keeps its layout and its camera — nothing about the relations
+ *  changed. A resource the reading does not list has no open issue. Returns whether anything changed (the scene is
+ *  then worked out again); `healthAt` moves either way. A reading of another build is ignored: its ids may mean
+ *  other resources. */
+export function applyHealth(g: WorldGraph, read: GalaxyHealthRead): boolean {
+  if (read.build_id !== g.buildId) return false;
+  const gone = new Set(read.absent);
+  let changed = false;
+  for (const n of g.nodes) {
+    const health = normalizeHealth(read.health[n.id]), absent = gone.has(n.id);
+    if (health !== n.health || absent !== n.absent) { n.health = health; n.absent = absent; changed = true; }
+  }
+  g.totals.gone = g.nodes.filter((n) => n.absent).length;
+  g.totals.present = g.nodes.length - g.totals.gone;
+  g.healthAt = read.at ?? g.healthAt;
+  return changed;
+}
+

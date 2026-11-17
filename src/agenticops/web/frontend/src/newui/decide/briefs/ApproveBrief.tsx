@@ -4,7 +4,7 @@ import { useApproveFixPlan, useFixPlan, useRejectFixPlan } from "@/hooks/useFixP
 import { findAction } from "@/lib/approval";
 import { parseItem } from "@/lib/inbox";
 import { useNfT } from "../../i18n";
-import { approveState } from "../../lib/briefs/plan";
+import { approveState, approvedToastKey } from "../../lib/briefs/plan";
 import type { HoldTarget } from "../../lib/hold";
 import { planBasis } from "../../lib/story";
 import { utcStamp } from "../../lib/time";
@@ -17,7 +17,7 @@ import { ImpactSection } from "../widgets/ImpactSection";
 import { ChecksSection, PlanSection } from "../widgets/PlanSection";
 import { ReasonForm } from "../widgets/ReasonForm";
 import { useHold } from "../widgets/useHold";
-import { errorText, useBriefKeys, useDecide, type BriefProps } from "./briefContext";
+import { errorText, useBriefKeys, useDecide, useDecision, type BriefProps } from "./briefContext";
 import { DismissForm } from "./shared";
 
 export const REFUSALS = ["read_only", "forbidden", "issue_closed", "run_in_flight", "executor_disabled", "state", "no_hash"];
@@ -25,13 +25,23 @@ export const REFUSALS = ["read_only", "forbidden", "issue_closed", "run_in_fligh
 export const refusal = (why: string | null, t: (k: string, v?: Record<string, string | null>) => string): string =>
   t(REFUSALS.includes(why ?? "") ? `refused.${why}` : "refused.other", { code: why });
 
+/** A refused approval in words. A 409 has many causes — the plan changed, someone else approved or rejected it, the
+ *  issue was closed — and the server says which: its own sentence is shown, never one fixed guess. */
+export const approveError = (e: unknown, t: (k: string, v?: Record<string, string>) => string): string =>
+  t(e instanceof ApiError && e.status === 409 ? "err.refused" : "err.failed", { msg: errorText(e) });
+
+/** While an approve brief is open its plan is read again this often: «approving does not run it» must not outlive
+ *  the executor being switched on. */
+export const PLAN_REFRESH_MS = 15_000;
+
 /** A fix plan that waits for approval. Approving is bound to the content hash that was on the page; with the executor
  *  on it runs at once — so the key must be held, and the hold approves only the plan it began on. */
 export function ApproveBrief({ item, frame }: BriefProps) {
   const t = useNfT();
-  const { done, openPeek } = useDecide();
+  const { openPeek } = useDecide();
+  const decide = useDecision(item);
   const issueId = parseItem(item.id)?.id ?? 0;
-  const planQ = useFixPlan(item.entity.entity_id);
+  const planQ = useFixPlan(item.entity.entity_id, PLAN_REFRESH_MS);
   const source = useCause(issueId);
   const approve = useApproveFixPlan();
   const reject = useRejectFixPlan();
@@ -47,18 +57,17 @@ export function ApproveBrief({ item, frame }: BriefProps) {
 
   const hold = useHold(target, async (tg) => {
     setError(null);
-    try {
-      await approve.mutateAsync({ id: tg.planId, content_hash: tg.hash });
-      done(t(state?.runs ? "toast.approved.run" : "toast.approved.only", { ref: item.ref }));
-    } catch (e) {
-      setError(e instanceof ApiError && e.status === 409 ? t("err.changed") : t("err.failed", { msg: errorText(e) }));
-    }
+    setError(await decide(
+      () => approve.mutateAsync({ id: tg.planId, content_hash: tg.hash }),
+      // what the server's answer says happened — the executor may have been switched on or off since the page was read
+      (res) => t(approvedToastKey(res?.run_queued ?? undefined, state?.effect ?? "unknown"), { ref: item.ref }),
+      (e) => approveError(e, t)));
   });
 
   useBriefKeys({
     onKey: (key, _e, repeat) => {
       if (form) return false;
-      if (key === "a") { if (!repeat) hold.down(); return true; }
+      if (key === "a") { if (!repeat) hold.down("a"); return true; }
       hold.cancel();                                      // any other key lets go of a hold
       if (key === " " && source.cause?.evidence.length) { openPeek(source.cause.evidence, 0); return true; }
       if (frame.readOnly) return false;
@@ -71,19 +80,18 @@ export function ApproveBrief({ item, frame }: BriefProps) {
   });
 
   const ask = !state ? t("ask.approve.loading") : !state.can ? t("ask.approve.cannot", { why: refusal(state.why, t) })
-    : t(state.runs ? "ask.approve.run" : "ask.approve.only");
+    : t(`ask.approve.${state.effect}`);
 
   const actions = form === "reject" && plan ? (
     <ReasonForm label={t("reject.label")} placeholder={t("reject.placeholder")} note={t("reject.note")} submit={t("act.reject")}
                 busy={reject.isPending} error={error} onCancel={() => setForm(null)}
                 onSubmit={async (reason) => {
                   setError(null);
-                  try { await reject.mutateAsync({ id: plan.id, reason }); done(t("toast.rejected", { ref: item.ref })); }
-                  catch (e) { setError(t("err.failed", { msg: errorText(e) })); }
+                  setError(await decide(() => reject.mutateAsync({ id: plan.id, reason }), t("toast.rejected", { ref: item.ref })));
                 }} />
   ) : form === "close" ? <DismissForm item={item} onCancel={() => setForm(null)} /> : (
     <>
-      <HoldButton label={t(state?.runs ? "act.approve" : "act.approveOnly")} disabled={!target} holding={hold.holding} hint={hold.hint}
+      <HoldButton label={t(state?.effect === "run" ? "act.approve" : "act.approveOnly")} disabled={!target} holding={hold.holding} hint={hold.hint}
                   onDown={hold.down} onUp={hold.up} onCancel={hold.cancel} />
       {canReject && <button type="button" className="btn" onClick={() => { setError(null); setForm("reject"); }}><span className="t">{t("act.reject")}</span><kbd>R</kbd></button>}
       <span className="spacer" />

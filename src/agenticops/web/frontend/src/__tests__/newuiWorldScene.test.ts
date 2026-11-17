@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GalaxyGraph, GalaxyGraphEdge, GalaxyGraphNode } from "@/api/types";
 import { indexGraph } from "@/newui/lib/world/graph";
-import { NO_ASK, around, expected, path, reconcile, scene, search, type Ask, type Drawn } from "@/newui/lib/world/scene";
+import { NO_ASK, around, confirm, expected, hopMarks, path, reconcile, scene, search, type Ask, type Drawn } from "@/newui/lib/world/scene";
 
 const res = (ref: number, type: string, over: Partial<GalaxyGraphNode> = {}): GalaxyGraphNode =>
   ({ id: `res:${ref}`, kind: "resource", name: `${type.toLowerCase()}-${ref}`, type, acct: 1, health: "unknown", absent: false, ...over });
@@ -49,6 +49,40 @@ describe("path — the shortest chain of links between two resources", () => {
     expect(path(g, at(30), at(80))).toBeNull();                        // another account, and no relation between them
     expect(path(g, at(30), at(30))).toBeNull();
     expect(path(g, at(31), at(50), 2)).toBeNull();
+  });
+});
+
+describe("a path says which of its links a model only inferred", () => {
+  // final review: «隔了 1 步：EC2-1 → RDS-4» was stated as fact over a link a model guessed, while the route over
+  // rule relations had three links. 542 of the 1,526 links of the measured build are inferred.
+  const guessed = indexGraph({ ...payload, edges: [...payload.edges, edge(31, 50, "references", "llm")] });
+  const ix = (ref: number) => guessed.byId.get(`res:${ref}`)!;
+
+  it("takes the route over relations the rules found when there is one, however short the guessed one is", () => {
+    expect(path(guessed, ix(31), ix(50))!.map((i) => guessed.nodes[i].ref)).toEqual([31, 20, 10, 21, 50]);
+    const sc = scene(guessed, ask({ a: ix(31), b: ix(50) }), null);
+    expect(sc.pathHops!.map((h) => [h.r, h.llm])).toEqual([["contains", false], ["contains", false], ["contains", false], ["contains", false]]);
+    expect(sc.pathInferred).toBe(0);
+  });
+
+  it("goes over an inferred link only when nothing else joins the two — and then says which link that is", () => {
+    const sc = scene(g, ask({ a: at(80), b: at(70) }), null);                    // the only link between them is a model's guess
+    expect(sc.path!.map((i) => g.nodes[i].ref)).toEqual([80, 70]);
+    expect(sc.pathHops).toEqual([{ k: g.edges.findIndex((e) => e.llm), r: "references", llm: true, fwd: true }]);
+    expect(sc.pathInferred).toBe(1);
+  });
+
+  it("says which way each link is written — a path may run against it", () => {
+    // found in the browser on the real graph: «sg_web —contains→ project-vpc» read as the group holding the VPC,
+    // while the build wrote «project-vpc contains sg_web». The arrow is the relation's, not the path's.
+    const sc = scene(g, ask({ a: at(31), b: at(50) }), null);         // instance 31 ← subnet 20 ← VPC 10 → subnet 21 → database 50
+    expect(sc.pathHops!.map((h) => [h.r, h.fwd])).toEqual([["contains", false], ["contains", false], ["contains", true], ["contains", true]]);
+    expect(sc.pathHops!.map((h) => hopMarks(h).join("contains"))).toEqual(["←contains—", "←contains—", "—contains→", "—contains→"]);
+  });
+
+  it("has no hops when there is no path", () => {
+    const sc = scene(g, ask({ a: at(30), b: at(80) }), null);
+    expect([sc.path, sc.pathHops, sc.pathInferred]).toEqual([null, null, 0]);
   });
 });
 
@@ -162,4 +196,28 @@ describe("expected / reconcile — the picture against the data", () => {
   it("names every number that differs", () => {
     expect(reconcile(sc, { ...want, rings: 2, links: 4 })).toEqual([{ what: "rings", want: 3, got: 2 }, { what: "links", want: 3, got: 4 }]);
   });
+  it("counts what a view left out because it is off the screen with what it drew", () => {
+    const none: Drawn = { nodes: 0, bright: 0, gone: 0, rings: 0, ringsBright: 0, links: 0, named: 0 };
+    // drawn + off the screen = what the scene asks for
+    expect(reconcile(sc, { ...want, nodes: 7, bright: 1, rings: 2, links: 2 }, "2d", { ...none, nodes: 3, bright: 1, rings: 1, links: 1 })).toEqual([]);
+    // … and one that is in neither count is still missed
+    expect(reconcile(sc, { ...want, nodes: 7 }, "2d", { ...none, nodes: 2 })).toEqual([{ what: "nodes", want: 10, got: 9 }]);
+  });
 });
+
+describe("confirm — one check that disagrees is not yet a red card", () => {
+  // final review: the card could be red for a second without cause — the 3D engine builds its objects over a few
+  // frames, and a check can land in between
+  const m = [{ what: "rings" as const, want: 3, got: 2 }];
+  it("shows agreement at once", () => {
+    expect(confirm([], 1)).toEqual({ show: [], strikes: 0 });
+  });
+  it("holds the first mismatch back: the card stays as it was", () => {
+    expect(confirm(m, 0)).toEqual({ show: undefined, strikes: 1 });
+  });
+  it("shows the mismatch when the next check finds one too, and keeps showing it", () => {
+    expect(confirm(m, 1)).toEqual({ show: m, strikes: 2 });
+    expect(confirm(m, 2)).toEqual({ show: m, strikes: 3 });
+  });
+});
+

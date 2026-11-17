@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { approveState, planHead, postChecksVm, rollbackVm, stepsVm } from "@/newui/lib/briefs/plan";
+import { approveState, approvedToastKey, checksVm, planHead, postChecksVm, rollbackVm, stepsVm } from "@/newui/lib/briefs/plan";
 import type { FixPlan } from "@/api/types";
 
 const plan = (over: Partial<FixPlan> = {}): FixPlan => ({
@@ -68,20 +68,65 @@ describe("planHead", () => {
 describe("approveState — what «approve» does here, as the server says", () => {
   const act = (over: object) => [{ action: "approve", allowed: true, reason_code: null, effect: "approve_and_queue_execution", ...over }];
   it("approves and runs when the server will queue the run", () => {
-    expect(approveState(plan({ available_actions: act({}) }))).toEqual({ can: true, runs: true, why: null, shadow: false });
+    expect(approveState(plan({ available_actions: act({}) }))).toEqual({ can: true, runs: true, effect: "run", why: null, shadow: false });
   });
   it("only approves when the executor or auto-fix is off", () => {
-    expect(approveState(plan({ available_actions: act({ effect: "approve_only" }) }))).toEqual({ can: true, runs: false, why: null, shadow: false });
+    expect(approveState(plan({ available_actions: act({ effect: "approve_only" }) }))).toEqual({ can: true, runs: false, effect: "only", why: null, shadow: false });
   });
   it("says so when only the policy's shadow mode lets it through", () => {
-    expect(approveState(plan({ available_actions: act({ reason_code: "policy_shadow" }) }))).toEqual({ can: true, runs: true, why: null, shadow: true });
+    expect(approveState(plan({ available_actions: act({ reason_code: "policy_shadow" }) }))).toEqual({ can: true, runs: true, effect: "run", why: null, shadow: true });
   });
   it("cannot approve when the server refuses, and says why", () => {
-    expect(approveState(plan({ available_actions: act({ allowed: false, reason_code: "forbidden" }) }))).toEqual({ can: false, runs: true, why: "forbidden", shadow: false });
+    expect(approveState(plan({ available_actions: act({ allowed: false, reason_code: "forbidden" }) }))).toEqual({ can: false, runs: true, effect: "run", why: "forbidden", shadow: false });
   });
   it("cannot approve a plan without a content hash, or one that offers no approval", () => {
-    expect(approveState(plan({ content_hash: null, available_actions: act({}) }))).toEqual({ can: false, runs: true, why: "no_hash", shadow: false });
-    expect(approveState(plan({ available_actions: [] }))).toEqual({ can: false, runs: false, why: "state", shadow: false });
-    expect(approveState(plan({}))).toEqual({ can: false, runs: false, why: "state", shadow: false });
+    expect(approveState(plan({ content_hash: null, available_actions: act({}) }))).toEqual({ can: false, runs: true, effect: "run", why: "no_hash", shadow: false });
+    expect(approveState(plan({ available_actions: [] }))).toEqual({ can: false, runs: false, effect: "unknown", why: "state", shadow: false });
+    expect(approveState(plan({}))).toEqual({ can: false, runs: false, effect: "unknown", why: "state", shadow: false });
   });
 });
+
+describe("the page shows everything the approval's hash covers", () => {
+  // final review: the hash binds steps, rollback, pre-checks and post-checks — the brief showed no pre-check, no
+  // check's command, and «—» for a step written with keys it did not know
+  it("lists the pre-checks too, each with its command", () => {
+    const p = plan({ pre_checks: [{ check: "replica lag < 5s", command: "aws rds describe-db-instances --query x" }, "nobody is deploying"],
+                     post_checks: [{ description: "port closed", command: "nc -z host 22" }, { check: "no alarm" }] });
+    expect(checksVm(p, "pre")).toEqual([
+      { id: "pre-1", text: "replica lag < 5s", cmd: "aws rds describe-db-instances --query x" },
+      { id: "pre-2", text: "nobody is deploying", cmd: null },
+    ]);
+    expect(checksVm(p, "post")).toEqual([
+      { id: "pc-1", text: "port closed", cmd: "nc -z host 22" },
+      { id: "pc-2", text: "no alarm", cmd: null },
+    ]);
+    expect(postChecksVm(p).map((c) => c.id)).toEqual(["pc-1", "pc-2"]);                // the old reader, same ids
+    expect(checksVm(plan({ pre_checks: "nothing" as unknown as unknown[] }), "pre")).toEqual([]);
+  });
+
+  it("prints a step it cannot read as it is, never as «—»", () => {
+    const [odd, plain] = stepsVm(plan({ steps: [{ title: "drain", run: "kubectl drain node-1" }, { action: "look" }] }));
+    expect(odd).toEqual({ say: "", cmd: null, tier: null, raw: '{"title":"drain","run":"kubectl drain node-1"}' });
+    expect(plain.raw).toBeUndefined();
+  });
+});
+
+describe("approveState.effect — what the page may say approving does", () => {
+  const act = (effect: string | undefined) => plan({ available_actions: [{ action: "approve", allowed: true, reason_code: null, effect } as never] });
+  it("runs, only approves, or is not known — an effect the client does not know is never «does not run»", () => {
+    expect(approveState(act("approve_and_queue_execution")).effect).toBe("run");
+    expect(approveState(act("approve_only")).effect).toBe("only");
+    expect(approveState(act("something_new")).effect).toBe("unknown");
+    expect(approveState(act(undefined)).effect).toBe("unknown");
+    expect(approveState(plan({ available_actions: [] })).effect).toBe("unknown");
+  });
+
+  it("the toast says what happened: the server's answer first, the page's belief only when it said nothing", () => {
+    expect(approvedToastKey(true, "only")).toBe("toast.approved.run");            // the executor was switched on meanwhile
+    expect(approvedToastKey(false, "run")).toBe("toast.approved.only");           // … or off
+    expect(approvedToastKey(undefined, "run")).toBe("toast.approved.run");
+    expect(approvedToastKey(undefined, "only")).toBe("toast.approved.only");
+    expect(approvedToastKey(undefined, "unknown")).toBe("toast.approved.unknown");
+  });
+});
+

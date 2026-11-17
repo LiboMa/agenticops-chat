@@ -3,7 +3,10 @@ import { HOLD_MS, holdStep, type HoldEvent, type HoldState, type HoldTarget } fr
 
 /** Drives lib/hold: `target` is what the page shows NOW (null = nothing that may be approved). The hold remembers the
  *  target it started with; when the time is up it fires that one — and only if the page still shows it. Losing the
- *  window's focus or going to the background cancels. */
+ *  window's focus, going to the background, or ANY other key going down cancels: the hook listens for keys itself,
+ *  in the capture phase, so a key the shell takes («/» moves the focus to the command bar), Escape, a modifier or a
+ *  key that moves nothing still lets go — the approval must not fire under a person who has gone on to something
+ *  else. `down(key)` says which key started it (none = the pointer). */
 export function useHold(target: HoldTarget | null, onFire: (t: HoldTarget) => void) {
   const [holding, setHolding] = useState(false);
   const [hint, setHint] = useState(false);
@@ -12,6 +15,7 @@ export function useHold(target: HoldTarget | null, onFire: (t: HoldTarget) => vo
   const fire = useRef(onFire);
   const timer = useRef<number | null>(null);
   const hintTimer = useRef<number | null>(null);
+  const startKey = useRef<string | null>(null);
   shown.current = target;
   fire.current = onFire;
 
@@ -35,21 +39,24 @@ export function useHold(target: HoldTarget | null, onFire: (t: HoldTarget) => vo
     if (isHolding()) timer.current = window.setTimeout(tick, 16);                  // a timer may fire a hair early
   }, [apply]);
 
-  const down = useCallback(() => {
+  const down = useCallback((key?: string) => {
     if (isHolding()) return;
     apply({ type: "down", target: shown.current, at: performance.now() });
-    if (isHolding()) timer.current = window.setTimeout(tick, HOLD_MS);
+    if (isHolding()) { startKey.current = typeof key === "string" ? key.toLowerCase() : null; timer.current = window.setTimeout(tick, HOLD_MS); }
   }, [apply, tick]);
   const up = useCallback(() => apply({ type: "up", at: performance.now() }), [apply]);
   const cancel = useCallback(() => apply({ type: "cancel" }), [apply]);
 
   useEffect(() => {
     const hidden = () => { if (document.visibilityState !== "visible") cancel(); };
+    const otherKey = (e: KeyboardEvent) => { if (isHolding() && e.key.toLowerCase() !== startKey.current) cancel(); };
     window.addEventListener("blur", cancel);
     document.addEventListener("visibilitychange", hidden);
+    window.addEventListener("keydown", otherKey, true);
     return () => {
       window.removeEventListener("blur", cancel);
       document.removeEventListener("visibilitychange", hidden);
+      window.removeEventListener("keydown", otherKey, true);
       if (timer.current !== null) window.clearTimeout(timer.current);
       if (hintTimer.current !== null) window.clearTimeout(hintTimer.current);
     };

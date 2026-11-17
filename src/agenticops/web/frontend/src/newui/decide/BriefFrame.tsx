@@ -1,10 +1,12 @@
 import type { ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import type { AttentionItem } from "@/lib/attention";
+import { useItemRefresh } from "../hooks/useItemData";
 import { useNfT } from "../i18n";
 import { toneOf } from "../lib/queue";
 import { storyPath } from "../lib/story";
 import { waitedText } from "./Queue";
+import { useAgentOn } from "./widgets/AgentAtWork";
 
 interface Props {
   item: AttentionItem;
@@ -25,6 +27,7 @@ interface Props {
 export function BriefFrame({ item, index, total, accountName, now, ask, actions, readOnly, children }: Props) {
   const t = useNfT();
   const location = useLocation();
+  useItemRefresh(item.id, useAgentOn(item.id));
   const tone = toneOf(item);
   const sev = item.severity ? t(`sev.${item.severity}`) : item.entity.entity_type === "change_request"
     ? `${t("sev.change")}${item.risk_level ? ` ${item.risk_level}` : ""}` : "";

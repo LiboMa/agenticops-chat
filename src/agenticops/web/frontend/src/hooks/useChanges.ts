@@ -56,6 +56,7 @@ export function useChangeAction() {
         method: "POST",
         body: "body" in args ? JSON.stringify(args.body) : undefined,
       }),
-    onSuccess: (_d, vars) => changeMutationKeys(vars.id).forEach((queryKey) => qc.invalidateQueries({ queryKey })),
+    // settled, not succeeded: a refusal (409 — someone else moved the change) must re-read it too, as a fix plan's does
+    onSettled: (_d, _e, vars) => changeMutationKeys(vars.id).forEach((queryKey) => qc.invalidateQueries({ queryKey })),
   });
 }

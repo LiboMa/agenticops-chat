@@ -3,8 +3,9 @@ import { apiFetch } from "@/api/client";
 import { ACTIVITY_QUERY_KEY } from "./useActivity";
 
 const refresh = (qc: QueryClient, issueId: number) => {
+  // «galaxy-health»: a dismissed, resolved or reopened issue changes its resource's ring on the map
   for (const key of [["anomaly", issueId], ["anomalies"], ["anomaly-rca", issueId], ["issue-timeline", issueId], ["fix-plans"],
-                     ["issue-executions", issueId], ["ui-attention"], [...ACTIVITY_QUERY_KEY]]) qc.invalidateQueries({ queryKey: key });
+                     ["issue-executions", issueId], ["ui-attention"], [...ACTIVITY_QUERY_KEY], ["galaxy-health"]]) qc.invalidateQueries({ queryKey: key });
 };
 
 /** Dismiss an issue with its reason: the reason goes with the status change and stays on the timeline. */
@@ -17,12 +18,36 @@ export function useDismissIssue(issueId: number) {
   });
 }
 
-/** Mark an issue resolved: its run ended and a person confirms the problem is gone. */
+/** Mark an issue resolved: its run ended and a person confirms the problem is gone. Final — a resolved issue cannot
+ *  be reopened — so the request names the status the page showed (`expected`), and the server refuses it (409
+ *  `status_moved`) when the issue has left that status meanwhile. */
 export function useResolveIssue(issueId: number) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => apiFetch<unknown>(`/issues/${issueId}/status`, { method: "PUT", body: JSON.stringify({ status: "resolved" }) }),
+    mutationFn: (expected: string) =>
+      apiFetch<unknown>(`/issues/${issueId}/status`, { method: "PUT", body: JSON.stringify({ status: "resolved", expected_status: expected }) }),
     onSettled: () => refresh(qc, issueId),
+  });
+}
+
+/** A verdict on the diagnosis the person was shown. `rca_id` names it: when a newer diagnosis exists the server
+ *  refuses the verdict (409 `rca_changed`) instead of recording it against one nobody read. */
+export function useRcaVerdict(issueId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { verdict?: "correct" | "incorrect"; location_verdict?: "correct" | "partial" | "incorrect"; note?: string; rca_id: number }) =>
+      apiFetch<{ rca_id: number }>(`/health-issues/${issueId}/rca-feedback`, { method: "POST", body: JSON.stringify(payload) }),
+    onSettled: () => refresh(qc, issueId),          // a refusal re-reads the diagnosis too
+  });
+}
+
+/** «Confirmed» / «false alarm» on the issue itself. A false alarm dismisses it, so the queue is re-read as well. */
+export function useIssueVerdict(issueId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (feedback: { type: "confirmed" | "false_positive"; note?: string; confidence: number }) =>
+      apiFetch<unknown>(`/health-issues/${issueId}/feedback`, { method: "POST", body: JSON.stringify(feedback) }),
+    onSettled: () => { refresh(qc, issueId); qc.invalidateQueries({ queryKey: ["agent-memory"] }); },
   });
 }
 

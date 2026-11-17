@@ -1,13 +1,14 @@
 import type { ReactNode } from "react";
-import { useAnomalyRca } from "@/hooks/useAnomalyRca";
 import { useSettings } from "@/hooks/useSettings";
+import { useFreshRca } from "../../hooks/useItemData";
 import { useNfT } from "../../i18n";
 import { causeVm } from "../../lib/briefs/cause";
 import { Cause } from "./Cause";
 
-/** An issue's newest diagnosis and the settings that say how far it got by itself. */
+/** An issue's newest diagnosis — read again each time a brief opens — and the settings that say how far it got by
+ *  itself. */
 export function useCause(issueId: number) {
-  const rcaQ = useAnomalyRca(issueId);
+  const rcaQ = useFreshRca(issueId);
   const settings = useSettings();
   const gate = settings.data?.rca_min_confidence_for_autofix;
   return { rcaQ, rca: rcaQ.data ?? null, gate, cause: causeVm(rcaQ.data, gate), autoFix: settings.data?.auto_fix_enabled };

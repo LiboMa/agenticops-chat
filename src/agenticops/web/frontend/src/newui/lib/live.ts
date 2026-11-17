@@ -1,3 +1,4 @@
+import { parseApiDate } from "@/lib/formatDate";
 import type { Activity } from "./activity";
 
 /** «现场»: everything on GET /api/ui/activity as one list of lanes — what is at work now, what is due next, what ended
@@ -63,27 +64,51 @@ export function laneViews(activity: Activity | undefined): LaneView[] {
   ];
 }
 
-/** How many lanes are really at work — the number beside the «现场» tab. undefined = not known yet. */
+/** How many lanes are at work within their own time limit — the number beside the «现场» tab. A diagnosis that
+ *  stopped is not at work; work that outlived its limit is listed and flagged, but not counted as going on.
+ *  undefined = not known yet. */
 export function atWork(activity: Activity | undefined): number | undefined {
-  return activity?.running.filter((l) => l.basis !== "stopped").length;
+  return activity?.running.filter((l) => l.basis !== "stopped" && !l.overdue).length;
+}
+
+/** When «ended in the last day» shows only the newest of what ended: how many are shown and how many there were, for
+ *  the agents' work on items and for schedule runs. null = everything is listed, or the server did not count. */
+export function recentCut(activity: Activity | undefined):
+    { work: { shown: number; total: number } | null; schedules: { shown: number; total: number } | null } | null {
+  const total = activity?.recent_total;
+  if (!activity || !total) return null;
+  const schedules = activity.recent.filter((l) => l.kind === "schedule").length, work = activity.recent.length - schedules;
+  const cut = (shown: number, all: number) => (all > shown ? { shown, total: all } : null);
+  const out = { work: cut(work, total.work), schedules: cut(schedules, total.schedules) };
+  return out.work || out.schedules ? out : null;
 }
 
 export interface LanePick {
-  /** none = the address names no lane (the first one is shown) · found · moved = the lane it names ended and this is
-   *  what it left behind · gone = nothing of it is listed (never another lane in its place) */
-  state: "none" | "found" | "moved" | "gone";
+  /** none = the address names no lane (the first one is shown) · found · moved = the lane that was being watched
+   *  ended and this is what it left behind · ended = it ended and nothing made since it began is listed · gone =
+   *  nothing of it is listed and nothing is known about it (never another lane in its place) */
+  state: "none" | "found" | "moved" | "ended" | "gone";
   lane: LaneView | null;
 }
 
 /** Which lane the address means. A running lane's id says its item and its kind ("I12:diagnosis"); once it ends it
- *  is listed under what it produced ("R9") — the newest ended lane of that kind on that item. */
-export function pickLane(lanes: LaneView[], id: string | null): LanePick {
+ *  is listed under what it produced ("R9"). `since` = when the running lane began, as the page saw it while it was
+ *  listed: only a result made at or after that is «what it left behind» — a run that failed left nothing, and an
+ *  older result of the same kind is not its result. Without `since` (the address was opened on a lane that is no
+ *  longer listed) nothing is claimed about what it left. */
+export function pickLane(lanes: LaneView[], id: string | null, since?: string | null): LanePick {
   if (!id) return { state: "none", lane: lanes[0] ?? null };
   const found = lanes.find((l) => l.id === id);
   if (found) return { state: "found", lane: found };
   const m = /^([IC][1-9]\d*):(\w+)$/.exec(id);
-  const after = m ? lanes.find((l) => l.group === "recent" && l.item === m[1] && l.kind === m[2]) : undefined;   // recent is newest first
-  return after ? { state: "moved", lane: after } : { state: "gone", lane: null };
+  const began = since ? parseApiDate(since)?.getTime() : undefined;
+  if (!m || began === undefined || Number.isNaN(began)) return { state: "gone", lane: null };
+  const after = lanes.find((l) => {                                                      // recent is newest first
+    if (l.group !== "recent" || l.item !== m[1] || l.kind !== m[2]) return false;
+    const at = parseApiDate(l.at)?.getTime();
+    return at !== undefined && at >= began;
+  });
+  return after ? { state: "moved", lane: after } : { state: "ended", lane: null };
 }
 
 /** A lane's own address. */

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useAccountScope } from "@/components/layout/AccountScope";
 import { parseItem } from "@/lib/inbox";
@@ -7,7 +7,7 @@ import { usePeek } from "../decide/widgets/usePeek";
 import { useActivity } from "../hooks/useActivity";
 import { useMyItem } from "../hooks/useMyItem";
 import { useNfT } from "../i18n";
-import { lanePath, laneViews, pickLane, staleSince } from "../lib/live";
+import { lanePath, laneViews, pickLane, recentCut, staleSince } from "../lib/live";
 import { step } from "../lib/queue";
 import { storyPath } from "../lib/story";
 import { Message, StateBlock } from "../shell/StateBlock";
@@ -27,8 +27,12 @@ export function LiveLens() {
   const { accountId } = useAccountScope();
   const q = useActivity(accountId);
   const lanes = useMemo(() => laneViews(q.data), [q.data]);
-  const pick = pickLane(lanes, laneParam);
+  // when the lane on the page began, as seen while it was listed as running: once it ends, only a result made since
+  // then is «what it left behind» (a failed run left nothing, and an older result is not its result)
+  const watched = useRef<{ id: string; since: string | null } | null>(null);
+  const pick = pickLane(lanes, laneParam, watched.current?.id === laneParam ? watched.current.since : undefined);
   const lane = pick.lane;
+  if (pick.state === "found" && lane && (lane.group === "running" || lane.group === "stalled")) watched.current = { id: lane.id, since: lane.at };
   const view = q.data ? "ready" : q.isError ? "failed" : "loading";
   const staleAt = staleSince({ isError: q.isError, hasData: !!q.data, dataUpdatedAt: q.dataUpdatedAt });
   const mine = useMyItem(lane?.item ?? null).data ?? null;
@@ -60,7 +64,8 @@ export function LiveLens() {
   const toStory = (item: string) => navigate(storyPath(item), { state: { from: "live", back: here } });
   const toDecide = (item: string) => navigate(`/app/new/decide/${item}`);
 
-  const api = useMemo<DecideApi>(() => ({ setBriefKeys: () => {}, done: notify, openPeek: peek.show }), [notify, peek.show]);
+  const api = useMemo<DecideApi>(() => ({ setBriefKeys: () => {}, done: (_item, message) => notify(message),
+                                          failed: (item, message) => notify(`${item.ref}　${message}`), openPeek: peek.show }), [notify, peek.show]);
 
   useLensKeys({
     onKey: (key, _e, repeat) => {
@@ -78,17 +83,19 @@ export function LiveLens() {
     },
   });
 
-  const goneItem = pick.state === "gone" ? parseItem((laneParam ?? "").split(":")[0]) : null;
+  const off = pick.state === "gone" || pick.state === "ended";
+  const goneItem = off ? parseItem((laneParam ?? "").split(":")[0]) : null;
   return (
     <DecideContext.Provider value={api}>
       <section className={`view${staleAt !== null ? " stale" : ""}`} id="live">
-        <Lanes lanes={lanes} currentId={lane?.id ?? null} view={view} staleAt={staleAt} now={now} onPick={open} onRetry={() => void q.refetch()} />
+        <Lanes lanes={lanes} currentId={lane?.id ?? null} view={view} staleAt={staleAt} now={now} cut={recentCut(q.data)}
+               onPick={open} onRetry={() => void q.refetch()} />
         <article key={lane?.id ?? pick.state} className="stream card" aria-live="polite" aria-label={t("live.lane")}>
           {view === "loading" ? <StateBlock kind="loading" />
             : view === "failed" ? <StateBlock kind="failed" failKey="live.failed.p" onRetry={() => void q.refetch()} />
-            : pick.state === "gone" ? (
-              <Message big={t("live.gone.big")}>
-                <p>{t("live.gone.p")}</p>
+            : off ? (
+              <Message big={t(pick.state === "ended" ? "live.ended.big" : "live.gone.big")}>
+                <p>{t(pick.state === "ended" ? "live.ended.p" : "live.gone.p")}</p>
                 <p className="row">
                   {goneItem && <button type="button" className="btn primary" onClick={() => toStory((laneParam ?? "").split(":")[0])}><span className="t">{t("gone.story")}</span></button>}
                   <button type="button" className="btn" onClick={() => navigate(lanePath(null), { replace: true })}><span className="t">{t("live.gone.list")}</span></button>

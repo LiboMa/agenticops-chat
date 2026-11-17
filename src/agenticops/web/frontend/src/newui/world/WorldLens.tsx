@@ -7,7 +7,7 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useAllWaiting } from "../hooks/useAllWaiting";
 import { useNfT } from "../i18n";
 import { storyPath } from "../lib/story";
-import { NO_ASK, reconcile, scene, type Ask, type Drawn, type View, type Waiting } from "../lib/world/scene";
+import { NO_ASK, confirm, reconcile, scene, type Ask, type Drawn, type Mismatch, type View, type Waiting } from "../lib/world/scene";
 import { utcStamp } from "../lib/time";
 import { Message, StateBlock } from "../shell/StateBlock";
 import { useLensKeys, useShell } from "../shell/shellContext";
@@ -36,7 +36,10 @@ export function WorldLens() {
   const [params, setParams] = useSearchParams();
   const [q, setQ] = useState("");
   const [pathMode, setPathMode] = useState(() => params.has("a"));
-  const [bad, setBad] = useState<{ what: keyof Drawn; want: number; got: number }[] | null>(null);
+  const [bad, setBad] = useState<Mismatch[] | null>(null);
+  /** what the flat map left out because it is off the screen (the 3D view has none) */
+  const [off, setOff] = useState<Drawn | null>(null);
+  const strikes = useRef(0);
   const [perf, setPerf] = useState<{ fps: number; ms: number | null } | null>(null);
   const [busy, setBusy] = useState(false);
   const [turning, setTurning] = useState(false);
@@ -65,7 +68,16 @@ export function WorldLens() {
 
   const waiting: Waiting[] | null = useMemo(
     () => waitingQ.data?.items.map((it) => ({ id: it.id, ref: it.resource?.ref ?? null })) ?? null, [waitingQ.data]);
-  const sc = useMemo(() => (g ? scene(g, ask, waiting) : null), [g, ask, waiting]);
+  // `healthRev`: health and «gone» were read again and changed on this same graph — the result is worked out again
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const sc = useMemo(() => (g ? scene(g, ask, waiting) : null), [g, ask, waiting, world.healthRev]);
+  // an address that names a resource this build does not have: say so, instead of silently showing the whole map
+  const lostSel = !!g && !!params.get("sel") && at("sel") === null ? params.get("sel") : null;
+  useEffect(() => {
+    if (!lostSel) return;
+    notify(t("world.selMissing", { id: lostSel.slice(0, 40) }));
+    patch({ sel: null, near: null });
+  }, [lostSel, notify, t, patch]);
   const ready = world.status === "ready" && !!g && !!sc;
 
   // the view: flat, or 3D once its engine is here (it is fetched the first time someone asks for it)
@@ -115,14 +127,21 @@ export function WorldLens() {
     sky?.apply(ready ? sc : null, pathMode ? null : ask.sel, g);
     sky3?.apply(ready ? sc : null, pathMode ? null : ask.sel, g);
     setBad(null);
+    strikes.current = 0;
   }, [sky, sky3, sc, ready, ask.sel, pathMode, g, view]);
 
   // the picture against the data, once the canvas has drawn this result — and again every second
   useEffect(() => {
     if (!sky || !ready || !sc) return;
     const check = () => {
-      if (view === "3d" && sky3) { setBad(reconcile(sc, sky3.stats(), "3d")); setPerf({ fps: sky3.fps, ms: null }); }
-      else { setBad(reconcile(sc, sky.stats(), "2d")); setPerf({ fps: sky.fps, ms: sky.drawMs }); }
+      if (document.visibilityState !== "visible") return;        // a hidden tab draws nothing: there is nothing to compare
+      const flat = !(view === "3d" && sky3), left = flat ? sky.culled() : null;
+      // drawn + off the screen = what the scene asks for; one check that disagrees is not yet shown (see `confirm`)
+      const res = confirm(flat ? reconcile(sc, sky.stats(), "2d", left!) : reconcile(sc, sky3!.stats(), "3d"), strikes.current);
+      strikes.current = res.strikes;
+      if (res.show) setBad(res.show);
+      setOff(left);
+      setPerf(flat ? { fps: sky.fps, ms: sky.drawMs } : { fps: sky3!.fps, ms: null });
       setNow(Date.now());
     };
     // the 3D engine builds its objects over a few frames: ask it a little later
@@ -230,19 +249,21 @@ export function WorldLens() {
                    onAsk={(change) => { if ("q" in change) setQ(change.q ?? ""); patch({ ...("type" in change ? { type: change.type ?? null } : {}),
                      ...("group" in change ? { grp: change.group ?? null } : {}), ...("onlyAbnormal" in change ? { abn: change.onlyAbnormal ? "1" : null } : {}) }); }}
                    onPick={(i) => pick(i)} onPath={() => togglePath()} onHome={() => cam?.home()} />
-            <Check sc={sc!} view={view} bad={bad} perf={perf} buildId={g!.buildId} builtAt={world.builtAt} building={world.building} now={now} />
+            <Check sc={sc!} view={view} bad={bad} off={off} perf={perf} buildId={g!.buildId} builtAt={world.builtAt} healthAt={world.healthAt}
+                   building={world.building} newerFailed={world.newerFailed} now={now} />
             <Happen g={g!} sc={sc!} complete={waitingQ.data?.complete ?? true} readOnly={readOnly} onPick={(i) => pick(i)} onDecide={() => navigate("/app/new/decide")} />
           </div>
           {pathMode && <PathHint g={g!} ask={ask} sc={sc!} onExit={() => togglePath()} />}
           {selNode && !pathMode && (
-            <NodeCard key={selNode.id} g={g!} i={selNode.i} ask={ask} mine={mine} accountName={accountName} now={now}
+            <NodeCard key={selNode.id} g={g!} i={selNode.i} ask={ask} mine={mine} accountName={accountName} now={now} healthAt={world.healthAt}
                       onPick={(i) => pick(i)} onClose={() => { patch({ sel: null, near: null }); cam?.home(); }} onFocus={toggleFocus}
                       onPathFrom={() => togglePath(selNode.i)}
                       onStory={(item) => navigate(storyPath(item), { state: { from: "world", back: here } })}
                       onDecide={(item) => navigate(`/app/new/decide/${item}`)} />
           )}
           <Legend t={t} view={view} />
-          {tip && <div id="tip" style={{ left: tip.x + 14, top: tip.y + 12 }}>{g!.nodes[tip.i].name}　{g!.nodes[tip.i].type}　{t(healthKey(g!.nodes[tip.i]))}</div>}
+          {/* the index is of the graph the pointer was over: after a rebuild it may be past the end of the new one */}
+          {tip && tip.i < g!.nodes.length && <div id="tip" style={{ left: tip.x + 14, top: tip.y + 12 }}>{g!.nodes[tip.i].name}　{g!.nodes[tip.i].type}　{t(healthKey(g!.nodes[tip.i]))}</div>}
         </>
       )}
     </section>

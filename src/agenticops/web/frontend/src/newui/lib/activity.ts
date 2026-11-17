@@ -25,7 +25,11 @@ export interface ActivityRecent {
   id: string; kind: string; agent: string; item: string | null; ref: string | null; title: string; account_id: number | null;
   at: string | null; outcome: "done" | "failed" | "needs_you"; route: string | null;
 }
-export interface Activity { running: ActivityLane[]; upcoming: ActivityUpcoming[]; recent: ActivityRecent[]; generated_at: string }
+export interface Activity {
+  running: ActivityLane[]; upcoming: ActivityUpcoming[]; recent: ActivityRecent[]; generated_at: string;
+  /** how many ended in the last day — `recent` is the newest few of each: the agents' work on items, and schedule runs */
+  recent_total?: { work: number; schedules: number };
+}
 
 /** The agent run a person asked for on this item that is still in flight — the server's record, so a reload or
  *  another browser sees it too. */
@@ -33,10 +37,12 @@ export function requestedRun(activity: Activity | undefined, item: string): Acti
   return activity?.running.find((l) => l.item === item && l.basis === "requested") ?? null;
 }
 
-/** Any agent at work on this item; a run a person asked for comes first. A diagnosis the server lists as `stopped`
- *  (its end is on the timeline, the status stayed «investigating») is nobody at work. */
+/** Any agent at work on this item; a run a person asked for comes first, then the plan run the pipeline started
+ *  (both are claims this process holds). A diagnosis the server lists as `stopped` (its end is on the timeline, the
+ *  status stayed «investigating») is nobody at work. */
 export function agentOn(activity: Activity | undefined, item: string): ActivityLane | null {
-  return requestedRun(activity, item) ?? activity?.running.find((l) => l.item === item && l.basis !== "stopped") ?? null;
+  return requestedRun(activity, item) ?? activity?.running.find((l) => l.item === item && l.basis === "pipeline")
+    ?? activity?.running.find((l) => l.item === item && l.basis !== "stopped") ?? null;
 }
 
 /** The diagnosis of this item that ended while its status stayed «investigating»: nothing is working on it. */

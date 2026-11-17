@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Activity, ActivityLane, ActivityRecent } from "@/newui/lib/activity";
-import { atWork, lanePath, laneViews, pickLane, staleSince, type LaneView } from "@/newui/lib/live";
+import { atWork, lanePath, laneViews, pickLane, recentCut, staleSince, type LaneView } from "@/newui/lib/live";
 
 const running = (over: Partial<ActivityLane>): ActivityLane => ({
   id: "I12:diagnosis", kind: "diagnosis", agent: "rca", item: "I12", ref: "I#12", title: "disk full", account_id: 1,
@@ -80,9 +80,23 @@ describe("pickLane — which lane the address means", () => {
     expect(pickLane(lanes, "X41")).toEqual({ state: "found", lane: lanes[2] });
   });
 
-  it("a running lane that ended is followed to what it left behind — the newest of that kind on that item", () => {
-    expect(pickLane(lanes, "I5:diagnosis")).toEqual({ state: "moved", lane: lanes[3] });
-    expect(pickLane(lanes, "I3:run")).toEqual({ state: "moved", lane: lanes[2] });
+  it("a lane that was being watched and ended is followed to what it left behind — a result made after it began", () => {
+    // I5's diagnosis began at 09:50: the newest diagnosis of I5 made since then is what it left (R9, 11:50)
+    expect(pickLane(lanes, "I5:diagnosis", "2026-11-17T09:50:00Z")).toEqual({ state: "moved", lane: lanes[3] });
+    expect(pickLane(lanes, "I3:run", "2026-11-17T11:00:00Z")).toEqual({ state: "moved", lane: lanes[2] });
+  });
+
+  it("never presents an older result as what the watched run left: a run that failed left nothing", () => {
+    // final review: yesterday's diagnosis was shown as «it has ended; this is what it left behind» for a run that
+    // had just failed. The result must have been made at or after the lane's own start.
+    expect(pickLane(lanes, "I5:diagnosis", "2026-11-17T11:55:00Z")).toEqual({ state: "ended", lane: null });   // R9 (11:50) is older than the run
+    expect(pickLane(lanes, "I5:plan", "2026-11-17T09:00:00Z")).toEqual({ state: "ended", lane: null });       // another kind of work is not its result
+  });
+
+  it("an address opened on a lane that is no longer listed claims nothing about what it left", () => {
+    // no start on record for it here (a bookmark, a link from earlier): which result would be «its» is not known
+    expect(pickLane(lanes, "I5:diagnosis")).toEqual({ state: "gone", lane: null });
+    expect(pickLane(lanes, "I5:diagnosis", null)).toEqual({ state: "gone", lane: null });
   });
 
   it("says it is gone when nothing of it is listed — never another lane in its place", () => {
@@ -108,3 +122,28 @@ describe("staleSince — the list on the page is older than the last attempt", (
     expect(staleSince({ isError: true, hasData: false, dataUpdatedAt: 0 })).toBeNull();
   });
 });
+
+describe("atWork — the number beside «现场»", () => {
+  it("counts what is at work within its own time limit: not a stopped diagnosis, not work that outlived its limit", () => {
+    expect(atWork(activity({ running: [running({}), running({ id: "I7:run", kind: "run", item: "I7" }),
+                                       running({ id: "I9:diagnosis", item: "I9", overdue: true }),
+                                       running({ id: "I4:diagnosis", item: "I4", basis: "stopped", overdue: true })] }))).toBe(2);
+    expect(atWork(undefined)).toBeUndefined();
+  });
+});
+
+describe("recentCut — «ended in the last day» says when it shows only some", () => {
+  const some = [ended({}), ended({ id: "R9", kind: "diagnosis" }), ended({ id: "SE3", kind: "schedule", item: null, ref: null })];
+  it("is nothing when everything that ended is listed, or the server did not count", () => {
+    expect(recentCut(activity({ recent: some, recent_total: { work: 2, schedules: 1 } }))).toBeNull();
+    expect(recentCut(activity({ recent: some }))).toBeNull();
+    expect(recentCut(undefined)).toBeNull();
+  });
+  it("says how many of each there were when the list is the newest few", () => {
+    expect(recentCut(activity({ recent: some, recent_total: { work: 39, schedules: 30 } })))
+      .toEqual({ work: { shown: 2, total: 39 }, schedules: { shown: 1, total: 30 } });
+    expect(recentCut(activity({ recent: some, recent_total: { work: 2, schedules: 30 } })))
+      .toEqual({ work: null, schedules: { shown: 1, total: 30 } });
+  });
+});
+

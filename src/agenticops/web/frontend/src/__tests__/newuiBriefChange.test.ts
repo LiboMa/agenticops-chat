@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canClarify, clarifyMessage, CLARIFY_MAX, requestVm } from "@/newui/lib/briefs/change";
+import { canClarify, clarifyMessage, clarifyOverflow, CLARIFY_MAX, requestVm } from "@/newui/lib/briefs/change";
 import type { ChangeRequest } from "@/api/types";
 
 const cr = (over: Partial<ChangeRequest> = {}): ChangeRequest => ({
@@ -42,9 +42,13 @@ describe("answering the reviewer — the server takes one message, the page asks
     expect(clarifyMessage(qs, [" tonight ", "nobody: drop it"])).toBe("1. Which window?\n   tonight\n\n2. Who owns web-99?\n   nobody: drop it");
     expect(clarifyMessage([], ["  go ahead  "])).toBe("go ahead");
   });
-  it("never sends more than the server takes", () => {
-    const long = clarifyMessage(["q"], ["x".repeat(6000)]);
-    expect(long.length).toBe(CLARIFY_MAX);
-    expect(canClarify(["q"], ["x".repeat(6000)])).toBe(true);
+  it("says by how much the answers are too long — it never cuts them and reports «sent»", () => {
+    // final review: three long answers went over the server's limit, the tail was dropped and the toast said «answers sent»
+    expect(clarifyOverflow(qs, ["tonight", "nobody"])).toBe(0);
+    const fits = "x".repeat(CLARIFY_MAX - clarifyMessage(["q"], [""]).length);
+    expect(clarifyOverflow(["q"], [fits])).toBe(0);
+    expect(clarifyOverflow(["q"], [fits + "yyy"])).toBe(3);
+    expect(clarifyMessage(["q"], [fits + "yyy"]).endsWith("yyy")).toBe(true);        // whole: the caller blocks the send
+    expect(canClarify(["q"], [fits + "yyy"])).toBe(false);
   });
 });

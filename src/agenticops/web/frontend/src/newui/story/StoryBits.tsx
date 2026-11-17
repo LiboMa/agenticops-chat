@@ -49,7 +49,7 @@ export function StoryHead({ frame, refText, tone, sev, title, state, wait, stuck
   children?: ReactNode;
 }) {
   const t = useNfT();
-  const w = wait && wait !== "wait.none" ? waitedParts(since, frame.now) : null;
+  const w = since ? waitedParts(since, frame.now) : null;      // the caller decides whether there is a duration to show (lib/story.waitSince)
   const kind = frame.mine ? briefKind(frame.mine) : null;
   return (
     <>
@@ -66,13 +66,13 @@ export function StoryHead({ frame, refText, tone, sev, title, state, wait, stuck
             {t(wait)}{w && w.unit !== "now" ? `　${t("wait.since", { t: t(`unit.${w.unit}`, { n: w.n }) })}` : ""}
           </span>
         )}
-        {stuck && <span className="wait">{t("lane.overdue")}</span>}
+        {stuck && wait !== "wait.agentOverdue" && <span className="wait">{t("lane.overdue")}</span>}
         {liveLane && <Link className="story-link" to={lanePath(liveLane)}>{t("story.watchLive")}</Link>}
         {place && <span>{place}</span>}
       </div>
       {frame.mine && (
         <p className="ask">
-          <b>{t("ask.lead")}</b>{t(`story.ask.${kind ?? "generic"}`)}　
+          <b>{t("ask.lead")}</b>{t(`story.ask.${kind ?? "generic"}`)}{"　"}
           <button type="button" className="btn sm" style={{ verticalAlign: "middle" }} onClick={frame.onDecide}>
             <span className="t">{t("story.goDecide")}</span><kbd>↵</kbd>
           </button>
@@ -98,11 +98,12 @@ export function Spine({ steps, now }: { steps: StepView[]; now: number }) {
   return (
     <ol className="spine">
       {steps.map((s) => {
-        const reached = s.state !== "todo";
+        const reached = s.state !== "todo" && s.state !== "skipped";     // a step never taken is its name and «not taken», nothing else
         return (
           <li key={s.id} className={s.state}>
             <h3>
               {t(`phase.${s.id}`)}<span className="sr">{t(`spine.${s.state}`)}</span>
+              {s.state === "skipped" && <span className="who">{t("spine.skipped.note")}</span>}
               {reached && s.at && <time>{utcStamp(s.at, now)} UTC</time>}
               {reached && s.who && <span className="who">{s.who}</span>}
             </h3>
@@ -127,7 +128,7 @@ export function WholeRecord({ events, failed, now }: { events: PipelineEvent[] |
         <ol className="rec">
           {entries.map((e, i) => (
             <li key={i} className={e.tone}>
-              <time>{utcStamp(e.ts, now)}</time>
+              <time>{utcStamp(e.ts, now)} UTC</time>
               <span>{fillPlaceholders(classic(e.labelKey), e.labelParams)}{e.count > 1 ? ` ×${e.count}` : ""}{e.summary ? ` — ${e.summary}` : ""}</span>
               {e.note != null && <span className="said">{e.note}</span>}
               <small>{e.actor}</small>

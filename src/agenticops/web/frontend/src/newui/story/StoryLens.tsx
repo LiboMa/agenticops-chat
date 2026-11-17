@@ -57,7 +57,8 @@ export function StoryLens() {
 
   const pageKeys = useRef<BriefKeys | null>(null);
   const api = useMemo<DecideApi>(() => ({
-    setBriefKeys: (keys) => { pageKeys.current = keys; }, done: notify, openPeek: peek.show,
+    setBriefKeys: (keys) => { pageKeys.current = keys; }, done: (_item, message) => notify(message),
+    failed: (item, message) => notify(`${item.ref}　${message}`), openPeek: peek.show,
   }), [notify, peek.show]);
 
   useLensKeys({

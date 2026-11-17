@@ -55,7 +55,8 @@ export interface Mark {
   i: number;
   /** the ring's tone; null = a name without a ring */
   ring: RingTone | null;
-  /** outside the view: the ring stays, faintly, without its name */
+  /** outside the view: the ring stays, faintly — without its name, unless the person asked about this resource
+   *  (it is open, found, or on the path): those names are drawn in both views, in or out of the view */
   off: boolean;
   named: boolean;
   sel: boolean;
@@ -66,9 +67,27 @@ export interface Mark {
  *  none. In the order of the scene's labels, so what is being looked at comes last and ends up on top. */
 export function marks(sc: Scene, sel: number | null): Mark[] {
   const named = new Set(sc.labels);
-  const out: Mark[] = sc.rings.map((r) => ({ i: r.i, ring: r.tone, off: r.dim, named: named.has(r.i) && !r.dim, sel: r.i === sel, gone: sc.gone.has(r.i) }));
+  const out: Mark[] = sc.rings.map((r) => ({ i: r.i, ring: r.tone, off: r.dim, named: named.has(r.i), sel: r.i === sel, gone: sc.gone.has(r.i) }));
   const have = new Set(out.map((m) => m.i));
   for (const i of sc.labels) if (!have.has(i)) out.push({ i, ring: null, off: false, named: true, sel: i === sel, gone: sc.gone.has(i) });
   const order = (m: Mark) => sc.labels.indexOf(m.i);
   return out.sort((a, b) => order(a) - order(b));
 }
+
+/** How the 3D view draws a link. `path` = one of the links the path between two resources actually takes — the
+ *  link itself, not any other link between the same two resources (a rule relation and a model's guess between the
+ *  same two are two links); `own` = a link of the open resource; `faint` = an end is outside the view; otherwise
+ *  by what the link is. */
+export type LinkLook = "path" | "own" | "faint" | "contain" | "inferred" | "rule";
+
+export function linkLook(sc: Scene | null, sel: number | null, e: { a: number; b: number; contain: boolean; llm: boolean }, k: number): LinkLook {
+  if (sc?.pathHops?.some((h) => h.k === k)) return "path";
+  if (sel !== null && !sc?.path && (e.a === sel || e.b === sel)) return "own";
+  if (sc?.dim && (sc.dim.has(e.a) || sc.dim.has(e.b))) return "faint";
+  return e.contain ? "contain" : e.llm ? "inferred" : "rule";
+}
+
+/** How strongly the plain kinds of link are drawn. A model's guess is never the brightest line on the map: it has
+ *  the strength of a rule relation and differs by its shape (a curve; the flat map dashes it). */
+export const LINK_ALPHA: Record<Exclude<LinkLook, "path" | "own">, number> = { faint: 0.03, contain: 0.1, inferred: 0.28, rule: 0.28 };
+

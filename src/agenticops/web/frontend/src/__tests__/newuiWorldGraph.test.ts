@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GalaxyGraph, GalaxyGraphEdge, GalaxyGraphNode } from "@/api/types";
-import { indexGraph } from "@/newui/lib/world/graph";
+import { applyHealth, indexGraph } from "@/newui/lib/world/graph";
 
 const res = (ref: number, type: string, over: Partial<GalaxyGraphNode> = {}): GalaxyGraphNode =>
   ({ id: `res:${ref}`, kind: "resource", name: `${type.toLowerCase()}-${ref}`, type, acct: 1, health: "unknown", absent: false, ...over });
@@ -72,6 +72,7 @@ describe("indexGraph — the relation graph as the map draws it", () => {
       links: 8,                 // between two resources
       lines: 2,                 // drawn as a line on the flat map: not containment
       contain: 6, rule: 7, inferred: 1,
+      containExtra: 1,          // containment not drawn as a circle: the database's second subnet
       ofAccount: 2,             // an account holding a resource: the region label
       ofGroup: 2,               // a resource in a tag group: the group filter
       dropped: 0,
@@ -101,3 +102,40 @@ describe("indexGraph — the relation graph as the map draws it", () => {
     expect([none.nodes.length, none.edges.length, none.buildId, none.totals.relations]).toEqual([0, 0, null, 0]);
   });
 });
+
+describe("what the map can say about its own age and its circles", () => {
+  it("carries when its build finished and when health was read — two different times", () => {
+    const g = indexGraph({ ...payload, built_at: "2026-11-11T18:01:56Z", health_at: "2026-11-17T09:00:00Z" });
+    expect([g.builtAt, g.healthAt]).toEqual(["2026-11-11T18:01:56Z", "2026-11-17T09:00:00Z"]);
+    expect([indexGraph(payload).builtAt, indexGraph(payload).healthAt]).toEqual([null, null]);       // an older server says neither
+  });
+
+  it("counts the containment that is not drawn as a circle: a resource in several holders sits in one", () => {
+    // the database is in two subnets; it is drawn inside the one with the lowest id, the other relation is a line when it is open
+    const t = indexGraph(payload).totals;
+    expect([t.contain, t.containExtra]).toEqual([6, 1]);
+  });
+});
+
+describe("applyHealth — health and «gone» read again, on the same graph", () => {
+  // the rings must follow the issues, not wait for the next build; the graph object stays the same one, so the map
+  // keeps its layout and the camera does not move
+  it("replaces every resource's health and «gone» by what was read now, and says whether anything changed", () => {
+    const g = indexGraph({ ...payload, health_at: "2026-11-17T09:00:00Z" });
+    const node = (ref: number) => g.nodes[g.byId.get(`res:${ref}`)!];
+    const read = { build_id: 172, at: "2026-11-17T09:45:00Z", health: { "res:30": "notice", "res:20": "critical" }, absent: ["res:40"] };
+    expect(applyHealth(g, read)).toBe(true);
+    expect([node(30).health, node(20).health, node(50).health]).toEqual(["notice", "critical", "unknown"]);     // not listed = no open issue
+    expect([node(40).absent, node(60).absent]).toEqual([true, false]);                                          // a resource that was gone is back
+    expect([g.totals.gone, g.totals.present, g.healthAt]).toEqual([1, 6, "2026-11-17T09:45:00Z"]);
+    expect(applyHealth(g, { ...read, at: "2026-11-17T09:46:00Z" })).toBe(false);                                // nothing changed …
+    expect(g.healthAt).toBe("2026-11-17T09:46:00Z");                                                            // … but it is as of now
+  });
+
+  it("does nothing with a reading of another build", () => {
+    const g = indexGraph({ ...payload, health_at: "2026-11-17T09:00:00Z" });
+    expect(applyHealth(g, { build_id: 173, at: "2026-11-17T09:45:00Z", health: {}, absent: [] })).toBe(false);
+    expect([g.healthAt, g.totals.gone]).toEqual(["2026-11-17T09:00:00Z", 1]);
+  });
+});
+

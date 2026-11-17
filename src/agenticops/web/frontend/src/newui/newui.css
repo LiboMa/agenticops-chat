@@ -275,6 +275,8 @@
 .nf .spine > li.bad::before{background:var(--red);border-color:var(--red)}
 .nf .spine > li.closed::before{background:var(--faint);border-color:var(--faint)}
 .nf .spine > li.todo{color:var(--faint)}
+.nf .spine > li.skipped{color:var(--faint)}
+.nf .spine > li.skipped::before{background:transparent;border-style:dashed}        /* a step that was never taken */
 .nf .spine h3{margin:0;font-size:var(--fs-md);font-weight:600;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
 .nf .spine h3 time{font-family:var(--num);font-weight:400;color:var(--faint);font-size:var(--fs-xs)}
 .nf .spine .who{display:inline;font-size:var(--fs-xs);color:var(--faint);font-weight:400}
@@ -381,6 +383,9 @@
 .nf .btn.on{border-color:var(--amber);color:var(--chalk)}
 .nf .hdot.gone{background:transparent;border:1px dashed var(--dim)}
 .nf .whint .chain{font-family:var(--mono);font-size:var(--fs-xs);color:var(--mint)} .nf .whint .btn{vertical-align:middle;margin-left:4px}
+/* the relation each step of a path runs over; one a model only inferred is marked — a dashed underline, like its line on the map */
+.nf .whint .chain .hop{font-size:inherit;color:var(--dim)}
+.nf .whint .chain .hop.llm{color:var(--amber);text-decoration:underline dashed;text-underline-offset:3px}
 .nf .chip-btn[aria-pressed="true"]{border-color:var(--amber);color:var(--chalk)}
 .nf .happen{padding:12px 14px;border-radius:14px;flex:none}
 .nf .happen h2{font-size:var(--fs-sm);color:var(--faint);font-weight:600;margin:0 0 6px}

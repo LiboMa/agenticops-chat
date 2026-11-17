@@ -28,7 +28,11 @@ export function Cause({ cause, gateNote }: { cause: CauseVm; gateNote?: string |
         </p>
       )}
       <div className="trust">
-        <div className="tile"><small><Prov code={false} />{t("trust.self")}</small><b style={cause.belowGate ? { color: "var(--amber)" } : undefined}>{pct(cause.self)}</b></div>
+        <div className="tile">
+          <small><Prov code={false} />{t("trust.self")}</small>
+          <b style={cause.belowGate && !cause.penalized ? { color: "var(--amber)" } : undefined}>{pct(cause.self)}</b>
+          {cause.penalized && <small style={cause.belowGate ? { color: "var(--amber)" } : undefined}><Prov code />{t("trust.gated", { p: pct(cause.gated) })}</small>}
+        </div>
         <div className="tile"><small><Prov code={false} />{t("trust.critic")}</small><b className="zh">{t(`critic.${cause.critic ?? "none"}`)}</b></div>
         <div className="tile"><small><Prov code />{t("trust.location")}</small><b className="zh">{t(`location.${cause.location ?? "none"}`)}</b></div>
       </div>
