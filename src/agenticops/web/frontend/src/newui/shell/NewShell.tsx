@@ -8,9 +8,11 @@ import { useReadOnly } from "@/hooks/useBootstrap";
 import { useTheme } from "@/hooks/useTheme";
 import { useLocale } from "@/i18n/LocaleContext";
 import { savePreferences } from "@/lib/preferences";
+import { useActivity } from "../hooks/useActivity";
 import { useWaitingCounts } from "../hooks/useDecideQueue";
 import { useNfT } from "../i18n";
 import { focusContext, keyIntent, type Lens } from "../lib/keys";
+import { atWork } from "../lib/live";
 import { groupCounts } from "../lib/queue";
 import { Help } from "./Help";
 import { ShellContext, type LensKeys, type ShellApi } from "./shellContext";
@@ -44,6 +46,7 @@ export function NewShell({ children }: { children: ReactNode }) {
   const location = useLocation();
   const lens = lensOf(location.pathname, (location.state as { from?: string } | null)?.from);
   const counts = useWaitingCounts(accountId);
+  const working = atWork(useActivity(accountId).data);              // the same record «现场» lists
 
   const [help, setHelp] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -154,6 +157,7 @@ export function NewShell({ children }: { children: ReactNode }) {
               <button key={l} type="button" role="tab" aria-selected={lens === l} onClick={() => go(l)}>
                 <span className="n">{i + 1}</span>{t(`lens.${l}`)}
                 {l === "decide" && <b className="cnt num">{countText}</b>}
+                {l === "live" && working !== undefined && working > 0 && <b className="cnt num">{working}</b>}
               </button>
             ))}
           </div>

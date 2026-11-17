@@ -12,7 +12,8 @@ export interface ActivityLane {
   account_id: number | null;
   /** when it started; null = nothing on record says */
   since: string | null;
-  /** how the server knows: a person asked and this process is on it ("requested"), a run row, a status, an event… */
+  /** how the server knows: a person asked and this process is on it ("requested"), a run row, a status, an event… —
+   *  or "stopped": the status says «investigating» but the timeline says the diagnosis ended */
   basis: string;
   requested_by: string | null;
   /** it outlived its own watchdog */
@@ -32,9 +33,15 @@ export function requestedRun(activity: Activity | undefined, item: string): Acti
   return activity?.running.find((l) => l.item === item && l.basis === "requested") ?? null;
 }
 
-/** Any agent at work on this item; a run a person asked for comes first. */
+/** Any agent at work on this item; a run a person asked for comes first. A diagnosis the server lists as `stopped`
+ *  (its end is on the timeline, the status stayed «investigating») is nobody at work. */
 export function agentOn(activity: Activity | undefined, item: string): ActivityLane | null {
-  return requestedRun(activity, item) ?? activity?.running.find((l) => l.item === item) ?? null;
+  return requestedRun(activity, item) ?? activity?.running.find((l) => l.item === item && l.basis !== "stopped") ?? null;
+}
+
+/** The diagnosis of this item that ended while its status stayed «investigating»: nothing is working on it. */
+export function stoppedOn(activity: Activity | undefined, item: string): ActivityLane | null {
+  return activity?.running.find((l) => l.item === item && l.basis === "stopped") ?? null;
 }
 
 /** The rail beside the brief: everything running, then the newest few that ended. */

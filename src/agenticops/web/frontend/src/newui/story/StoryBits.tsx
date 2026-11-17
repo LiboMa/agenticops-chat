@@ -12,6 +12,7 @@ import { Quote, RunSteps } from "../decide/widgets/RunSteps";
 import { useNfT } from "../i18n";
 import { whoText } from "../lib/activity";
 import { briefKind } from "../lib/briefKind";
+import { lanePath } from "../lib/live";
 import { failedVm, runStepsVm } from "../lib/briefs/run";
 import { waitedParts } from "../lib/queue";
 import { runLine, type SpineState, type WaitKey } from "../lib/story";
@@ -33,8 +34,10 @@ export interface StoryFrame {
 
 /** The top of the page: the way back, which item, where it stands and who it waits on — and, when it waits on this
  *  person, what is asked of them and the way to the decision. */
-export function StoryHead({ frame, refText, tone, sev, title, state, wait, stuck, since, place, children }: {
+export function StoryHead({ frame, refText, tone, sev, title, state, wait, stuck, liveLane, since, place, children }: {
   frame: StoryFrame; refText: string; tone: string; sev: string; title: string;
+  /** the lane of «现场» where this item is being worked on right now, if any */
+  liveLane?: string | null;
   /** the status in words */
   state: string;
   wait: WaitKey | null;
@@ -64,6 +67,7 @@ export function StoryHead({ frame, refText, tone, sev, title, state, wait, stuck
           </span>
         )}
         {stuck && <span className="wait">{t("lane.overdue")}</span>}
+        {liveLane && <Link className="story-link" to={lanePath(liveLane)}>{t("story.watchLive")}</Link>}
         {place && <span>{place}</span>}
       </div>
       {frame.mine && (

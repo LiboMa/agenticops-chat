@@ -22,7 +22,7 @@ import { Quote } from "../decide/widgets/RunSteps";
 import { useActivity } from "../hooks/useActivity";
 import { useReopenIssue } from "../hooks/useIssueDecisions";
 import { useNfT } from "../i18n";
-import { agentOn, whoText } from "../lib/activity";
+import { agentOn, stoppedOn, whoText } from "../lib/activity";
 import { causeVm } from "../lib/briefs/cause";
 import { humanVerdict } from "../lib/briefs/verdict";
 import { closure, issueSpine, lastMove, planBasis, planLine, reachedOf, waitKey, type IssueStep } from "../lib/story";
@@ -52,6 +52,7 @@ export function IssueStory({ id, frame }: { id: number; frame: StoryFrame }) {
   const anchor = useResource(issueQ.data?.resource_ref ?? 0);
   const activity = useActivity(null).data;                 // every account: the item is what it is, whatever the scope
   const lane = agentOn(activity, frame.item);
+  const halted = stoppedOn(activity, frame.item);          // its last diagnosis ended, the status stayed «investigating»
   const reopen = useReopenIssue(id);
   const [error, setError] = useState<string | null>(null);
   const [wide, setWide] = useState(false);
@@ -119,6 +120,7 @@ export function IssueStory({ id, frame }: { id: number; frame: StoryFrame }) {
     rca: (
       <>
         {lane?.kind === "diagnosis" && <AgentAtWork lane={lane} now={frame.now} />}
+        {halted && <p><Prov code />{t(halted.since ? "story.rca.stopped" : "story.rca.stopped.unknown", { t: utcStamp(halted.since, frame.now) })}</p>}
         {rcaQ.isPending ? <div className="skel" style={{ height: 54, marginTop: 6 }} />
           : rcaQ.isError ? <p className="note err">{t("sec.failedLoad")}</p>
           : !cause ? (lane?.kind === "diagnosis" ? null : <p>{t("story.rca.none")}</p>)
@@ -216,7 +218,8 @@ export function IssueStory({ id, frame }: { id: number; frame: StoryFrame }) {
     <>
       <article className="story card" aria-label={t("story.label")}>
         <StoryHead frame={frame} refText={`I#${id}`} tone={TONE[issue.severity] ?? ""} sev={t(`sev.${issue.severity}`)} title={issue.title}
-                   state={state} wait={wait} stuck={!!lane?.overdue} since={issue.waiting_since ?? (lane ? lane.since : null)}
+                   state={state} wait={wait} stuck={!!lane?.overdue} liveLane={(lane ?? halted)?.id}
+                   since={wait === "wait.agent" && lane?.since ? lane.since : issue.waiting_since ?? null}
                    place={[issue.account_name, issueFacts(issue).region].filter(Boolean).join("　")}>
           {canReopen && (
             <p style={{ margin: "10px 0 0" }}>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentOn, railRows, requestedRun, whoText, type Activity, type ActivityLane } from "@/newui/lib/activity";
+import { agentOn, railRows, requestedRun, stoppedOn, whoText, type Activity, type ActivityLane } from "@/newui/lib/activity";
 import { humanVerdict } from "@/newui/lib/briefs/verdict";
 import type { PipelineEvent } from "@/api/types";
 
@@ -22,6 +22,20 @@ describe("agents at work on an item — the server's record, not this browser's 
     expect(agentOn(activity([lane({}), asked]), "I12")).toBe(asked);
     expect(agentOn(activity([lane({ item: "C3", id: "C3:change_review", kind: "change_review" })]), "C3")?.kind).toBe("change_review");
     expect(agentOn(activity([]), "I12")).toBeNull();
+  });
+});
+
+describe("a diagnosis that stopped is not an agent at work", () => {
+  // the status still says «investigating», the timeline says the diagnosis ended: the server lists it as `stopped`
+  const stopped = lane({ basis: "stopped", overdue: true });
+  it("is nobody on the item — a person may ask again", () => {
+    expect(agentOn(activity([stopped]), "I12")).toBeNull();
+    expect(requestedRun(activity([stopped]), "I12")).toBeNull();
+  });
+  it("is found as what it is", () => {
+    expect(stoppedOn(activity([stopped]), "I12")).toBe(stopped);
+    expect(stoppedOn(activity([lane({})]), "I12")).toBeNull();
+    expect(stoppedOn(undefined, "I12")).toBeNull();
   });
 });
 

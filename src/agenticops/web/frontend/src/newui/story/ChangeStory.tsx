@@ -158,7 +158,8 @@ export function ChangeStory({ id, frame }: { id: number; frame: StoryFrame }) {
       <article className="story card" aria-label={t("story.label")}>
         <StoryHead frame={frame} refText={`C#${id}`} tone={TONE[cr.risk_level ?? ""] ?? ""}
                    sev={`${t("sev.change")}${cr.risk_level ? ` ${cr.risk_level}` : ""}`} title={cr.title}
-                   state={state} wait={wait} stuck={!!lane?.overdue} since={cr.waiting_since ?? (lane ? lane.since : null)} place={[accountName, region].filter(Boolean).join("　")} />
+                   state={state} wait={wait} stuck={!!lane?.overdue} liveLane={lane?.id}
+                   since={wait === "wait.agent" && lane?.since ? lane.since : cr.waiting_since ?? null} place={[accountName, region].filter(Boolean).join("　")} />
         <Spine steps={view} now={frame.now} />
         <WholeRecord events={timeline.data ? toPipelineEvents(timeline.data) : undefined} failed={timeline.isError} now={frame.now} />
       </article>

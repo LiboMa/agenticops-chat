@@ -5,11 +5,14 @@ import { useNfT, type NfT } from "../i18n";
 import { railRows, type ActivityLane } from "../lib/activity";
 import { waitedParts } from "../lib/queue";
 
-/** "诊断 · 已经 3 分钟": what a lane is doing and for how long — or that nothing on record says since when. */
-export function laneLabel(lane: Pick<ActivityLane, "kind" | "since">, now: number, t: NfT): string {
+/** "诊断 · 已经 3 分钟": what a lane is doing and for how long — or that nothing on record says since when. A diagnosis
+ *  that stopped (its end is on the timeline, the status stayed) reads "诊断停了 · 42 天前". */
+export function laneLabel(lane: Pick<ActivityLane, "kind" | "since" | "basis">, now: number, t: NfT): string {
+  const what = t(`lane.${lane.kind}`) === `lane.${lane.kind}` ? lane.kind : t(`lane.${lane.kind}`);
   const w = waitedParts(lane.since, now);
-  const span = !w ? t("lane.sinceUnknown") : t("lane.for", { t: w.unit === "now" ? t("unit.min", { n: 0 }) : t(`unit.${w.unit}`, { n: w.n }) });
-  return `${t(`lane.${lane.kind}`)} · ${span}`;
+  const span = !w ? null : w.unit === "now" ? t("unit.min", { n: 0 }) : t(`unit.${w.unit}`, { n: w.n });
+  if (lane.basis === "stopped") return span ? t("lane.stopped", { what, t: span }) : t("lane.stopped.unknown", { what });
+  return `${what} · ${span ? t("lane.for", { t: span }) : t("lane.sinceUnknown")}`;
 }
 
 /** The rail beside the brief: what agents are doing now, and the last few things that ended — so a decision does
@@ -32,7 +35,7 @@ export function Feed({ now }: { now: number }) {
             <button key={l.id} type="button" className={`f run${l.overdue ? " late" : ""}`} onClick={() => open(l.id)}>
               <span className="h"><span><span className="dot" />{laneLabel(l, now, t)}</span><span className="num">{l.ref ?? ""}</span></span>
               <span className="b">{l.title}</span>
-              {l.overdue && <span className="b late-note">{t("lane.overdue")}</span>}
+              {l.overdue && l.basis !== "stopped" && <span className="b late-note">{t("lane.overdue")}</span>}
             </button>
           ))}
         {rows.recent.length > 0 && <div className="lgroup"><span>{t("feed.recent")}</span></div>}

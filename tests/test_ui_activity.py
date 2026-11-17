@@ -114,6 +114,24 @@ def test_an_open_issue_or_one_that_waits_on_a_person_is_not_an_agent_at_work(db)
     assert _lanes() == []
 
 
+def test_a_diagnosis_that_ended_while_the_status_stayed_is_not_an_agent_at_work(db):
+    """An issue can be left at `investigating` after its diagnosis ended without a result (the timeline's
+    rca_completed is newer than rca_started). Nothing is working on it: the lane says the diagnosis STOPPED, since
+    when — it must not read «diagnosing for 42 days»."""
+    stuck = _issue("investigating", title="left behind")
+    _event(stuck, "rca_started", ago(days=42, minutes=1))
+    _event(stuck, "rca_completed", ago(days=42), {"reason": "no_result"}, status="failed")
+    retried = _issue("investigating", title="started again")
+    _event(retried, "rca_started", ago(days=2))
+    _event(retried, "rca_completed", ago(days=2) + timedelta(minutes=3), {"reason": "no_result"}, status="failed")
+    _event(retried, "rca_started", ago(minutes=4))                       # a newer start: this one is at work
+    by = {l["item"]: l for l in _lanes()}
+    assert (by[f"I{stuck}"]["basis"], by[f"I{stuck}"]["kind"], by[f"I{stuck}"]["overdue"]) == ("stopped", "diagnosis", True)
+    assert by[f"I{stuck}"]["since"] == "2026-10-06T12:00:00Z"            # when it ended
+    assert (by[f"I{retried}"]["basis"], by[f"I{retried}"]["overdue"]) == ("status", False)
+    assert by[f"I{retried}"]["since"] == "2026-11-17T11:56:00Z"
+
+
 def test_a_run_a_person_asked_for_is_a_lane_with_who_asked(db):
     iid = _issue("root_cause_identified", "port 22 open")
     agent_runs.begin("sre", iid, "user:alice", now=ago(minutes=2))

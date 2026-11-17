@@ -724,5 +724,13 @@
   "live.result.none": "This run's record was not found.",
   "live.result.newerRca": "The item has a newer diagnosis since; this is the newest one.",
   "live.openStory": "See the item's whole story",
-  "live.openClassic": "Open the classic page"
+  "live.openClassic": "Open the classic page",
+  "lane.stopped": "{what} stopped · {t} ago",
+  "lane.stopped.unknown": "{what} stopped",
+  "live.group.stalled": "Stalled: no agent is on it",
+  "live.basis.stopped": "The item's status still says “investigating”, but its last diagnosis ended on the timeline and left no result. No agent is on it now.",
+  "live.stoppedAt": "It ended {t} UTC.",
+  "live.stopped.next": "It is on nobody's list. Its story page has the whole record; to move it, somebody must rerun the diagnosis or dismiss it (on the classic page, for now).",
+  "story.rca.stopped": "The last diagnosis ended at {t} UTC and left no result; the status stayed “investigating”, and no agent is on it now.",
+  "story.rca.stopped.unknown": "The last diagnosis ended and left no result; the status stayed “investigating”, and no agent is on it now."
 }

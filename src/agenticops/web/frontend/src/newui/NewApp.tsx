@@ -3,6 +3,7 @@ import { AccountScopeProvider } from "@/components/layout/AccountScope";
 import { ShellEffects } from "@/components/layout/ShellEffects";
 import { DecideLens } from "./decide/DecideLens";
 import { useNfT } from "./i18n";
+import { LiveLens } from "./live/LiveLens";
 import { NewShell } from "./shell/NewShell";
 import { Message } from "./shell/StateBlock";
 import { StoryLens } from "./story/StoryLens";
@@ -19,7 +20,8 @@ export default function NewApp() {
           <Route path="decide" element={<DecideLens />} />
           <Route path="decide/:item" element={<DecideLens />} />
           <Route path="story/:item" element={<StoryLens />} />
-          <Route path="live/*" element={<Soon />} />
+          <Route path="live" element={<LiveLens />} />
+          <Route path="live/:lane" element={<LiveLens />} />
           <Route path="world/*" element={<Soon />} />
           <Route path="*" element={<Lost />} />
         </Routes>

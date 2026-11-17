@@ -3,7 +3,8 @@
 Built only from state that can be checked:
 
   running   a run a person asked for that this process is still on (services/agent_runs); an issue whose status
-            says it is being diagnosed (`investigating`) or executed (`fix_executing`); a fix run row that is pending
+            says it is being diagnosed (`investigating`) or executed (`fix_executing`) — a diagnosis whose end is on
+            the timeline while the status stayed is listed as `stopped`, not as at work; a fix run row that is pending
             or running; an approved plan whose run has started (the timeline's execution_started with no end yet);
             a change under review or executing; a schedule run that is running; a graph build that is running
   upcoming  the next runs of the enabled schedules
@@ -85,7 +86,7 @@ def activity(actor, *, account_id: Optional[int] = None, now: Optional[datetime]
         if issues:
             for e in s.query(PipelineEvent).filter(
                     PipelineEvent.health_issue_id.in_(list(issues)),
-                    PipelineEvent.event_type.in_(("rca_started", "execution_started", "execution_completed"))):
+                    PipelineEvent.event_type.in_(("rca_started", "rca_completed", "execution_started", "execution_completed"))):
                 events.setdefault(e.health_issue_id, []).append(e)
         approved = [i for i in issues.values() if i.status == "fix_approved"]
         plans: dict[int, list] = {}
@@ -134,9 +135,15 @@ def activity(actor, *, account_id: Optional[int] = None, now: Optional[datetime]
             if issue.id in taken:
                 continue
             if issue.status == "investigating":
-                running.append(_lane(f"I{issue.id}:diagnosis", "diagnosis", "rca", issue.title, now=now, basis="status",
-                                     item=f"I{issue.id}", account_id=issue.account_id,
-                                     since=_newest(events, issue.id, "rca_started"), limit=rca_limit))
+                started, ended = _newest(events, issue.id, "rca_started"), _newest(events, issue.id, "rca_completed")
+                # the diagnosis ended and the status stayed (it left no result): nothing is at work — say it stopped
+                stopped = ended is not None and (started is None or ended >= started)
+                lane = _lane(f"I{issue.id}:diagnosis", "diagnosis", "rca", issue.title, now=now,
+                             basis="stopped" if stopped else "status", item=f"I{issue.id}", account_id=issue.account_id,
+                             since=ended if stopped else started, limit=rca_limit)
+                if stopped:
+                    lane["overdue"] = True
+                running.append(lane)
             elif issue.status == "fix_executing":
                 running.append(_lane(f"I{issue.id}:run", "run", "executor", issue.title, now=now, basis="status",
                                      item=f"I{issue.id}", account_id=issue.account_id,
