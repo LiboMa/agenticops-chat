@@ -438,16 +438,17 @@ def test_a_change_run_whose_plan_row_reads_as_missing_is_refused(db):
     assert not cli_tool.called and not agent_cls.called and not model_cls.called
 
 
-def test_a_run_whose_plan_row_reads_as_missing_without_a_change_request_is_unchanged(db):
-    """No change request in the Run Context (a fix-plan run, or no queued run at all): the fallback, as before."""
+def test_a_run_whose_plan_row_reads_as_missing_without_a_change_request_is_refused_in_code(db):
+    """No change request in the Run Context (a fix-plan run, or no queued run at all). Until MVP-2.9.0 N8 the agent
+    was built with the fallback tools and left to find out from get_approved_fix_plan; a run now opens its record
+    first, and there is no plan to open one for — so it is refused before any model is built."""
     from agenticops.agents.executor_agent import executor_agent
     missing = 9999
     for run in (_in_run(missing, None, None), nullcontext()):
-        with _executor_build() as (agent_cls, _, cli_tool), run:
+        with _executor_build() as (agent_cls, model_cls, cli_tool), run:
             out = executor_agent(fix_plan_id=missing)
-        assert out == "done" and agent_cls.call_count == 1 and not cli_tool.called
-        tools = agent_cls.call_args.kwargs["tools"]
-        assert run_aws_cli in tools and run_aws_cli_readonly in tools
+        assert out == "REJECTED: FixPlan #9999 not found"
+        assert not agent_cls.called and not model_cls.called and not cli_tool.called
 
 
 def test_a_change_with_no_account_uses_the_account_addressed_tools(db):
@@ -759,3 +760,17 @@ def test_a_fix_run_is_unbound(db):
     fake, seen = _binding_recorder()
     _run(ex_id, pid, fake)
     assert seen["bound"] is None
+
+
+def test_a_change_run_that_records_its_result_writes_one_completion_event(db):
+    """save_execution_result and the change mapper each wrote one: a change's timeline said «completed» twice for
+    one run (MVP-2.9.0 N8). The mapper's is the one kept — it carries the request's own terminal status."""
+    from agenticops.models import PipelineEvent
+    cr_id, pid, ex_id = _change_run(db)
+    fake, _ = _recorder("succeeded", post_check_results=PASSED)
+    _run(ex_id, pid, fake)
+    db.expire_all()
+    events = db.query(PipelineEvent).filter_by(change_request_id=cr_id, event_type="execution_completed").all()
+    assert [e.status for e in events] == ["completed"]
+    detail = json.loads(events[0].detail)
+    assert detail["execution_status"] == "succeeded" and detail["verification"] == "passed"

@@ -66,12 +66,12 @@ class ExecutorService:
     def cancel_execution(self, execution_id: int) -> bool:
         """Request cancellation of a running execution.
 
-        Note: This sets the DB status to 'aborted' but cannot forcibly kill the
-        executor agent thread. The plan (if executing) → failed and, for a change
-        plan, the change request → failed via on_execution_result("aborted"); the
-        still-running agent's later writes and change_required commands are refused
-        because its plan is no longer approved/executing. False when the ticket is
-        missing or no longer running (see _close_ticket).
+        The ticket is closed as 'aborted'; the plan (if executing) → failed; a fix's issue goes back to
+        root_cause_identified; for a change plan the change request → failed via on_execution_result("aborted").
+        The agent's thread is not killed — it cannot be — but it stops: agents/run_guard.RunGuard reads the
+        closed record before the agent's next tool call and its next model call and cancels both (MVP-2.9.0 N8;
+        until then the thread went on, and a write command no plan-context rule refuses still ran). A command
+        already running finishes. False when the ticket is missing or no longer running (see _close_ticket).
         """
         ok = self._close_ticket(execution_id, "aborted", "Cancelled by operator")
         if ok:
@@ -225,43 +225,11 @@ class ExecutorService:
                 self._active_executions.pop(execution_id, None)
 
     def _close_ticket(self, execution_id: int, ticket_status: str, message: str) -> bool:
-        """Close a still-running ticket as ``ticket_status``; its executing plan → failed; for a change plan the
-        change mapper gets ``ticket_status`` (its request → failed).
-
-        The ticket is the arbiter between the three writers that close it — this one (a cancel, the watchdog, a
-        crash, the post-run reconcile) and save_execution_result — so the first write is a compare-and-set,
-        ``UPDATE … WHERE id=? AND status='running'`` (the _check_for_pending claim): only its winner goes on
-        to the plan. False (and nothing written) when the ticket is missing or no longer running — it was
-        already closed by one of the others. The plan is the TICKET's plan.
-        """
-        from sqlalchemy import update
-        from agenticops.models import FixExecution, FixPlan, get_db_session, transition_plan
-        from agenticops.security.redaction import redact_obj
-
-        with get_db_session() as session:
-            # Core UPDATE: past the ORM's before_flush secret scrubber, so the message is scrubbed here.
-            closed = session.execute(
-                update(FixExecution)
-                .where(FixExecution.id == execution_id, FixExecution.status == "running")
-                .values(status=ticket_status, completed_at=datetime.now(timezone.utc), error_message=redact_obj(message))
-            )
-            if closed.rowcount != 1:
-                return False
-            plan_id = session.query(FixExecution.fix_plan_id).filter_by(id=execution_id).scalar()
-            plan = session.query(FixPlan).filter_by(id=plan_id).first()
-            is_change = plan is not None and plan.plan_kind == "change"
-            if plan is not None and plan.status == "executing":
-                transition_plan(plan, "failed")
-            session.commit()
-        # Change plan: feed the terminal to the change mapper after commit (a no-op unless its request is
-        # executing). Best-effort: a post-commit side-effect must never crash the handler that closes the ticket.
-        if is_change:
-            try:
-                from agenticops.services.change_service import on_execution_result
-                on_execution_result(plan_id, ticket_status, error=message)
-            except Exception:
-                logger.warning("change on_execution_result failed for FixPlan #%s", plan_id, exc_info=True)
-        return True
+        """Close a still-running ticket as ``ticket_status`` — services/run_tickets.close_ticket, the one way a run
+        record is closed by anything but its own result (MVP-2.9.0 N8: it also gives a fix's issue back and writes
+        the timeline event). False, and nothing written, when the ticket is missing or no longer running."""
+        from agenticops.services.run_tickets import close_ticket
+        return close_ticket(execution_id, ticket_status, message)
 
     def _fail_execution(self, execution_id: int, message: str) -> bool:
         """Close a still-running ticket as failed; its executing plan → failed; a change plan's request → failed.

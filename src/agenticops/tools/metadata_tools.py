@@ -1738,18 +1738,17 @@ def save_execution_result(
         if disputed is not None:
             log_rca_disputed(issue_id, disputed.id, execution_ref, why)
 
-        # Log pipeline event (against the CR for a change plan, else the issue)
-        try:
-            from agenticops.services.pipeline_events import log_event
-            detail = {"plan_id": fix_plan_id, "duration_ms": duration_ms, "auto_resolved": auto_resolved,
-                      "verification": verdict}
-            if is_change:
-                log_event(None, "execution_completed", "execution", status, detail=detail, duration_ms=duration_ms,
-                          change_request_id=change_request_id)
-            else:
+        # The run's end on the issue's timeline. A change run's is written by the change mapper below
+        # (change_service.on_execution_result), with the request's own terminal status: until MVP-2.9.0 N8 both
+        # wrote one, and a change's timeline said «completed» twice for one run.
+        if not is_change:
+            try:
+                from agenticops.services.pipeline_events import log_event
+                detail = {"plan_id": fix_plan_id, "duration_ms": duration_ms, "auto_resolved": auto_resolved,
+                          "verification": verdict}
                 log_event(issue_id, "execution_completed", "execution", status, detail=detail, duration_ms=duration_ms)
-        except Exception:
-            pass
+            except Exception:
+                pass
 
         # Trigger post-resolution pipeline (RAG + case distillation) in background
         if auto_resolved:

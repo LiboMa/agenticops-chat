@@ -790,7 +790,12 @@ async def api_update_settings(request: Request, body: dict = Body(...), current:
         if key in body:
             if not isinstance(body[key], bool):
                 raise HTTPException(400, f"{key} must be a boolean")
+            was = getattr(settings, key)
             setattr(settings, key, body[key])
+            if key == "executor_enabled" and body[key] and not was:
+                # The queue's poller is started at boot only when the executor is on: switched on at runtime, the
+                # tickets queued from then on waited for the next restart (MVP-2.9.0 N8). start() is idempotent.
+                _executor_service.start()
 
     if "scan_focus" in body:
         val = body["scan_focus"]
@@ -3008,6 +3013,17 @@ def api_delete_fix_plan(plan_id: int, actor: Actor = Depends(current_actor)):
         refusal = fix_path_refusal(plan, "deleted")
         if refusal:
             raise HTTPException(status_code=409, detail=refusal)
+        # A plan that is running, or has run, is part of a record (MVP-2.9.0 N8): its runs point at it. Until then
+        # the route had no state check — the plan of a run in progress could be removed under the executor, and
+        # one with a finished run answered 500 (the run rows' foreign key).
+        from agenticops.services.pipeline_service import plan_run_in_flight
+        from agenticops.services.run_tickets import OPEN
+        runs = session.query(FixExecution.status).filter(FixExecution.fix_plan_id == plan.id).all()
+        if plan.status == "executing" or any(st in OPEN for (st,) in runs) or plan_run_in_flight(session, plan.id):
+            raise HTTPException(status_code=409, detail="A run of this plan is in progress; it cannot be deleted now")
+        if runs:
+            raise HTTPException(status_code=409, detail=f"This plan has run ({len(runs)} run record"
+                                f"{'s' if len(runs) != 1 else ''}); it is kept with them and cannot be deleted")
         session.delete(plan)
 
 

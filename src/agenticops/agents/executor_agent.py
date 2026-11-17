@@ -210,6 +210,8 @@ def executor_agent(fix_plan_id: int) -> str:
     if refused:
         return f"REJECTED: {refused}"
 
+    opened = watchdog = None     # the run record this call opened itself, and the timer that times it out
+    outcome = ""
     try:
         from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_executor_interventions, get_bedrock_boto_session
         from agenticops.models import get_db_session, FixPlan, HealthIssue
@@ -218,6 +220,27 @@ def executor_agent(fix_plan_id: int) -> str:
             refusal = change_execution_refusal(db.query(FixPlan).filter_by(id=fix_plan_id).first())
         if refusal:
             return f"REJECTED: {refusal}"
+
+        # Every run has a record while it works (MVP-2.9.0 N8). A queued run arrives with its ticket in the Run
+        # Context; the thread an approval starts and a run dispatched from chat open theirs here — which also
+        # refuses, before any model is built, a plan that is not approved (a withdraw that raced this thread) and
+        # a second executor on a plan that is already running. The record is closed by the run's own result, or
+        # in the `finally` below when the run ends without one; RunGuard stops the agent once it is closed.
+        from agenticops.run_context import get_run_context
+        from agenticops.services import run_tickets
+        execution_id = get_run_context().execution_id
+        # (a run that names a change request is a queued one, or is refused below for want of its account)
+        if not execution_id and not get_run_context().change_request_id:
+            opened, why = run_tickets.open_ticket(fix_plan_id, executed_by=get_run_context().actor)
+            if opened is None and why:
+                return f"REJECTED: {why}"
+            execution_id = opened
+        if opened and (settings.executor_total_timeout or 0) > 0:
+            import threading
+            watchdog = threading.Timer(settings.executor_total_timeout, run_tickets.close_ticket, args=(
+                opened, "failed", f"Execution timed out after {settings.executor_total_timeout}s"))
+            watchdog.daemon = True
+            watchdog.start()
 
         # Resolve provider CLI tool from the plan's account: the issue's account for a fix
         # plan, the change request's account for a change plan (凭证安全铁律 #3 — account-addressed).
@@ -285,6 +308,8 @@ def executor_agent(fix_plan_id: int) -> str:
             **cache_kwargs,
         )
 
+        from strands.tools.executors import SequentialToolExecutor
+        from agenticops.agents.run_guard import RunGuard
         agent = Agent(
             system_prompt=build_system_prompt(_build_executor_prompt(), include_account=False, agent_type="executor", agent_name="executor"),
             model=model,
@@ -292,6 +317,10 @@ def executor_agent(fix_plan_id: int) -> str:
             conversation_manager=get_agent_conversation_manager("executor"),
             plugins=get_agent_context_plugins("executor"),
             interventions=get_executor_interventions(),
+            # One command at a time, in the order the model wrote them (the SDK's default runs a turn's tool calls
+            # concurrently): a plan's steps are a sequence, and «it stops after the step it is on» must be true.
+            tool_executor=SequentialToolExecutor(),
+            hooks=[RunGuard(execution_id)] if execution_id else [],
             tools=[
                 # Plan verification (safety gate)
                 get_approved_fix_plan,
@@ -337,7 +366,7 @@ def executor_agent(fix_plan_id: int) -> str:
         from agenticops.run_context import run_context
         from agenticops.services.agent_log_service import track_agent
         # save_execution_result measures the run's duration from here — never the agent's own figure (E2E obs. 5)
-        with run_context(run_started_at=datetime.now(timezone.utc)), \
+        with run_context(run_started_at=datetime.now(timezone.utc), **({"execution_id": opened} if opened else {})), \
                 track_agent("executor", "execute_fix", f"fix_plan_id={fix_plan_id}", parent_agent=infer_parent_agent(),
                             model_id=model_id) as tracker:   # the smart model for L0/L1 — what the run is priced at
             result = invoke_with_retry(agent,
@@ -346,7 +375,21 @@ def executor_agent(fix_plan_id: int) -> str:
                 f"Start with step 1: call get_approved_fix_plan({fix_plan_id})."
             )
             tracker.set_result(result)
-        return str(result)
+        outcome = str(result)
+        return outcome
     except Exception as e:
         logger.exception("Executor agent failed for FixPlan #%d", fix_plan_id)
-        return f"Executor agent error: {e}"
+        outcome = f"Executor agent error: {e}"
+        return outcome
+    finally:
+        # A run that ends without recording its result — a refusal, a model error the agent caught, an exception —
+        # must not leave its record running and its plan and issue «executing». A no-op when the result, a cancel
+        # or the watchdog already closed it (the first closer wins).
+        if watchdog is not None:
+            watchdog.cancel()
+        if opened:
+            try:
+                from agenticops.services import run_tickets
+                run_tickets.close_ticket(opened, "failed", f"Executor ended without recording a result: {outcome[:300]}")
+            except Exception:
+                logger.warning("post-run reconcile failed for Execution #%s", opened, exc_info=True)
