@@ -2,13 +2,17 @@
 
 Built only from state that can be checked:
 
-  running   a run a person asked for that this process is still on (services/agent_runs); an issue whose status
+  running   a run a person asked for, or the plan run the pipeline started after a diagnosis passed its gate, that
+            this process is still on (services/agent_runs); an issue whose status
             says it is being diagnosed (`investigating`) or executed (`fix_executing`) — a diagnosis whose end is on
             the timeline while the status stayed is listed as `stopped`, not as at work; a fix run row that is pending
             or running; an approved plan whose run has started (the timeline's execution_started with no end yet);
             a change under review or executing; a schedule run that is running; a graph build that is running
   upcoming  the next runs of the enabled schedules
-  recent    fix runs, diagnoses, fix plans and schedule runs that ended in the last day
+  recent    fix runs, diagnoses and fix plans that ended in the last day (the newest RECENT_MAX), and the newest
+            RECENT_SCHEDULES_MAX schedule runs — counted apart, so a schedule that runs every ten minutes cannot
+            crowd the agents' work out; `recent_total` says how many there were of each, so the page can say when
+            it shows only some
 
 An `open` issue is NOT an agent at work — hundreds of them wait for nothing. `since` is when the work started, or
 null when nothing on record says; `overdue` marks work that outlived its own watchdog, so a stuck one stands out.
@@ -25,7 +29,8 @@ from agenticops.services import agent_runs
 from agenticops.services import work_phases as wp
 
 RECENT_HOURS = 24
-RECENT_MAX = 20
+RECENT_MAX = 20                 # the agents' work on issues: runs, diagnoses, plans
+RECENT_SCHEDULES_MAX = 10       # schedule runs
 UPCOMING_MAX = 5
 GRAPH_BUILD_LIMIT_SECONDS = 1800          # a build takes minutes; one still «running» after this is stuck
 _RUN_IN_FLIGHT = ("pending", "running")
@@ -96,13 +101,24 @@ def activity(actor, *, account_id: Optional[int] = None, now: Optional[datetime]
         run_rows = s.query(FixExecution).filter(FixExecution.status.in_(_RUN_IN_FLIGHT)).all()
         manual = agent_runs.running(now=now)
 
-        ended_runs = (s.query(FixExecution).filter(FixExecution.completed_at >= since_recent,
-                                                   FixExecution.status.notin_(_RUN_IN_FLIGHT))
-                      .order_by(FixExecution.completed_at.desc()).limit(RECENT_MAX).all())
-        new_rcas = (s.query(RCAResult).filter(RCAResult.created_at >= since_recent)
-                    .order_by(RCAResult.created_at.desc()).limit(RECENT_MAX).all())
-        new_plans = (s.query(FixPlan).filter(FixPlan.created_at >= since_recent, FixPlan.plan_kind == "fix")
-                     .order_by(FixPlan.created_at.desc()).limit(RECENT_MAX).all())
+        def scoped(query, model):
+            """The account scope is part of the query: the newest N of every account, filtered afterwards, left a
+            quiet account beside a busy one with an empty list. A run of a change plan has no issue — it is the
+            change's lane, not an issue's ended row."""
+            query = query.filter(model.health_issue_id.isnot(None))
+            if account_id is not None:
+                query = (query.join(HealthIssue, HealthIssue.id == model.health_issue_id)
+                         .filter(HealthIssue.account_id == account_id))
+            return query
+
+        runs_q = scoped(s.query(FixExecution).filter(FixExecution.completed_at >= since_recent,
+                                                     FixExecution.status.notin_(_RUN_IN_FLIGHT)), FixExecution)
+        rcas_q = scoped(s.query(RCAResult).filter(RCAResult.created_at >= since_recent), RCAResult)
+        plans_q = scoped(s.query(FixPlan).filter(FixPlan.created_at >= since_recent, FixPlan.plan_kind == "fix"), FixPlan)
+        work_total = runs_q.count() + rcas_q.count() + plans_q.count()
+        ended_runs = runs_q.order_by(FixExecution.completed_at.desc()).limit(RECENT_MAX).all()
+        new_rcas = rcas_q.order_by(RCAResult.created_at.desc()).limit(RECENT_MAX).all()
+        new_plans = plans_q.order_by(FixPlan.created_at.desc()).limit(RECENT_MAX).all()
 
         # every issue named above that is not loaded yet, in one query
         wanted = ({r.issue_id for r in manual} | {x.health_issue_id for x in (*run_rows, *ended_runs, *new_rcas, *new_plans)}) - {None}
@@ -116,14 +132,16 @@ def activity(actor, *, account_id: Optional[int] = None, now: Optional[datetime]
             return issue if issue is not None and (account_id is None or issue.account_id == account_id) else None
 
         taken: set[int] = set()        # issues that already have their lane: the best evidence wins
-        for r in manual:               # a person asked, this process is on it
+        for r in manual:               # a person asked — or the pipeline handed it on — and this process is on it
             issue = mine(r.issue_id)
             if issue is None:
                 continue
             taken.add(issue.id)
+            auto = r.requested_by == agent_runs.PIPELINE          # nobody asked: the basis says who started it
             running.append(_lane(f"I{issue.id}:{_AGENT_KIND.get(r.agent, r.agent)}", _AGENT_KIND.get(r.agent, r.agent), r.agent,
-                                 issue.title, now=now, basis="requested", item=f"I{issue.id}", account_id=issue.account_id,
-                                 since=r.started_at, requested_by=r.requested_by))
+                                 issue.title, now=now, basis="pipeline" if auto else "requested", item=f"I{issue.id}",
+                                 account_id=issue.account_id, since=r.started_at,
+                                 requested_by=None if auto else r.requested_by))
         for x in run_rows:             # a run row that is pending or running
             issue = mine(x.health_issue_id)
             if issue is None or issue.id in taken:
@@ -172,9 +190,11 @@ def activity(actor, *, account_id: Optional[int] = None, now: Optional[datetime]
                              .filter(ScheduleExecution.status.in_(("running", "retrying")))):
             running.append(_lane(f"S{schedule.id}", "schedule", "scheduler", schedule.name, now=now, basis="schedule",
                                  since=ex.started_at, route=f"/app/schedules/{schedule.id}"))
-        for build in s.query(GalaxyBuild).filter(GalaxyBuild.status == "running"):
-            running.append(_lane(f"G{build.id}", "graph_build", "galaxy", f"build #{build.id} ({build.trigger})", now=now,
-                                 basis="build", since=build.started_at, limit=GRAPH_BUILD_LIMIT_SECONDS, route="/app/galaxy"))
+        # three columns, not the row: a running build already holds its whole rule graph
+        for build_id, trigger, started_at in (s.query(GalaxyBuild.id, GalaxyBuild.trigger, GalaxyBuild.started_at)
+                                              .filter(GalaxyBuild.status == "running")):
+            running.append(_lane(f"G{build_id}", "graph_build", "galaxy", f"build #{build_id} ({trigger})", now=now,
+                                 basis="build", since=started_at, limit=GRAPH_BUILD_LIMIT_SECONDS, route="/app/galaxy"))
 
         upcoming = [{"id": f"S{sc.id}", "kind": "schedule", "agent": "scheduler", "title": sc.name, "at": _iso(sc.next_run_at),
                      "route": f"/app/schedules/{sc.id}"}
@@ -196,14 +216,18 @@ def activity(actor, *, account_id: Optional[int] = None, now: Optional[datetime]
             ended(f"R{r.id}", "diagnosis", "rca", r.health_issue_id, r.created_at, "done")
         for p in new_plans:
             ended(f"P{p.id}", "plan", "sre", p.health_issue_id, p.created_at, "done")
-        for ex, schedule in (s.query(ScheduleExecution, Schedule).join(Schedule, Schedule.id == ScheduleExecution.schedule_id)
-                             .filter(ScheduleExecution.completed_at >= since_recent,
-                                     ScheduleExecution.status.notin_(("running", "retrying")))
-                             .order_by(ScheduleExecution.completed_at.desc()).limit(RECENT_MAX)):
+        newest_first = lambda l: (l["at"] or "", l["id"])                           # noqa: E731
+        recent = sorted(recent, key=newest_first, reverse=True)[:RECENT_MAX]         # the agents' work, cut on its own
+        ended_jobs = (s.query(ScheduleExecution, Schedule).join(Schedule, Schedule.id == ScheduleExecution.schedule_id)
+                      .filter(ScheduleExecution.completed_at >= since_recent,
+                              ScheduleExecution.status.notin_(("running", "retrying"))))
+        schedule_total = ended_jobs.count()
+        for ex, schedule in ended_jobs.order_by(ScheduleExecution.completed_at.desc()).limit(RECENT_SCHEDULES_MAX):
             recent.append({"id": f"SE{ex.id}", "kind": "schedule", "agent": "scheduler", "item": None, "ref": None,
                            "title": schedule.name, "account_id": None, "at": _iso(ex.completed_at),
                            "outcome": "done" if ex.status == "completed" else "failed", "route": f"/app/schedules/{schedule.id}"})
 
     running.sort(key=lambda l: (l["since"] is None, l["since"] or "", l["id"]))      # the longest-running first
-    recent.sort(key=lambda l: (l["at"] or "", l["id"]), reverse=True)
-    return {"running": running, "upcoming": upcoming, "recent": recent[:RECENT_MAX], "generated_at": _iso(now)}
+    recent.sort(key=newest_first, reverse=True)
+    return {"running": running, "upcoming": upcoming, "recent": recent,
+            "recent_total": {"work": work_total, "schedules": schedule_total}, "generated_at": _iso(now)}

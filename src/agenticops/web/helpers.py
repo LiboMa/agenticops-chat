@@ -78,7 +78,8 @@ def _auto_learn_dismissed(issue_id: int, resource_id: str, title: str, descripti
             f"Auto-learned: issue I#{issue_id} was dismissed by user."
         )
         if note:
-            body += f"\nUser note: {note}"
+            # the body is injected into the detect agent's prompt on every run: a short copy; the timeline has it whole
+            body += f"\nUser note: {note[:300]}{'…' if len(note) > 300 else ''}"
         save_memory_file(
             agent_name="detect",
             filename=filename,

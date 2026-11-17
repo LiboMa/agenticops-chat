@@ -27,11 +27,13 @@ class IssueStatusConflict(InvalidStatusTransition):
 
 
 def transition_issue(session, issue_id: int, new_status: str, *, actor: str, reason: str,
-                     expected: Optional[str] = None) -> str:
+                     expected: Optional[str] = None, note: Optional[str] = None) -> str:
     """Move HealthIssue `issue_id` to `new_status`; returns the status it moved from.
 
     `expected` is the status the caller read; None = the loaded row's status. A same-status request writes
     nothing (no row, no event). `actor` is an actor key string (`user:alice`, `agent:executor`, `system`).
+    `reason` says why and is often the code's own sentence; `note` is what a PERSON typed with the decision, and
+    is given only then — a page quotes `note` under their name, never `reason` (MVP-2.9.0).
 
     Raises IssueNotFound, ValueError (unknown status), InvalidStatusTransition (illegal edge) and
     IssueStatusConflict (the row is no longer in `expected`).
@@ -55,10 +57,12 @@ def transition_issue(session, issue_id: int, new_status: str, *, actor: str, rea
         raise IssueStatusConflict(f"HealthIssue #{issue_id} is no longer '{current}'; it was changed concurrently")
     for key, value in values.items():  # the bulk UPDATE bypassed the loaded row; mirror it without dirtying it
         set_committed_value(issue, key, value)
+    detail = {"from": current, "to": new_status, "reason": (reason or "")[:2000]}
+    if note and note.strip():
+        detail["note"] = note.strip()[:2000]     # a person's own words, kept whole, as a plan's rejection reason is
     session.add(PipelineEvent(
         health_issue_id=issue_id, event_type="status_changed", stage="issue", status="completed",
-        # 2000: a person's own reason (a dismissal's, MVP-2.9.0) is kept whole, as a plan's rejection reason is
-        detail=json.dumps({"from": current, "to": new_status, "reason": (reason or "")[:2000]}),
+        detail=json.dumps(detail),
         actor=actor[:100] if actor else actor, trace_id=issue.trace_id,  # the column is String(100)
     ))
     return current

@@ -1,15 +1,21 @@
-"""Agent runs a person asked for, while they are in flight (MVP-2.9.0).
+"""Agent runs on an issue while they are in flight: the ones a person asked for, and the plan run the pipeline itself
+starts after a diagnosis passes its gate (MVP-2.9.0).
 
 A person asks for a diagnosis (POST /api/health-issues/{id}/rca) or a fix plan (…/generate-fix-plan) and the agent
 then works in a background thread for minutes. Nothing used to record that it had started: the page went on saying
-«waits on you», a reload forgot the click, and a second click started a second agent on the same issue.
+«waits on you», a reload forgot the click, and a second click started a second agent on the same issue. The pipeline's
+own plan run (services/pipeline_service.trigger_auto_sre) left no record either — with auto-fix on that is the common
+path, and for those minutes the issue «waited on the agent» with no agent on record.
 
 AgenticOps is ONE process (CLAUDE.md «Core trust»), so an in-process registry is the truth for «is an agent on this
 issue»: the route claims the issue before it starts the thread, the thread releases it in its `finally`. A process
 that dies takes its runs — and this registry — with it. One run per issue at a time, whichever agent: a plan written
 while the diagnosis is being redone would be a plan for the old diagnosis. A claim older than the RCA watchdog
 (`rca_timeout_seconds`) is abandoned, so a hung model call cannot block an issue for good. The timeline keeps the
-record: `rca_started {trigger: manual}` / `fix_plan_requested`.
+record: `rca_started {trigger: manual}` / `fix_plan_requested {trigger: manual | auto}`.
+
+`begin` is for a person's request and can be refused. `take` is for the pipeline's next stage and never is: the
+pipeline must not wait on, or be stopped by, this bookkeeping.
 """
 from __future__ import annotations
 
@@ -29,6 +35,8 @@ class AgentRun:
     started_at: datetime     # aware, UTC
 
 
+PIPELINE = "agent:auto-pipeline"     # `requested_by` of a run the pipeline itself started (its Run Context actor)
+
 _lock = threading.Lock()
 _runs: dict[int, AgentRun] = {}
 
@@ -46,6 +54,15 @@ def begin(agent: str, issue_id: int, requested_by: str, *, now: Optional[datetim
     with _lock:
         if _live(_runs.get(issue_id), now) is not None:
             return None
+        run = _runs[issue_id] = AgentRun(agent, issue_id, requested_by, now)
+        return run
+
+
+def take(agent: str, issue_id: int, requested_by: str, *, now: Optional[datetime] = None) -> AgentRun:
+    """Claim the issue for the stage the pipeline starts next, whatever holds it now. The stage before it — a
+    diagnosis that has just been saved — is ending; its own `end` then finds this claim in place and leaves it."""
+    now = now or datetime.now(timezone.utc)
+    with _lock:
         run = _runs[issue_id] = AgentRun(agent, issue_id, requested_by, now)
         return run
 

@@ -1897,24 +1897,27 @@ def _issues_of_resource(resource: CloudResource):
     resource id. The alarm's id is often an ARN or an alarm name: the string alone missed every such issue while the
     map and the resource table (by `resource_ref`) counted it (MVP-2.9.0)."""
     from sqlalchemy import and_
+    # the id tie stays inside the resource's account too (an issue with no account is kept): a service-linked role
+    # has the same name in every account, and another account's issue is not this resource's
     return or_(and_(HealthIssue.resource_ref == resource.id, HealthIssue.account_id == resource.account_id),
-               HealthIssue.resource_id == resource.resource_id)
+               and_(HealthIssue.resource_id == resource.resource_id,
+                    or_(HealthIssue.account_id == resource.account_id, HealthIssue.account_id.is_(None))))
 
 
 @app.get("/api/resources/{resource_id}/issues", response_model=List[HealthIssueResponse])
-def api_resource_issues(resource_id: int, limit: int = Query(default=20, le=100)):
-    """List health issues for a resource: anchored to it, or carrying its resource id."""
+def api_resource_issues(resource_id: int, limit: int = Query(default=20, le=100), open: bool = Query(default=False)):
+    """List health issues for a resource: anchored to it, or carrying its resource id (same account). `open=true`
+    keeps the open ones only (the statuses the health overlay counts) — each row's `resource_ref` says whether it
+    is anchored here, which is what the resource's health is made of."""
+    from agenticops.services.signal_gate import OPEN_ISSUE_STATUSES
     with get_db_session() as session:
         resource = session.query(CloudResource).filter_by(id=resource_id).first()
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
-        issues = (
-            session.query(HealthIssue)
-            .filter(_issues_of_resource(resource))
-            .order_by(HealthIssue.detected_at.desc())
-            .limit(limit)
-            .all()
-        )
+        query = session.query(HealthIssue).filter(_issues_of_resource(resource))
+        if open:
+            query = query.filter(HealthIssue.status.in_(OPEN_ISSUE_STATUSES))
+        issues = query.order_by(HealthIssue.detected_at.desc()).limit(limit).all()
         return [HealthIssueResponse.model_validate(i) for i in issues]
 
 
@@ -2067,10 +2070,18 @@ async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate
         if not issue:
             raise HTTPException(status_code=404, detail="Anomaly not found")
 
+        # MVP-2.9.0: a page can say which status it showed — «mark resolved» is final, and must not go through
+        # from a state the issue reached while the person was reading
+        if update.expected_status and issue.status != update.expected_status:
+            return JSONResponse(status_code=409, content={
+                "detail": (f"Issue #{issue.id} is now '{issue.status}', not '{update.expected_status}' as the page "
+                           f"showed. Reload and decide again."),
+                "code": "status_moved", "status": issue.status})
         # MVP-2.9.0: the person's own reason, when they gave one, is what the timeline keeps
         note = (update.note or "").strip()[:2000]
         try:
-            transition_issue(session, issue.id, update.status, actor=actor.key, reason=note or "anomaly status update")
+            transition_issue(session, issue.id, update.status, actor=actor.key, reason=note or "anomaly status update",
+                             note=note or None, expected=update.expected_status or None)
         except InvalidStatusTransition as e:
             raise HTTPException(status_code=409, detail=str(e))
         except ValueError as e:
@@ -2109,15 +2120,15 @@ async def api_get_anomaly_rca(issue_id: int):
 
 
 @app.post("/api/anomalies/{issue_id}/rca", status_code=202)
-async def api_trigger_anomaly_rca(issue_id: int, actor: Actor = Depends(current_actor)):
+def api_trigger_anomaly_rca(issue_id: int, actor: Actor = Depends(current_actor)):
     """Trigger RCA for an anomaly (legacy compat — delegates to health-issues endpoint) (as the session actor — the handler's own Depends does not run on a direct call)."""
-    return await api_trigger_rca(issue_id, actor)
+    return api_trigger_rca(issue_id, actor)
 
 
 @app.post("/api/anomalies/{issue_id}/generate-fix-plan", status_code=202)
-async def api_trigger_anomaly_fix_plan(issue_id: int, actor: Actor = Depends(current_actor)):
+def api_trigger_anomaly_fix_plan(issue_id: int, actor: Actor = Depends(current_actor)):
     """Trigger fix plan for an anomaly (legacy compat — delegates to health-issues endpoint) (as the session actor — the handler's own Depends does not run on a direct call)."""
-    return await api_trigger_fix_plan(issue_id, actor)
+    return api_trigger_fix_plan(issue_id, actor)
 
 
 # ============================================================================
@@ -2157,15 +2168,15 @@ async def api_get_issue_rca(issue_id: int):
 
 
 @app.post("/api/issues/{issue_id}/rca", status_code=202)
-async def api_trigger_issue_rca(issue_id: int, actor: Actor = Depends(current_actor)):
+def api_trigger_issue_rca(issue_id: int, actor: Actor = Depends(current_actor)):
     """Trigger RCA analysis for an issue (as the session actor — the handler's own Depends does not run on a direct call)."""
-    return await api_trigger_rca(issue_id, actor)
+    return api_trigger_rca(issue_id, actor)
 
 
 @app.post("/api/issues/{issue_id}/generate-fix-plan", status_code=202)
-async def api_trigger_issue_fix_plan(issue_id: int, actor: Actor = Depends(current_actor)):
+def api_trigger_issue_fix_plan(issue_id: int, actor: Actor = Depends(current_actor)):
     """Trigger fix plan generation for an issue (as the session actor — the handler's own Depends does not run on a direct call)."""
-    return await api_trigger_fix_plan(issue_id, actor)
+    return api_trigger_fix_plan(issue_id, actor)
 
 
 # ============================================================================
@@ -2527,8 +2538,9 @@ def _start_issue_agent(agent_name: str, issue_id: int, trace_id: Optional[str], 
 
 
 @app.post("/api/health-issues/{issue_id}/rca", response_model=RCAResponse, status_code=202)
-async def api_trigger_rca(issue_id: int, actor: Actor = Depends(current_actor)):
-    """Trigger RCA analysis for a health issue via the rca_agent.
+def api_trigger_rca(issue_id: int, actor: Actor = Depends(current_actor)):
+    """Trigger RCA analysis for a health issue via the rca_agent. A plain `def` (so are its aliases): it writes the
+    start record, and a database write must not wait for a lock on the event loop.
 
     Runs the rca_agent in a background thread (agent:rca on behalf of the requesting actor,
     under the issue's trace) and returns immediately. 409 `agent_run_in_flight` while an agent a person
@@ -2555,7 +2567,7 @@ async def api_trigger_rca(issue_id: int, actor: Actor = Depends(current_actor)):
 
 
 @app.post("/api/health-issues/{issue_id}/generate-fix-plan", status_code=202)
-async def api_trigger_fix_plan(issue_id: int, actor: Actor = Depends(current_actor)):
+def api_trigger_fix_plan(issue_id: int, actor: Actor = Depends(current_actor)):
     """Trigger fix plan generation for a health issue via the sre_agent.
 
     Requires an existing RCA result. Runs sre_agent in a background thread (agent:sre on behalf
@@ -2881,7 +2893,8 @@ async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate, actor: Actor = 
                 changed_new[key] = value
                 setattr(plan, key, value)
         if status_alias == "rejected":
-            _reject_plan(session, plan, actor, "(rejected via deprecated PUT status)")
+            from agenticops.services.plan_content import DEPRECATED_REJECT
+            _reject_plan(session, plan, actor, DEPRECATED_REJECT)
         if changed_new:
             AuditService.log(Actions.PLAN_EDITED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
                              user_id=actor.user_id, details={"fields": sorted(changed_new)},
@@ -2954,12 +2967,14 @@ async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody, actor: Ac
         session.flush()
         response = _fix_plan_response(session, plan, actor)
 
-    # Chain to auto-execute (outside DB session)
+    # Chain to auto-execute (outside DB session); the answer says whether the run was queued
+    queued = False
     try:
         from agenticops.services.pipeline_service import trigger_auto_execute
-        trigger_auto_execute(approved_plan_id)
+        queued = bool(trigger_auto_execute(approved_plan_id))
     except Exception:
         logger.warning("Failed to trigger auto-execute for plan #%d", approved_plan_id, exc_info=True)
+    response.run_queued = queued
 
     return response
 
@@ -5685,6 +5700,9 @@ class RcaFeedbackRequest(BaseModel):
     verdict: Optional[str] = Field(None, pattern="^(correct|incorrect)$")
     note: str = ""
     location_verdict: Optional[str] = Field(None, pattern="^(correct|partial|incorrect)$")
+    # MVP-2.9.0: the diagnosis the person was shown. When it is no longer the newest the verdict is refused (409
+    # `rca_changed`) instead of landing on one they did not read. None = older clients: the newest, as before.
+    rca_id: Optional[int] = Field(None, ge=1)
 
 
 @app.post("/api/health-issues/{issue_id}/rca-feedback", status_code=201)
@@ -5712,6 +5730,11 @@ async def api_rca_feedback(issue_id: int, data: RcaFeedbackRequest, actor: Actor
         )
         if not rca:
             raise HTTPException(status_code=404, detail="No RCA result for this issue")
+        if data.rca_id is not None and data.rca_id != rca.id:
+            return JSONResponse(status_code=409, content={
+                "detail": (f"The diagnosis changed: RCA #{rca.id} is now the newest one of issue #{issue_id}, "
+                           f"and the verdict was given on RCA #{data.rca_id}. Reload and judge the current one."),
+                "code": "rca_changed", "rca_id": rca.id})
         if data.location_verdict is not None:
             if rca.location_status not in ("valid", "partial"):
                 raise HTTPException(status_code=409, detail=(
@@ -5732,7 +5755,7 @@ async def api_rca_feedback(issue_id: int, data: RcaFeedbackRequest, actor: Actor
         from agenticops.services.pipeline_events import log_event
         log_event(issue_id, "rca_human_feedback", "rca",
                   detail={"rca_id": rca_id, "verdict": data.verdict, "location_verdict": data.location_verdict,
-                          "by": actor.key, "note": (data.note or "")[:200]})
+                          "by": actor.key, "note": (data.note or "")[:2000]})   # whole: it is quoted back
     except Exception:
         pass
 
@@ -5848,7 +5871,9 @@ async def api_issue_feedback(issue_id: int, data: IssueFeedbackRequest, actor: A
         from agenticops.services.issue_state import IssueNotFound, transition_issue
         with get_db_session() as session:
             try:
-                transition_issue(session, issue_id, "dismissed", actor=actor.key, reason="marked as a false positive")
+                # the person's own reason stays on the timeline (it used to reach the detect agent's memory only)
+                transition_issue(session, issue_id, "dismissed", actor=actor.key, reason="marked as a false positive",
+                                 note=(data.note or "").strip() or None)
             except (IssueNotFound, InvalidStatusTransition):
                 logger.info("false-positive feedback: HealthIssue #%d keeps its status", issue_id)
 

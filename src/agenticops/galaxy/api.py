@@ -2,6 +2,7 @@
 overlays live HealthIssue status (by anchored resource_ref, four values). Mounted at /api/galaxy."""
 
 import asyncio
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Query, Response
@@ -25,6 +26,14 @@ def _absent_nodes(s) -> set:
     """Resource node ids the latest scan no longer saw. Read live, so a scan after the build shows."""
     return {f"res:{rid}" for (rid,) in
             s.query(CloudResource.id).filter(CloudResource.absent_since.isnot(None)).all()}
+
+
+def _utc(ts) -> Optional[str]:
+    """A stored time as UTC with its Z (the columns are naive UTC)."""
+    if ts is None:
+        return None
+    ts = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds") + "Z"
 
 
 def _latest_completed(s) -> Optional[GalaxyBuild]:
@@ -190,8 +199,10 @@ async def graph():
         rule_edges = rule.get("edges", [])
         llm_edges = llm.get("edges", [])
         build_id = latest.id
+        built_at = _utc(latest.finished_at)
         health = _health_by_node(s)
         absent = _absent_nodes(s)
+        health_at = _utc(datetime.now(timezone.utc))
 
     nodes = []
     for n in raw_nodes:
@@ -211,4 +222,20 @@ async def graph():
     for e in llm_edges:
         edges.append({"s": e["source"], "t": e["target"], "r": e["relation_type"], "p": "llm",
                       "ev": (e.get("evidence") or "")[:120], "c": e.get("confidence")})
-    return {"nodes": nodes, "edges": edges, "build_id": build_id}
+    # two ages on one map (MVP-2.9.0): the relations are this build's (`built_at`); health and «absent» were read
+    # just now (`health_at`) and can be read again on their own — GET /api/galaxy/health
+    return {"nodes": nodes, "edges": edges, "build_id": build_id, "built_at": built_at, "health_at": health_at}
+
+
+@router.get("/health")
+def health_now():
+    """Health and «absent» alone, as of now, for the build the graph endpoint serves (MVP-2.9.0): a map that stays
+    open reads this instead of refetching — and re-laying out — the whole graph, so a ring follows its issue and
+    not the next build. The same two definitions as /graph: the worst open issue anchored to the resource (a node
+    not listed is `unknown`), and the rows the latest scan no longer saw."""
+    with get_db_session() as s:
+        latest = _latest_completed(s)
+        if latest is None:
+            return {"build_id": None, "health": {}, "absent": [], "at": None}
+        return {"build_id": latest.id, "health": _health_by_node(s), "absent": sorted(_absent_nodes(s)),
+                "at": _utc(datetime.now(timezone.utc))}

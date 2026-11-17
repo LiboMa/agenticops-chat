@@ -65,18 +65,53 @@ def trigger_auto_sre(health_issue_id: int, trace_id: Optional[str] = None) -> No
     except Exception:
         logger.debug("FixPlan guard check failed, proceeding with auto-SRE", exc_info=True)
 
+    run = _record_auto_sre_started(health_issue_id, trace_id)
     thread = threading.Thread(
         target=_run_auto_sre,
-        args=(health_issue_id, trace_id),
+        args=(health_issue_id, trace_id, run),
         daemon=True,
         name=f"auto-sre-{health_issue_id}",
     )
-    thread.start()
+    try:
+        thread.start()
+    except BaseException:
+        _release_auto_sre(run)      # the thread releases the claim; one that never started never would
+        raise
     logger.info("Auto-SRE spawned for HealthIssue #%d", health_issue_id)
 
 
-def _run_auto_sre(health_issue_id: int, trace_id: Optional[str] = None) -> None:
-    """Run sre_agent for the given issue to generate a fix plan (daemon thread — sets its own Run Context)."""
+def _record_auto_sre_started(health_issue_id: int, trace_id: Optional[str]):
+    """Put the plan run on record before it starts (MVP-2.9.0): the issue is claimed for it (services/agent_runs — the
+    live page lists it, and a person asking for a plan meanwhile is told one is being written instead of starting a
+    second) and the timeline says it was asked for. Bookkeeping only: if it cannot be written, the plan is still
+    written. Returns the claim, or None."""
+    run = None
+    try:
+        from agenticops.services import agent_runs
+        from agenticops.services.pipeline_events import log_event
+
+        run = agent_runs.take("sre", health_issue_id, agent_runs.PIPELINE)
+        log_event(health_issue_id, "fix_plan_requested", "plan", "started", detail={"trigger": "auto"},
+                  actor=agent_runs.PIPELINE, trace_id=trace_id)
+    except Exception:
+        logger.debug("Auto-SRE start record failed for #%d", health_issue_id, exc_info=True)
+    return run
+
+
+def _release_auto_sre(run) -> None:
+    if run is None:
+        return
+    try:
+        from agenticops.services import agent_runs
+
+        agent_runs.end(run)
+    except Exception:
+        logger.debug("Auto-SRE claim release failed for #%d", run.issue_id, exc_info=True)
+
+
+def _run_auto_sre(health_issue_id: int, trace_id: Optional[str] = None, run=None) -> None:
+    """Run sre_agent for the given issue to generate a fix plan (daemon thread — sets its own Run Context).
+    `run` is the pipeline's claim on the issue (services/agent_runs): released here, whatever happened."""
     _restore_trace_id(trace_id)
     from agenticops.config import get_trace_id
     from agenticops.run_context import RunContext, reset_run_context, set_run_context
@@ -91,7 +126,15 @@ def _run_auto_sre(health_issue_id: int, trace_id: Optional[str] = None) -> None:
         )
     except Exception:
         logger.exception("Auto-SRE failed for HealthIssue #%d", health_issue_id)
+        try:
+            from agenticops.services.pipeline_events import log_event
+
+            log_event(health_issue_id, "fix_plan_requested", "plan", "failed",
+                      detail={"trigger": "auto", "reason": "agent error"}, actor="agent:sre", trace_id=trace_id)
+        except Exception:
+            logger.debug("Auto-SRE failure record failed for #%d", health_issue_id, exc_info=True)
     finally:
+        _release_auto_sre(run)
         reset_run_context(_rc_token)
 
 
@@ -313,19 +356,20 @@ def _log_policy_decision(plan, decision, trace_id: Optional[str]) -> None:
 # ── Stage 3: Auto-Execute (after plan approved) ──────────────────────
 
 
-def trigger_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> None:
+def trigger_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> bool:
     """Fire-and-forget: spawn executor agent to run an approved fix plan.
 
     Called from trigger_auto_approve() (L0/L1 auto path) or from
-    approve_fix_plan() (manual/human approval path).
+    approve_fix_plan() (manual/human approval path). Returns whether the run was queued (MVP-2.9.0: the approval's
+    answer says it, so a page need not believe the «approving runs it / does not» it read a while ago).
     """
     if not settings.auto_fix_enabled:
         logger.info("Auto-fix pipeline disabled — skipping execute for plan #%d", fix_plan_id)
-        return
+        return False
 
     if not settings.executor_enabled:
         logger.info("Executor disabled — skipping auto-execute for plan #%d", fix_plan_id)
-        return
+        return False
 
     thread = threading.Thread(
         target=_run_auto_execute,
@@ -335,6 +379,7 @@ def trigger_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> No
     )
     thread.start()
     logger.info("Auto-execute spawned for FixPlan #%d", fix_plan_id)
+    return True
 
 
 def runs_in_flight(session, plans) -> set[int]:

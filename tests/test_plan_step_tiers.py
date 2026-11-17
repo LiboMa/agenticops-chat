@@ -49,6 +49,74 @@ class TestStepTier:
         assert len(unknown) == len(unclassified_commands(steps)) == 2
 
 
+class TestWhatAShellWouldDoWithTheLine:
+    """The classifiers read how a line begins. A step whose line a shell would split, redirect or substitute holds
+    commands nobody looked at, and a few «read-only» words write through their arguments (find -delete, tee, xargs,
+    journalctl --vacuum-size, curl -s -X DELETE …). Such a step is 'unknown' — a person looks — on the approval
+    page and for the auto-approval floor alike (final review, 2026-11-17: three of these were labelled read-only)."""
+
+    @pytest.mark.parametrize("command", [
+        "find /var/log -name '*.gz' -mtime +7 -delete",
+        "journalctl --vacuum-size=500M",
+        "cat > /etc/nginx/conf.d/limit.conf <<EOF",
+        "df -h && rm -rf /var/lib/docker/overlay2/*",
+        "ls /tmp; systemctl stop nginx",
+        "env FOO=1 systemctl restart nginx",
+        "curl -s -X DELETE http://localhost:9200/logs-2026.10",
+        "kubectl get pods -n web -o name | xargs kubectl delete -n web",
+        "aws s3 ls; aws s3 sync /var/www s3://bucket/www",
+        "kubectl get pods > /tmp/pods.txt",
+        "ls $(touch /etc/marker)",
+        'ls "`touch /etc/marker`"',
+        "df -h &",
+        "tail -n 5 /var/log/syslog | tee /etc/copy.log",
+        "sort -o /etc/hosts /etc/hosts",
+        "date -s '2026-01-01'",
+        "hostname new-name",
+        "Set the desired capacity of the ASG back to 3",          # prose that happens to begin with a listed word
+        "Find the stale pods and delete them",
+    ])
+    def test_a_line_that_could_change_something_is_never_called_read_only(self, command):
+        assert step_tier({"command": command}) == "unknown"
+
+    @pytest.mark.parametrize("command", [
+        "aws ec2 describe-images --owners self --query 'sort_by(Images, &CreationDate) | [-1].ImageId'",
+        "aws ec2 describe-volumes --query 'Volumes[?Size > `100`].VolumeId'",
+        'aws ec2 describe-instances --query "Reservations[].Instances[?State.Name==\'running\'].InstanceId"',
+        "kubectl get pods -n web -o jsonpath='{.items[*].metadata.name}'",
+        "kubectl get pods -n web 2>/dev/null",
+        "kubectl get events -n web 2>&1",
+        "aws ec2 describe-instances \\\n  --instance-ids i-1",      # a continued line is one command
+        "df -h /var", "ls -la /etc/nginx", "ps aux", "docker ps -a", "grep -c error /var/log/app.log",
+        "tail -n 200 /var/log/syslog",
+    ])
+    def test_quoted_text_harmless_redirects_and_plain_reads_stay_read_only(self, command):
+        assert step_tier({"command": command}) == "readonly"
+
+    def test_two_lines_are_two_commands(self):
+        assert step_tier({"command": "ls /tmp\nrm -r /var/cache/app"}) == "unknown"
+        assert step_tier("kubectl get pods\nkubectl delete pod web-1") == "unknown"
+
+    def test_a_chain_never_hides_a_write_or_a_blocked_command(self):
+        assert step_tier({"command": "systemctl restart nginx && systemctl status nginx"}) == "write"
+        assert step_tier({"command": "ls /tmp; shutdown -h now"}) == "blocked"
+        assert step_tier({"command": "aws ec2 describe-instances; aws ec2 terminate-instances --instance-ids i-1"}) == "blocked"
+
+    def test_the_auto_approval_floor_reads_the_same_answer(self):
+        steps = [{"command": "df -h && rm -rf /var/lib/docker/overlay2/*"}, {"command": "ls /tmp\nsystemctl stop nginx"},
+                 {"command": "df -h /var"}]
+        assert step_tiers(steps) == ["unknown", "unknown", "readonly"]
+        assert len(unclassified_commands(steps)) == 2
+
+    def test_every_read_only_host_command_has_been_decided(self):
+        """skills/security.SHELL_READONLY_COMMANDS is the run-time gate of run_on_host. Each entry is either one that
+        cannot write whatever its arguments, or one that can — a new entry fails here until someone decides."""
+        from agenticops.services.change_steps import HOST_CAN_WRITE, HOST_CANNOT_WRITE
+        from agenticops.skills.security import SHELL_READONLY_COMMANDS
+        assert HOST_CANNOT_WRITE | HOST_CAN_WRITE == SHELL_READONLY_COMMANDS
+        assert not HOST_CANNOT_WRITE & HOST_CAN_WRITE
+
+
 @pytest.fixture
 def client(tmp_path):
     import agenticops.models as models_mod
@@ -85,6 +153,16 @@ def test_the_plan_response_carries_one_tier_per_step(client):
     assert client.get(f"/api/fix-plans/{pid}").json()["step_tiers"] == want
     assert client.get("/api/fix-plans?kind=fix").json()[0]["step_tiers"] == want
     assert client.get(f"/api/health-issues/{iid}/fix-plans").json()[0]["step_tiers"] == want
+
+
+def test_a_classifier_that_raises_does_not_take_the_plan_pages_down(client, monkeypatch):
+    """The field is on every plan response: one bad answer from a classifier must not 500 the lists and the page."""
+    import agenticops.services.change_steps as cs
+    pid, _iid, _ = _plan([WRITE, READ])
+    monkeypatch.setattr(cs, "step_tiers", lambda steps: (_ for _ in ()).throw(RuntimeError("classifier broke")))
+    r = client.get(f"/api/fix-plans/{pid}")
+    assert r.status_code == 200 and r.json()["step_tiers"] == ["unknown", "unknown"]      # nothing is called read-only
+    assert client.get("/api/fix-plans").status_code == 200
 
 
 def test_a_plan_without_steps_has_no_tiers(client):

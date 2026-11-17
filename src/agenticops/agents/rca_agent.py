@@ -514,4 +514,7 @@ def rca_agent(issue_id: int) -> str:
             return str(result)
     except Exception as e:
         logger.exception("RCA agent failed")
+        # this function does not raise, so its callers cannot see the failure: the timeline says it (MVP-2.9.0)
+        from agenticops.services.pipeline_events import log_agent_failed
+        log_agent_failed(issue_id, "rca", error=e)
         return f"RCA agent error: {e}"

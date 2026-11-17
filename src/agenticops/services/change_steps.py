@@ -35,29 +35,116 @@ def normalize_steps(raw) -> Optional[list[dict]]:
     return steps
 
 
+def _raw_command(step) -> str:
+    return str((step.get("command") or "") if isinstance(step, dict) else (step or ""))
+
+
 def _command(step) -> str:
-    return " ".join(str((step.get("command") or "") if isinstance(step, dict) else (step or "")).split())
+    return " ".join(_raw_command(step).split())
+
+
+# skills/security.SHELL_READONLY_COMMANDS is the run-time gate of run_on_host: it answers «may this run without
+# asking». A plan step's label — and the auto-approval floor — ask something narrower: «can this line change
+# anything». Only the entries that cannot write whatever their arguments keep 'readonly' here; the others (find
+# -delete, tee, xargs rm, journalctl --vacuum-size, sort -o, date -s, curl -s -X DELETE, env VAR=1 cmd …) are
+# 'unknown': a person looks. tests/test_plan_step_tiers.py fails when the run-time list gains an entry nobody put
+# on one side.
+HOST_CANNOT_WRITE = frozenset({
+    "ls", "cat", "head", "tail", "more", "file", "stat", "wc", "locate", "which", "whereis", "readlink",
+    "ps", "top", "htop", "pgrep", "pidof", "lsof",
+    "uname", "uptime", "who", "w", "whoami", "id", "groups",
+    "free", "vmstat", "iostat", "mpstat", "nproc", "lscpu", "df", "du", "lsblk", "fdisk -l",
+    "netstat", "ping", "traceroute", "tracepath", "mtr", "dig", "nslookup", "host",
+    "last", "lastb",
+    "grep", "egrep", "fgrep", "cut", "tr", "diff", "comm",
+    "docker ps", "docker logs", "docker inspect", "docker images", "docker stats", "docker top", "docker port",
+    "docker diff", "docker history", "docker network ls", "docker network inspect", "docker volume ls",
+    "docker volume inspect",
+    "ssh-add -l", "ssh-keygen -lf", "ssh-keygen -l", "ssh-keyscan", "sshd -t",
+    "openssl s_client", "printenv",
+})
+HOST_CAN_WRITE = frozenset({
+    "less", "find", "hostname", "date", "timedatectl", "hostnamectl", "sar", "blkid", "mount",
+    "ss", "ip", "ifconfig", "nmap", "arp", "route", "iperf", "iperf3", "ethtool", "tc",
+    "journalctl", "dmesg", "lastlog",
+    "awk", "sed -n", "sort", "uniq", "tee", "xargs",
+    "strace", "ltrace", "tcpdump", "sysctl -a",
+    "curl -s", "curl --silent", "wget -q", "env", "set",
+})
+
+_CONTINUED = re.compile(r"\\\r?\n")                                             # a line continued with a backslash
+_HARMLESS_REDIRECT = re.compile(r"(?:[12]?>{1,2}\s*/dev/null|&>\s*/dev/null|2>&1)")  # sends nothing anywhere that matters
+
+
+def _shell_would_split(text: str) -> bool:
+    """True when a shell would read more than one simple command in `text`, or send its output somewhere: an
+    unquoted ; & | < > ( ), a backtick or $( outside single quotes. Quoted text is data (a JMESPath `--query` is
+    full of | & > and backticks) and `2>/dev/null` / `2>&1` change nothing, so neither counts."""
+    text = _HARMLESS_REDIRECT.sub(" ", text)
+    quote, i = None, 0
+    while i < len(text):
+        c = text[i]
+        if quote == "'":
+            if c == "'":
+                quote = None
+        elif c == "\\":
+            i += 1                                   # the next character is literal
+        elif quote == '"':
+            if c == '"':
+                quote = None
+            elif c == "`" or text.startswith("$(", i):
+                return True                          # still runs inside double quotes
+        elif c in "'\"":
+            quote = c
+        elif c in ";&|<>()`":
+            return True
+        i += 1
+    return False
+
+
+def _host_entry(lowered: str) -> str:
+    """The run-time list's entry `lowered` begins with (the longest, as classify_shell_command picks it)."""
+    from agenticops.skills.security import SHELL_READONLY_COMMANDS
+
+    best = ""
+    for entry in SHELL_READONLY_COMMANDS:
+        if (lowered == entry or lowered.startswith(entry + " ")) and len(entry) > len(best):
+            best = entry
+    return best
 
 
 def command_tier(command: str) -> str:
-    """The execution tier ('blocked' | 'write' | 'readonly' | 'unknown') of the tool that would run `command`."""
+    """The execution tier ('blocked' | 'write' | 'readonly' | 'unknown') of the tool that would run `command`.
+
+    The tools' classifiers read how the line begins. 'readonly' is therefore kept only for a line that is ONE
+    command a shell would not split, redirect or substitute into, on one line — and, on a host, one whose first
+    words cannot write whatever follows (HOST_CANNOT_WRITE). Anything else that began like a read is 'unknown'.
+    A write or a blocked command stays what it is: the checks only move a step toward «a person looks»."""
     from agenticops.skills.security import classify_kubectl_command, classify_shell_command
     from agenticops.tools.aws_cli_tool import _classify_command
 
-    head = command.split(None, 1)[0].lower() if command.strip() else ""
+    text = _CONTINUED.sub(" ", command or "")
+    flat = " ".join(text.split())
+    head = flat.split(None, 1)[0].lower() if flat else ""
     if head == "aws":
-        return _classify_command(command)
-    if head == "kubectl":
-        return classify_kubectl_command(command)
-    return classify_shell_command(command)
+        tier = _classify_command(flat)
+    elif head == "kubectl":
+        tier = classify_kubectl_command(flat)
+    else:
+        tier = classify_shell_command(flat)
+        if tier == "readonly" and _host_entry(flat.lower()) not in HOST_CANNOT_WRITE:
+            tier = "unknown"
+    if tier == "readonly" and (len([line for line in text.splitlines() if line.strip()]) > 1 or _shell_would_split(text)):
+        tier = "unknown"
+    return tier
 
 
 def step_tier(step) -> str:
     """One plan step's tier as a page shows it beside the step: its command's tier, and 'unknown' for a step with
-    no command — the executor would decide what to run, which is how the auto-approval floor reads it too
-    (unclassified_commands)."""
-    command = _command(step)
-    return command_tier(command) if command else "unknown"
+    no command — the executor would decide what to run. The auto-approval floor (unclassified_commands) reads
+    this same answer."""
+    raw = _raw_command(step)
+    return command_tier(raw) if raw.strip() else "unknown"
 
 
 def step_tiers(steps) -> list[str]:
@@ -114,7 +201,7 @@ def unclassified_commands(*step_lists) -> list[str]:
         for step in steps or []:
             command = _command(step)
             if command:
-                label = command if command_tier(command) == "unknown" else ""
+                label = command if step_tier(step) == "unknown" else ""
             else:
                 action = " ".join(str(step.get("action") or "").split()) if isinstance(step, dict) else ""
                 label = f"(no command) {action}".strip()

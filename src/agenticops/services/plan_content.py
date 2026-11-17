@@ -14,6 +14,21 @@ from agenticops.models import FIXPLAN_TERMINAL_STATUSES, ChangeRequest, FixPlan,
 
 # The reason an execution is aborted with when the plan changed after its approval (spec §3.D.1)
 CONTENT_CHANGED = "content changed after approval"
+# What the deprecated `PUT /api/fix-plans/{id}` with status=rejected stores as the reason
+DEPRECATED_REJECT = "(rejected via deprecated PUT status)"
+
+HUMAN_ACTORS = ("user:", "cli:", "web:", "im:")
+
+
+def rejection_is_feedback(plan) -> bool:
+    """Whether a rejected plan's reason is something a PERSON wrote about the plan — what is quoted under their name
+    and passed to the agent asked for the next plan (MVP-2.9.0). A rejection made by code is not: one by an agent or
+    the policy engine, and the two reasons code writes under a person's key — a plan withdrawn because its content
+    changed after approval is stamped with whoever started the run, and the deprecated PUT writes a filler."""
+    reason = (getattr(plan, "rejection_reason", None) or "").strip()
+    by = getattr(plan, "rejected_by", None) or ""
+    return (getattr(plan, "status", None) == "rejected" and bool(reason) and by.startswith(HUMAN_ACTORS)
+            and reason not in (CONTENT_CHANGED, DEPRECATED_REJECT))
 
 
 def content_hash(*, steps, rollback_plan, pre_checks, post_checks, account_id, risk_level) -> str:

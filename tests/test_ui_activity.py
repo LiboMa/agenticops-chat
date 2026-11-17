@@ -144,6 +144,17 @@ def test_a_run_a_person_asked_for_is_a_lane_with_who_asked(db):
     assert sorted((l["id"], l["basis"]) for l in _lanes()) == [(f"I{iid}:plan", "requested"), (f"I{other}:diagnosis", "requested")]
 
 
+def test_the_plan_run_the_pipeline_started_is_a_lane_that_says_so(db):
+    """After a diagnosis passes its gate the pipeline hands the issue to the SRE agent (auto-fix on). The issue's
+    status does not move while the plan is written, so nothing else can show that an agent is on it."""
+    iid = _issue("root_cause_identified", title="gate passed")
+    agent_runs.take("sre", iid, agent_runs.PIPELINE, now=ago(minutes=2))
+    lane = _lanes()[0]
+    assert (lane["id"], lane["kind"], lane["agent"], lane["basis"], lane["since"]) == (
+        f"I{iid}:plan", "plan", "sre", "pipeline", "2026-11-17T11:58:00Z")
+    assert lane["requested_by"] is None                    # nobody asked: the basis says who started it
+
+
 def test_an_approved_plan_whose_run_started_is_a_run_lane(db):
     iid = _issue("fix_approved")
     pid = _plan(iid)
@@ -213,6 +224,75 @@ def test_recent_is_capped(db):
     assert len(_lanes("recent")) == activity.RECENT_MAX == 20
 
 
+def test_a_scoped_recent_list_is_cut_after_the_scope_not_before(db):
+    """Final review: the newest 20 were taken across every account and the scope applied afterwards — a quiet
+    account beside a busy one saw an empty list."""
+    busy, quiet = _issue("root_cause_identified", "busy", account_id=1), _issue("root_cause_identified", "quiet", account_id=2)
+    _add(*[RCAResult(health_issue_id=busy, root_cause="x", confidence=0.4, created_at=ago(minutes=m)) for m in range(1, 26)])
+    _add(RCAResult(health_issue_id=quiet, root_cause="x", confidence=0.4, created_at=ago(hours=3)),
+         RCAResult(health_issue_id=quiet, root_cause="x", confidence=0.4, created_at=ago(hours=4)))
+    pid = _plan(quiet, "executed", created=ago(days=2))
+    _add(FixExecution(fix_plan_id=pid, health_issue_id=quiet, status="succeeded", verification_status="passed",
+                      completed_at=ago(hours=5), created_at=ago(hours=5)))
+    out = activity.activity(ALICE, now=NOW, account_id=2)
+    assert [(l["kind"], l["item"]) for l in out["recent"]] == [("diagnosis", f"I{quiet}"), ("diagnosis", f"I{quiet}"), ("run", f"I{quiet}")]
+    assert out["recent_total"] == {"work": 3, "schedules": 0}
+
+
+def test_a_run_that_belongs_to_no_issue_takes_no_place_in_the_list(db):
+    """A change plan's run has no issue: it has its own lane on the change, and is not an issue's «ended» row."""
+    iid = _issue("fix_executed", "restart nginx")
+    pid = _plan(iid, "executed", created=ago(days=2))
+    _add(*[FixExecution(fix_plan_id=pid, health_issue_id=None, status="succeeded", completed_at=ago(minutes=m), created_at=ago(minutes=m))
+           for m in range(1, 26)])
+    _add(FixExecution(fix_plan_id=pid, health_issue_id=iid, status="succeeded", verification_status="passed",
+                      completed_at=ago(hours=6), created_at=ago(hours=6)))
+    out = activity.activity(ALICE, now=NOW)
+    assert [(l["kind"], l["item"]) for l in out["recent"]] == [("run", f"I{iid}")]
+    assert out["recent_total"]["work"] == 1
+
+
+def test_schedule_runs_do_not_crowd_agent_work_out_and_the_cut_is_said(db):
+    """With the default schedules about fifteen runs end every hour: twenty rows of one list covered eighty minutes,
+    and a diagnosis from two hours ago was not under «ended in the last day»."""
+    from agenticops.scheduler.scheduler import Schedule, ScheduleExecution
+    iid = _issue("root_cause_identified", "disk full")
+    _add(*[RCAResult(health_issue_id=iid, root_cause="x", confidence=0.4, created_at=ago(hours=h)) for h in (2, 5, 9)])
+    sid = _add(Schedule(name="poll", pipeline_name="SecurityIncrementalPoll", cron_expression="*/10 * * * *"))
+    _add(*[ScheduleExecution(schedule_id=sid, status="completed", started_at=ago(minutes=m), completed_at=ago(minutes=m))
+           for m in range(1, 31)])
+    out = activity.activity(ALICE, now=NOW)
+    kinds = [l["kind"] for l in out["recent"]]
+    assert kinds.count("diagnosis") == 3 and kinds.count("schedule") == activity.RECENT_SCHEDULES_MAX == 10
+    assert out["recent_total"] == {"work": 3, "schedules": 30}                      # what the page needs to say «10 of 30»
+    assert [l["at"] for l in out["recent"]] == sorted((l["at"] for l in out["recent"]), reverse=True)
+
+
+def test_the_total_says_how_much_work_ended_when_the_list_is_cut(db):
+    iid = _issue("root_cause_identified")
+    _add(*[RCAResult(health_issue_id=iid, root_cause="x", confidence=0.4, created_at=ago(minutes=m)) for m in range(1, 40)])
+    out = activity.activity(ALICE, now=NOW)
+    assert len(out["recent"]) == 20 and out["recent_total"] == {"work": 39, "schedules": 0}
+
+
+def test_a_running_graph_build_is_listed_without_loading_its_graph(db):
+    """The running build's row holds the whole rule graph while the model phase runs; the lane needs three columns."""
+    from agenticops.galaxy.models import GalaxyBuild
+    bid = _add(GalaxyBuild(status="running", trigger="manual", started_at=ago(minutes=4)))
+    import agenticops.models as models_mod
+    seen = []
+    eng = models_mod.get_engine()
+    listener = lambda conn, cur, statement, *a: seen.append(statement)  # noqa: E731
+    event.listen(eng, "before_cursor_execute", listener)
+    try:
+        lanes = activity.activity(ALICE, now=NOW)["running"]
+    finally:
+        event.remove(eng, "before_cursor_execute", listener)
+    assert [(l["id"], l["kind"], l["since"]) for l in lanes] == [(f"G{bid}", "graph_build", "2026-11-17T11:56:00Z")]
+    build_sql = [q for q in seen if "galaxy_builds" in q]
+    assert build_sql and all("rule_graph" not in q for q in build_sql)
+
+
 def test_it_reads_in_a_bounded_number_of_queries(db):
     import agenticops.models as models_mod
     for i in range(12):
@@ -226,7 +306,7 @@ def test_it_reads_in_a_bounded_number_of_queries(db):
         out = activity.activity(ALICE, now=NOW)
     finally:
         event.remove(eng, "before_cursor_execute", listener)
-    assert len(out["running"]) == 24 and len(counted) <= 14
+    assert len(out["running"]) == 24 and len(counted) <= 18
 
 
 def test_the_endpoint_serves_any_signed_in_user_and_nobody_else(db):
@@ -242,7 +322,7 @@ def test_the_endpoint_serves_any_signed_in_user_and_nobody_else(db):
     app.dependency_overrides[ui_router.signed_in_user] = lambda: SimpleNamespace(id=4)
     try:
         body = client.get("/api/ui/activity").json()                             # a read-only account may look
-        assert set(body) == {"running", "upcoming", "recent", "generated_at"} and body["generated_at"].endswith("Z")
+        assert set(body) == {"running", "upcoming", "recent", "recent_total", "generated_at"} and body["generated_at"].endswith("Z")
         assert [l["title"] for l in body["running"]] == ["disk full"]
         assert client.get("/api/ui/activity?account_id=0").status_code == 422
     finally:

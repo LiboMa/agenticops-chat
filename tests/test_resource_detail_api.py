@@ -147,6 +147,34 @@ def test_resource_fix_plans_include_the_plans_of_anchored_issues(client, seed_da
     assert [p["title"] for p in data] == ["Plan of the anchored issue", "Cleanup disk"]
 
 
+def test_resource_issues_leave_out_another_accounts_resource_of_the_same_id(client, seed_data):
+    """Final review: the older tie — the alarm's id equals the row's own id — had no account condition. A service-
+    linked role has the same name in every account, so account B's issue was listed (with its plans) on account A's
+    role, while A's ring — by the anchor — showed none."""
+    with get_db_session() as db:
+        res = db.query(CloudResource).filter_by(id=seed_data["resource_id"]).one()
+        other = CloudAccount(name=f"other-{uuid.uuid4().hex[:8]}", provider="aws", credentials={}, regions=["us-east-1"])
+        db.add(other); db.flush()
+        db.add(HealthIssue(resource_id=res.resource_id, severity="critical", source="test", title="Another account's",
+                           description="d", status="open", account_id=other.id,
+                           detected_at=datetime.now(timezone.utc) + timedelta(minutes=5)))
+        db.add(HealthIssue(resource_id=res.resource_id, severity="low", source="test", title="This account's, by id",
+                           description="d", status="open", account_id=res.account_id,
+                           detected_at=datetime.now(timezone.utc) + timedelta(minutes=4)))
+    data = client.get(f"/api/resources/{seed_data['resource_id']}/issues").json()
+    assert [i["title"] for i in data] == ["This account's, by id", "CPU spike", "Disk full"]       # an issue with no account stays
+
+
+def test_resource_issues_can_be_asked_for_open_ones_only(client, seed_data):
+    """A card that says «N open issues» lists the open ones: the newest 20 of any status could leave the one open
+    issue out behind twenty closed ones."""
+    iid = _anchored(seed_data, "alarm:cpu-high-web-prod")
+    data = client.get(f"/api/resources/{seed_data['resource_id']}/issues", params={"open": "true"}).json()
+    assert [i["id"] for i in data] == [iid, seed_data["issue1_id"]]                              # the resolved one is left out
+    assert [i["resource_ref"] == seed_data["resource_id"] for i in data] == [True, False]        # which tie each one has
+    assert len(client.get(f"/api/resources/{seed_data['resource_id']}/issues").json()) == 3      # the default is unchanged
+
+
 def test_resource_issues_404(client):
     resp = client.get("/api/resources/99999/issues")
     assert resp.status_code == 404

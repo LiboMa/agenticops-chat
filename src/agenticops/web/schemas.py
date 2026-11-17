@@ -4,12 +4,15 @@ Mechanically extracted from app.py (no logic change) to shrink app.py and give
 routers a dependency-leaf module to import from (avoids app<->router import cycle).
 """
 
+import logging
 from datetime import datetime
 from typing import Annotated, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 from agenticops.credentials.store import REDACTED_VALUE  # an edit that sends it back keeps the stored value
+
+_log = logging.getLogger(__name__)      # private: app.py star-imports this module and has its own `logger`
 
 
 class AccountCreate(BaseModel):
@@ -114,6 +117,8 @@ class AnomalyStatusUpdate(BaseModel):
     """Schema for updating anomaly status."""
     status: str = Field(..., pattern="^(open|investigating|acknowledged|root_cause_identified|fix_planned|fix_approved|fix_executing|fix_executed|resolved|dismissed)$")
     note: Optional[str] = None
+    # MVP-2.9.0: the status the page showed; the change is refused (409 `status_moved`) when the issue has left it
+    expected_status: Optional[str] = Field(None, max_length=40)
 
 
 class AnomalyResponse(BaseModel):
@@ -464,6 +469,8 @@ class FixPlanResponse(BaseModel):
     issue_status: Optional[str] = None
     target: Optional[dict] = None   # {resource_id, resource_ref, anchor_status, resource_type, region} of its issue
     available_actions: List[dict] = Field(default_factory=list)   # services/ui_actions.plan_actions
+    # MVP-2.9.0, set by PUT /approve only: whether the approval queued the plan's run (None on every other answer)
+    run_queued: Optional[bool] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -483,7 +490,20 @@ class FixPlanResponse(BaseModel):
         unknown, one per step (services/change_steps.step_tier, the classifier the auto-approval floor uses; a step
         with no command is unknown). Computed on the way out: never stored, never part of the content hash."""
         from agenticops.services.change_steps import step_tiers
-        return step_tiers(self.steps)
+        try:
+            return step_tiers(self.steps)
+        except Exception:        # a classifier that raised must not take every plan list and page with it
+            _log.warning("step_tiers failed for fix plan #%s", self.id, exc_info=True)
+            return ["unknown"] * len(self.steps or [])
+
+    @computed_field
+    @property
+    def rejection_is_feedback(self) -> bool:
+        """MVP-2.9.0 read context: whether `rejection_reason` is something a person wrote about this plan
+        (services/plan_content.rejection_is_feedback) — what a page may quote under `rejected_by`'s name, and what the
+        agent asked for the next plan is given. False for a plan that is not rejected."""
+        from agenticops.services.plan_content import rejection_is_feedback
+        return rejection_is_feedback(self)
 
 
 class FixExecutionResponse(BaseModel):
