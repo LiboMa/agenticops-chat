@@ -21,3 +21,12 @@ export function humanVerdict(events: PipelineEvent[] | undefined, rcaId: number 
   }
   return best;
 }
+
+/** Until 2026-11-17 the timeline kept only the first 200 characters of a verdict's reason (the box takes 2,000).
+ *  A note that is exactly that long is, almost certainly, one of those: the page says the record holds only part of
+ *  it instead of quoting it as the whole reason. A reason written since is kept whole. */
+const OLD_NOTE_LIMIT = 200;
+export function noteWasCut(note: string): boolean {
+  return note.length === OLD_NOTE_LIMIT;
+}
+

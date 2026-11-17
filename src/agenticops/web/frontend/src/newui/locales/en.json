@@ -699,5 +699,6 @@
   "node.asOf.unknown": "When this health was read is not on record.",
   "path.inferredHop": " (inferred)",
   "path.inferred": "Inferred by a model: {n} of these links — advisory; no route over rule relations alone exists within 8 steps. ",
-  "legend.gone3d": "Fainter dot: a resource no longer there"
+  "legend.gone3d": "Fainter dot: a resource no longer there",
+  "verdict.cut": "… (the record kept only the first 200 characters of this)"
 }

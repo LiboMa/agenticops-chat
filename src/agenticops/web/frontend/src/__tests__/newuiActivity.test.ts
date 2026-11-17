@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { agentOn, railRows, requestedRun, stoppedOn, whoText, type Activity, type ActivityLane } from "@/newui/lib/activity";
-import { humanVerdict } from "@/newui/lib/briefs/verdict";
+import { humanVerdict, noteWasCut } from "@/newui/lib/briefs/verdict";
 import type { PipelineEvent } from "@/api/types";
 
 const lane = (over: Partial<ActivityLane>): ActivityLane => ({
@@ -81,3 +81,17 @@ describe("humanVerdict — what a person made of a diagnosis, from the timeline"
     expect(humanVerdict(undefined, 5)).toBeNull();
   });
 });
+
+describe("noteWasCut — a verdict's reason that the record holds only in part", () => {
+  // final review: the box takes 2,000 characters, the timeline kept 200 until 2026-11-17 and the page quoted that
+  // as the whole reason. New records are whole; an old one that is exactly as long as the old limit says so.
+  it("marks a note that is exactly as long as the old limit", () => {
+    expect(noteWasCut("x".repeat(200))).toBe(true);
+  });
+  it("leaves a shorter note, and a longer one kept whole since, alone", () => {
+    expect(noteWasCut("x".repeat(199))).toBe(false);
+    expect(noteWasCut("x".repeat(201))).toBe(false);
+    expect(noteWasCut("")).toBe(false);
+  });
+});
+

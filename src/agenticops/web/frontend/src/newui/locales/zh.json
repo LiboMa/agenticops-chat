@@ -699,5 +699,6 @@
   "node.asOf.unknown": "健康状态的读取时间没有记录。",
   "path.inferredHop": "（推断）",
   "path.inferred": "其中 {n} 步是模型推断的关系，仅供参考：只走规则关系在 8 步之内连不到。",
-  "legend.gone3d": "暗一些的点：已经不见了的资源"
+  "legend.gone3d": "暗一些的点：已经不见了的资源",
+  "verdict.cut": "……（记录里只留了这句话的前 200 个字）"
 }

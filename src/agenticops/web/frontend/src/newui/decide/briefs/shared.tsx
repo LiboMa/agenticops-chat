@@ -6,7 +6,7 @@ import { parseItem } from "@/lib/inbox";
 import { useDismissIssue, useTriggerPlan, useTriggerRca } from "../../hooks/useIssueDecisions";
 import { useNfT } from "../../i18n";
 import { whoText } from "../../lib/activity";
-import { humanVerdict } from "../../lib/briefs/verdict";
+import { humanVerdict, noteWasCut } from "../../lib/briefs/verdict";
 import { utcStamp } from "../../lib/time";
 import { useShell } from "../../shell/shellContext";
 import { triggerError, useAgentOn } from "../widgets/AgentAtWork";
@@ -64,5 +64,5 @@ export function VerdictQuote({ issueId, rcaId }: { issueId: number; rcaId: numbe
   if (timeline.isPending) return <div className="skel" style={{ height: 40 }} />;
   if (!v) return <p className="note">{t("verdict.none")}</p>;
   const cite = t("verdict.cite", { by: whoText(v.by, user?.email, t), v: t(`verdict.word.${v.verdict}`), t: utcStamp(v.at) });
-  return <Quote text={v.note || "—"} cite={cite} />;
+  return <Quote text={(v.note || "—") + (noteWasCut(v.note) ? t("verdict.cut") : "")} cite={cite} />;
 }

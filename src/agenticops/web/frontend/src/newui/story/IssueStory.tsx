@@ -24,7 +24,7 @@ import { useFreshRca } from "../hooks/useItemData";
 import { useNfT } from "../i18n";
 import { agentOn, stoppedOn, whoText } from "../lib/activity";
 import { causeVm } from "../lib/briefs/cause";
-import { humanVerdict } from "../lib/briefs/verdict";
+import { humanVerdict, noteWasCut } from "../lib/briefs/verdict";
 import { closure, issueSpine, lastMove, planBasis, planLine, planRewrittenAt, reachedOf, waitKey, waitSince, type IssueStep } from "../lib/story";
 import { utcStamp } from "../lib/time";
 import { Message, StateBlock } from "../shell/StateBlock";
@@ -142,7 +142,7 @@ function IssueRecord({ id, frame }: { id: number; frame: StoryFrame }) {
         {verdict?.verdict === "incorrect" && (
           <>
             <p>{t("story.rca.wrong", { by: who(verdict.by) })}</p>
-            {verdict.note && <Quote text={verdict.note} cite={`${who(verdict.by)}　${utcStamp(verdict.at, frame.now)} UTC`} />}
+            {verdict.note && <Quote text={verdict.note + (noteWasCut(verdict.note) ? t("verdict.cut") : "")} cite={`${who(verdict.by)}　${utcStamp(verdict.at, frame.now)} UTC`} />}
           </>
         )}
         {verdict?.verdict === "correct" && <p>{t("story.rca.confirmed", { by: who(verdict.by) })}</p>}
