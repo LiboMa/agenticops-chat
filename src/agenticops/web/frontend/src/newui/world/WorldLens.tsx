@@ -7,10 +7,10 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useAllWaiting } from "../hooks/useAllWaiting";
 import { useNfT } from "../i18n";
 import { storyPath } from "../lib/story";
-import { NO_ASK, reconcile, scene, type Ask, type Drawn, type Waiting } from "../lib/world/scene";
+import { NO_ASK, reconcile, scene, type Ask, type Drawn, type View, type Waiting } from "../lib/world/scene";
 import { utcStamp } from "../lib/time";
 import { Message, StateBlock } from "../shell/StateBlock";
-import { useLensKeys } from "../shell/shellContext";
+import { useLensKeys, useShell } from "../shell/shellContext";
 import { useWorld } from "./WorldData";
 import { Check, Happen, Legend, NodeCard, PathHint, Tools, healthKey } from "./WorldPanels";
 
@@ -25,7 +25,8 @@ export function WorldLens() {
   const navigate = useNavigate();
   const location = useLocation();
   const world = useWorld();
-  const { graph: g, sky, want } = world;
+  const { graph: g, sky, sky3, want, load3d } = world;
+  const { notify, setRootFlag } = useShell();
   useEffect(() => { want(); }, [want]);
   const { accountId } = useAccountScope();
   const accounts = useAccounts();
@@ -36,7 +37,9 @@ export function WorldLens() {
   const [q, setQ] = useState("");
   const [pathMode, setPathMode] = useState(() => params.has("a"));
   const [bad, setBad] = useState<{ what: keyof Drawn; want: number; got: number }[] | null>(null);
-  const [perf, setPerf] = useState<{ fps: number; ms: number } | null>(null);
+  const [perf, setPerf] = useState<{ fps: number; ms: number | null } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [turning, setTurning] = useState(false);
   const [tip, setTip] = useState<{ x: number; y: number; i: number } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const search = useRef<HTMLInputElement>(null);
@@ -65,15 +68,39 @@ export function WorldLens() {
   const sc = useMemo(() => (g ? scene(g, ask, waiting) : null), [g, ask, waiting]);
   const ready = world.status === "ready" && !!g && !!sc;
 
+  // the view: flat, or 3D once its engine is here (it is fetched the first time someone asks for it)
+  const want3d = params.get("v") === "3d";
+  const view: View = want3d && sky3 ? "3d" : "2d";
+  const act = useRef({ pick: (_i: number | null) => {}, hover: (_i: number | null, _x: number, _y: number) => {} });
+  useEffect(() => {
+    if (!want3d || sky3) return;
+    let live = true;
+    setBusy(true);
+    void load3d({ pick: (i) => act.current.pick(i), hover: (i, x, y) => act.current.hover(i, x, y) }).then((ok) => {
+      if (!live) return;
+      setBusy(false);
+      if (!ok) { notify(t("view.failed")); patch({ v: null }); }
+    });
+    return () => { live = false; };
+  }, [want3d, sky3, load3d, notify, t, patch]);
+  useEffect(() => {
+    if (view !== "3d" || !sky3) return;
+    sky3.show(true);
+    setRootFlag("view3d", true);
+    return () => { sky3.show(false); setRootFlag("view3d", false); setTurning(false); sky3.turn(false); };
+  }, [view, sky3, setRootFlag]);
+
   // the canvas: this lens owns it while it is on the page; the map is fitted into what the panels leave free
   const carded = ask.sel !== null && !pathMode;
   useEffect(() => {
     if (!sky) return;
     // a phone: the panels are a column above the map (44 % of the height, see newui.css), the open resource's card below it
     const tall = window.innerHeight;
-    sky.setMode({ world: true, inset: narrow ? { left: 0, right: 0, top: Math.round(tall * 0.44) + 60, bottom: carded ? Math.round(tall * 0.3) : 0 }
-                                             : { left: 320, right: carded ? 330 : 20, top: 0, bottom: 0 } });
-  }, [sky, narrow, carded]);
+    const inset = narrow ? { left: 0, right: 0, top: Math.round(tall * 0.44) + 60, bottom: carded ? Math.round(tall * 0.3) : 0 }
+                         : { left: 320, right: carded ? 330 : 20, top: 0, bottom: 0 };
+    sky.setMode({ world: true, off: view === "3d", inset });
+    sky3?.setInset(inset.left, inset.right);
+  }, [sky, sky3, narrow, carded, view]);
   useEffect(() => () => { sky?.setMode({ world: false, inset: { left: 0, right: 0, top: 0, bottom: 0 } }); sky?.apply(null, null, null); }, [sky]);
   // a link that names a resource opens ON it
   const flown = useRef(false);
@@ -82,28 +109,42 @@ export function WorldLens() {
     flown.current = true;
     if (ask.sel !== null && !pathMode) sky.flyTo(ask.sel);
   }, [ready, sky, ask.sel, pathMode]);
-  useEffect(() => { sky?.apply(ready ? sc : null, pathMode ? null : ask.sel, g); setBad(null); }, [sky, sc, ready, ask.sel, pathMode, g]);
+  // whichever view is on: the same camera moves
+  const cam = view === "3d" && sky3 ? sky3 : sky;
+  useEffect(() => {
+    sky?.apply(ready ? sc : null, pathMode ? null : ask.sel, g);
+    sky3?.apply(ready ? sc : null, pathMode ? null : ask.sel, g);
+    setBad(null);
+  }, [sky, sky3, sc, ready, ask.sel, pathMode, g, view]);
 
   // the picture against the data, once the canvas has drawn this result — and again every second
   useEffect(() => {
     if (!sky || !ready || !sc) return;
-    const check = () => { setBad(reconcile(sc, sky.stats())); setPerf({ fps: sky.fps, ms: sky.drawMs }); setNow(Date.now()); };
-    const first = window.setTimeout(check, 260), again = window.setInterval(check, 1000);
+    const check = () => {
+      if (view === "3d" && sky3) { setBad(reconcile(sc, sky3.stats(), "3d")); setPerf({ fps: sky3.fps, ms: null }); }
+      else { setBad(reconcile(sc, sky.stats(), "2d")); setPerf({ fps: sky.fps, ms: sky.drawMs }); }
+      setNow(Date.now());
+    };
+    // the 3D engine builds its objects over a few frames: ask it a little later
+    const first = window.setTimeout(check, view === "3d" ? 900 : 260), again = window.setInterval(check, 1000);
     return () => { window.clearTimeout(first); window.clearInterval(again); };
-  }, [sky, sc, ready]);
+  }, [sky, sky3, sc, ready, view]);
 
   const pick = useCallback((i: number | null, fly = true) => {
     if (!g) return;
     if (pathMode) {
       if (i === null) return;
       if (ask.a === null || ask.b !== null) patch({ a: refOf(i), b: null });
-      else if (i !== ask.a) { patch({ b: refOf(i) }); sky?.home(); }
+      else if (i !== ask.a) { patch({ b: refOf(i) }); cam?.home(); }
       return;
     }
     patch({ sel: refOf(i), near: i === null ? null : params.get("near") });
-    if (i !== null && fly) sky?.flyTo(i);
+    if (i !== null && fly) cam?.flyTo(i);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [g, pathMode, ask.a, ask.b, patch, sky, params]);
+  }, [g, pathMode, ask.a, ask.b, patch, cam, params]);
+  act.current = { pick: (i) => pick(i, false), hover: (i, x, y) => setTip(i === null ? null : { x, y, i }) };
+  const setView = useCallback((v: View) => patch({ v: v === "3d" ? "3d" : null }), [patch]);
+  const toggleTurn = useCallback(() => { if (view !== "3d" || !sky3) return; const on = !sky3.turning; sky3.turn(on); setTurning(on); }, [view, sky3]);
   const togglePath = useCallback((from?: number | null) => {
     const on = !pathMode;
     setPathMode(on);
@@ -119,15 +160,17 @@ export function WorldLens() {
       if (key === "f") { search.current?.focus(); search.current?.select(); return true; }
       if (key === "l") { togglePath(); return true; }
       if (key === "g") { toggleFocus(); return true; }
-      if (key === "h") { sky?.home(); return true; }
+      if (key === "h") { cam?.home(); return true; }
+      if (key === "v") { setView(want3d ? "2d" : "3d"); return true; }
+      if (key === "r" && view === "3d") { toggleTurn(); return true; }
       return false;
     },
     // Esc peels one layer at a time: the path, «only around it», the open resource, a moved camera
     onEscape: () => {
       if (pathMode) { togglePath(); return true; }
       if (ask.focus) { patch({ near: null }); return true; }
-      if (ask.sel !== null) { patch({ sel: null, near: null }); sky?.home(); return true; }
-      sky?.home();
+      if (ask.sel !== null) { patch({ sel: null, near: null }); cam?.home(); return true; }
+      cam?.home();
       return false;
     },
   });
@@ -183,22 +226,22 @@ export function WorldLens() {
         <>
           <div className="wleft">
             {world.staleAt !== null && <p className="stalebar" role="alert">{t("world.stale", { t: utcStamp(world.staleAt, now) })}</p>}
-            <Tools g={g!} ask={ask} sc={sc!} search={search} pathMode={pathMode}
+            <Tools g={g!} ask={ask} sc={sc!} search={search} pathMode={pathMode} view={view} busy={busy} turning={turning} onView={setView} onTurn={toggleTurn}
                    onAsk={(change) => { if ("q" in change) setQ(change.q ?? ""); patch({ ...("type" in change ? { type: change.type ?? null } : {}),
                      ...("group" in change ? { grp: change.group ?? null } : {}), ...("onlyAbnormal" in change ? { abn: change.onlyAbnormal ? "1" : null } : {}) }); }}
-                   onPick={(i) => pick(i)} onPath={() => togglePath()} onHome={() => sky?.home()} />
-            <Check sc={sc!} bad={bad} perf={perf} buildId={g!.buildId} builtAt={world.builtAt} building={world.building} now={now} />
+                   onPick={(i) => pick(i)} onPath={() => togglePath()} onHome={() => cam?.home()} />
+            <Check sc={sc!} view={view} bad={bad} perf={perf} buildId={g!.buildId} builtAt={world.builtAt} building={world.building} now={now} />
             <Happen g={g!} sc={sc!} complete={waitingQ.data?.complete ?? true} readOnly={readOnly} onPick={(i) => pick(i)} onDecide={() => navigate("/app/new/decide")} />
           </div>
           {pathMode && <PathHint g={g!} ask={ask} sc={sc!} onExit={() => togglePath()} />}
           {selNode && !pathMode && (
             <NodeCard key={selNode.id} g={g!} i={selNode.i} ask={ask} mine={mine} accountName={accountName} now={now}
-                      onPick={(i) => pick(i)} onClose={() => { patch({ sel: null, near: null }); sky?.home(); }} onFocus={toggleFocus}
+                      onPick={(i) => pick(i)} onClose={() => { patch({ sel: null, near: null }); cam?.home(); }} onFocus={toggleFocus}
                       onPathFrom={() => togglePath(selNode.i)}
                       onStory={(item) => navigate(storyPath(item), { state: { from: "world", back: here } })}
                       onDecide={(item) => navigate(`/app/new/decide/${item}`)} />
           )}
-          <Legend t={t} />
+          <Legend t={t} view={view} />
           {tip && <div id="tip" style={{ left: tip.x + 14, top: tip.y + 12 }}>{g!.nodes[tip.i].name}　{g!.nodes[tip.i].type}　{t(healthKey(g!.nodes[tip.i]))}</div>}
         </>
       )}

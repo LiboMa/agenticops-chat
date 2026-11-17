@@ -11,7 +11,7 @@ const ROWS: [string[], string][] = [
   [["Y", "P", "N", "F", "M"], "help.verdict"],
   [["Space"], "help.peek"],
   [["↵"], "help.story"],
-  [["F", "G", "L", "H"], "help.world"],
+  [["F", "G", "L", "H", "V"], "help.world"],
   [["1", "2", "3"], "help.lens"],
   [["T"], "help.theme"],
   [["?"], "help.helpKey"],

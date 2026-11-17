@@ -20,6 +20,8 @@ export interface SkyMode {
   world: boolean;
   /** how much of the canvas the panels cover on the left and the right (px) — the map is fitted into what is left */
   inset: { left: number; right: number; top: number; bottom: number };
+  /** the 3D view is showing instead: this canvas draws nothing */
+  off?: boolean;
 }
 
 export class Sky {
@@ -211,7 +213,7 @@ export class Sky {
     cx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     cx.clearRect(0, 0, W, H);
     const D: Drawn = { ...NONE };
-    if (!g || !g.nodes.length) { this.drawn = D; this.next(); return; }
+    if (!g || !g.nodes.length || this.mode.off) { this.drawn = D; this.next(); return; }
 
     const world = this.mode.world, z = cam.z, ox = W / 2, oy = H / 2, N = g.nodes, sx = this.sx, sy = this.sy, on = this.on;
     const mine = this.scOf === g, R = mine ? this.sc : null, sel = mine ? this.sel : null;
@@ -281,10 +283,13 @@ export class Sky {
       if (!this.still) g.adj[lit].forEach(([j, k, out], n) => {
         const way = flow({ r: E[k].r, p: E[k].llm ? "llm" : "rule" });
         if (way === "none") return;                                     // no known direction: no dot
-        const forward = way === "both" ? n % 2 === 0 : (way === "forward") === out;       // from this resource outwards?
-        const [fx, fy, tx, ty] = forward ? [sx[lit], sy[lit], sx[j], sy[j]] : [sx[j], sy[j], sx[lit], sy[lit]];
         const u = (t * 0.45 + n * 0.37) % 1;
-        cx.fillStyle = C.mint; cx.beginPath(); cx.arc(fx + (tx - fx) * u, fy + (ty - fy) * u, 2.2, 0, TAU); cx.fill();
+        cx.fillStyle = C.mint;
+        // from this resource outwards, towards it — or, for a two-way relation, one dot each way
+        for (const outward of way === "both" ? [true, false] : [(way === "forward") === out]) {
+          const [fx, fy, tx, ty] = outward ? [sx[lit], sy[lit], sx[j], sy[j]] : [sx[j], sy[j], sx[lit], sy[lit]];
+          cx.beginPath(); cx.arc(fx + (tx - fx) * u, fy + (ty - fy) * u, 2.2, 0, TAU); cx.fill();
+        }
       });
     }
     // a path between two resources: how they are linked — not a claim that a fault travels along it

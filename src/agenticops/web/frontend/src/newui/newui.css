@@ -575,3 +575,5 @@
   .nf .nodecard{bottom:10px;max-height:30vh}                      /* no time bar under it here */
   .nf .wtools .wf kbd{display:none}
 }
+.nf .wtools .wf{flex-wrap:wrap}
+.nf .wtools .wf .btn{flex:1 1 40%}

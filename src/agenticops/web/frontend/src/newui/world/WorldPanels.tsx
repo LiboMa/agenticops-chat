@@ -6,7 +6,7 @@ import { Prov } from "../decide/widgets/Cause";
 import { useNfT, type NfT } from "../i18n";
 import type { WNode, WorldGraph } from "../lib/world/graph";
 import { side } from "../lib/world/relations";
-import { expected, type Ask, type Drawn, type Scene } from "../lib/world/scene";
+import { expected, type Ask, type Drawn, type Scene, type View } from "../lib/world/scene";
 import { utcStamp } from "../lib/time";
 
 const num = (v: number) => v.toLocaleString("en-US");
@@ -20,14 +20,25 @@ export const Name = ({ node }: { node: Pick<WNode, "name" | "absent"> }) => (nod
 export const healthKey = (n: Pick<WNode, "health" | "absent">) => `health.${n.absent ? "gone" : n.health}`;
 
 /** Search, filters, and how much of the map is in view. */
-export function Tools({ g, ask, sc, search, pathMode, onAsk, onPick, onPath, onHome }: {
+export function Tools({ g, ask, sc, search, pathMode, view, busy, turning, onView, onTurn, onAsk, onPick, onPath, onHome }: {
   g: WorldGraph; ask: Ask; sc: Scene; search: RefObject<HTMLInputElement>; pathMode: boolean;
+  view: View;
+  /** the 3D engine is being fetched */
+  busy: boolean;
+  turning: boolean;
+  onView: (v: View) => void; onTurn: () => void;
   onAsk: (patch: Partial<Ask>) => void; onPick: (i: number) => void; onPath: () => void; onHome: () => void;
 }) {
   const t = useNfT();
   const types = [...g.nodes.reduce((m, n) => m.set(n.type, (m.get(n.type) ?? 0) + 1), new Map<string, number>())].sort((a, b) => a[0].localeCompare(b[0]));
   return (
     <div className="wtools card">
+      <div className={`tabs wview${busy ? " busy" : ""}`} role="tablist" aria-label={t("view.label")}>
+        {(["2d", "3d"] as const).map((v) => (
+          <button key={v} type="button" role="tab" aria-selected={view === v} onClick={() => onView(v)}>{t(`view.${v}`)}</button>
+        ))}
+        <kbd>V</kbd>
+      </div>
       <label className="wsearch">
         <input ref={search} className="field" type="search" autoComplete="off" spellCheck={false} value={ask.q} placeholder={t("world.search")}
                aria-label={t("world.search")} onChange={(e) => onAsk({ q: e.target.value })}
@@ -57,6 +68,9 @@ export function Tools({ g, ask, sc, search, pathMode, onAsk, onPick, onPath, onH
       <div className="wf">
         <button type="button" className={`btn sm${pathMode ? " on" : ""}`} aria-pressed={pathMode} onClick={onPath}><span className="t">{t("world.path")}</span><kbd>L</kbd></button>
         <button type="button" className="btn sm quiet" onClick={onHome}><span className="t">{t("world.home")}</span><kbd>H</kbd></button>
+        {view === "3d" && (
+          <button type="button" className={`btn sm${turning ? " on" : ""}`} aria-pressed={turning} onClick={onTurn}><span className="t">{t("world.turn")}</span><kbd>R</kbd></button>
+        )}
       </div>
     </div>
   );
@@ -64,14 +78,14 @@ export function Tools({ g, ask, sc, search, pathMode, onAsk, onPick, onPath, onH
 
 /** «数据核对»: what the build holds, how every relation of it is shown, how old it is — and whether the canvas drew
  *  exactly that. `bad` = the numbers that differ; null = not checked yet. */
-export function Check({ sc, bad, perf, buildId, builtAt, building, now }: {
-  sc: Scene; bad: { what: keyof Drawn; want: number; got: number }[] | null; perf: { fps: number; ms: number } | null;
+export function Check({ sc, view, bad, perf, buildId, builtAt, building, now }: {
+  sc: Scene; view: View; bad: { what: keyof Drawn; want: number; got: number }[] | null; perf: { fps: number; ms: number | null } | null;
   buildId: number | null; builtAt: string | null; building: boolean; now: number;
 }) {
   const t = useNfT();
-  const T = sc.totals, want = expected(sc);
+  const T = sc.totals, want = expected(sc, view);
   return (
-    <div className={`wcheck card${bad?.length ? " bad" : ""}`} data-ok={bad === null ? "" : bad.length ? "0" : "1"} data-fps={perf?.fps ?? ""} data-ms={perf ? perf.ms.toFixed(2) : ""}>
+    <div className={`wcheck card${bad?.length ? " bad" : ""}`} data-ok={bad === null ? "" : bad.length ? "0" : "1"} data-view={view} data-fps={perf?.fps ?? ""} data-ms={perf?.ms != null ? perf.ms.toFixed(2) : ""}>
       <h2>{t("check.title")}</h2>
       <p><Prov code />{t("check.totals", { present: num(T.present), gone: num(T.gone), open: sc.goneOpen, links: num(T.links), inferred: num(T.inferred) })}</p>
       <p><Prov code />{t("check.relations", { relations: num(T.relations), lines: num(T.lines), contain: num(T.contain), ofAccount: num(T.ofAccount), ofGroup: num(T.ofGroup) })}
@@ -79,7 +93,7 @@ export function Check({ sc, bad, perf, buildId, builtAt, building, now }: {
       <p><Prov code />{builtAt ? t("check.fresh", { t: utcStamp(builtAt, now), id: buildId }) : t("check.fresh.unknown", { id: buildId })}{building ? t("check.building") : ""}</p>
       {bad === null ? <p>{t("check.pending")}</p>
         : bad.length ? <p className="mis" role="alert">{t("check.bad")}{bad.map((m) => t("check.item", { what: t(`check.${m.what}`), want: num(m.want), got: num(m.got) })).join("；")}</p>
-        : <p className="ok"><Prov code />{t("check.ok", { n: num(want.bright), r: want.rings, rb: want.ringsBright, l: num(want.links), named: want.named })}</p>}
+        : <p className="ok"><Prov code />{t("check.ok", { view: t(`view.${view}`), n: num(want.bright), r: want.rings, rb: want.ringsBright, l: num(want.links), named: want.named })}</p>}
     </div>
   );
 }
@@ -199,7 +213,7 @@ export function PathHint({ g, ask, sc, onExit }: { g: WorldGraph; ask: Ask; sc: 
   );
 }
 
-export function Legend({ t }: { t: NfT }) {
+export function Legend({ t, view }: { t: NfT; view: View }) {
   return (
     <div className="legend">
       <span><i style={{ background: "var(--red)" }} />{t("health.critical")}</span>
@@ -207,8 +221,8 @@ export function Legend({ t }: { t: NfT }) {
       <span><i style={{ background: "var(--mint)" }} />{t("health.notice")}</span>
       <span><i style={{ background: "rgb(var(--star))", opacity: 0.6 }} />{t("legend.none")}</span>
       <span><i className="gonei" />{t("legend.gone")}</span>
-      <span><i className="dash" />{t("legend.llm")}</span>
-      <span><i style={{ background: "var(--mint)", width: 5, height: 5 }} />{t("legend.flow")}</span>
+      <span><i className={view === "3d" ? "curve" : "dash"} />{t(view === "3d" ? "legend.llm3d" : "legend.llm")}</span>
+      <span><i style={{ background: "var(--mint)", width: 5, height: 5 }} />{t(view === "3d" ? "legend.flow3d" : "legend.flow")}</span>
       <span className="sch">{t("legend.schematic")}</span>
     </div>
   );

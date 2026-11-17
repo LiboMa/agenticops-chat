@@ -158,15 +158,17 @@ export function scene(g: WorldGraph, ask: Ask, waiting: Waiting[] | null): Scene
 /** What a view reports it drew. */
 export interface Drawn { nodes: number; bright: number; gone: number; rings: number; ringsBright: number; links: number; named: number }
 
-/** What a view must have on its canvas for this result. The flat map shows containment as the cluster itself, so
- *  its lines are every link but those. */
-export function expected(sc: Scene): Drawn {
+export type View = "2d" | "3d";
+
+/** What a view must have on its canvas for this result. The flat map shows containment as the circles themselves,
+ *  so its lines are every link but those; the 3D view has no circles and draws every link. */
+export function expected(sc: Scene, view: View = "2d"): Drawn {
   return { nodes: sc.totals.nodes, bright: sc.shown, gone: sc.gone.size, rings: sc.rings.length, ringsBright: sc.rings.filter((r) => !r.dim).length,
-           links: sc.totals.lines, named: sc.labels.length };
+           links: view === "3d" ? sc.totals.links : sc.totals.lines, named: sc.labels.length };
 }
 
 /** The check: what the view says it drew against what the data says. [] = they agree. */
-export function reconcile(sc: Scene, drawn: Drawn): { what: keyof Drawn; want: number; got: number }[] {
-  const want = expected(sc);
+export function reconcile(sc: Scene, drawn: Drawn, view: View = "2d"): { what: keyof Drawn; want: number; got: number }[] {
+  const want = expected(sc, view);
   return (Object.keys(want) as (keyof Drawn)[]).filter((k) => drawn[k] !== want[k]).map((k) => ({ what: k, want: want[k], got: drawn[k] }));
 }
