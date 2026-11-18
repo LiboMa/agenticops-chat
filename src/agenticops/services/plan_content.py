@@ -75,8 +75,15 @@ def previous_plan_diff(session, plan: FixPlan) -> dict:
 
 
 def content_hash(*, steps, rollback_plan, pre_checks, post_checks, account_id, risk_level) -> str:
-    doc = {"steps": steps, "rollback_plan": rollback_plan, "pre_checks": pre_checks, "post_checks": post_checks,
-           "account_id": account_id, "risk_level": risk_level}
+    """sha256 of the content AS IT IS STORED. Every text / JSON column is scrubbed of secrets when it is written
+    (security/db_redaction), so a plan whose step names an access key id is stored with the id masked. A hash
+    stamped over the step as the agent wrote it was not the hash of the stored step — the approve route recomputed
+    another one and answered «changed since it was loaded» for good (MVP-2.9.0 N15: 4 of the 80 plans waiting for
+    approval on a copy of the local database). The same scrub is applied here first; it is idempotent, so stored
+    content hashes as before, and content without a secret hashes exactly as it always did."""
+    from agenticops.security.redaction import redact_obj
+    doc = {"steps": redact_obj(steps), "rollback_plan": redact_obj(rollback_plan), "pre_checks": redact_obj(pre_checks),
+           "post_checks": redact_obj(post_checks), "account_id": account_id, "risk_level": risk_level}
     canonical = json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -118,6 +125,16 @@ def stamp_approval(session, plan: FixPlan) -> None:
     """Record what an approval approved — call right after the plan moves to approved."""
     stamp_content(session, plan)
     plan.approved_hash, plan.approved_version = plan.content_hash, plan.plan_version
+
+
+def repair_stale_hash(session, plan: FixPlan) -> bool:
+    """Restamp a stored hash that is not the hash of the stored content — none at all (a plan from before 2.6.1), or
+    one stamped before the database redaction rewrote the content (N15) — so that the reload a refused approval asks
+    for shows a hash that CAN be approved. True = it was restamped (the caller commits)."""
+    if plan.content_hash == current_hash(session, plan):
+        return False
+    stamp_content(session, plan)
+    return True
 
 
 def approval_conflict(session, plan: FixPlan, seen_hash: str) -> Optional[str]:

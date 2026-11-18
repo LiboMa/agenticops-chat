@@ -35,7 +35,7 @@ from agenticops.services.verification import FAILED, PASSED, PENDING, as_results
 from agenticops.services.change_steps import (blocked_commands, diff_steps, normalize_steps, plan_steps,
                                               rollback_steps, unclassified_commands)
 from agenticops.services.pipeline_events import log_event
-from agenticops.services.plan_content import approval_conflict, plan_label, stamp_approval, stamp_content
+from agenticops.services.plan_content import approval_conflict, plan_label, repair_stale_hash, stamp_approval, stamp_content
 
 logger = logging.getLogger(__name__)
 
@@ -1019,8 +1019,7 @@ def approve(cr_id: int, *, actor: Actor, reason: str = "", content_hash: str) ->
             raise ChangeStateError("no active change plan to approve")
         conflict = approval_conflict(s, plan, content_hash)
         if conflict:
-            if plan.content_hash is None:  # stored without one: stamp it now, so the reload shows a hash to send
-                stamp_content(s, plan)
+            if repair_stale_hash(s, plan):  # the stored hash was not of the stored content: the reload shows one that is
                 s.commit()
             raise ChangeStateError(conflict)
         if not _claim(s, cr_id, "planned", "approved"):

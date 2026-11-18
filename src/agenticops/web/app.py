@@ -52,7 +52,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from agenticops.graph.api import router as graph_router
 from agenticops.services.executor_service import ExecutorService
-from agenticops.services.plan_content import approval_conflict, stamp_approval, stamp_content
+from agenticops.services.plan_content import approval_conflict, repair_stale_hash, stamp_approval, stamp_content
 from agenticops.services.inventory import PRESENT
 from agenticops.web.session_manager import ChatSessionManager
 
@@ -2905,8 +2905,7 @@ async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate, actor: Actor = 
                 raise HTTPException(status_code=422, detail="content_hash is required to edit a plan's content")
             conflict = approval_conflict(session, plan, data.content_hash)
             if conflict:
-                if plan.content_hash is None:  # stored without one: stamp it now, so the reload shows a hash to send
-                    stamp_content(session, plan)
+                if repair_stale_hash(session, plan):  # the stored hash was not of the stored content: the reload shows one that is
                     session.commit()
                 raise HTTPException(status_code=409, detail=conflict)
         changed_old, changed_new = {}, {}
@@ -2963,8 +2962,7 @@ async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody, actor: Ac
             raise HTTPException(status_code=409, detail=closed)
         conflict = approval_conflict(session, plan, data.content_hash)
         if conflict:
-            if plan.content_hash is None:  # stored without one: stamp it now, so the reload shows a hash to send
-                stamp_content(session, plan)
+            if repair_stale_hash(session, plan):  # the stored hash was not of the stored content: the reload shows one that is
                 session.commit()
             raise HTTPException(status_code=409, detail=conflict)
         old = plan.status

@@ -450,3 +450,114 @@ def test_the_cli_shows_a_plan_by_its_label(db):
     plan = _fix_plan(db)
     out = cli._slash_fix(None, ["show", str(plan.id)])
     assert f"I#{plan.health_issue_id} fix plan v1" in out and "Fix Plan #" not in out
+
+
+# ── MVP-2.9.0 N15: a plan whose content the database redaction rewrote could never be approved ───────────────────
+# Found live on the copy database: an approval answered 409 «changed since it was loaded … reload it», twice, on a
+# plan nobody had touched. The plan's step named an access key id. The hash was stamped over the step as the agent
+# wrote it; the flush that followed scrubbed the key id out of the stored step (security/db_redaction). From then
+# on the stored hash — the one every page sends — was not the hash of the stored content, and no reload could
+# fix that. 4 of the 80 plans waiting for approval in that database were in this state.
+
+KEY_STEP = [{"action": "deactivate the leaked key",
+             "command": "aws iam update-access-key --user-name app --access-key-id AKIAIOSFODNN7EXAMPLE --status Inactive"}]
+
+
+def _saved_by_the_agent(db, *, steps=KEY_STEP):
+    """A fix plan saved the way the SRE agent saves one (tools.save_fix_plan): the hash is stamped on the plan as it
+    was written, in the same transaction whose flush scrubs the stored content."""
+    from agenticops.tools.metadata_tools import save_fix_plan
+    issue = HealthIssue(title="t", description="d", severity="low", source="test", status="root_cause_identified", resource_id="i-0abc")
+    db.add(issue); db.flush()
+    rca = RCAResult(health_issue_id=issue.id, root_cause="x", confidence=0.9)
+    db.add(rca); db.commit()
+    with patch("agenticops.services.pipeline_service.trigger_auto_approve"):
+        out = save_fix_plan(health_issue_id=issue.id, rca_result_id=rca.id, risk_level="L2", title="Deactivate the key", summary="s",
+                            steps=json.dumps(steps), rollback_plan=json.dumps({"steps": [{"command": "aws iam update-access-key --user-name app --access-key-id AKIAIOSFODNN7EXAMPLE --status Active"}]}),
+                            post_checks=json.dumps([{"check": "the key is inactive"}]))
+    assert "saved" in out, out
+    s = get_session()
+    try:
+        return s.query(FixPlan).filter_by(health_issue_id=issue.id).one().id
+    finally:
+        s.close()
+
+
+def test_the_stored_hash_is_of_the_content_as_it_is_stored(db):
+    stored = _fresh(FixPlan, _saved_by_the_agent(db))
+    assert "AKIAIOSFODNN7EXAMPLE" not in json.dumps(stored.steps) and "[REDACTED-SECRET]" in json.dumps(stored.steps)
+    assert stored.content_hash == pc.current_hash(get_session(), stored)
+
+
+def test_a_plan_whose_step_was_redacted_can_be_approved(db, client):
+    plan_id = _saved_by_the_agent(db)
+    shown = client.get(f"/api/fix-plans/{plan_id}").json()
+    with patch("agenticops.services.pipeline_service.trigger_auto_execute"):
+        r = client.put(f"/api/fix-plans/{plan_id}/approve", json={"content_hash": shown["content_hash"]})
+    assert r.status_code == 200, r.text
+    _assert_bound(plan_id)
+
+
+def test_content_without_a_secret_hashes_as_it_always_did():
+    """The fix must not move a single existing hash: every stored approval is bound to one."""
+    import hashlib
+    canonical = json.dumps({"steps": FIELDS["steps"], "rollback_plan": FIELDS["rollback_plan"], "pre_checks": FIELDS["pre_checks"],
+                            "post_checks": FIELDS["post_checks"], "account_id": 1, "risk_level": "L1"},
+                           sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+    assert pc.content_hash(**FIELDS) == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def test_two_plans_that_differ_only_in_a_secret_are_the_same_stored_content():
+    a = pc.content_hash(**{**FIELDS, "steps": [{"command": "aws iam delete-access-key --access-key-id AKIAIOSFODNN7EXAMPLE"}]})
+    b = pc.content_hash(**{**FIELDS, "steps": [{"command": "aws iam delete-access-key --access-key-id AKIAI44QH8DHBEXAMPLE"}]})
+    assert a == b == pc.content_hash(**{**FIELDS, "steps": [{"command": "aws iam delete-access-key --access-key-id [REDACTED-SECRET]"}]})
+
+
+def test_a_stored_hash_that_is_not_of_the_stored_content_is_repaired_by_the_first_refusal(db, client):
+    """The rows written before the fix: the first approval is still refused (the page did show another hash), but
+    that request restamps the plan — so the reload the refusal asks for shows a hash that CAN be approved."""
+    plan = _fix_plan(db)
+    s = get_session()
+    s.query(FixPlan).filter_by(id=plan.id).update({"content_hash": "0" * 64})       # as a hash stamped before the redaction is
+    s.commit(); s.close()
+    with patch("agenticops.services.pipeline_service.trigger_auto_execute"):
+        first = client.put(f"/api/fix-plans/{plan.id}/approve", json={"content_hash": "0" * 64})
+        assert first.status_code == 409 and "reload it and review it again" in first.json()["detail"]
+        healed = _fresh(FixPlan, plan.id)
+        assert healed.status == "pending_approval" and healed.content_hash == pc.current_hash(get_session(), healed) != "0" * 64
+        assert healed.plan_version == 2                                              # what was hashed is not what is stored: a new version
+        again = client.put(f"/api/fix-plans/{plan.id}/approve", json={"content_hash": client.get(f"/api/fix-plans/{plan.id}").json()["content_hash"]})
+    assert again.status_code == 200, again.text
+    _assert_bound(plan.id, version=2)
+
+
+def test_a_change_plans_stale_hash_is_repaired_the_same_way(db, client):
+    cr_id, change = _change_plan(db)
+    s = get_session()
+    s.query(FixPlan).filter_by(id=change.id).update({"content_hash": "0" * 64})
+    s.commit(); s.close()
+    first = client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok", "content_hash": "0" * 64})
+    assert first.status_code == 409
+    healed = _fresh(FixPlan, change.id)
+    assert healed.content_hash == pc.current_hash(get_session(), healed) != "0" * 64
+    again = client.post(f"/api/changes/{cr_id}/approve", json={"reason": "ok", "content_hash": healed.content_hash})
+    assert again.status_code == 200, again.text
+
+
+def test_the_plans_already_waiting_with_a_stale_hash_are_repaired_at_startup(db):
+    """So the first approval after the upgrade is not a refusal. Only plans that wait for approval: an approved
+    plan is bound to its approved hash, and a plan whose hash is right keeps its version."""
+    import agenticops.models as models_mod
+    waiting, fine, approved = _fix_plan(db), _fix_plan(db), _fix_plan(db, status="approved", issue_status="fix_approved")
+    ids = (waiting.id, fine.id, approved.id)
+    before_fine, before_approved = fine.content_hash, approved.content_hash
+    s = get_session()
+    s.query(FixPlan).filter(FixPlan.id.in_((waiting.id, approved.id))).update({"content_hash": "0" * 64}, synchronize_session=False)
+    s.commit(); s.close()
+    models_mod._repair_plan_hashes_2_9_0(models_mod.get_engine())
+    w, f, a = (_fresh(FixPlan, i) for i in ids)
+    assert w.content_hash == pc.current_hash(get_session(), w) != "0" * 64 and w.plan_version == 2
+    assert (f.content_hash, f.plan_version) == (before_fine, 1)
+    assert (a.content_hash, a.plan_version) == ("0" * 64, 1) and a.approved_hash == before_approved   # not this repair's
+    models_mod._repair_plan_hashes_2_9_0(models_mod.get_engine())                                    # again: nothing moves
+    assert _fresh(FixPlan, waiting.id).plan_version == 2

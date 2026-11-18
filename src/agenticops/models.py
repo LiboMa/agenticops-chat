@@ -1800,6 +1800,41 @@ def _run_migrate_2_7_0(engine) -> None:
             for stmt in stmts:
                 conn.execute(text(stmt))
     _backfill_reports_2_7_0(engine)
+    _repair_plan_hashes_2_9_0(engine)
+
+
+def _repair_plan_hashes_2_9_0(engine) -> None:
+    """MVP-2.9.0 N15: a plan that waits for approval whose stored hash is not the hash of its stored content cannot
+    be approved — every approval is answered «changed since it was loaded». It happened to every plan whose step
+    named a secret: the hash was stamped over the step as written, and the flush that followed scrubbed the stored
+    step (services/plan_content.content_hash now hashes the scrubbed form). Restamp those rows — the next version —
+    so the first approval after the upgrade is not a refusal. An approved plan is bound to its approved hash and is
+    left alone. Fail-soft, like the backfills."""
+    try:
+        from agenticops.services.plan_content import content_hash
+        if not inspect(engine).has_table("fix_plans"):
+            return
+        waiting = ("draft", "pending_approval")
+        with Session(engine) as session:
+            rows = (
+                session.query(FixPlan.id, FixPlan.plan_version, FixPlan.content_hash, FixPlan.steps, FixPlan.rollback_plan,
+                              FixPlan.pre_checks, FixPlan.post_checks, FixPlan.risk_level,
+                              HealthIssue.account_id.label("issue_account"),
+                              ChangeRequest.account_id.label("change_account"))
+                .outerjoin(HealthIssue, HealthIssue.id == FixPlan.health_issue_id)
+                .outerjoin(ChangeRequest, ChangeRequest.id == FixPlan.change_request_id)
+                .filter(FixPlan.status.in_(waiting), FixPlan.content_hash.isnot(None)).all()
+            )
+            for row in rows:
+                digest = content_hash(steps=row.steps, rollback_plan=row.rollback_plan, pre_checks=row.pre_checks,
+                                      post_checks=row.post_checks, risk_level=row.risk_level,
+                                      account_id=row.change_account if row.change_account is not None else row.issue_account)
+                if digest != row.content_hash:
+                    session.query(FixPlan).filter(FixPlan.id == row.id, FixPlan.status.in_(waiting)).update(
+                        {"content_hash": digest, "plan_version": (row.plan_version or 1) + 1}, synchronize_session=False)
+            session.commit()
+    except Exception as exc:
+        logger.warning("MVP-2.9.0 plan hash repair skipped: %s", exc)
 
 
 def _backfill_reports_2_7_0(engine) -> None:
