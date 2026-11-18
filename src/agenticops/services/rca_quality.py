@@ -30,8 +30,13 @@ EVIDENCE_PENALTY = 0.6   # multiplier when cited evidence is not grounded
 CRITIC_PENALTY = 0.5     # multiplier when the critic refutes the root cause
 
 
-def run_post_rca_pipeline(issue_id: int, messages: list, started_at: datetime) -> None:
-    """Verify, critique, and gate the RCAResult produced in this run."""
+def run_post_rca_pipeline(issue_id: int, messages: list, started_at: datetime, *, hand_on: bool = True) -> None:
+    """Verify, critique, and gate the RCAResult produced in this run.
+
+    `hand_on` False = the run that produced it was taken over while it worked (services/agent_runs.holds): its
+    result is checked and saved like any other, but a result that passes the gate starts no plan run — the issue
+    belongs to the run that replaced it. The timeline says so (`rca_superseded`). Round-2 review B-I2: without this
+    the late run's hand-on took the issue away from the diagnosis a person had asked for after it."""
     from agenticops.models import RCAResult, get_db_session
     from agenticops.services.pipeline_events import log_event
 
@@ -121,7 +126,10 @@ def run_post_rca_pipeline(issue_id: int, messages: list, started_at: datetime) -
     # ── 3. Confidence gate → auto-SRE or needs_review ────────────────
     gate_pass = (confidence >= settings.rca_min_confidence_for_autofix
                  and critic_verdict != "refuted")
-    if gate_pass:
+    if gate_pass and not hand_on:
+        log_event(issue_id, "rca_superseded", "rca", "completed", detail={"rca_id": rca_id})
+        logger.info("post-RCA: issue #%d — the run was taken over while it worked; no plan run is started from it", issue_id)
+    elif gate_pass:
         try:
             from agenticops.services.pipeline_service import trigger_auto_sre
 

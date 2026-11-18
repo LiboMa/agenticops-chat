@@ -237,11 +237,14 @@ def _past_moment(text: str) -> datetime:
         when = datetime.fromisoformat(text.strip().replace("Z", "+00:00"))
     except ValueError:
         raise HTTPException(status_code=422, detail="`at` must be an ISO 8601 time, e.g. 2026-11-18T02:30:00Z")
-    when = when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+    # ONE moment, in UTC, whatever offset it was written with (the «absent» cut below drops the zone: an offset left
+    # on it made health and «absent» two moments in one answer)
+    when = (when if when.tzinfo else when.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
     now = datetime.now(timezone.utc)
-    if when > now + timedelta(seconds=60):
+    grace = timedelta(seconds=60)             # two clocks and a request in between: the page's «now − 24 h» is older here
+    if when > now + grace:
         raise HTTPException(status_code=422, detail="`at` lies in the future")
-    if when < now - timedelta(hours=REPLAY_HOURS):
+    if when < now - timedelta(hours=REPLAY_HOURS) - grace:
         raise HTTPException(status_code=422, detail=f"`at` is older than the last {REPLAY_HOURS} hours")
     return min(when, now)
 

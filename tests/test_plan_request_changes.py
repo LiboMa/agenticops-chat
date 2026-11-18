@@ -223,3 +223,126 @@ def test_a_closed_issues_plan_says_why_not(client):
 def test_an_approved_plan_does_not_offer_it(client):
     _iid, pid = _plan(status="approved", issue_status="fix_approved")
     assert "request_changes" not in _actions(client, pid)
+
+
+# ── the plan that comes back is never approved without a person (round-2 review, C1) ─────────────────
+#
+# save_fix_plan runs the auto-approval after every save. A reviewer who asked for «the exact command in step 3» got
+# a plan whose every step is an exact command — which is what removes the floor that held the first plan for a
+# person: with the committed defaults an L0 / L1 redo was approved and run with nobody having seen it, while the
+# page had said «the new plan comes back to you for approval».
+
+STEP = [{"action": "restart", "command": "kubectl rollout restart deploy/web -n shop"}]
+
+
+def _redone(prev_status="rejected", rejected_by="user:alice", reason="restart only the web tier", risk="L1"):
+    """An issue whose first plan ended as given (None = it has none), and the L1 draft written after it."""
+    from agenticops.services.plan_content import stamp_content
+    s = get_session()
+    try:
+        issue = HealthIssue(title="t", description="d", severity="high", source="test", status="fix_planned", resource_id="i-1")
+        s.add(issue); s.flush()
+        rca = RCAResult(health_issue_id=issue.id, root_cause="x", confidence=0.9)
+        s.add(rca); s.flush()
+        prev_id = None
+        if prev_status:
+            prev = FixPlan(health_issue_id=issue.id, rca_result_id=rca.id, risk_level="L2", title="p1", summary="s",
+                           status=prev_status, steps=STEP, rejected_by=rejected_by, rejection_reason=reason)
+            s.add(prev); s.flush()
+            prev_id = prev.id
+        plan = FixPlan(health_issue_id=issue.id, rca_result_id=rca.id, risk_level=risk, title="p2", summary="s",
+                       status="draft", steps=STEP)
+        s.add(plan); s.flush()
+        stamp_content(s, plan); s.commit()
+        return issue.id, plan.id, prev_id
+    finally:
+        s.close()
+
+
+def _auto_approve(monkeypatch, pid, policy_engine=False):
+    from agenticops.config import settings
+    from agenticops.services import pipeline_service
+    monkeypatch.setattr(settings, "auto_fix_enabled", True)
+    monkeypatch.setattr(settings, "executor_auto_approve_l0_l1", True)
+    monkeypatch.setattr(settings, "policy_engine_enabled", policy_engine)
+    ran = []
+    monkeypatch.setattr(pipeline_service, "trigger_auto_execute", lambda plan_id, trace_id=None: ran.append(plan_id))
+    pipeline_service.trigger_auto_approve(pid)
+    return ran
+
+
+def _held(iid):
+    return [d["policy_decision"] for (kind, _status, _actor, d) in _events(iid)
+            if kind == "policy_decision" and d["policy_decision"]["rule"] == "reviewer_requested_changes"]
+
+
+def test_an_issues_first_low_risk_plan_is_auto_approved_as_before(client, monkeypatch):
+    iid, pid, _ = _redone(prev_status=None)
+    assert _auto_approve(monkeypatch, pid) == [pid]
+    assert _row(pid)[0] == "approved" and _held(iid) == []
+
+
+@pytest.mark.parametrize("policy_engine", [False, True])
+def test_a_plan_redone_after_a_person_sent_the_last_one_back_waits_for_a_person(client, monkeypatch, policy_engine):
+    iid, pid, prev = _redone()
+    assert _auto_approve(monkeypatch, pid, policy_engine) == []          # nothing runs
+    assert _row(pid)[0] == "draft"                                       # and it is still a person's to approve
+    [decision] = _held(iid)
+    assert decision["action"] == "require_human"
+    assert f"#{prev}" in decision["reasons"][0] and "user:alice" in decision["reasons"][0]
+
+
+def test_a_person_who_said_no_without_a_reason_is_asked_again_too(client, monkeypatch):
+    iid, pid, _ = _redone(reason=None)
+    assert _auto_approve(monkeypatch, pid) == []
+    assert _row(pid)[0] == "draft" and len(_held(iid)) == 1
+
+
+@pytest.mark.parametrize("prev_status,rejected_by,reason", [
+    ("rejected", "agent:sre", "superseded"),                                    # code said no, not a person
+    ("rejected", "policy:blocked-command", "blocked command"),
+    ("rejected", "user:alice", "content changed after approval"),               # withdrawn by code under her key
+    ("failed", None, None),                                                     # it ran and failed: a new situation
+    ("executed", None, None),
+])
+def test_only_a_persons_no_holds_the_next_plan(client, monkeypatch, prev_status, rejected_by, reason):
+    iid, pid, _ = _redone(prev_status=prev_status, rejected_by=rejected_by, reason=reason)
+    assert _auto_approve(monkeypatch, pid) == [pid]
+    assert _row(pid)[0] == "approved" and _held(iid) == []
+
+
+# ── the reason is about the plan the reviewer was shown (round-2 review, C-S2) ────────────────────────
+
+def _hash(pid):
+    s = get_session()
+    try:
+        return s.get(FixPlan, pid).content_hash
+    finally:
+        s.close()
+
+
+def test_a_request_that_names_the_plan_it_was_shown_goes_through(client, monkeypatch):
+    iid, pid = _plan()
+    agent = _Agent(monkeypatch)
+    r = client.post(f"/api/fix-plans/{pid}/request-changes", json={"reason": "no", "content_hash": _hash(pid)})
+    assert r.status_code == 202, r.text
+    assert agent.started.wait(10)
+    agent.finish()
+
+
+def test_a_plan_rewritten_since_the_page_loaded_is_not_sent_back_with_a_reason_about_the_old_one(client, monkeypatch):
+    iid, pid = _plan()
+    shown = _hash(pid)
+    s = get_session()                                            # the draft is rewritten in place: the same row, new content
+    try:
+        from agenticops.services.plan_content import stamp_content
+        plan = s.get(FixPlan, pid)
+        plan.steps = [{"action": "scale", "command": "kubectl scale deploy/web --replicas=6 -n shop"}]
+        stamp_content(s, plan); s.commit()
+    finally:
+        s.close()
+    agent = _Agent(monkeypatch)
+    r = client.post(f"/api/fix-plans/{pid}/request-changes", json={"reason": "step 1 restarts too much", "content_hash": shown})
+    assert r.status_code == 409 and r.json()["code"] == "plan_changed", r.text
+    assert _row(pid)[0] == "pending_approval"                    # not sent back
+    assert agent_runs.get(iid) is None and agent.calls == []     # and nobody was asked for a new plan

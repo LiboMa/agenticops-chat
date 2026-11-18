@@ -199,6 +199,23 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
                 )
                 return
 
+            # Round-2 review C1: a person said no to the plan before this one — the plan written in answer comes
+            # back to a person, whatever its risk label or the policy rule says. («Request changes» promises it on
+            # the page; and a redo that turns every step into an exact command is exactly what lifts the floor
+            # below, so without this an L0 / L1 redo was approved and run with nobody having seen it.)
+            from agenticops.services.plan_content import previous_fix_plan, rejected_by_person
+            before = previous_fix_plan(session, plan)
+            if before is not None and rejected_by_person(before):
+                from agenticops.services.policy_engine import PolicyDecision
+                floor = PolicyDecision(action="require_human", rule_name="reviewer_requested_changes", reasons=[
+                    f"the plan before this one (#{before.id}) was sent back by {before.rejected_by}"])
+                if decision is not None:
+                    floor.shadow_blast_radius = decision.shadow_blast_radius
+                _log_policy_decision(plan, floor, trace_id)
+                logger.info("Auto-approve: FixPlan #%d (%s) follows a plan a person sent back (#%d) — left for a human",
+                            fix_plan_id, plan.risk_level, before.id)
+                return
+
             # 2.7.0 E2E observation 3: an approval no person sees never covers a step the code cannot classify —
             # whatever the plan's own risk label or the policy rule says
             from agenticops.services.change_steps import plan_steps, rollback_steps, unclassified_commands

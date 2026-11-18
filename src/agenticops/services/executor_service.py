@@ -8,6 +8,7 @@ import logging
 import threading
 import time
 from datetime import datetime, timezone
+from typing import Optional
 
 from agenticops.config import settings
 
@@ -63,7 +64,7 @@ class ExecutorService:
         with self._lock:
             return len(self._active_executions)
 
-    def cancel_execution(self, execution_id: int) -> bool:
+    def cancel_execution(self, execution_id: int, by: Optional[str] = None) -> bool:
         """Request cancellation of a running execution.
 
         The ticket is closed as 'aborted'; the plan (if executing) → failed; a fix's issue goes back to
@@ -73,7 +74,7 @@ class ExecutorService:
         until then the thread went on, and a write command no plan-context rule refuses still ran). A command
         already running finishes. False when the ticket is missing or no longer running (see _close_ticket).
         """
-        ok = self._close_ticket(execution_id, "aborted", "Cancelled by operator")
+        ok = self._close_ticket(execution_id, "aborted", f"Cancelled by {by or 'operator'}", by=by)
         if ok:
             logger.info("Execution #%d marked as aborted (cancellation requested)", execution_id)
             with self._lock:
@@ -202,7 +203,8 @@ class ExecutorService:
             # caught, the iteration cap) must not leave the ticket running and the plan/change executing.
             # A no-op when save_execution_result already closed the ticket.
             try:
-                self._fail_execution(execution_id, f"Executor ended without recording a result: {str(result)[:300]}")
+                from agenticops.services.run_tickets import unrecorded_reason   # one sentence with the executor's own reconcile
+                self._fail_execution(execution_id, unrecorded_reason(execution_id, str(result)))
             except Exception:
                 logger.warning("post-run reconcile failed for Execution #%d", execution_id, exc_info=True)
         finally:
@@ -224,12 +226,12 @@ class ExecutorService:
             with self._lock:
                 self._active_executions.pop(execution_id, None)
 
-    def _close_ticket(self, execution_id: int, ticket_status: str, message: str) -> bool:
+    def _close_ticket(self, execution_id: int, ticket_status: str, message: str, by: Optional[str] = None) -> bool:
         """Close a still-running ticket as ``ticket_status`` — services/run_tickets.close_ticket, the one way a run
         record is closed by anything but its own result (MVP-2.9.0 N8: it also gives a fix's issue back and writes
         the timeline event). False, and nothing written, when the ticket is missing or no longer running."""
         from agenticops.services.run_tickets import close_ticket
-        return close_ticket(execution_id, ticket_status, message)
+        return close_ticket(execution_id, ticket_status, message, by=by)
 
     def _fail_execution(self, execution_id: int, message: str) -> bool:
         """Close a still-running ticket as failed; its executing plan → failed; a change plan's request → failed.

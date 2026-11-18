@@ -115,6 +115,8 @@ def test_before_a_stop_everything_runs():
     ("run_aws_cli_dev", {"command": "  " + ROLLBACK.replace(" --", "   --") + " "}),   # … whatever the spacing, whichever CLI tool
     ("run_aws_cli", {"command": CHECK}),                                      # a read: the agent may look
     ("run_kubectl", {"command": "kubectl get pods -n web"}),
+    ("run_kubectl", {"command": "get pods -n web"}),                          # the form the tool itself documents
+    ("run_kubectl", {"command": "rollout status deployment/web -n shop"}),
     ("save_execution_result", {"fix_plan_id": 1, "status": "rolled_back"}),   # … and must be able to record
     ("mark_fix_failed", {"execution_id": 3}),
     ("get_approved_fix_plan", {"fix_plan_id": 1}),
@@ -130,6 +132,7 @@ def test_after_a_stop_rollback_reads_and_recording_still_run(tool_name, tool_inp
     ("run_aws_cli", {"command": f"{CHECK} && {STEP_2}"}),                     # a read with a write behind it
     ("run_on_host", {"instance_id": "i-1", "command": "systemctl restart nginx"}),
     ("run_kubectl", {"command": "kubectl delete pod web-1"}),
+    ("run_kubectl", {"command": "delete pod web-1"}),                         # … written the tool's way
     ("activate_skill", {"name": "aws-compute"}),                              # no command to judge: not on the list
     ("assume_role", {"role_arn": "arn:aws:iam::1:role/x"}),
     ("run_skill_script", {"skill_name": "s", "script": "fix.sh"}),
@@ -137,6 +140,98 @@ def test_after_a_stop_rollback_reads_and_recording_still_run(tool_name, tool_inp
 def test_after_a_stop_nothing_else_runs(tool_name, tool_input):
     refusal = guard_decision(STOPPED, tool_name, tool_input)
     assert refusal and "user:alice" in refusal and "roll" in refusal.lower() and "save_execution_result" in refusal
+
+
+# Round-2 review A-I2. run_kubectl takes the subcommand WITHOUT the word («rollout undo deployment/web»); a plan
+# writes «kubectl rollout undo deployment/web». The guard compared the raw argument: after a stop a kubectl read
+# was «unknown» and refused, and the rollback could pass the guard only in the form the tool cannot run.
+
+K_ROLLBACK = "kubectl rollout undo deployment/web -n shop"
+K_STOPPED = {"status": "running", "fix_plan_id": 1, "stopped_by": "user:alice", "rollback": frozenset({K_ROLLBACK})}
+
+
+@pytest.mark.parametrize("command", ["rollout undo deployment/web -n shop", K_ROLLBACK, "  rollout   undo deployment/web -n shop "])
+def test_after_a_stop_a_kubectl_rollback_runs_in_the_form_the_tool_takes_and_as_the_plan_writes_it(command):
+    assert guard_decision(K_STOPPED, "run_kubectl", {"cluster_name": "c", "command": command}) is None
+
+
+@pytest.mark.parametrize("command", ["rollout undo deployment/other -n shop", "rollout undo deployment/web", "scale deployment/web --replicas=0 -n shop"])
+def test_after_a_stop_another_kubectl_write_does_not(command):
+    assert guard_decision(K_STOPPED, "run_kubectl", {"cluster_name": "c", "command": command})
+
+
+def test_a_rollback_written_the_tools_way_matches_too():
+    stopped = {**K_STOPPED, "rollback": frozenset({"rollout undo deployment/web -n shop"})}   # a plan may write it without the word
+    assert guard_decision(stopped, "run_kubectl", {"command": "rollout undo deployment/web -n shop"}) is None
+
+
+def test_run_kubectl_takes_its_command_with_or_without_the_word(db):
+    """«Exactly as written» is what the refusal asks for, so the plan's own text must run: with the word the tool
+    used to build `kubectl -n <ns> kubectl rollout undo …`."""
+    from agenticops.skills import execution
+    ran = []
+    with patch.object(execution, "_execute_kubectl", side_effect=lambda cluster, command, *a, **k: ran.append(command) or "ok"):
+        assert execution.run_kubectl(cluster_name="c", command="kubectl get pods -n web") == "ok"
+        assert execution.run_kubectl(cluster_name="c", command="get pods -n web") == "ok"
+        assert "Empty" in execution.run_kubectl(cluster_name="c", command="kubectl")
+    assert ran == ["get pods -n web", "get pods -n web"]
+
+
+# Round-2 review A-M2. A rollback step of two lines is two commands; the same words on one line are another
+# command. The comparison collapsed every whitespace, a line break included.
+
+TWO_LINES = "systemctl stop app\nsystemctl start app-old"
+
+
+def test_a_line_break_in_a_rollback_step_is_not_a_space():
+    from agenticops.services.change_steps import rollback_commands
+    rollback = rollback_commands({"steps": [{"command": TWO_LINES}]})
+    stopped = {"status": "running", "fix_plan_id": 1, "stopped_by": "user:alice", "rollback": rollback}
+    assert guard_decision(stopped, "run_on_host", {"instance_id": "i-1", "command": "systemctl stop app\n   systemctl  start app-old\n"}) is None
+    assert guard_decision(stopped, "run_on_host", {"instance_id": "i-1", "command": "systemctl stop app systemctl start app-old"})
+    one_line = {**stopped, "rollback": rollback_commands({"steps": [{"command": "systemctl restart app"}]})}
+    assert guard_decision(one_line, "run_on_host", {"instance_id": "i-1", "command": "systemctl restart\napp"})
+    assert guard_decision(one_line, "run_on_host", {"instance_id": "i-1", "command": "systemctl restart \\\n  app"}) is None   # a continued line is one line
+
+
+# Round-2 review A-S1. A stop that arrives before the run changed anything: there is nothing to roll back, and a
+# rollback run anyway is itself a change (`kubectl rollout undo` goes back one revision whoever made the last).
+
+def test_a_stop_before_anything_was_applied_refuses_the_rollback_too():
+    refusal = guard_decision(STOPPED, "run_aws_cli", {"command": ROLLBACK}, applied=0)
+    assert refusal and "nothing to roll back" in refusal and "user:alice" in refusal and "'aborted'" in refusal
+    assert guard_decision(STOPPED, "run_aws_cli", {"command": STEP_2}, applied=0) == refusal      # the next step: the same answer
+    assert guard_decision(STOPPED, "run_aws_cli", {"command": CHECK}, applied=0) is None           # it may still look
+    assert guard_decision(STOPPED, "save_execution_result", {"status": "aborted"}, applied=0) is None
+    assert guard_decision(STOPPED, "run_aws_cli", {"command": ROLLBACK}, applied=1) is None        # something was applied
+    assert guard_decision(STOPPED, "run_aws_cli", {"command": ROLLBACK}) is None                   # not known: as before
+
+
+def test_a_run_stopped_while_it_was_still_looking_can_only_look_and_record(db):
+    issue_id, plan_id, ticket = _run(db)
+    ran = []
+
+    @tool
+    def run_aws_cli(command: str) -> str:
+        """Run a command."""
+        ran.append(command)
+        if command == CHECK and len(ran) == 1:
+            assert request_stop(ticket, by="user:alice", note="")
+        return "ok"
+
+    cmd = lambda *cs: [("run_aws_cli", {"command": c}) for c in cs]
+    model = Scripted([cmd(CHECK),                     # the pre-check: the stop lands here
+                      cmd(STEP_1),                    # the first step: refused
+                      cmd(ROLLBACK),                  # … so is the rollback — this run applied nothing
+                      cmd(CHECK),                     # a look is still allowed
+                      "stopped before anything changed"])
+    agent = Agent(model=model, tools=[run_aws_cli], hooks=[RunGuard(ticket)], callback_handler=None,
+                  tool_executor=SequentialToolExecutor())
+    agent("go")
+    assert ran == [CHECK, CHECK]
+    refusals = [b["toolResult"]["content"][0]["text"] for m in agent.messages for b in m["content"] if "toolResult" in b
+                and "nothing to roll back" in b["toolResult"]["content"][0]["text"]]
+    assert len(refusals) == 2
 
 
 def test_a_closed_record_still_refuses_everything():
@@ -200,6 +295,53 @@ def test_a_stopped_run_that_rolled_back_gives_the_issue_back_without_disputing_i
     assert db.query(PipelineEvent).filter_by(health_issue_id=issue_id, event_type="rca_disputed").count() == 0
 
 
+# Round-2 review A-I4. The stop landed after the last write: everything the executor still does is a read or the
+# save, so nothing is refused, the model reports «succeeded», the checks pass — and the issue resolved itself after a
+# person had held «stop and roll back». A stopped run is never «passed»: a person accepts it or does not.
+
+def _run_with_a_check(db):
+    issue_id, plan_id, ticket = _run(db)
+    plan = db.get(FixPlan, plan_id)
+    plan.post_checks = [{"check": "port 22 is closed"}]
+    stamp_approval(db, plan); db.commit()
+    return issue_id, plan_id, ticket
+
+
+def _save_succeeded(plan_id, ticket):
+    from agenticops.tools.metadata_tools import save_execution_result
+    with _in_run(plan_id, ticket):
+        return save_execution_result(
+            fix_plan_id=plan_id, status="succeeded",
+            step_results=json.dumps([{"step": 1, "status": "success"}, {"step": 2, "status": "success"}]),
+            post_check_results=json.dumps([{"check_id": "pc-1", "status": "passed", "output": "closed"}]))
+
+
+def test_a_run_nobody_stopped_passes_and_resolves_as_before(db, monkeypatch):
+    from agenticops.config import settings
+    monkeypatch.setattr(settings, "executor_auto_resolve", True)
+    issue_id, plan_id, ticket = _run_with_a_check(db)
+    _save_succeeded(plan_id, ticket)
+    db.expire_all()
+    assert db.get(FixExecution, ticket).verification_status == "passed"
+    assert db.get(HealthIssue, issue_id).status == "resolved"
+
+
+def test_a_stopped_run_whose_steps_had_all_run_waits_for_a_person_instead_of_resolving(db, monkeypatch):
+    from agenticops.config import settings
+    monkeypatch.setattr(settings, "executor_auto_resolve", True)
+    issue_id, plan_id, ticket = _run_with_a_check(db)
+    request_stop(ticket, by="user:alice", note="this is the wrong security group")
+    out = _save_succeeded(plan_id, ticket)
+    db.expire_all()
+    row = db.get(FixExecution, ticket)
+    assert row.status == "succeeded"                                      # what happened is recorded as it happened
+    assert row.verification_status == "pending_acceptance"                # … but a person decides whether it stands
+    assert "stopped by user:alice" in row.verification_reason and "nothing was rolled back" in row.verification_reason
+    assert db.get(HealthIssue, issue_id).status == "fix_executed"         # not resolved, and in the acceptance queue
+    assert db.get(FixPlan, plan_id).status == "executed"
+    assert "pending" in out.lower()
+
+
 def test_a_run_that_failed_by_itself_still_disputes_its_diagnosis(db):
     from agenticops.tools.metadata_tools import save_execution_result
     issue_id, plan_id, ticket = _run(db)
@@ -207,6 +349,23 @@ def test_a_run_that_failed_by_itself_still_disputes_its_diagnosis(db):
         save_execution_result(fix_plan_id=plan_id, status="failed", error_message="step 1 failed")
     db.expire_all()
     assert db.query(PipelineEvent).filter_by(health_issue_id=issue_id, event_type="rca_disputed").count() == 1
+
+
+def test_a_stopped_queued_run_that_ends_without_recording_says_so_too(db):
+    """Round-2 review A-M4: the same sentence whoever closes the record — the queue's worker closed it with the
+    generic one, so a stopped change said nothing about the stop in its stored reason."""
+    from agenticops.services.run_tickets import close_unrecorded
+    issue_id, plan_id, ticket = _run(db)
+    request_stop(ticket, by="user:alice", note="")
+    assert close_unrecorded(ticket, "I was stopped.") is True
+    db.expire_all()
+    row = db.get(FixExecution, ticket)
+    assert row.status == "failed" and "Stopped by user:alice" in row.error_message and "no rollback is on record" in row.error_message
+    assert close_unrecorded(ticket, "again") is False                     # already closed: nothing written
+    other = _run(db)[2]
+    assert close_unrecorded(other, "model error") is True
+    db.expire_all()
+    assert db.get(FixExecution, other).error_message == "Executor ended without recording a result: model error"
 
 
 def test_a_stopped_run_that_ends_without_recording_says_no_rollback_is_on_record(db):
@@ -303,15 +462,34 @@ def test_the_run_as_the_api_shows_it_carries_the_stop(db, client):
     # … and a command the tools refuse outright cannot run, however it is written
     ({"steps": [{"command": "kubectl delete namespace kube-system"}, {"command": ROLLBACK}]}, {"steps": 2, "commands": 2, "as_written": 1}),
     # a placeholder inside a quoted argument is still a placeholder (a shell would not split the line, and the
-    # command would run — with «<OWNER_APPROVED_IP>» as its value); a comparison in a --query is not one
+    # command would run — with «<OWNER_APPROVED_IP>» as its value)
     ({"steps": [{"command": "aws ec2 authorize-security-group-ingress --group-id sg-1 --ip-permissions 'IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=<OWNER_APPROVED_IP>/32}]'"},
-                {"command": "aws ec2 describe-volumes --query 'Volumes[?Size < `100` && Iops > `3000`].VolumeId' --output text"},
-                {"command": 'aws ec2 create-tags --resources sg-1 --tags "Key=owner,Value=<team-name>"'}]},
+                {"command": 'aws ec2 create-tags --resources sg-1 --tags "Key=owner,Value=<team-name>"'},
+                {"command": ROLLBACK}]},
      {"steps": 3, "commands": 3, "as_written": 1}),
+    # Round-2 review (A-M10, C-I1). The AWS CLI tools refuse | ; && $( ` > < wherever they stand — inside a quoted
+    # --query too — so such a line cannot run through them as it is written; and a line whose value the database
+    # scrub removed names nothing to run.
+    ({"steps": [{"command": "aws ec2 describe-volumes --query 'Volumes[?Size < `100` && Iops > `3000`].VolumeId' --output text"},
+                {"command": "aws ec2 describe-instances --query 'Reservations[].Instances[] | [0].State.Name'"},
+                {"command": "aws iam update-access-key --user-name app --access-key-id [REDACTED-SECRET] --status Active"},
+                {"command": ROLLBACK}]},
+     {"steps": 4, "commands": 4, "as_written": 1}),
+    # … which is the AWS tools' own rule: the same characters inside quotes are data to a host shell
+    ({"steps": [{"command": "grep -c 'a|b' /var/log/app.log"}]}, {"steps": 1, "commands": 1, "as_written": 1}),
 ])
 def test_how_much_of_a_rollback_can_run_exactly_as_written(rollback, want):
     from agenticops.services.change_steps import rollback_outlook
     assert rollback_outlook(rollback) == want
+
+
+def test_the_aws_tools_do_refuse_each_character_the_outlook_counts_as_not_runnable():
+    from agenticops.services.change_steps import AWS_TOOLS_REFUSE
+    from agenticops.tools.aws_cli_tool import run_aws_cli, run_aws_cli_readonly
+    for token in AWS_TOOLS_REFUSE:
+        command = f"aws ec2 describe-instances --query 'a {token} b'"
+        assert "not allowed" in run_aws_cli_readonly(command=command), token
+        assert "not allowed" in run_aws_cli(command=command), token
 
 
 def test_the_guard_passes_the_plans_own_rollback_text_and_the_outlook_says_how_much_of_it_a_tool_can_run(db):
@@ -334,3 +512,31 @@ def test_the_plan_as_the_api_shows_it_says_what_a_stop_could_roll_back(db, clien
     assert body["rollback_outlook"] == {"steps": 1, "commands": 1, "as_written": 1}
     refused = client.put(f"/api/fix-plans/{plan_id}", json={"content_hash": body["content_hash"], "rollback_outlook": {"as_written": 9}})
     assert refused.status_code in (409, 422)                          # computed on the way out: a client cannot write it
+
+
+# ── round-2 review A-M8: the stop and its audit row are one write; the note reads as written ──────────
+
+def test_a_stop_whose_audit_row_cannot_be_written_did_not_happen(db):
+    """It was three transactions: the stop took effect, the audit write failed, the answer was 500 — and the retry
+    said «already stopping». Now the stop and its audit row are written together or not at all."""
+    from fastapi.testclient import TestClient
+    from agenticops.audit.service import AuditService
+    from agenticops.web.app import app
+    issue_id, plan_id, ticket = _run(db)
+    quiet = TestClient(app, raise_server_exceptions=False)
+    with patch.object(AuditService, "log", side_effect=RuntimeError("audit store is down")):
+        assert quiet.post(f"/api/fix-executions/{ticket}/stop", json={}).status_code == 500
+    db.expire_all()
+    assert db.get(FixExecution, ticket).stop_requested_at is None            # nothing was written
+    assert quiet.post(f"/api/fix-executions/{ticket}/stop", json={}).status_code == 200   # … so it can be asked again
+    db.expire_all()
+    assert db.get(FixExecution, ticket).stop_requested_at is not None
+
+
+@pytest.mark.parametrize("reason", ["wrong\x00window", "look ‮gnorw"])
+def test_a_stop_note_with_control_characters_is_refused(db, client, reason):
+    issue_id, plan_id, ticket = _run(db)
+    r = client.post(f"/api/fix-executions/{ticket}/stop", json={"reason": reason})
+    assert r.status_code == 422
+    db.expire_all()
+    assert db.get(FixExecution, ticket).stop_requested_at is None

@@ -115,7 +115,8 @@ def test_the_first_plan_of_an_issue_has_nothing_before_it(client):
     pid = _add(s, issue, rca, steps=STEPS_1).id
     s.commit(); s.close()
     assert client.get(f"/api/fix-plans/{pid}/previous-diff").json() == {
-        "plan_id": pid, "previous": None, "same_content": None, "steps": None, "rollback": None}
+        "plan_id": pid, "previous": None, "same_content": None, "steps": None, "rollback": None,
+        "rollback_same": None, "checks": None, "risk_same": None}
 
 
 def test_a_redone_plan_says_what_it_changed_and_why_the_last_one_was_sent_back(client):
@@ -197,3 +198,43 @@ def test_a_change_plan_has_no_plan_before_it(client):
 
 def test_an_unknown_plan_is_404(client):
     assert client.get("/api/fix-plans/99999/previous-diff").status_code == 404
+
+
+# ── round-2 review C-I2: what the page must not call «unchanged» ─────────────────────────────────────────────────
+#
+# The section compared command lines only. A rollback written as a sentence — the usual shape: 99 of 166 plans on
+# the copy database — has no line, so a rewritten one read «no command of the steps or the rollback changed;
+# something else did (wording, checks or risk level)»; and the checks, which are in the hash, were never compared.
+
+def _pair(client, old_kw, new_kw):
+    s = get_session()
+    issue, rca = _issue(s)
+    _add(s, issue, rca, steps=STEPS_1, status="rejected", rejected_by="user:alice", rejection_reason="no", **old_kw)
+    new_id = _add(s, issue, rca, steps=[dict(x) for x in STEPS_1], at=T0 + timedelta(minutes=9), **new_kw).id
+    s.commit(); s.close()
+    return client.get(f"/api/fix-plans/{new_id}/previous-diff").json()
+
+
+def test_a_rollback_rewritten_in_prose_is_said_to_have_changed(client):
+    d = _pair(client, {"rollback": {"description": "Put the previous task definition back"}},
+              {"rollback": {"description": "Delete the service and recreate it from the template"}})
+    assert d["same_content"] is False
+    assert d["rollback"] == {"added": [], "removed": [], "modified": [], "unchanged": 0}     # no line to compare …
+    assert d["rollback_same"] is False                                                        # … and it is not the same
+    assert d["checks"]["same"] is True and d["risk_same"] is True
+
+
+def test_a_rollback_that_is_the_same_prose_is_said_to_be_the_same(client):
+    d = _pair(client, {"rollback": {"description": "Put the previous task definition back"}, "risk": "L2"},
+              {"rollback": '{"description": "Put the previous task definition back"}', "risk": "L1"})   # a legacy JSON string
+    assert d["rollback_same"] is True and d["risk_same"] is False
+
+
+def test_the_checks_are_compared(client):
+    d = _pair(client, {"post_checks": [{"check": "the pods are ready"}, {"check": "the error rate is back"}], "pre_checks": [{"check": "a"}]},
+              {"post_checks": [{"check": "the pods are ready"}], "pre_checks": [{"check": "a"}]})
+    assert d["checks"] == {"same": False, "pre": [1, 1], "post": [2, 1]}
+    same = _pair(client, {"post_checks": [{"check": "the pods are ready"}]}, {"post_checks": [{"check": "the pods are ready"}]})
+    assert same["checks"] == {"same": True, "pre": [0, 0], "post": [1, 1]}
+    reworded = _pair(client, {"post_checks": [{"check": "the pods are ready"}]}, {"post_checks": [{"check": "one pod is ready"}]})
+    assert reworded["checks"] == {"same": False, "pre": [0, 0], "post": [1, 1]}

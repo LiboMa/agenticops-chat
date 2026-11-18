@@ -60,9 +60,11 @@ def open_ticket(fix_plan_id: int, *, executed_by: str) -> tuple[Optional[int], s
         return ticket.id, ""
 
 
-def close_ticket(execution_id: int, ticket_status: str, message: str) -> bool:
+def close_ticket(execution_id: int, ticket_status: str, message: str, *, by: Optional[str] = None) -> bool:
     """Close a still-running record as `ticket_status`; its executing plan → failed; a fix's issue goes back to
-    root_cause_identified; a change plan's request gets `ticket_status` through the change mapper.
+    root_cause_identified; a change plan's request gets `ticket_status` through the change mapper. `by` is the
+    person who closed it (a cancel): the issue's move and the run's end on the timeline are theirs; without one
+    they are the executor's (a timeout, a reconcile).
 
     The record is the arbiter between the writers that close it — this one and save_execution_result — so the
     first write is a compare-and-set (`UPDATE … WHERE id=? AND status='running'`): only its winner goes on to the
@@ -75,7 +77,7 @@ def close_ticket(execution_id: int, ticket_status: str, message: str) -> bool:
     from agenticops.security.redaction import redact_obj
     from agenticops.services.issue_state import IssueNotFound, transition_issue
 
-    issue_id = None
+    issue_id, actor = None, (by or "agent:executor")
     with get_db_session() as session:
         # Core UPDATE: past the ORM's before_flush secret scrubber, so the message is scrubbed here.
         closed = session.execute(
@@ -93,7 +95,7 @@ def close_ticket(execution_id: int, ticket_status: str, message: str) -> bool:
         if plan is not None and not is_change and plan.health_issue_id:
             issue_id = plan.health_issue_id
             try:
-                transition_issue(session, issue_id, "root_cause_identified", actor="agent:executor",
+                transition_issue(session, issue_id, "root_cause_identified", actor=actor,
                                  reason=f"Execution #{execution_id} {ticket_status}: {message}"[:500],
                                  expected="fix_executing")
             except (IssueNotFound, InvalidStatusTransition):
@@ -103,7 +105,7 @@ def close_ticket(execution_id: int, ticket_status: str, message: str) -> bool:
         from agenticops.services.pipeline_events import log_event
         log_event(issue_id, "execution_completed", "execution", "failed",
                   detail={"plan_id": plan_id, "execution_id": execution_id, "ticket": ticket_status,
-                          "reason": (message or "")[:300]}, actor="agent:executor")
+                          "reason": (message or "")[:300]}, actor=actor)
     # Change plan: feed the terminal to the change mapper after commit (a no-op unless its request is
     # executing). Best-effort: a post-commit side-effect must never crash the handler that closes the ticket.
     if is_change:
@@ -115,16 +117,35 @@ def close_ticket(execution_id: int, ticket_status: str, message: str) -> bool:
     return True
 
 
-def request_stop(execution_id: int, *, by: str, note: str = "") -> bool:
+def unrecorded_reason(execution_id: int, outcome: str = "") -> str:
+    """Why a run that ended without recording a result is closed — one sentence whoever closes it (the executor's
+    own `finally`, the queue's worker): what the agent last said, and — when a person had stopped the run — that
+    no rollback is on record."""
+    state = ticket_state(execution_id) or {}
+    if state.get("stopped_by"):
+        return (f"Stopped by {state['stopped_by']}; the executor ended without recording a result — "
+                f"no rollback is on record. {(outcome or '')[:200]}")
+    return f"Executor ended without recording a result: {(outcome or '')[:300]}"
+
+
+def close_unrecorded(execution_id: int, outcome: str = "") -> bool:
+    """Close a run that ended without recording a result, as failed (unrecorded_reason). False, and nothing
+    written, when the record is already closed."""
+    return close_ticket(execution_id, "failed", unrecorded_reason(execution_id, outcome))
+
+
+def request_stop(execution_id: int, *, by: str, note: str = "", session=None) -> bool:
     """A person asks for a run in progress to stop (MVP-2.9.0 N9). The record is NOT closed: a closed record takes
     no result, and the agent must still be able to roll back and record what it did. From the next tool call on,
     agents/run_guard lets through only reads, the recording tools and the plan's own rollback commands.
-    A compare-and-set: False when the record is missing, not running, or already has a stop request."""
+    A compare-and-set: False when the record is missing, not running, or already has a stop request.
+    With `session` the write joins the caller's transaction (the route writes the stop and its audit row together)."""
     from sqlalchemy import update
     from agenticops.models import FixExecution, get_db_session
     from agenticops.security.redaction import redact_obj
-    with get_db_session() as session:
-        done = session.execute(
+
+    def write(s) -> bool:
+        done = s.execute(
             update(FixExecution)
             .where(FixExecution.id == execution_id, FixExecution.status == "running",
                    FixExecution.stop_requested_at.is_(None))
@@ -132,6 +153,54 @@ def request_stop(execution_id: int, *, by: str, note: str = "") -> bool:
                     stop_note=redact_obj((note or "")[:2000]) or None)
         )
         return done.rowcount == 1
+    if session is not None:
+        return write(session)
+    with get_db_session() as own:
+        return write(own)
+
+
+ORPHAN_MARGIN_SECONDS = 120
+ORPHANED = "The process that ran it ended before a result was recorded (a restart or a crash)"
+
+
+def close_orphans() -> tuple[list[int], list]:
+    """Runs a process that is gone left `running` — called once when the service starts (round-2 review A-I3).
+
+    The timer that times a run out and the reconcile that closes one that recorded nothing both live in the process
+    that runs it; after a restart nothing closed the record, so its issue stayed «executing» on nobody's list and
+    neither a new run nor a new plan could start. Since N8 every fix run has such a record.
+
+    A record older than executor_total_timeout plus a margin is closed as failed now: a run that is still alive in
+    another process (the CLI) has been closed by that process's own timer by then. A younger one gets a timer for
+    the moment it reaches that age — the same compare-and-set, so a run that ends by itself first is left as it
+    ended. With no time limit configured (0) an old record proves nothing, and nothing is closed.
+    → (the ids closed now, the timers started)"""
+    import threading
+    from agenticops.config import settings
+    from agenticops.models import FixExecution, get_db_session
+    limit = settings.executor_total_timeout or 0
+    if limit <= 0:
+        return [], []
+    now = datetime.now(timezone.utc)
+    with get_db_session() as session:
+        running = session.query(FixExecution.id, FixExecution.started_at).filter(FixExecution.status == "running").all()
+    closed, timers = [], []
+    for execution_id, started in running:
+        if started is None:
+            age = float(limit + ORPHAN_MARGIN_SECONDS)
+        else:
+            started = started if started.tzinfo else started.replace(tzinfo=timezone.utc)   # SQLite: naive UTC
+            age = (now - started).total_seconds()
+        left = limit + ORPHAN_MARGIN_SECONDS - age
+        if left <= 0:
+            if close_ticket(execution_id, "failed", ORPHANED):
+                closed.append(execution_id)
+            continue
+        timer = threading.Timer(left, close_ticket, args=(execution_id, "failed", ORPHANED))
+        timer.daemon = True
+        timer.start()
+        timers.append(timer)
+    return closed, timers
 
 
 def ticket_state(execution_id: int) -> Optional[dict]:

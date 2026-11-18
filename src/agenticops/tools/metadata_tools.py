@@ -1644,6 +1644,14 @@ def save_execution_result(
                           .filter(FixExecution.id == rc.execution_id, FixExecution.stop_requested_at.isnot(None)).scalar())
         if stopped_by and status != "succeeded":
             why = f"stopped by {stopped_by}: {why}"
+        elif stopped_by and verdict == PASSED:
+            # The stop landed after the last change: every call left was a read or this save, so nothing was
+            # refused and nothing was rolled back. What happened is recorded as it happened (succeeded) — but a run
+            # a person asked to stop is never «passed» by the code: the issue must not resolve itself after that.
+            # A person accepts the result or does not (round-2 review A-I4).
+            verdict = PENDING
+            why = (f"stopped by {stopped_by} after its steps had run; nothing was rolled back — the checks passed, "
+                   f"a person decides whether the result stands")
 
         now = datetime.now(timezone.utc)
         # The run's duration is measured (E2E obs. 5: both live runs reported 45000): from when executor_agent
@@ -1703,7 +1711,10 @@ def save_execution_result(
             session.flush()  # its id names the result (and a dispute) below
 
         # Update FixPlan status through the state machine (approved → executing → terminal).
-        # aborted: an approved plan stays approved (retry allowed, as today); an executing plan → failed.
+        # aborted: an executing plan → failed. Since MVP-2.9.0 N8 every run finds its plan `executing` (the run's
+        # record is opened first — services/run_tickets.open_ticket), so an aborted run ends its plan on every
+        # path: the issue goes back to root_cause_identified for a new plan. (Until N8 a run started by an
+        # approval or from a chat found the plan still `approved`, and an abort left it there for a retry.)
         terminal = {"succeeded": "executed", "failed": "failed", "rolled_back": "failed"}.get(status)
         ran = bool(terminal) or plan.status == "executing"
         if terminal:
@@ -1924,9 +1935,9 @@ def log_rca_disputed(health_issue_id: int, rca_id: int, execution_id: int, reaso
 def mark_fix_failed(health_issue_id: Optional[int], execution_id: int, reason: str = "") -> str:
     """Record that a fix execution failed, and dispute the RCA it was based on.
 
-    A run that ended its plan (failed, or aborted mid-run) sends the HealthIssue back to root_cause_identified,
-    where a new fix plan can be made. A run aborted before it started leaves the plan approved and the issue
-    where it is, so the same plan can be retried.
+    A run that ended its plan (failed, or aborted) sends the HealthIssue back to root_cause_identified, where a
+    new fix plan can be made. (Since MVP-2.9.0 N8 every run opens its record first, so its plan is `executing`
+    by the time anything can abort it: there is no «aborted before it started, retry the same plan» any more.)
 
     Args:
         health_issue_id: The HealthIssue ID.

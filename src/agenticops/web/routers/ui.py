@@ -215,25 +215,33 @@ def api_ui_activity(account_id: Optional[int] = Query(None, ge=1), actor: Actor 
 def api_ui_activity_steps(item: str = Query(..., pattern=r"^[IC][1-9]\d*$"), agent: str = Query(..., pattern="^(rca|sre|executor)$"),
                           execution: Optional[int] = Query(None, ge=1), since: Optional[datetime] = Query(None),
                           before: Optional[datetime] = Query(None), after: int = Query(0, ge=0),
-                          limit: int = Query(200, ge=1, le=200), _user=Depends(signed_in_user)) -> dict:
+                          limit: int = Query(200, ge=1, le=200), actor: Actor = Depends(current_actor),
+                          _user=Depends(signed_in_user)) -> dict:
     """One agent run's steps as the code recorded them while it worked (MVP-2.9.0 N10; agents/step_recorder,
     services/agent_steps): each tool call with its start, its end and how it ended, and what the model said in
     between. Which run: `execution` (a run record), else the newest run of `agent` on `item` that began at or after
     `since` (a lane in flight) or before `before` (the run that left a result); `after` = the last step id the page
-    has. Any signed-in user — what an agent did on an item is as readable as the item. Plain def: DB work."""
+    has. Any signed-in user reads which steps there were; a read-only account is not shown a command line or the
+    start of a result (`withheld`) — the display redaction does not know every shape of a secret. Plain def: DB work."""
     from agenticops.services.agent_steps import run_steps
-    return run_steps(item, agent, execution_id=execution, since=since, before=before, after=after, limit=limit)
+    return run_steps(item, agent, execution_id=execution, since=since, before=before, after=after, limit=limit,
+                     withhold=actor.read_only)
 
 
 class ActivityNote(BaseModel):
     lane: str = Field(..., pattern=r"^([IC][1-9]\d*:[a-z_]+|[A-Z]+\d+)$", max_length=64)
     text: str = Field(..., min_length=1, max_length=200)
+    # the run the note was written for (the key the step list carries); without it, the run in flight on the lane
+    run: Optional[str] = Field(None, pattern=r"^[0-9a-f]{32}$")
 
     @field_validator("text")
     @classmethod
     def _not_blank(cls, v: str) -> str:
+        from agenticops.services.issue_notes import reads_as_written
         if not v.strip():
             raise ValueError("the note is empty")
+        if not reads_as_written(v):
+            raise ValueError("the note may not contain control characters")
         return v
 
 
@@ -248,9 +256,10 @@ def api_ui_activity_note(data: ActivityNote, actor: Actor = Depends(current_acto
     the session actor — never the body) and handed to the agent before its next model call, as information from
     the person watching, not as a new task. Only a diagnosis, a plan or a change review in flight in THIS process;
     an execution follows the plan that was approved and can only be stopped. 403 a read-only account ·
-    409 `not_steerable` (not that kind of lane) · 409 `not_running` (nothing in flight there, or it just ended).
-    Plain def: DB work."""
-    from agenticops.agents.step_recorder import live_recorder
+    409 `not_steerable` (not that kind of lane) · 409 `not_running` (nothing in flight there, it just ended, or
+    the run the note names is not the one in flight any more) · 503 `not_stored` (the note could not be recorded:
+    the run goes on, send it again). Plain def: DB work."""
+    from agenticops.agents.step_recorder import NoteNotStored, live_recorder
     from agenticops.auth import authz
 
     if actor.read_only:
@@ -264,7 +273,13 @@ def api_ui_activity_note(data: ActivityNote, actor: Actor = Depends(current_acto
     except authz.AuthzDenied as e:
         raise HTTPException(status_code=403, detail=str(e))
     recorder = live_recorder(item, agent)
-    row = recorder.note(data.text, by=actor.key) if recorder is not None else None
+    if recorder is not None and data.run is not None and recorder.run_key != data.run:
+        return _ui_error(409, "not_running", "The run this note was written for has ended; another run is on it now. "
+                                              "The note was not delivered.")
+    try:
+        row = recorder.note(data.text, by=actor.key) if recorder is not None else None
+    except NoteNotStored:
+        return _ui_error(503, "not_stored", "The note could not be recorded, so it was not delivered. The run goes on: send it again.")
     if row is None:
         return _ui_error(409, "not_running", "No such run is in flight: it has ended, or it never started here. The note was not delivered.")
     return row

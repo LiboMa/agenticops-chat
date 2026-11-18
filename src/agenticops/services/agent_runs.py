@@ -49,10 +49,22 @@ _lock = threading.Lock()
 _runs: dict[int, AgentRun] = {}
 
 
+# `rca_timeout_seconds: 0` means «no watchdog» — it must not mean «a claim is never overdue»: a run whose thread hangs
+# would then answer 409 to every request on its issue and keep it out of every person's queue until the process
+# restarts (round-2 review B-m7). Without a watchdog a claim, and a diagnosis that started and never ended, is
+# overdue after this long.
+CLAIM_LIMIT_WITHOUT_WATCHDOG = 3600
+
+
+def limit_seconds() -> float:
+    """How long an agent run on an issue may take before it counts as overdue: the RCA watchdog's limit, or
+    CLAIM_LIMIT_WITHOUT_WATCHDOG when there is no watchdog."""
+    return float(settings.rca_timeout_seconds or 0) or float(CLAIM_LIMIT_WITHOUT_WATCHDOG)
+
+
 def overdue(run: AgentRun, *, now: Optional[datetime] = None) -> bool:
-    """Whether the run has outlived the RCA watchdog: it may be hung, and no longer keeps the issue to itself."""
-    ttl = float(settings.rca_timeout_seconds or 0)
-    return ttl > 0 and ((now or datetime.now(timezone.utc)) - run.started_at).total_seconds() >= ttl
+    """Whether the run has outlived its limit: it may be hung, and no longer keeps the issue to itself."""
+    return ((now or datetime.now(timezone.utc)) - run.started_at).total_seconds() >= limit_seconds()
 
 
 def begin(agent: str, issue_id: int, requested_by: str, *, now: Optional[datetime] = None) -> Optional[AgentRun]:
@@ -116,6 +128,16 @@ def take(agent: str, issue_id: int, requested_by: str, *, now: Optional[datetime
         return run
 
 
+def holds(run: Optional[AgentRun]) -> bool:
+    """Whether `run` is still the claim on its issue. False once it was taken over (it had outlived its limit and
+    somebody asked again): what such a run still produces is saved, but it hands the issue on to nobody — the issue
+    belongs to the run that replaced it, or to whoever that run left it with (round-2 review B-I2)."""
+    if run is None:
+        return False
+    with _lock:
+        return _runs.get(run.issue_id) is run
+
+
 def end(run: AgentRun) -> None:
     """Release a claim — only its own: a run that outlived the watchdog and was replaced does not free the new one."""
     with _lock:
@@ -128,9 +150,12 @@ def refusal(issue_id: int) -> str:
     held = get(issue_id)
     if held is None:
         return f"REJECTED: an agent run on issue #{issue_id} is in flight; wait for it to finish."
+    left = ("the fix plan it is writing (get_plan)" if held.agent == "sre"
+            else "the diagnosis it is making (get_health_issue)")
     return (f"REJECTED: the {held.agent} agent is already working on issue #{issue_id} "
             f"(asked by {held.requested_by}, since {held.started_at.isoformat(timespec='seconds').replace('+00:00', 'Z')}). "
-            f"Wait for it to finish — one agent run per issue at a time.")
+            f"Wait for it to finish — one agent run per issue at a time. Do not start it again: tell the person it "
+            f"is under way, and when it has finished read {left} instead.")
 
 
 def get(issue_id: int, *, now: Optional[datetime] = None) -> Optional[AgentRun]:

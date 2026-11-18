@@ -152,6 +152,17 @@ async def lifespan(app: FastAPI):
         logger.warning("Chat: interrupt_stale failed: %s", e)
     await _sweep_chat_attachments_at_startup()
 
+    # MVP-2.9.0 (round-2 review): a run an earlier process left `running` — its timer and its reconcile went with
+    # that process — is closed, or timed for the moment its time limit is up, so its issue is on somebody's list again
+    try:
+        from agenticops.services.run_tickets import close_orphans
+        _closed, _timed = await asyncio.to_thread(close_orphans)
+        if _closed or _timed:
+            logger.warning("Executions: %d run(s) left running by an earlier process closed, %d given their remaining time",
+                           len(_closed), len(_timed))
+    except Exception as e:
+        logger.warning("Executions: close_orphans failed: %s", e)
+
     # Seed default admin user if auth is enabled and no users exist
     if settings.api_auth_enabled:
         try:
@@ -2962,7 +2973,10 @@ async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody, actor: Ac
             raise HTTPException(status_code=409, detail=closed)
         conflict = approval_conflict(session, plan, data.content_hash)
         if conflict:
-            if repair_stale_hash(session, plan):  # the stored hash was not of the stored content: the reload shows one that is
+            # The stored hash was not of the stored content: the reload shows one that is. Only for a plan that still
+            # waits for approval — one that is executing or has run is refused just below, and its columns are the
+            # record of what was approved and run (round-2 review C-M1).
+            if plan.status in ("draft", "pending_approval") and repair_stale_hash(session, plan):
                 session.commit()
             raise HTTPException(status_code=409, detail=conflict)
         old = plan.status
@@ -3027,15 +3041,17 @@ def api_fix_plan_previous_diff(plan_id: int):
 
 
 @app.post("/api/fix-plans/{plan_id}/request-changes", status_code=202)
-def api_request_plan_changes(plan_id: int, data: FixPlanRejectBody, actor: Actor = Depends(current_actor)):
+def api_request_plan_changes(plan_id: int, data: FixPlanChangesBody, actor: Actor = Depends(current_actor)):
     """Send a fix plan that waits for approval back AND ask the plan agent for the next one — both, or neither
     (MVP-2.9.0 N14). The reason is the person's; the agent asked for the next plan is given it
     (sre_agent.rejection_feedback). Plain `def`: it writes.
 
-    404 → 409 (a change plan; `not_awaiting_approval`; `issue_closed`) → 422 (no reason) → 403 / 409 of a rejection
-    → 409 `agent_run_in_flight` (an agent is on the issue: the plan is NOT sent back) → 202. The rejection is
-    written first and committed only once the issue is claimed for the plan agent, so a refusal leaves nothing behind;
-    the claim is released if the commit or the thread fails."""
+    404 → 409 (a change plan; `not_awaiting_approval`; `issue_closed`) → 422 (no reason) → 409 `plan_changed` (the
+    request names the content it was shown, and the plan is no longer that: the reason would be sent to the agent
+    with a plan the reviewer never read) → 403 / 409 of a rejection → 409 `agent_run_in_flight` (an agent is on
+    the issue: the plan is NOT sent back) → 202. The rejection is written first and committed only once the issue
+    is claimed for the plan agent, so a refusal leaves nothing behind; the claim is released if the commit or the
+    thread fails."""
     from agenticops.services import agent_runs
     from agenticops.services.change_service import fix_path_refusal
     reason = data.reason.strip()
@@ -3059,6 +3075,10 @@ def api_request_plan_changes(plan_id: int, data: FixPlanRejectBody, actor: Actor
                     "code": "issue_closed", "status": issue.status if issue else None})
             if not reason:
                 raise HTTPException(status_code=422, detail="a reason is required")
+            if data.content_hash is not None:
+                changed = approval_conflict(session, plan, data.content_hash)
+                if changed:
+                    return JSONResponse(status_code=409, content={"detail": changed, "code": "plan_changed"})
             issue_id, trace_id = issue.id, issue.trace_id
             _reject_plan(session, plan, actor, reason)          # 403 / 409; added to this session, not committed yet
             session.flush()
@@ -3319,10 +3339,12 @@ async def api_get_trace(trace_id: str):
 
 
 @app.post("/api/fix-executions/{execution_id}/cancel")
-async def api_cancel_execution(execution_id: int, actor: Actor = Depends(current_actor)):
+def api_cancel_execution(execution_id: int, actor: Actor = Depends(current_actor)):
     """Cancel a running fix execution — authorized against the plan behind it (plan.execute for a fix
     plan, change.execute for a change plan; cancelling a run is executing it, not change.cancel) and
-    audited (one plan.execution_cancelled row on success). An unknown/closed ticket is a 400 as before."""
+    audited (one plan.execution_cancelled row on success). An unknown/closed ticket is a 400 as before.
+    Plain `def`: closing the record fails the plan, moves the issue and writes the timeline — under the name of
+    the person who cancelled (round-2 review A-M7: it was written as the executor's)."""
     from agenticops.audit.service import Actions, AuditService, EntityTypes
     from agenticops.auth import authz
     with get_db_session() as session:
@@ -3340,7 +3362,7 @@ async def api_cancel_execution(execution_id: int, actor: Actor = Depends(current
                 authz.check(actor, "plan.execute", subject=plan)
         except authz.AuthzDenied as e:
             raise HTTPException(status_code=403, detail=authz.http_detail(e))
-    if _executor_service.cancel_execution(execution_id):
+    if _executor_service.cancel_execution(execution_id, by=actor.key):
         AuditService.log(Actions.PLAN_EXECUTION_CANCELLED, EntityTypes.FIX_PLAN, str(plan_id),
                          actor=actor.key, user_id=actor.user_id,
                          details={"execution_id": execution_id, "plan_kind": plan_kind})
@@ -3362,7 +3384,11 @@ def api_stop_execution(execution_id: int, body: StopExecutionBody = Body(default
     (a human decision). 404 no such run · 403 · 409 `not_running` / `already_stopping`."""
     from agenticops.audit.service import Actions, AuditService, EntityTypes
     from agenticops.auth import authz
+    from agenticops.services.issue_notes import reads_as_written
     from agenticops.services.run_tickets import request_stop
+    note = body.reason.strip()
+    if not reads_as_written(note):
+        raise HTTPException(status_code=422, detail="the note may not contain control characters")
     with get_db_session() as session:
         ex = session.get(FixExecution, execution_id)
         plan = session.get(FixPlan, ex.fix_plan_id) if ex is not None else None
@@ -3385,20 +3411,22 @@ def api_stop_execution(execution_id: int, body: StopExecutionBody = Body(default
             raise HTTPException(status_code=409, detail={
                 "detail": f"{ex.stop_requested_by or 'Someone'} already asked this run to stop.",
                 "code": "already_stopping", "by": ex.stop_requested_by})
-    if not request_stop(execution_id, by=actor.key, note=body.reason.strip()):
-        with get_db_session() as session:          # it ended, or someone else stopped it, between the read and the write
-            ex = session.get(FixExecution, execution_id)
-            code = "already_stopping" if ex is not None and ex.status == "running" else "not_running"
+        # The stop and its audit row are ONE write (round-2 review A-M8: as three transactions, an audit write that
+        # failed answered 500 for a stop that had taken effect, and the retry said «already stopping»).
+        if not request_stop(execution_id, by=actor.key, note=note, session=session):
+            session.expire(ex)                     # it ended, or someone else stopped it, between the read and the write
+            code = "already_stopping" if ex.status == "running" else "not_running"
             raise HTTPException(status_code=409, detail={
                 "detail": "This run ended, or was stopped by someone else, a moment ago.", "code": code,
-                "status": ex.status if ex is not None else None})
+                "status": ex.status})
+        AuditService.log(Actions.PLAN_EXECUTION_STOP_REQUESTED, EntityTypes.FIX_PLAN, str(plan_id), actor=actor.key,
+                         user_id=actor.user_id, details={"execution_id": execution_id, "plan_kind": plan_kind},
+                         session=session)
     from agenticops.services.pipeline_events import log_event
     log_event(issue_id, "execution_stop_requested", "execution", "completed",
               detail={"execution_id": execution_id, "plan_id": plan_id, "by": actor.key,
-                      **({"note": body.reason.strip()[:2000]} if body.reason.strip() else {})},
+                      **({"note": note[:2000]} if note else {})},
               actor=actor.key, change_request_id=change_id if plan_kind == "change" else None)
-    AuditService.log(Actions.PLAN_EXECUTION_STOP_REQUESTED, EntityTypes.FIX_PLAN, str(plan_id), actor=actor.key,
-                     user_id=actor.user_id, details={"execution_id": execution_id, "plan_kind": plan_kind})
     with get_db_session() as session:
         return FixExecutionResponse.model_validate(session.get(FixExecution, execution_id))
 

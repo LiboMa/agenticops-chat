@@ -348,3 +348,106 @@ def test_a_timed_out_automatic_diagnosis_keeps_its_claim_while_its_thread_lives(
             if t.name.startswith("auto-rca-run-"):
                 t.join(10)
     assert agent_runs.get(iid) is None
+
+
+# ── round-2 review ───────────────────────────────────────────────────────────────────────────────────
+#
+# B-I2. «A late run cannot take over the run a person asked for after it» was half kept: `end` lets go only of its
+# own claim, but a diagnosis that came back after it had been taken over still ran the hand-on — trigger_auto_sre
+# → take() — and that replaced the claim of the diagnosis in flight. A plan agent then wrote (and, at L0 / L1,
+# the pipeline approved and ran) a plan from the abandoned run's diagnosis while the one the person asked for was
+# still under way, and the issue was no longer theirs.
+
+def test_a_claim_that_was_taken_over_no_longer_holds_its_issue():
+    old = agent_runs.begin("rca", 7, agent_runs.PIPELINE, now=datetime.now(timezone.utc) - timedelta(hours=1))
+    assert agent_runs.holds(old)
+    new = agent_runs.begin("rca", 7, "user:alice")                       # the old one is overdue: taken over
+    assert new is not None and agent_runs.holds(new) and not agent_runs.holds(old)
+    agent_runs.end(new)
+    assert not agent_runs.holds(old)                                     # replaced stays replaced when the newer run ends
+
+
+def _late_diagnosis(iid, *, taken_over):
+    """rca_agent as the pipeline's thread runs it; while the model «works», a person's diagnosis takes the issue
+    over (or not). → whether the post-RCA pipeline was told to hand the issue on."""
+    from contextlib import ExitStack
+    from unittest.mock import patch
+    from agenticops.run_context import RunContext, reset_run_context, set_run_context
+    claim = agent_runs.begin("rca", iid, agent_runs.PIPELINE, now=datetime.now(timezone.utc) - timedelta(hours=1))
+
+    def invoke(agent, prompt, **kw):
+        if taken_over:
+            assert agent_runs.begin("rca", iid, "user:alice") is not None
+        return "done"
+
+    ra = "agenticops.agents.rca_agent"
+    token = set_run_context(RunContext(actor=agent_runs.PIPELINE, agent_name="rca", agent_run=claim))
+    try:
+        with ExitStack() as stack:
+            for p in _agent_patches(ra):
+                stack.enter_context(p)
+            agent_cls = stack.enter_context(patch(f"{ra}.Agent"))
+            stack.enter_context(patch(f"{ra}.resolve_rca_effort", return_value=(0, None)))
+            stack.enter_context(patch("agenticops.agents.preamble.invoke_with_retry", side_effect=invoke))
+            post = stack.enter_context(patch("agenticops.services.rca_quality.run_post_rca_pipeline"))
+            agent_cls.return_value.messages = []
+            from agenticops.agents.rca_agent import rca_agent
+            assert rca_agent(issue_id=iid) == "done"
+    finally:
+        reset_run_context(token)
+    return post.call_args.kwargs.get("hand_on")
+
+
+def test_a_diagnosis_that_still_holds_its_issue_hands_it_on(client):
+    assert _late_diagnosis(_issue(), taken_over=False) is True
+
+
+def test_a_diagnosis_that_was_taken_over_while_it_worked_hands_nothing_on(client):
+    iid = _issue()
+    assert _late_diagnosis(iid, taken_over=True) is False
+    held = agent_runs.get(iid)
+    assert held is not None and held.requested_by == "user:alice"        # the issue is still the newer run's
+
+
+def test_the_gate_does_not_start_a_plan_for_a_run_that_was_replaced(client, monkeypatch):
+    """The other half, in the post-RCA pipeline itself: a result that passes the gate, from a run that no longer
+    holds the issue, starts no plan run — and the timeline says why."""
+    from unittest.mock import patch
+    from agenticops.config import settings
+    from agenticops.services import rca_quality
+    monkeypatch.setattr(settings, "rca_critic_enabled", False)
+    monkeypatch.setattr(settings, "rca_min_confidence_for_autofix", 0.6)
+    iid = _issue()                                                       # has a diagnosis with confidence 0.9
+    started = datetime.now(timezone.utc) - timedelta(minutes=5)
+    with patch("agenticops.services.pipeline_service.trigger_auto_sre") as plan_run, \
+         patch("agenticops.services.notification_service.notify_rca_completed"), \
+         patch("agenticops.services.notification_service.notify_im_origin"):
+        rca_quality.run_post_rca_pipeline(iid, [], started, hand_on=False)
+        plan_run.assert_not_called()
+        assert [t for t, _s, _a, _d in _events(iid)].count("rca_superseded") == 1
+        rca_quality.run_post_rca_pipeline(iid, [], started)              # the usual case: it does
+        plan_run.assert_called_once()
+
+
+# B-m7. `rca_timeout_seconds: 0` is a supported value («no watchdog»). A claim then never became overdue: a run
+# whose thread hung answered 409 to every request on its issue and — by the N14 rule — kept the issue out of every
+# person's queue until the process restarted.
+
+def test_without_a_watchdog_a_claim_still_has_a_limit(monkeypatch):
+    from agenticops.config import settings
+    monkeypatch.setattr(settings, "rca_timeout_seconds", 0)
+    fresh = agent_runs.begin("rca", 8, "user:alice")
+    assert not agent_runs.overdue(fresh) and agent_runs.in_time(8) is fresh
+    long_ago = datetime.now(timezone.utc) - timedelta(seconds=agent_runs.CLAIM_LIMIT_WITHOUT_WATCHDOG + 60)
+    agent_runs.clear()
+    stuck = agent_runs.begin("rca", 8, "user:alice", now=long_ago)
+    assert agent_runs.overdue(stuck) and agent_runs.in_time(8) is None
+    assert agent_runs.begin("rca", 8, "user:bob") is not None            # … and the next request takes it over
+
+
+def test_the_refusal_tells_the_caller_to_read_what_the_run_leaves(monkeypatch):
+    """B-m10. In a chat, «diagnose I#12 and plan a fix»: the diagnosis hands the issue to the pipeline's plan run,
+    and Main's own sre_agent call is then refused — rightly — with «wait». It must also say what to do next."""
+    agent_runs.take("sre", 12, agent_runs.PIPELINE)
+    said = agent_runs.refusal(12)
+    assert "REJECTED" in said and "get_plan" in said and "do not" in said.lower()

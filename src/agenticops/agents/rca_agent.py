@@ -518,9 +518,11 @@ def rca_agent(issue_id: int) -> str:
             # Post-RCA quality pipeline: evidence verification → critic →
             # confidence gate → (pass) auto-SRE / (fail) needs_review.
             # save_rca_result is pure persistence since MVP-2.2.0.
+            # A run that was taken over while it worked (it outlived its limit and somebody asked again) still
+            # has its result checked and saved — but it hands the issue on to nobody: no plan run is started from it.
             try:
                 from agenticops.services.rca_quality import run_post_rca_pipeline
-                run_post_rca_pipeline(issue_id, list(agent.messages), started_at)
+                run_post_rca_pipeline(issue_id, list(agent.messages), started_at, hand_on=agent_runs.holds(claim))
             except Exception:
                 logger.exception("post-RCA quality pipeline failed for issue #%d", issue_id)
             return str(result)

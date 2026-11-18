@@ -161,3 +161,26 @@ def test_an_issue_of_another_account_does_not_colour_the_resource(world):
     s.add(other); s.commit(); other_id = other.id; s.close()
     _issue(other_id, ids["r1"], hours_ago=10, now=now)
     assert _at(client, now, 5)["health"] == {}
+
+
+# ── round-2 review ───────────────────────────────────────────────────────────────────────────────────
+
+def test_a_moment_given_with_an_offset_is_one_moment_for_health_and_for_gone(world):
+    """C-M2: `at=…+08:00` was converted for health and had its offset dropped for «absent» — two moments, eight
+    hours apart, in one answer."""
+    client, ids, now = world
+    five_hours_ago = now - timedelta(hours=5)                                        # r4 has been gone for six
+    west = five_hours_ago.astimezone(timezone(timedelta(hours=-5))).isoformat()      # its clock reads ten hours ago
+    body = client.get("/api/galaxy/health", params={"at": west}).json()
+    assert body["as_of"][:19] == _iso(five_hours_ago)[:19] and body["as_of"].endswith("Z")
+    assert body["absent"] == [f"res:{ids['r4']}"]
+    east = (now - timedelta(hours=7)).astimezone(timezone(timedelta(hours=8))).isoformat()   # its clock reads an hour ahead
+    assert client.get("/api/galaxy/health", params={"at": east}).json()["absent"] == []
+
+
+def test_the_oldest_moment_the_page_can_ask_for_can_be_read(world):
+    """C-M3: the slider's left end is «now − 24 h» by the PAGE's clock, a moment older than that by the server's
+    when the request arrives — it always answered 422."""
+    client, _ids, now = world
+    assert client.get("/api/galaxy/health", params={"at": _iso(now - timedelta(hours=24, seconds=20))}).status_code == 200
+    assert client.get("/api/galaxy/health", params={"at": _iso(now - timedelta(hours=24, minutes=5))}).status_code == 422

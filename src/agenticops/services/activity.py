@@ -86,7 +86,7 @@ def activity(actor, *, account_id: Optional[int] = None, now: Optional[datetime]
 
     now = now or datetime.now(timezone.utc)
     since_recent = now - timedelta(hours=RECENT_HOURS)
-    rca_limit, run_limit = settings.rca_timeout_seconds, settings.executor_total_timeout
+    rca_limit, run_limit = agent_runs.limit_seconds(), settings.executor_total_timeout
     running: list[dict] = []
     recent: list[dict] = []
     with get_db_session() as s:
@@ -146,28 +146,35 @@ def activity(actor, *, account_id: Optional[int] = None, now: Optional[datetime]
                 continue
             taken.add(issue.id)
             auto = r.requested_by == agent_runs.PIPELINE          # nobody asked: the basis says who started it
+            # «pipeline» = the diagnosis passed its gate and the pipeline handed the issue to the plan agent;
+            # «auto» = the pipeline's own diagnosis of a new issue (N11 made that one claim its issue too)
+            basis = "requested" if not auto else "pipeline" if r.agent == "sre" else "auto"
             # a claim past the watchdog is kept — its thread may be alive — and listed as overdue (N11)
             running.append(_lane(f"I{issue.id}:{_AGENT_KIND.get(r.agent, r.agent)}", _AGENT_KIND.get(r.agent, r.agent), r.agent,
-                                 issue.title, now=now, basis="pipeline" if auto else "requested", item=f"I{issue.id}",
+                                 issue.title, now=now, basis=basis, item=f"I{issue.id}",
                                  account_id=issue.account_id, since=r.started_at, limit=rca_limit,
                                  requested_by=None if auto else r.requested_by))
-        for x in run_rows:             # a run row that is pending or running
+        # A run row that is pending or running ALWAYS has its own lane — beside an agent's lane on the same issue
+        # too: «stop» lives on the run's lane, and a claim (a re-diagnosis asked from the classic page or a chat)
+        # must not hide a run that is in progress (round-2 review B-I4).
+        has_run: set[int] = set()
+        for x in run_rows:
             issue = mine(x.health_issue_id)
-            if issue is None or issue.id in taken:
+            if issue is None or issue.id in has_run:
                 continue
-            taken.add(issue.id)
+            has_run.add(issue.id)
             running.append({**_lane(f"I{issue.id}:run", "run", "executor", issue.title, now=now, basis="run",
                                     item=f"I{issue.id}", account_id=issue.account_id,
                                     since=x.started_at or x.created_at, limit=run_limit), "execution": _execution(x)})
         for issue in issues.values():
-            if issue.id in taken:
+            if issue.id in taken or issue.id in has_run:
                 continue
             if issue.status == "investigating":
                 started = _newest(events, issue.id, "rca_started")
                 # the diagnosis ended and the status stayed (it left no result): nothing is at work — say it stopped.
                 # The one rule the queue uses too (work_phases.rca_stopped_at): such an issue now waits on a person.
                 ended = wp.rca_stopped_at(issue.status, events.get(issue.id, ()), now=now, limit_seconds=rca_limit,
-                                          moved_at=_newest(events, issue.id, "status_changed"))
+                                          moved_at=wp.left_diagnosing_at(events.get(issue.id, ())))
                 stopped = ended is not None
                 lane = _lane(f"I{issue.id}:diagnosis", "diagnosis", "rca", issue.title, now=now,
                              basis="stopped" if stopped else "status", item=f"I{issue.id}", account_id=issue.account_id,

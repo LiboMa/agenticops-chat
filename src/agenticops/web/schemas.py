@@ -438,6 +438,13 @@ class FixPlanRejectBody(BaseModel):
     reason: str = Field(..., min_length=1, max_length=2000)
 
 
+class FixPlanChangesBody(FixPlanRejectBody):
+    """«Request changes» (MVP-2.9.0 N14): the reason, and the content hash the reviewer was shown — when it is
+    given and the plan is no longer that content, nothing is sent back (409 `plan_changed`). Optional so that a
+    caller that does not read plans (a script) can still send a plan back."""
+    content_hash: Optional[str] = Field(None, max_length=128)
+
+
 class FixPlanResponse(BaseModel):
     """Schema for fix plan response."""
     id: int

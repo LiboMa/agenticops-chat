@@ -212,3 +212,32 @@ def test_the_tiers_are_not_part_of_the_content_an_approval_is_bound_to(client):
     refused = client.put(f"/api/fix-plans/{pid}", json={"content_hash": content_hash, "step_tiers": ["readonly"]})
     assert refused.status_code == 422                               # the update body takes no such field
     assert client.get(f"/api/fix-plans/{pid}").json()["step_tiers"] == ["write"]
+
+
+# ── a value the database scrub removed (round-2 review, C-I1) ─────────────────────────────────────────
+#
+# Every text column is scrubbed of secrets when it is written, so a step that named an access key is stored as
+# «… --access-key-id [REDACTED-SECRET] …». That text is what the approver is shown, what the hash covers and what
+# the executor is handed — and it does not say which key. The code cannot read such a line as a command: it is
+# 'unknown' (a person looks; the auto-approval floor holds it; a stop cannot «run it as written»).
+
+SCRUBBED = "[REDACTED-SECRET]"
+
+
+@pytest.mark.parametrize("command, with_a_value", [
+    (f"aws iam update-access-key --user-name app --access-key-id {SCRUBBED} --status Inactive", "write"),
+    (f"aws iam get-access-key-last-used --access-key-id {SCRUBBED}", "readonly"),
+    (f"kubectl create secret generic db --from-literal=password={SCRUBBED}", "write"),
+    (f"grep -c {SCRUBBED} /etc/app/app.env", "readonly"),
+])
+def test_a_command_whose_value_was_scrubbed_is_not_one_the_code_can_read(command, with_a_value):
+    from agenticops.services.change_steps import command_tier
+    assert command_tier(command.replace(SCRUBBED, "some-value")) == with_a_value     # the same line with a value
+    assert command_tier(command) == "unknown"
+    assert unclassified_commands([{"action": "x", "command": command}]) == [command]  # … so it waits for a person
+
+
+def test_a_blocked_command_stays_blocked_whatever_was_scrubbed_from_it():
+    from agenticops.services.change_steps import command_tier
+    assert command_tier("aws iam create-user --user-name x") == "blocked"
+    assert command_tier(f"aws iam create-user --user-name {SCRUBBED}") == "blocked"

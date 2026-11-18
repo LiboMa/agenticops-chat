@@ -467,6 +467,11 @@ def run_kubectl(
         kubectl output, or error/confirmation message.
     """
     command = command.strip()
+    # The word itself is accepted: a plan's step reads «kubectl rollout undo …», the classifier below already reads
+    # it either way, and a stopped run is told to run its rollback «exactly as written» (MVP-2.9.0 round-2 review:
+    # with the word this built `kubectl -n <ns> kubectl rollout undo …`).
+    if command == "kubectl" or command.startswith("kubectl "):
+        command = command[len("kubectl"):].strip()
     if not command:
         return "Error: Empty kubectl command."
 

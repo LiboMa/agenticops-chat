@@ -79,6 +79,32 @@ def gate_passed(rca: Any, threshold: Any) -> Optional[bool]:
 _DIAGNOSING = ("open", "investigating", "acknowledged")
 
 
+def left_diagnosing_at(events: Iterable) -> Optional[datetime]:
+    """The last time the issue's status moved to or from a status OUTSIDE the three it is diagnosed in — what
+    rca_stopped_at takes as `moved_at`. A move among open / investigating / acknowledged (Main's status tool, the
+    CLI, the API, a late thread) leaves a stopped diagnosis stopped; a dismissal and a reopening do not (round-2
+    review B-m11: until then ANY later move took a failed diagnosis back out of every queue). An event that does
+    not say where from and where to counts, as it did before."""
+    newest = None
+    for e in events or ():
+        if _get(e, "event_type") != "status_changed":
+            continue
+        at = _ts(_get(e, "created_at"))
+        if at is None:
+            continue
+        detail = _get(e, "detail")
+        if isinstance(detail, str):
+            try:
+                detail = json.loads(detail)
+            except ValueError:
+                detail = None
+        if isinstance(detail, Mapping) and detail.get("from") in _DIAGNOSING and detail.get("to") in _DIAGNOSING:
+            continue
+        if newest is None or at > newest:
+            newest = at
+    return newest
+
+
 def rca_stopped_at(status: str, events: Iterable, *, now: Optional[datetime] = None,
                    limit_seconds: Optional[float] = None, moved_at: Optional[datetime] = None) -> Optional[datetime]:
     """Since when the newest diagnosis of an issue that is still waiting for one is not going to produce anything
@@ -90,8 +116,9 @@ def rca_stopped_at(status: str, events: Iterable, *, now: Optional[datetime] = N
     died with its process, or hangs: the time is when it should have ended at the latest (`now` and `limit_seconds`
     are needed to tell; without them only an end counts).
 
-    `moved_at` = the issue's last status move. One AFTER that time voids it: the issue has been somewhere else since
-    (diagnosed, planned, dismissed, reopened …) and stands here again for another reason than that old diagnosis.
+    `moved_at` = the last time the issue left or re-entered the diagnosing statuses (left_diagnosing_at). One AFTER
+    that time voids it: the issue has been somewhere else since (diagnosed, planned, dismissed, reopened …) and
+    stands here again for another reason than that old diagnosis.
 
     `events` = the issue's timeline (rows or dicts; only rca_started / rca_completed are read). Whether an agent is on
     the issue NOW is the caller's question (services/agent_runs): the timeline cannot answer it."""

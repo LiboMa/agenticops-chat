@@ -345,3 +345,35 @@ def test_a_run_lane_names_its_run_record_and_says_when_a_person_stopped_it(db):
     assert lanes["change_run"]["execution"] == {"id": cex, "status": "running", "stop_requested_at": "2026-11-17T11:59:30Z",
                                                 "stop_requested_by": "user:alice"}
     assert "execution" not in lanes["diagnosis"]                     # only a run has a run record
+
+
+# ── round-2 review ───────────────────────────────────────────────────────────────────────────────────
+
+def test_a_run_in_progress_keeps_its_own_lane_while_an_agent_holds_the_issue(db):
+    """B-I4. One lane per issue: an agent's claim (a re-diagnosis asked from the classic page or a chat — N11 made
+    those claim the issue) hid the run that was in progress, and with it «stop», for as long as the claim lasted."""
+    iid = _issue("fix_executing", "restart nginx")
+    pid = _plan(iid, "executing")
+    ex = _add(FixExecution(fix_plan_id=pid, health_issue_id=iid, status="running", started_at=ago(minutes=2), created_at=ago(minutes=2)))
+    agent_runs.begin("rca", iid, "user:bob", now=ago(minutes=1))
+    lanes = {l["id"]: l for l in _lanes()}
+    assert set(lanes) == {f"I{iid}:diagnosis", f"I{iid}:run"}
+    assert lanes[f"I{iid}:run"]["execution"]["id"] == ex and lanes[f"I{iid}:run"]["basis"] == "run"
+    assert lanes[f"I{iid}:diagnosis"]["requested_by"] == "user:bob"
+
+
+def test_a_run_row_and_a_status_still_make_one_run_lane(db):
+    iid = _issue("fix_executing")
+    pid = _plan(iid, "executing")
+    _add(FixExecution(fix_plan_id=pid, health_issue_id=iid, status="running", started_at=ago(minutes=2), created_at=ago(minutes=2)))
+    assert [l["id"] for l in _lanes()] == [f"I{iid}:run"]
+
+
+def test_the_diagnosis_the_pipeline_started_does_not_say_it_passed_its_gate(db):
+    """B-I5. Every claim of the pipeline had basis «pipeline», which the page words «the diagnosis passed its gate
+    and the pipeline handed the issue to the plan agent» — true of the plan run only. N11 made the automatic
+    DIAGNOSIS claim its issue too."""
+    iid = _issue("investigating", "new issue")
+    agent_runs.begin("rca", iid, agent_runs.PIPELINE, now=ago(minutes=1))
+    lane, = _lanes()
+    assert (lane["id"], lane["kind"], lane["basis"], lane["requested_by"]) == (f"I{iid}:diagnosis", "diagnosis", "auto", None)

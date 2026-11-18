@@ -17,6 +17,13 @@ class NoteRejected(ValueError):
     pass
 
 
+def reads_as_written(text: str) -> bool:
+    """No control character and no bidi override in `text`: what a person wrote reads, on every page and to an
+    agent, as they wrote it. The one rule for every sentence a person leaves on a record (an issue note, the note
+    of a stop, a word to a running agent)."""
+    return _CONTROL.search(text or "") is None
+
+
 def clean_note(content: str) -> str:
     text = (content or "").strip()
     if not text:

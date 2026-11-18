@@ -157,6 +157,31 @@ class TestRecent:
         assert {e["item"] for e in ue.recent_events(hours=24, account_id=bid, now=NOW)["events"]} == {f"I{other}", f"C{cid}"}
         assert len(ue.recent_events(hours=24, now=NOW)["events"]) == 4
 
+    def test_it_never_loads_more_rows_than_it_answers_with(self, db, monkeypatch):
+        """Round-2 review C-M7: every row of the window was loaded and turned into a dict before the cut."""
+        from sqlalchemy import event
+        import agenticops.models as models_mod
+        monkeypatch.setattr(ue, "MAX_EVENTS", 3)
+        iid = _issue()
+        for n in range(8):
+            _event(iid, type="rca_completed", actor="agent:rca", minutes_ago=n + 1)
+        _event(iid, type="status_changed", actor="agent:rca", minutes_ago=1)          # the code moving a status: not on the band
+        _event(iid, type="status_changed", actor="user:alice", detail={"from": "open", "to": "dismissed"}, minutes_ago=2)
+        fetched = []
+        engine = models_mod.get_engine()
+
+        def listener(conn, cur, stmt, params, ctx, many):
+            if "LIMIT" in stmt.upper():
+                fetched.append(stmt)
+        event.listen(engine, "before_cursor_execute", listener)
+        try:
+            out = ue.recent_events(hours=24, now=NOW)
+        finally:
+            event.remove(engine, "before_cursor_execute", listener)
+        assert fetched, "the rows are read with a LIMIT"
+        assert (len(out["events"]), out["total"], out["cut"]) == (3, 9, True)         # 8 + the person's move; not the code's
+        assert [e["kind"] for e in out["events"]].count("decision") == 1
+
     def test_it_costs_two_queries_whatever_the_number_of_events(self, db):
         from sqlalchemy import event
         import agenticops.models as models_mod

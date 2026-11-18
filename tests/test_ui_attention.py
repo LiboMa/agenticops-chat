@@ -768,3 +768,43 @@ def test_the_issue_list_says_the_agent_too(db, no_claims):
         assert next(r for r in rows if r["id"] == iid)["waiting_on"] == "sre_agent"
     finally:
         app.dependency_overrides.clear()
+
+
+# ── round-2 review B-m11: only LEAVING the diagnosing statuses voids a stopped diagnosis ─────────────────────────
+
+def _moved(issue_id, frm, to, minutes_ago):
+    import json as _json
+    s = get_session()
+    s.add(PipelineEvent(health_issue_id=issue_id, event_type="status_changed", stage="issue", status="completed",
+                        detail=_json.dumps({"from": frm, "to": to}), created_at=NOW - timedelta(minutes=minutes_ago)))
+    s.commit(); s.close()
+
+
+def test_a_move_among_the_diagnosing_statuses_leaves_a_stopped_diagnosis_in_the_queue(db, no_claims):
+    """Any later status move voided «stopped» — the ruling was made for a dismissed issue that is reopened. But
+    open → acknowledged or acknowledged → investigating (Main's status tool, the CLI, the API, a late thread) took
+    a failed diagnosis out of every queue just the same, back to «waits on the RCA agent» with nothing on it."""
+    iid, _ = _issue("acknowledged", rca=None)
+    _rca_events(iid, ("rca_started", "started", 50), ("rca_completed", "failed", 35))
+    _moved(iid, "investigating", "acknowledged", 10)
+    assert _row(ALICE, f"I{iid}")["reason_detail"] == "rca_stopped"
+
+
+def test_an_issue_that_left_the_diagnosing_statuses_and_came_back_is_not_a_stopped_diagnosis(db, no_claims):
+    iid, _ = _issue("open", rca=None)
+    _rca_events(iid, ("rca_started", "started", 50), ("rca_completed", "failed", 35))
+    _moved(iid, "investigating", "dismissed", 20)
+    _moved(iid, "dismissed", "open", 10)
+    assert _row(ALICE, f"I{iid}") is None
+
+
+def test_without_a_watchdog_a_diagnosis_that_never_ended_still_stops_some_day(db, no_claims, monkeypatch):
+    """B-m7, the queue's half: with rca_timeout_seconds = 0 «started, never ended» never became «stopped»."""
+    from agenticops.services import agent_runs
+    monkeypatch.setattr(db, "rca_timeout_seconds", 0)
+    orphan, _ = _issue("investigating", rca=None)
+    _rca_events(orphan, ("rca_started", "started", 60 * 24 * 3))
+    young, _ = _issue("investigating", rca=None)
+    _rca_events(young, ("rca_started", "started", 10))
+    assert agent_runs.CLAIM_LIMIT_WITHOUT_WATCHDOG > 10 * 60
+    assert {i["id"] for i in _items(ALICE)} == {f"I{orphan}"}

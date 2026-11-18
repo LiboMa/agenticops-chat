@@ -504,3 +504,119 @@ def test_a_tool_that_says_it_failed_is_recorded_as_failed(db, returned, failed):
     agent("go")
     [step] = [r for r in _rows(db) if r.kind == "tool"]
     assert step.outcome == ("error" if failed else "ok")
+
+
+# ── round-2 review ───────────────────────────────────────────────────────────────────────────────────
+
+def test_a_kubectl_command_is_found_in_its_plan_in_the_form_the_tool_takes(db):
+    """A-I2 / B: the executor passes run_kubectl the subcommand without the word; the plan writes «kubectl …». Compared
+    as it was passed, every command of a kubectl plan was «off» and none of its steps was ever marked."""
+    issue = HealthIssue(title="t", description="d", severity="low", source="test", status="fix_approved", resource_id="r")
+    db.add(issue); db.flush()
+    rca = RCAResult(health_issue_id=issue.id, root_cause="x", confidence=0.9)
+    db.add(rca); db.flush()
+    plan = FixPlan(health_issue_id=issue.id, rca_result_id=rca.id, risk_level="L1", title="p", summary="s", status="approved",
+                   steps=[{"action": "restart", "command": "kubectl rollout restart deploy/web -n shop"}],
+                   rollback_plan={"steps": [{"command": "kubectl rollout undo deploy/web -n shop"}]})
+    db.add(plan); db.commit()
+    recorder = StepRecorder("executor", f"I{issue.id}", plan_id=plan.id)
+    look = lambda command: recorder._plan_ref("run_kubectl", {"cluster_name": "c", "command": command}, "write")
+    assert look("rollout restart deploy/web -n shop") == "step:1"            # the tool's own form
+    assert look("kubectl rollout restart deploy/web -n shop") == "step:1"    # as the plan writes it
+    assert look("rollout undo deploy/web -n shop") == "rollback:1"
+    assert look("delete pod web-1 -n shop") == "off"
+
+
+def test_what_the_model_said_is_scrubbed_before_it_is_cut(db):
+    """B-m9: cut at 300 first, a `scheme://user:password@host` the cut landed in lost its `@` — and the start of the
+    password stayed."""
+    speech = "x" * 262 + " postgres://app:hunter2-the-rest-of-a-long-password@db.internal:5432/shop was refused"
+    agent, _, _ = _agent([speech], [StepRecorder("rca", "I7")])
+    agent("go")
+    [said] = _rows(db)
+    assert "hunter2" not in said.summary and len(said.summary) <= 300
+
+
+def test_the_guards_own_sentence_is_not_recorded_as_the_models_words(db):
+    """A-I1: a model call the guard cancels becomes an assistant message carrying the guard's text. On the run's
+    record that is not «what the model said»."""
+    from agenticops.agents.run_guard import CLOSED, RunGuard
+    from agenticops.services.run_tickets import close_ticket, open_ticket
+    issue_id, plan_id = _plan(db)
+    ticket, _ = open_ticket(plan_id, executed_by="agent:auto-pipeline")
+    close_ticket(ticket, "aborted", "Cancelled by user:alice")
+    agent, model, ran = _agent([[("run_aws_cli", {"command": STEP_1})], "never"],
+                               [RunGuard(ticket), StepRecorder("executor", f"I{issue_id}", execution_id=ticket, plan_id=plan_id)])
+    result = agent("go")
+    assert CLOSED.split("(")[0] in str(result) and ran == []
+    assert [r.summary for r in _rows(db) if r.kind == "say"] == []
+
+
+# B-I6. `agent_steps` is the first place where a command's text and the start of its output are readable by EVERY
+# signed-in account — a read-only one too, whose own agent may not even run a host command. The display redaction
+# knows a few shapes (KEY=…, --password, Bearer, user:pass@ …), not a JSON env array, `requirepass`, `-p<password>`.
+# So a read-only account is not shown either.
+
+def _reader(read_only):
+    from agenticops.auth.actor import Actor
+    return Actor("user", "rita" if read_only else "wendy", 5, ("read",) if read_only else ("read", "write"),
+                 read_only=read_only)
+
+
+def test_a_read_only_account_is_not_shown_what_a_command_was_or_what_came_back(db, client):
+    from types import SimpleNamespace
+    from agenticops.web import deps
+    from agenticops.web.app import app
+    from agenticops.web.routers import ui as ui_router
+    recorder = StepRecorder("rca", "I7")
+    agent, _, _ = _agent([[("run_aws_cli", {"command": "grep -i redis /etc/app/app.env"}), ("describe_vpcs", {"region": "a"})],
+                          "The cache is refusing connections."], [recorder],
+                         fail={"grep -i redis /etc/app/app.env": "REDIS_URL=redis://:s3cr3t-value@cache:6379"})
+    agent("go")
+    app.dependency_overrides[ui_router.signed_in_user] = lambda: SimpleNamespace(id=5)
+    try:
+        app.dependency_overrides[deps.current_actor] = lambda: _reader(False)
+        full = client.get("/api/ui/activity/steps?item=I7&agent=rca").json()["steps"]
+        app.dependency_overrides[deps.current_actor] = lambda: _reader(True)
+        shown = client.get("/api/ui/activity/steps?item=I7&agent=rca").json()["steps"]
+    finally:
+        app.dependency_overrides.clear()
+    command, read, said = full
+    assert "grep -i redis" in command["summary"] and command["preview"] and not command.get("withheld")
+    r_command, r_read, r_said = shown
+    assert (r_command["summary"], r_command["preview"], r_command["withheld"]) == ("", None, True)   # the command and its output
+    assert r_read["summary"] == read["summary"] and r_read["preview"] is None and r_read["withheld"] is True   # a named read: its input, not its output
+    assert r_said["summary"] == said["summary"] and not r_said.get("withheld")                     # what the model said is on the diagnosis anyway
+    assert [(s["tool"], s["outcome"], s["started_at"]) for s in shown] == [(s["tool"], s["outcome"], s["started_at"]) for s in full]
+
+
+def test_a_run_is_asked_for_between_two_moments(db):
+    """B-m4: «the newest run that began before the stop» handed the rerun brief an OLDER run's steps when the run
+    that stopped had recorded none. The brief now also says when the stopped run began."""
+    from agenticops.services.agent_steps import run_steps
+    _step(db, "old", at=T0)
+    _step(db, "mid", at=T0 + timedelta(minutes=30))
+    _step(db, "new", at=T0 + timedelta(minutes=60))
+    between = lambda since, before: (run_steps("I7", "rca", since=T0 + timedelta(minutes=since), before=T0 + timedelta(minutes=before))["run"] or {}).get("key")
+    assert between(20, 40) == "mid"
+    assert between(20, 100) == "new"             # the newest inside the window
+    assert between(35, 55) is None               # none began in it: not the older one, not the newer one
+    assert between(-5, 10) == "old"
+
+
+def test_a_stopped_diagnosis_that_recorded_nothing_is_not_shown_an_older_runs_steps(db):
+    """B-m4, the reading side: «the newest run that began before the stop» is bounded from below by when that
+    diagnosis began (the issue's newest rca_started before the stop). A run that failed at its first model call
+    recorded nothing — the brief then says so instead of listing last week's run as «how far it got»."""
+    from agenticops.models import PipelineEvent
+    from agenticops.services.agent_steps import run_steps
+    _step(db, "last-week", at=T0)
+    stop = T0 + timedelta(minutes=65)
+    assert run_steps("I7", "rca", before=stop)["run"]["key"] == "last-week"      # nothing on the timeline: as before
+    db.add(PipelineEvent(health_issue_id=7, event_type="rca_started", stage="rca", status="started",
+                         created_at=(T0 + timedelta(minutes=50)).replace(tzinfo=None)))
+    db.commit()
+    assert run_steps("I7", "rca", before=stop)["run"] is None                    # the run that stopped began after it
+    _step(db, "the-one", at=T0 + timedelta(minutes=51))
+    assert run_steps("I7", "rca", before=stop)["run"]["key"] == "the-one"
+    assert run_steps("I7", "sre", before=stop)["run"] is None                    # another agent's runs: untouched

@@ -561,3 +561,20 @@ def test_the_plans_already_waiting_with_a_stale_hash_are_repaired_at_startup(db)
     assert (a.content_hash, a.plan_version) == ("0" * 64, 1) and a.approved_hash == before_approved   # not this repair's
     models_mod._repair_plan_hashes_2_9_0(models_mod.get_engine())                                    # again: nothing moves
     assert _fresh(FixPlan, waiting.id).plan_version == 2
+
+
+@pytest.mark.parametrize("status", ["executing", "executed", "failed"])
+def test_the_repair_never_restamps_a_plan_that_is_past_approval(db, client, status):
+    """Round-2 review (C-M1): the approve route refuses such a plan only at the status transition, after the hash
+    check — so a stale stored hash on a plan that has already run was restamped (and its version bumped) by an
+    approval that was refused anyway, and the pages that compare it with the approved hash then read «not what
+    was approved» for a finished run."""
+    plan = _fix_plan(db)
+    s = get_session()
+    s.query(FixPlan).filter_by(id=plan.id).update({"status": status, "content_hash": "0" * 64, "approved_hash": "0" * 64,
+                                                   "approved_version": 1})
+    s.commit(); s.close()
+    r = client.put(f"/api/fix-plans/{plan.id}/approve", json={"content_hash": "f" * 64})
+    assert r.status_code == 409
+    after = _fresh(FixPlan, plan.id)
+    assert (after.content_hash, after.plan_version, after.status) == ("0" * 64, 1, status)

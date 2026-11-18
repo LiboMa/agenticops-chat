@@ -402,11 +402,6 @@ def executor_agent(fix_plan_id: int) -> str:
         if opened:
             try:
                 from agenticops.services import run_tickets
-                state = run_tickets.ticket_state(opened) or {}
-                said = f"Executor ended without recording a result: {outcome[:300]}"
-                if state.get("stopped_by"):          # a person stopped it and the agent recorded nothing (N9)
-                    said = (f"Stopped by {state['stopped_by']}; the executor ended without recording a result — "
-                            f"no rollback is on record. {outcome[:200]}")
-                run_tickets.close_ticket(opened, "failed", said)
+                run_tickets.close_unrecorded(opened, outcome)   # says so when a person had stopped it (N9)
             except Exception:
                 logger.warning("post-run reconcile failed for Execution #%s", opened, exc_info=True)

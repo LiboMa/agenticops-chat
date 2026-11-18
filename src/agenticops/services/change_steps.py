@@ -147,6 +147,12 @@ def command_tier(command: str) -> str:
     if tier == "readonly" and (not as_written or len([line for line in text.splitlines() if line.strip()]) > 1
                                or _shell_would_split(text)):
         tier = "unknown"
+    # A value the database scrub removed (security/redaction: every text column is scrubbed when it is written):
+    # «… --access-key-id [REDACTED-SECRET] …» is what is stored, shown, hashed and handed to the executor, and it
+    # does not say which key. The code cannot read that as a command (round-2 review C-I1).
+    from agenticops.security.redaction import PLACEHOLDER
+    if tier in ("readonly", "write") and PLACEHOLDER in text:
+        tier = "unknown"
     return tier
 
 
@@ -202,10 +208,29 @@ def rollback_steps(rollback_plan) -> list:
     return out
 
 
+def exact_text(command: str) -> str:
+    """A command as it is compared word for word (the run guard's rollback allow-list): a backslash-continued line
+    joined, spaces and tabs collapsed, blank lines dropped — but a line break KEPT. Two lines are two commands, and
+    the same words on one line are another command: «systemctl stop app» / «systemctl start app-old», flattened,
+    stops units named `systemctl`, `start` and `app-old` (round-2 review A-M2)."""
+    text = _CONTINUED.sub(" ", command or "")
+    return "\n".join(" ".join(line.split()) for line in text.splitlines() if line.strip())
+
+
+def tool_command(tool_name: str, command: str) -> str:
+    """The command a tool call would run, as a plan writes it (exact_text). run_kubectl takes the subcommand
+    without the word («get pods -n web») where a plan writes «kubectl get pods -n web»: it is judged — its tier,
+    its place in the plan, whether it is the plan's rollback — as the command it is (round-2 review A-I2)."""
+    text = exact_text(command)
+    if tool_name == "run_kubectl" and text and not (text == "kubectl" or text.startswith("kubectl ")):
+        text = f"kubectl {text}"
+    return text
+
+
 def rollback_commands(rollback_plan) -> frozenset[str]:
-    """The commands of a plan's rollback steps, whitespace-collapsed — what a stopped run may still run
+    """The commands of a plan's rollback steps, each as exact_text — what a stopped run may still run
     (agents/run_guard, MVP-2.9.0 N9). Prose carries no command and adds nothing."""
-    return frozenset(c for c in (_command(s) for s in rollback_steps(rollback_plan)) if c)
+    return frozenset(c for c in (exact_text(_raw_command(s)) for s in rollback_steps(rollback_plan)) if c)
 
 
 # `<AMI_ID>`, `<team-name>`: one name between angle brackets, wherever it stands — inside a quoted argument too,
@@ -224,13 +249,27 @@ def rollback_outlook(rollback_plan) -> dict:
     The second condition is N14's: a sentence («Start instance and verify status checks») or a label before a
     command («Re-enable key: aws iam update-access-key …») is no command, though a shell would not split it — and a
     command the tools refuse outright cannot run; nor does a line that still holds a placeholder inside a quoted
-    argument (`--ip-permissions '…CidrIp=<OWNER_APPROVED_IP>/32…'`). The numbers measured on a copy of the local
-    database are in docs/MVP-2.9.0-RELEASE.md (N10, corrected at N14)."""
+    argument (`--ip-permissions '…CidrIp=<OWNER_APPROVED_IP>/32…'`). The round-2 review added two more: a line
+    whose value the database scrub removed, and an `aws` line holding a character the AWS CLI tools refuse wherever
+    it stands (_a_tool_can_run). The numbers measured on a copy of the local database are in
+    docs/MVP-2.9.0-RELEASE.md (N10, corrected at N14 and after the review)."""
     steps = rollback_steps(rollback_plan)
     commands = [c for c in (_command(s) for s in steps) if c]
-    return {"steps": len(steps), "commands": len(commands),
-            "as_written": sum(1 for c in commands if not _shell_would_split(c) and not _PLACEHOLDER.search(c)
-                              and command_tier(c) in ("readonly", "write"))}
+    return {"steps": len(steps), "commands": len(commands), "as_written": sum(1 for c in commands if _a_tool_can_run(c))}
+
+
+# What the AWS CLI tools refuse wherever it stands in the command — inside a quoted --query too
+# (tools/aws_cli_tool.run_aws_cli / run_aws_cli_readonly, providers/aws). tests/test_run_stop.py asks the tool.
+AWS_TOOLS_REFUSE = ("|", ";", "&&", "$(", "`", ">", "<")
+
+
+def _a_tool_can_run(command: str) -> bool:
+    """ONE command a tool can run exactly as it is written (rollback_outlook): a shell would not split it, it holds
+    no placeholder, the code recognises it as a command that may run (a line whose value was scrubbed is not one:
+    command_tier), and — for the AWS CLI — it holds none of the characters those tools refuse anywhere."""
+    if _shell_would_split(command) or _PLACEHOLDER.search(command) or command_tier(command) not in ("readonly", "write"):
+        return False
+    return not (command.split(None, 1)[0] == "aws" and any(token in command for token in AWS_TOOLS_REFUSE))
 
 
 def unclassified_commands(*step_lists) -> list[str]:

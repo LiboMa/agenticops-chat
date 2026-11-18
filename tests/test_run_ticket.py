@@ -322,3 +322,101 @@ def test_switching_the_executor_on_starts_its_queue(db, client, monkeypatch):
         assert client.patch("/api/settings", json={"executor_enabled": False}).status_code == 200
         start.assert_called_once()                                 # switching it off starts nothing
     monkeypatch.setattr(settings, "executor_enabled", True)
+
+
+# ── round-2 review ───────────────────────────────────────────────────────────────────────────────────
+
+def test_a_cancelled_run_names_who_cancelled_it_on_the_timeline(db, client):
+    """A-M7: the status move and the run's end were written as agent:executor «Cancelled by operator»; who it was
+    stood only in the audit log."""
+    from agenticops.services.run_tickets import open_ticket
+    issue_id, plan_id = _plan(db)
+    ticket, _ = open_ticket(plan_id, executed_by="agent:auto-pipeline")
+    r = client.post(f"/api/fix-executions/{ticket}/cancel")
+    assert r.status_code == 200, r.text
+    who = "web:anonymous"                                        # auth is off in this fixture: the session's actor
+    db.expire_all()
+    ended = db.query(PipelineEvent).filter_by(health_issue_id=issue_id, event_type="execution_completed").one()
+    moved = db.query(PipelineEvent).filter_by(health_issue_id=issue_id, event_type="status_changed").order_by(PipelineEvent.id.desc()).first()
+    assert ended.actor == who and moved.actor == who
+    assert f"Cancelled by {who}" in db.get(FixExecution, ticket).error_message
+
+
+def test_the_cancel_route_does_not_run_on_the_event_loop():
+    """It closes the record, fails the plan, moves the issue and writes the timeline: blocking writes (A-M7)."""
+    import inspect
+    from agenticops.web import app as app_mod
+    assert not inspect.iscoroutinefunction(app_mod.api_cancel_execution)
+
+
+# A-I3. The timer that times a run out, and the reconcile that closes one that recorded nothing, live in the process
+# that runs it. After a restart nothing ever closed the record: the issue stayed «executing», in nobody's queue,
+# no new run and no new plan could start. Since N8 every fix run has such a record, so every restart during a run
+# left one.
+
+def _running_since(db, minutes):
+    from datetime import datetime, timedelta, timezone
+    from agenticops.services.run_tickets import open_ticket
+    issue_id, plan_id = _plan(db)
+    ticket, _ = open_ticket(plan_id, executed_by="agent:auto-pipeline")
+    db.query(FixExecution).filter_by(id=ticket).update({"started_at": datetime.now(timezone.utc) - timedelta(minutes=minutes)})
+    db.commit()
+    return issue_id, plan_id, ticket
+
+
+def test_a_run_whose_process_is_gone_is_closed_at_startup(db, monkeypatch):
+    from agenticops.config import settings
+    from agenticops.services.run_tickets import close_orphans
+    monkeypatch.setattr(settings, "executor_total_timeout", 1800)
+    old_issue, old_plan, old = _running_since(db, 120)
+    young_issue, young_plan, young = _running_since(db, 1)
+    closed, timers = close_orphans()
+    try:
+        assert closed == [old]
+        db.expire_all()
+        row = db.get(FixExecution, old)
+        assert row.status == "failed" and "process that ran it ended" in row.error_message
+        assert _state(db, old_issue, old_plan)[:2] == ("failed", "root_cause_identified")     # back on somebody's list
+        assert [s for s, _d in _events(db, old_issue, "execution_completed")] == ["failed"]
+        # the young one may still be running in another process (the CLI): it gets the time it has left
+        assert db.get(FixExecution, young).status == "running"
+        [timer] = timers
+        assert 1800 - 60 < timer.interval <= 1800 + 120
+    finally:
+        for t in timers:
+            t.cancel()
+    timer.function(*timer.args, **timer.kwargs)                                             # … and is closed when that is up
+    db.expire_all()
+    assert db.get(FixExecution, young).status == "failed"
+    assert _state(db, young_issue, young_plan)[:2] == ("failed", "root_cause_identified")
+
+
+def test_a_run_that_ended_meanwhile_is_left_as_it_ended(db, monkeypatch):
+    from agenticops.config import settings
+    from agenticops.services.run_tickets import close_orphans, close_ticket
+    monkeypatch.setattr(settings, "executor_total_timeout", 1800)
+    issue_id, plan_id, ticket = _running_since(db, 1)
+    closed, timers = close_orphans()
+    for t in timers:
+        t.cancel()
+    close_ticket(ticket, "aborted", "Cancelled by user:alice")                              # it ends by itself first
+    timers[0].function(*timers[0].args, **timers[0].kwargs)
+    db.expire_all()
+    assert db.get(FixExecution, ticket).status == "aborted"
+
+
+def test_without_a_time_limit_nothing_is_closed_at_startup(db, monkeypatch):
+    """executor_total_timeout = 0 means a run may take as long as it takes: an old record proves nothing."""
+    from agenticops.config import settings
+    from agenticops.services.run_tickets import close_orphans
+    monkeypatch.setattr(settings, "executor_total_timeout", 0)
+    _i, _p, ticket = _running_since(db, 600)
+    assert close_orphans() == ([], [])
+    db.expire_all()
+    assert db.get(FixExecution, ticket).status == "running"
+
+
+def test_the_service_closes_orphaned_runs_when_it_starts():
+    import inspect
+    from agenticops.web import app as app_mod
+    assert "close_orphans" in inspect.getsource(app_mod.lifespan)
