@@ -5,16 +5,21 @@ import { useAccounts } from "@/hooks/useAccounts";
 import { useReadOnly } from "@/hooks/useBootstrap";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useAllWaiting } from "../hooks/useAllWaiting";
+import { useRecentEvents } from "../hooks/useRecentEvents";
 import { useNfT } from "../i18n";
 import { storyPath } from "../lib/story";
+import { jump, moments, playPlan } from "../lib/world/replay";
 import { NO_ASK, confirm, reconcile, scene, type Ask, type Drawn, type Mismatch, type View, type Waiting } from "../lib/world/scene";
 import { utcStamp } from "../lib/time";
 import { Message, StateBlock } from "../shell/StateBlock";
 import { useLensKeys, useShell } from "../shell/shellContext";
+import { Replay } from "./Replay";
 import { useWorld } from "./WorldData";
 import { Check, Happen, Legend, NodeCard, PathHint, Tools, healthKey } from "./WorldPanels";
 
 const NARROW = "(max-width: 760px)";
+/** «P»: at most this many moments of the day are shown, one every PLAY_STEP_MS — a busy day still ends in a minute */
+const PLAY_MAX = 60, PLAY_STEP_MS = 900;
 
 /** «全景»: every resource of the latest relation-graph build on one map. What to show is worked out once
  *  (lib/world/scene) from what the person asked for; the canvas draws that result and the panels read their numbers
@@ -66,8 +71,34 @@ export function WorldLens() {
   }, [setParams]);
   const refOf = (i: number | null) => (i === null || !g ? null : String(g.nodes[i].ref));
 
+  // back in time (N15): the map as of a moment of the last 24 hours. Which resources had an open issue and which
+  // were gone is of that moment; the relations, each issue's severity and anchor are today's — and the queue is
+  // today's, so the map is not tied to it while it shows the past.
+  const { asOf, setAsOf } = world;
+  const past = asOf !== null;
+  const recent = useRecentEvents(accountId);
+  const ms = useMemo(() => moments(recent.data?.events, now), [recent.data, now]);
+  const msNow = useRef(ms);
+  msNow.current = ms;
+  const [playing, setPlaying] = useState(false);
+  const goTo = useCallback((at: number | null) => { setPlaying(false); setAsOf(at); }, [setAsOf]);
+  useEffect(() => {
+    if (!playing) return;
+    const steps = playPlan(msNow.current, PLAY_MAX);     // the day as it stood when «P» was pressed
+    if (!steps.length) { setPlaying(false); return; }
+    let i = 0;
+    setAsOf(steps[0]);
+    const id = window.setInterval(() => {
+      i += 1;
+      if (i >= steps.length) { setPlaying(false); return; }
+      setAsOf(steps[i]);
+    }, PLAY_STEP_MS);
+    return () => window.clearInterval(id);
+  }, [playing, setAsOf]);
+  useEffect(() => () => setAsOf(null), [setAsOf]);        // leaving the lens: the backdrop of the other lenses is of now
+
   const waiting: Waiting[] | null = useMemo(
-    () => waitingQ.data?.items.map((it) => ({ id: it.id, ref: it.resource?.ref ?? null })) ?? null, [waitingQ.data]);
+    () => (past ? null : waitingQ.data?.items.map((it) => ({ id: it.id, ref: it.resource?.ref ?? null })) ?? null), [waitingQ.data, past]);
   // `healthRev`: health and «gone» were read again and changed on this same graph — the result is worked out again
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const sc = useMemo(() => (g ? scene(g, ask, waiting) : null), [g, ask, waiting, world.healthRev]);
@@ -174,8 +205,13 @@ export function WorldLens() {
   const here = location.pathname + location.search;
 
   useLensKeys({
-    onKey: (key) => {
+    onKey: (key, e) => {
       if (!ready) return false;
+      // by the key's place, not its character: with a Chinese input method «[» types «【»
+      if (key === "[" || e.code === "BracketLeft") { goTo(jump(ms, asOf, -1)); return true; }
+      if (key === "]" || e.code === "BracketRight") { goTo(jump(ms, asOf, 1)); return true; }
+      if (key === "p") { if (ms.length) setPlaying((v) => !v); return true; }
+      if (key === "0") { goTo(null); return true; }
       if (key === "f") { search.current?.focus(); search.current?.select(); return true; }
       if (key === "l") { togglePath(); return true; }
       if (key === "g") { toggleFocus(); return true; }
@@ -231,7 +267,9 @@ export function WorldLens() {
   const accountName = useCallback((id: number | null) =>
     (id === null ? t("world.noAccount") : accounts.data?.find((a) => a.id === id)?.name ?? g?.accounts.find((a) => a.id === id)?.name ?? `#${id}`), [accounts.data, g, t]);
   const selNode = ready && ask.sel !== null ? g!.nodes[ask.sel] : null;
-  const mine = selNode ? (waitingQ.data?.items ?? []).filter((it) => it.resource?.ref === selNode.ref) : [];
+  const mine = selNode && !past ? (waitingQ.data?.items ?? []).filter((it) => it.resource?.ref === selNode.ref) : [];
+  // what the panels say the health is OF: the moment the reading on the graph is of (not the one just asked for)
+  const shownPast = world.shownAsOf;
 
   return (
     <section ref={section} className="view" id="world" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => setTip(null)}>
@@ -250,18 +288,23 @@ export function WorldLens() {
                      ...("group" in change ? { grp: change.group ?? null } : {}), ...("onlyAbnormal" in change ? { abn: change.onlyAbnormal ? "1" : null } : {}) }); }}
                    onPick={(i) => pick(i)} onPath={() => togglePath()} onHome={() => cam?.home()} />
             <Check sc={sc!} view={view} bad={bad} off={off} perf={perf} buildId={g!.buildId} builtAt={world.builtAt} healthAt={world.healthAt}
-                   building={world.building} newerFailed={world.newerFailed} now={now} />
-            <Happen g={g!} sc={sc!} complete={waitingQ.data?.complete ?? true} readOnly={readOnly} onPick={(i) => pick(i)} onDecide={() => navigate("/app/new/decide")} />
+                   asOf={shownPast} building={world.building} newerFailed={world.newerFailed} now={now} />
+            <Happen g={g!} sc={sc!} complete={waitingQ.data?.complete ?? true} readOnly={readOnly} asOf={shownPast} now={now}
+                    onPick={(i) => pick(i)} onDecide={() => navigate("/app/new/decide")} />
           </div>
           {pathMode && <PathHint g={g!} ask={ask} sc={sc!} onExit={() => togglePath()} />}
+          {past && !pathMode && <p className="wpast" role="status">{t("replay.banner", { t: utcStamp(asOf, now) })}</p>}
           {selNode && !pathMode && (
-            <NodeCard key={selNode.id} g={g!} i={selNode.i} ask={ask} mine={mine} accountName={accountName} now={now} healthAt={world.healthAt}
+            <NodeCard key={selNode.id} g={g!} i={selNode.i} ask={ask} mine={mine} accountName={accountName} now={now} healthAt={world.healthAt} asOf={shownPast}
                       onPick={(i) => pick(i)} onClose={() => { patch({ sel: null, near: null }); cam?.home(); }} onFocus={toggleFocus}
                       onPathFrom={() => togglePath(selNode.i)}
                       onStory={(item) => navigate(storyPath(item), { state: { from: "world", back: here } })}
                       onDecide={(item) => navigate(`/app/new/decide/${item}`)} />
           )}
           <Legend t={t} view={view} />
+          <Replay asOf={asOf} busy={world.replayBusy} failed={world.replayFailed} events={recent.data?.events} cut={!!recent.data?.cut} moments={ms.length}
+                  playing={playing} now={now} onAt={goTo} onJump={(dir) => goTo(jump(ms, asOf, dir))}
+                  onPlay={() => { if (ms.length) setPlaying((v) => !v); }} onNow={() => goTo(null)} />
           {/* the index is of the graph the pointer was over: after a rebuild it may be past the end of the new one */}
           {tip && tip.i < g!.nodes.length && <div id="tip" style={{ left: tip.x + 14, top: tip.y + 12 }}>{g!.nodes[tip.i].name}　{g!.nodes[tip.i].type}　{t(healthKey(g!.nodes[tip.i]))}</div>}
         </>

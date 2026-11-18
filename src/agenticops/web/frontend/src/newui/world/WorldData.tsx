@@ -23,6 +23,13 @@ export interface WorldApi {
   builtAt: string | null;
   /** when health and «gone» were last read (API time string); null = not known */
   healthAt: string | null;
+  /** back in time (N15): the moment asked for (ms; null = now), the moment the health on the graph is of, whether
+   *  the asked moment's reading is still on its way or failed, and the switch. The relations stay the build's */
+  asOf: number | null;
+  shownAsOf: string | null;
+  replayBusy: boolean;
+  replayFailed: boolean;
+  setAsOf: (at: number | null) => void;
   /** goes up each time a reading changed some resource's health or «gone»: what depends on them is worked out again */
   healthRev: number;
   /** a newer build is running right now */
@@ -43,6 +50,7 @@ export interface WorldApi {
 }
 
 const Ctx = createContext<WorldApi>({ status: "loading", graph: null, layout: null, builtAt: null, healthAt: null, healthRev: 0, building: false,
+                                      asOf: null, shownAsOf: null, replayBusy: false, replayFailed: false, setAsOf: () => {},
                                       newerFailed: null, staleAt: null, sky: null, sky3: null, load3d: async () => false, retry: () => {}, want: () => {} });
 export const useWorld = () => useContext(Ctx);
 
@@ -73,15 +81,23 @@ export function WorldLayer({ children }: { children: ReactNode }) {
     return { graph, layout: layOut(graph) };
   }, [q.data, names]);
 
-  // health and «gone», read again on their own and put onto the same graph (no new layout, the camera stays)
-  const health = useQuery({ queryKey: [...HEALTH_QUERY_KEY], queryFn: () => apiFetch<GalaxyHealthRead>("/galaxy/health"),
-                            enabled: !!built, refetchInterval: HEALTH_POLL_MS, staleTime: 5_000 });
+  // health and «gone», read again on their own and put onto the same graph (no new layout, the camera stays).
+  // `asOf` (N15) = read them for a moment of the last 24 hours instead: one reading per moment, not polled — the
+  // past does not change; a decision still refreshes the reading of now (the key's prefix).
+  const [asOf, setAsOf] = useState<number | null>(null);
+  const health = useQuery({
+    queryKey: [...HEALTH_QUERY_KEY, asOf ?? "now"],
+    queryFn: () => apiFetch<GalaxyHealthRead>(`/galaxy/health${asOf !== null ? `?at=${encodeURIComponent(new Date(asOf).toISOString())}` : ""}`),
+    enabled: !!built, refetchInterval: asOf === null ? HEALTH_POLL_MS : false, staleTime: asOf === null ? 5_000 : 5 * 60_000, retry: asOf === null ? 3 : 1,
+  });
   const [healthRev, setHealthRev] = useState(0);
   const [healthAt, setHealthAt] = useState<string | null>(null);
+  const [shownAsOf, setShownAsOf] = useState<string | null>(null);
   useEffect(() => {
     if (!built) return;
     if (health.data && applyHealth(built.graph, health.data)) setHealthRev((r) => r + 1);
     setHealthAt(built.graph.healthAt);              // the graph's own reading when there is no newer one
+    setShownAsOf(built.graph.asOf);                 // …and the moment that reading is OF (null = now)
   }, [built, health.data]);
 
   useEffect(() => {
@@ -121,12 +137,17 @@ export function WorldLayer({ children }: { children: ReactNode }) {
     // build has a time (the status names the newest build, which may be one still running, or one that failed)
     builtAt: built?.graph.builtAt ?? (status.data?.build && status.data.build.id === q.data?.build_id ? status.data.build.finished_at : null),
     healthAt, healthRev,
+    asOf, shownAsOf, setAsOf,
+    // the map shows the reading before until the asked moment's arrives: say so, and say when it did not
+    replayBusy: asOf !== null && health.isFetching && !health.data,
+    replayFailed: asOf !== null && health.isError && !health.data,
     building: status.data?.build?.status === "running",
     newerFailed: status.data?.build && status.data.build.status === "failed" && q.data?.build_id != null && status.data.build.id !== q.data.build_id
       ? { id: status.data.build.id, at: status.data.build.finished_at } : null,
     staleAt: q.isError && q.data ? q.dataUpdatedAt : null,
     sky, sky3, load3d, retry, want,
-  }), [built, q.isError, q.data, q.dataUpdatedAt, status.data, healthAt, healthRev, sky, sky3, load3d, retry, want]);
+  }), [built, q.isError, q.data, q.dataUpdatedAt, status.data, healthAt, healthRev, asOf, shownAsOf, health.isFetching, health.isError, health.data,
+       sky, sky3, load3d, retry, want]);
 
   return (
     <Ctx.Provider value={api}>

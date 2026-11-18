@@ -707,6 +707,8 @@
   "activity.type.rca_completed": "RCA 完成",
   "activity.type.fix_plan_requested": "已请 agent 出修复方案",
   "activity.type.fix_plan_requested_after": "退回了方案 #{plan}，并请 agent 按意见重做",
+  "activity.type.fix_plan_created": "写出了修复方案",
+  "activity.type.fix_plan_updated": "重写了修复方案",
   "activity.type.rca_evidence_check": "证据核验",
   "activity.type.rca_critic": "评审员结论",
   "activity.type.rca_needs_review": "需人工复核：自动修复已暂停",

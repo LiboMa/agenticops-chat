@@ -117,3 +117,12 @@ describe("a plan request that followed sending a plan back (MVP-2.9.0 N14)", () 
     expect(out.map((e) => [e.labelParams.plan, e.count])).toEqual([["160", 1], ["167", 1]]);
   });
 });
+
+describe("a plan written by the agent has a sentence of its own (MVP-2.9.0 N15)", () => {
+  // the top bar's band says each event in the timeline's own words: «事件：fix_plan_created» is no sentence
+  it("names a plan that was written and one that was rewritten", () => {
+    const [made, redone] = toActivity([ev("fix_plan_created", { plan_id: 7, risk_level: "L2" }), ev("fix_plan_updated", { plan_id: 7, risk_level: "L1" }, { created_at: "2026-10-03T03:40:00" })]);
+    expect([made.labelKey, made.summary]).toEqual(["activity.type.fix_plan_created", "L2"]);
+    expect(redone.labelKey).toBe("activity.type.fix_plan_updated");
+  });
+});

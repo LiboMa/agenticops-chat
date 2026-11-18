@@ -427,6 +427,13 @@
 .nf .scrub .ticks i.signal{background:var(--red)} .nf .scrub .ticks i.agent{background:var(--mint)} .nf .scrub .ticks i.decision{background:var(--amber)} .nf .scrub .ticks i.change{background:var(--violet)}
 .nf .scrub .ticks i.cause{height:12px;top:-2px;width:3px}
 .nf .scrub input{width:100%;margin:2px 0 0;accent-color:var(--amber)}
+.nf .scrub .row .spacer{flex:1}
+.nf .scrub .row .wait{color:var(--faint)}
+.nf .scrub.past{border-color:var(--amber)}
+.nf .scrub p.built,.nf .scrub ul.built{margin:6px 0 0;padding:0;list-style:none}
+.nf .scrub ul.here{color:var(--dim)}
+.nf .scrub .built.err{color:var(--red)}
+.nf .pulse.off .lbl{color:var(--amber)}
 .nf .nodecard{position:absolute;right:16px;top:10px;width:300px;max-height:calc(100% - 130px);overflow:auto;padding:12px 14px;font-size:var(--fs-sm);border-radius:14px;animation:nf-slide var(--mo) ease-out}
 .nf .nodecard h3{margin:0 24px 2px 0;font-size:var(--fs-lg);overflow-wrap:anywhere}
 .nf .nodecard .sub{color:var(--dim)}
@@ -606,4 +613,5 @@
   .nf .dialog kbd{display:inline-flex}                             /* …except in the list that explains them */
   /* the brief's first row: «the story» and «later» are touched, not typed, here — a finger's width each */
   .nf .meta .story-link{min-height:44px;min-width:44px;justify-content:center}
+  .nf .scrub .chip-btn{min-height:40px}                            /* the replay's buttons are touched here, not typed */
 }

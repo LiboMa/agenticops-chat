@@ -19,6 +19,7 @@ import { WorldLayer } from "../world/WorldData";
 import { CommandBar } from "./CommandBar";
 import { Help } from "./Help";
 import { PendingToast } from "./PendingToast";
+import { Pulse } from "./Pulse";
 import { usePendingStore } from "./usePendingStore";
 import { ShellContext, type LensKeys, type ShellApi } from "./shellContext";
 
@@ -186,7 +187,7 @@ export function NewShell({ children }: { children: ReactNode }) {
               </button>
             ))}
           </div>
-          <div className="gap" />
+          <Pulse accountId={accountId} />
           <div className="who">
             {scope("scope")}
             <Link className="chip-btn wide" to="/app" title={t("shell.classic.hint")}>{t("shell.classic")}</Link>

@@ -1132,6 +1132,8 @@ export interface GalaxyHealthRead {
   health: Record<string, string>;
   absent: string[];
   at: string | null;
+  /** MVP-2.9.0 N15 — the reading is of this past moment (GET /api/galaxy/health?at=), not of now */
+  as_of?: string | null;
 }
 
 // ── Security review (MVP-2.5.0) ────────────────────────────────

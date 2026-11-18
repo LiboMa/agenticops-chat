@@ -132,6 +132,16 @@ describe("applyHealth — health and «gone» read again, on the same graph", ()
     expect(g.healthAt).toBe("2026-11-17T09:46:00Z");                                                            // … but it is as of now
   });
 
+  it("a reading of a past moment is marked as that, and a reading of now clears the mark (N15)", () => {
+    const g = indexGraph({ ...payload, health_at: "2026-11-17T09:00:00Z" });
+    expect(g.asOf).toBeNull();
+    const past = { build_id: 172, at: "2026-11-17T09:45:00Z", as_of: "2026-11-17T03:00:00Z", health: { "res:20": "warning" }, absent: [] };
+    expect(applyHealth(g, past)).toBe(true);
+    expect([g.asOf, g.healthAt]).toEqual(["2026-11-17T03:00:00Z", "2026-11-17T09:45:00Z"]);
+    applyHealth(g, { build_id: 172, at: "2026-11-17T09:46:00Z", health: {}, absent: [] });
+    expect(g.asOf).toBeNull();
+  });
+
   it("does nothing with a reading of another build", () => {
     const g = indexGraph({ ...payload, health_at: "2026-11-17T09:00:00Z" });
     expect(applyHealth(g, { build_id: 173, at: "2026-11-17T09:45:00Z", health: {}, absent: [] })).toBe(false);

@@ -9,6 +9,7 @@ SQL per neighborhood(): depth + 2 on a cache miss (published build, one per hop,
 """
 from __future__ import annotations
 
+import json
 import threading
 from collections import OrderedDict
 from contextlib import contextmanager
@@ -22,7 +23,7 @@ from agenticops.config import settings
 from agenticops.galaxy.builder import latest_published_id
 from agenticops.galaxy.models import ResourceRelation as RR
 from agenticops.graph.relations import step
-from agenticops.models import AlertEvent, CloudResource, HealthIssue, get_db_session
+from agenticops.models import AlertEvent, CloudResource, HealthIssue, PipelineEvent, get_db_session
 from agenticops.services.identity_resolver import account_pk
 from agenticops.services.signal_gate import OPEN_ISSUE_STATUSES
 
@@ -155,6 +156,45 @@ def health_overlay(session, refs: Optional[Iterable[int]] = None) -> dict[int, d
     grouped: dict[int, list] = {}
     for ref, iid, severity, observed, first, detected in session.execute(q):
         grouped.setdefault(ref, []).append((iid, severity, observed or first or detected))
+    return {ref: _fold_health(rows) for ref, rows in grouped.items()}
+
+
+def _status_before(detail) -> Optional[str]:
+    """The status a `status_changed` event moved the issue FROM (its detail is JSON, sometimes stored as text)."""
+    if isinstance(detail, str):
+        try:
+            detail = json.loads(detail)
+        except ValueError:
+            return None
+    frm = detail.get("from") if isinstance(detail, dict) else None
+    return frm if isinstance(frm, str) and frm else None
+
+
+def health_overlay_at(session, at: datetime) -> dict[int, dict]:
+    """`health_overlay` for a past moment (MVP-2.9.0 N15): {ref: {health, issue_ids, signal_at}} of the issues that
+    were OPEN at `at` (a naive-UTC or aware time).
+
+    No history of health is stored; this much can be worked out. An issue is on record from `detected_at`. Its
+    status at `at` is what its first status move AFTER `at` started from — every move is one `status_changed`
+    event carrying `from` (services/issue_state, the only writer) — and today's status when it has not moved
+    since. What cannot be worked out, and is today's here: the issue's severity and the resource it is anchored
+    to (both are overwritten in place). Two statements, whatever the number of issues."""
+    at = at.astimezone(timezone.utc).replace(tzinfo=None) if at.tzinfo else at
+    then: dict[int, Optional[str]] = {}
+    moves = (select(PipelineEvent.health_issue_id, PipelineEvent.detail)
+             .where(PipelineEvent.event_type == "status_changed", PipelineEvent.health_issue_id.isnot(None),
+                    PipelineEvent.created_at > at)
+             .order_by(PipelineEvent.created_at, PipelineEvent.id))
+    for iid, detail in session.execute(moves):
+        then.setdefault(iid, _status_before(detail))                 # the FIRST move after `at`: later ones say nothing of it
+    q = (select(HealthIssue.resource_ref, HealthIssue.id, HealthIssue.severity, HealthIssue.status, *_issue_seen())
+         .join(CloudResource, and_(CloudResource.id == HealthIssue.resource_ref,
+                                   CloudResource.account_id == HealthIssue.account_id))
+         .where(HealthIssue.detected_at <= at))
+    grouped: dict[int, list] = {}
+    for ref, iid, severity, status, observed, first, detected in session.execute(q):
+        if (then.get(iid) or status) in OPEN_ISSUE_STATUSES:         # a move that does not say where it started: today's status
+            grouped.setdefault(ref, []).append((iid, severity, observed or first or detected))
     return {ref: _fold_health(rows) for ref, rows in grouped.items()}
 
 

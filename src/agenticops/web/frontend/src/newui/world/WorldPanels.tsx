@@ -86,13 +86,15 @@ export function Tools({ g, ask, sc, search, pathMode, view, busy, turning, onVie
 /** «数据核对»: what the build holds, how every relation of it is shown, how old each part is — and whether the canvas
  *  holds exactly this result. `bad` = the numbers that differ; null = not checked yet. What the check proves is said on
  *  the card: the COUNTS the view reports for what it put on the canvas — not a colour, not a position. */
-export function Check({ sc, view, bad, off, perf, buildId, builtAt, healthAt, building, newerFailed, now }: {
+export function Check({ sc, view, bad, off, perf, buildId, builtAt, healthAt, asOf, building, newerFailed, now }: {
   sc: Scene; view: View; bad: Mismatch[] | null; perf: { fps: number; ms: number | null } | null;
   /** what the flat map left out because it is off the screen; null = the view leaves nothing out (3D) or not checked yet */
   off: Drawn | null;
   buildId: number | null; builtAt: string | null;
   /** when health and «gone» were last read; null = not known */
   healthAt: string | null;
+  /** back in time (N15): the past moment the health and «gone» on the map are OF; null = they are of now */
+  asOf: string | null;
   building: boolean;
   /** the newest build failed: the map is of an older one */
   newerFailed: { id: number; at: string | null } | null;
@@ -109,7 +111,7 @@ export function Check({ sc, view, bad, off, perf, buildId, builtAt, healthAt, bu
         {T.containExtra > 0 ? t("check.containExtra", { n: num(T.containExtra) }) : ""}
         {T.dropped > 0 ? t("check.dropped", { n: T.dropped }) : ""}</p>
       <p><Prov code />{builtAt ? t("check.fresh", { t: utcStamp(builtAt, now), id: buildId }) : t("check.fresh.unknown", { id: buildId })}
-        {healthAt ? t("check.health", { t: utcStamp(healthAt, now) }) : t("check.health.unknown")}
+        {asOf ? t("check.health.asOf", { t: utcStamp(asOf, now) }) : healthAt ? t("check.health", { t: utcStamp(healthAt, now) }) : t("check.health.unknown")}
         {building ? t("check.building") : ""}{newerFailed ? t("check.newerFailed", { id: newerFailed.id, t: newerFailed.at ? utcStamp(newerFailed.at, now) : "—" }) : ""}</p>
       {bad === null ? <p>{t("check.pending")}</p>
         : bad.length ? <p className="mis" role="alert">{t("check.bad")}{bad.map((m) => t("check.item", { what: t(`check.${m.what}`), want: num(m.want), got: num(m.got) })).join("；")}</p>
@@ -122,8 +124,11 @@ export function Check({ sc, view, bad, off, perf, buildId, builtAt, healthAt, bu
 const LIST_MAX = 8;
 
 /** How many resources are not normal now, which, and how the map relates to the queue. */
-export function Happen({ g, sc, complete, readOnly, onPick, onDecide }: {
+export function Happen({ g, sc, complete, readOnly, asOf, now, onPick, onDecide }: {
   g: WorldGraph; sc: Scene;
+  /** back in time (N15): the moment the numbers are of; null = now. The queue is today's: in the past it is not tied in */
+  asOf: string | null;
+  now: number;
   /** the whole queue was read; false = it was cut, the numbers are of what was read */
   complete: boolean;
   /** a read-only account is never handed a decision: there is no queue to tie the map to */
@@ -135,7 +140,7 @@ export function Happen({ g, sc, complete, readOnly, onPick, onDecide }: {
   const waiting = ties ? ties.ringed.length + ties.quiet.length + ties.offMap.length : 0;
   return (
     <div className="happen card">
-      <h2>{t("world.now")}</h2>
+      <h2>{asOf ? t("world.then", { t: utcStamp(asOf, now) }) : t("world.now")}</h2>
       <div className="abn num">{num(sc.abnormal.length)}<small>{t("world.abnormal")}</small></div>
       {sc.abnormal.length ? (
         <ul className="abnlist">
@@ -146,7 +151,8 @@ export function Happen({ g, sc, complete, readOnly, onPick, onDecide }: {
       ) : <p className="note">{t("world.noneAbnormal")}</p>}
       {sc.abnormal.length > LIST_MAX && <p className="note">{t("node.more", { n: num(sc.abnormal.length - LIST_MAX) })}</p>}
       {sc.goneOpen > 0 && <p className="note"><Prov code />{t("world.goneOpen", { n: sc.goneOpen })}</p>}
-      {readOnly ? <p className="note ties">{t("world.ties.readOnly")}</p>
+      {asOf ? <p className="note ties">{t("world.ties.past")}</p>
+        : readOnly ? <p className="note ties">{t("world.ties.readOnly")}</p>
         : ties && waiting === 0 ? <p className="note ties"><Prov code />{t("world.ties.none")}</p>
         : ties ? (
         <p className="note ties">
@@ -174,7 +180,7 @@ function useOpenIssues(ref: number) {
 }
 
 /** The open resource: what it is, how it is, what is open on it, what it is linked to and how. */
-export function NodeCard({ g, i, ask, mine, accountName, now, healthAt, onPick, onClose, onFocus, onPathFrom, onStory, onDecide }: {
+export function NodeCard({ g, i, ask, mine, accountName, now, healthAt, asOf, onPick, onClose, onFocus, onPathFrom, onStory, onDecide }: {
   g: WorldGraph; i: number; ask: Ask;
   /** the items waiting on this person that sit on this resource */
   mine: AttentionItem[];
@@ -182,6 +188,9 @@ export function NodeCard({ g, i, ask, mine, accountName, now, healthAt, onPick, 
   now: number;
   /** when health and «gone» were last read; null = not known */
   healthAt: string | null;
+  /** back in time (N15): the moment the health on this card is OF; null = now. The list of issues below it is
+   *  read as of now either way, and says so */
+  asOf: string | null;
   onPick: (i: number) => void; onClose: () => void; onFocus: () => void; onPathFrom: () => void;
   onStory: (item: string) => void; onDecide: (item: string) => void;
 }) {
@@ -199,7 +208,8 @@ export function NodeCard({ g, i, ask, mine, accountName, now, healthAt, onPick, 
       <div className="sub">{n.type}　·　{accountName(n.acct)}</div>
       <p><Prov code /><Dot node={n} /><b>{t(healthKey(n))}</b></p>
       {n.absent ? <p className="note"><Prov code />{t(n.health !== "unknown" ? "node.gone.open" : "node.gone")}</p>
-        : n.health === "unknown" ? <p className="note">{t("node.none")}</p> : null}
+        : n.health === "unknown" ? <p className="note">{t(asOf ? "node.none.then" : "node.none")}</p> : null}
+      {asOf && <p className="note"><Prov code />{t("node.issuesNow")}</p>}
       {issues.isPending ? <div className="skel" style={{ height: 18 }} />
         : issues.isError ? <p className="note err">{t("sec.failedLoad")}</p>
         : [[anchored, null] as const, [byId, "node.byId"] as const].map(([list, note]) => list.length > 0 && (
@@ -228,7 +238,7 @@ export function NodeCard({ g, i, ask, mine, accountName, now, healthAt, onPick, 
       </ul>
       {nb.length > NB_MAX && <p className="note">{t("node.more", { n: nb.length - NB_MAX })}</p>}
       {groups.length > 0 && <p className="note">{t("node.groups", { groups: groups.map((x) => `${x.type}: ${x.name}`).join("、") })}</p>}
-      <p className="note">{healthAt ? t("node.asOf", { t: utcStamp(healthAt, now) }) : t("node.asOf.unknown")}</p>
+      <p className="note">{asOf ? t("node.asOf.past", { t: utcStamp(asOf, now) }) : healthAt ? t("node.asOf", { t: utcStamp(healthAt, now) }) : t("node.asOf.unknown")}</p>
       <div className="acts">
         {mine.map((item) => (
           <button key={item.id} type="button" className="btn primary sm" onClick={() => onDecide(item.id)}><span className="t">{t("node.go")}　{item.ref}</span></button>

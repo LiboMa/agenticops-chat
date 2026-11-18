@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SWAP_GUARD_MS, TYPING_GRACE_MS, endsTyping, escapeStep, keyIntent, stillTyping, swapGuard, toastMs, type KeyContext, type KeyEventLike,
+  focusContext,
 } from "@/newui/lib/keys";
 
 const ev = (key: string, over: Partial<KeyEventLike> = {}): KeyEventLike => ({
@@ -129,3 +130,25 @@ describe("toastMs — a toast stays long enough to be read", () => {
   });
 });
 
+
+describe("focusContext — where the focus is decides whether a letter is typing (N15)", () => {
+  const el = (tagName: string, attrs: Record<string, string> = {}) =>
+    ({ tagName, isContentEditable: false, getAttribute: (k: string) => attrs[k] ?? null, ...attrs }) as unknown as Element;
+
+  it("a text box, a text area and a select take the keys", () => {
+    for (const e of [el("INPUT"), el("INPUT", { type: "text" }), el("INPUT", { type: "search" }), el("TEXTAREA"), el("SELECT")]) {
+      expect(focusContext(e).inField).toBe(true);
+    }
+  });
+
+  it("a slider does not: nothing can be typed into it, so the page's keys go on working after it was dragged", () => {
+    // found in the browser: after moving the map's time slider, «0» (back to now) did nothing until the focus left it
+    expect(focusContext(el("INPUT", { type: "range" }))).toEqual({ inField: false, onControl: false });
+  });
+
+  it("a button and a link keep Space and Enter", () => {
+    expect(focusContext(el("BUTTON")).onControl).toBe(true);
+    expect(focusContext(el("A")).onControl).toBe(true);
+    expect(focusContext(null)).toEqual({ inField: false, onControl: false });
+  });
+});

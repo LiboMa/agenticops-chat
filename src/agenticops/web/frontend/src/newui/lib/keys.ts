@@ -50,8 +50,11 @@ export function keyIntent(e: KeyEventLike, ctx: KeyContext): KeyIntent | null {
 export function focusContext(active: Element | null): Pick<KeyContext, "inField" | "onControl"> {
   const tag = active?.tagName ?? "";
   const editable = !!active && (active as HTMLElement).isContentEditable === true;
+  // a slider is an INPUT nothing can be typed into: after it was dragged the page's keys must go on working (N15:
+  // «0» did nothing until the focus left the map's time slider). Its own keys — the arrows — are not lens keys
+  const slider = tag === "INPUT" && active?.getAttribute?.("type") === "range";
   return {
-    inField: /^(INPUT|TEXTAREA|SELECT)$/.test(tag) || editable,
+    inField: (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) && !slider) || editable,
     onControl: /^(BUTTON|A|SUMMARY)$/.test(tag) || active?.getAttribute?.("role") === "button",
   };
 }

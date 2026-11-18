@@ -191,6 +191,16 @@ def api_ui_attention_unsnooze(item: str = Query(..., pattern=r"^[IC][1-9]\d{0,8}
     return Response(status_code=204)
 
 
+@router.get("/api/ui/events")
+def api_ui_events(hours: int = Query(24, ge=1, le=24), account_id: Optional[int] = Query(None, ge=1),
+                  _user=Depends(signed_in_user)) -> dict:
+    """What happened in the last `hours` (MVP-2.9.0 N15; services/ui_events): an issue found, an agent's start and
+    end, a person's decision, a change's course — each with its time and its work item. The top bar's band and the
+    map's replay read it. Plain def: DB work."""
+    from agenticops.services.ui_events import recent_events
+    return recent_events(hours=hours, account_id=account_id)
+
+
 @router.get("/api/ui/activity")
 def api_ui_activity(account_id: Optional[int] = Query(None, ge=1), actor: Actor = Depends(current_actor),
                     _user=Depends(signed_in_user)) -> dict:

@@ -67,6 +67,8 @@ export interface WorldGraph {
   builtAt: string | null;
   /** when health and «gone» were read — they are not the build's. Moves with every applyHealth */
   healthAt: string | null;
+  /** the past moment the health and «gone» on this graph are OF (N15: back in time); null = they are of now */
+  asOf: string | null;
   nodes: WNode[];
   edges: WEdge[];
   byId: Map<string, number>;
@@ -121,7 +123,7 @@ export function indexGraph(payload: GalaxyGraph, names?: ReadonlyMap<number, str
   const count = <K,>(keys: K[]) => keys.reduce((m, k) => m.set(k, (m.get(k) ?? 0) + 1), new Map<K, number>());
   const perAccount = count(nodes.map((n) => n.acct)), perGroup = count(nodes.flatMap((n) => n.groups));
   return {
-    buildId: payload.build_id, builtAt: payload.built_at ?? null, healthAt: payload.health_at ?? null, nodes, edges, byId, adj, totals,
+    buildId: payload.build_id, builtAt: payload.built_at ?? null, healthAt: payload.health_at ?? null, asOf: null, nodes, edges, byId, adj, totals,
     accounts: payload.nodes.filter((n) => n.kind === "account")
       .map((n) => ({ id: Number(n.id.slice(5)), name: n.name || n.id }))
       .map((a) => ({ id: a.id, name: names?.get(a.id) ?? a.name, count: perAccount.get(a.id) ?? 0 })).sort((a, b) => a.id - b.id),
@@ -147,6 +149,7 @@ export function applyHealth(g: WorldGraph, read: GalaxyHealthRead): boolean {
   g.totals.gone = g.nodes.filter((n) => n.absent).length;
   g.totals.present = g.nodes.length - g.totals.gone;
   g.healthAt = read.at ?? g.healthAt;
+  g.asOf = read.as_of ?? null;
   return changed;
 }
 
