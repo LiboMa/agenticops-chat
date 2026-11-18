@@ -329,6 +329,8 @@ class HealthIssueResponse(BaseModel):
     # MVP-2.8.0 S2: who the issue waits on (work_phases) and since when (services/attention.issue_waits)
     waiting_on: Optional[str] = None
     waiting_since: Optional[datetime] = None
+    # MVP-2.9.0 N11: its newest diagnosis ended without a result and no agent is on it — it waits on a person
+    rca_stopped: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

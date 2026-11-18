@@ -109,6 +109,8 @@ export interface HealthIssue {
   /** MVP-2.8.0 S2: who it waits on (work_phases) and since when — null when unknown */
   waiting_on?: string | null;
   waiting_since?: string | null;
+  /** MVP-2.9.0 N11: its newest diagnosis ended without a result and no agent is on it — it waits on a person */
+  rca_stopped?: boolean;
   available_actions?: UiAction[]; // the detail route only (MVP-2.7.0 S4): "note"
 }
 

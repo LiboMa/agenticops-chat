@@ -41,7 +41,9 @@ export function useAgentAsk(item: AttentionItem) {
   const rca = useTriggerRca(issueId);
   const plan = useTriggerPlan(issueId);
   const [error, setError] = useState<string | null>(null);
-  const busy = rca.isPending || plan.isPending || !!lane;
+  // an agent within its time limit keeps the item; one past it does not (N11) — asking again takes the item over,
+  // and the old run is recorded as abandoned
+  const busy = rca.isPending || plan.isPending || (!!lane && !lane.overdue);
   const ask = async (what: "rca" | "plan") => {
     if (busy) return;
     setError(null);

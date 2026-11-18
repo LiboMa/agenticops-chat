@@ -544,3 +544,140 @@ def test_a_run_a_person_stopped_comes_back_saying_so(db):
     s.commit(); s.close()
     row = _row(ALICE, f"I{issue_id}")
     assert (row["reason"], row["reason_detail"]) == ("execution_failed", "run_stopped")
+
+
+# ── a diagnosis that stopped waits on a person (MVP-2.9.0 N11) ───────────────
+
+def _rca_events(issue_id, *events):
+    """(event_type, status, minutes before NOW) rows on the issue's timeline."""
+    s = get_session()
+    try:
+        for event_type, status, ago in events:
+            s.add(PipelineEvent(health_issue_id=issue_id, event_type=event_type, stage="rca", status=status,
+                                created_at=NOW - timedelta(minutes=ago)))
+        s.commit()
+    finally:
+        s.close()
+
+
+@pytest.fixture
+def no_claims():
+    from agenticops.services import agent_runs
+    agent_runs.clear()
+    yield agent_runs
+    agent_runs.clear()
+
+
+def test_an_issue_whose_diagnosis_ended_without_a_result_waits_on_a_person(db, no_claims):
+    """Until N11 it «waited on the RCA agent» for good: nothing was on it, and it was in nobody's queue."""
+    stopped, _ = _issue("investigating", rca=None)
+    _rca_events(stopped, ("rca_started", "started", 50), ("rca_completed", "failed", 35))
+    row = _row(ALICE, f"I{stopped}")
+    assert (row["reason"], row["reason_detail"], row["waiting_on"]) == ("review_required", "rca_stopped", "you")
+    assert row["occurred_at"] == "2026-10-06T11:25:00Z"                         # it has waited since the diagnosis ended (35 min ago)
+    assert row["available_actions"][0]["action"] == "rerun_rca" and row["route"] == f"/app/issues/{stopped}#diagnose"
+    assert _row(READER, f"I{stopped}") is None                                  # a read-only account is not handed it
+
+
+def test_the_other_issues_waiting_for_a_diagnosis_stay_where_they_were(db, no_claims):
+    never, _ = _issue("open", rca=None)                                         # never diagnosed: not this rule's
+    under_way, _ = _issue("investigating", rca=None)
+    _rca_events(under_way, ("rca_completed", "failed", 40), ("rca_started", "started", 5))     # a newer one has started
+    open_stopped, _ = _issue("open", rca=None)
+    _rca_events(open_stopped, ("rca_completed", "failed", 20))
+    ack_stopped, _ = _issue("acknowledged", rca=None)
+    _rca_events(ack_stopped, ("rca_started", "started", 30), ("rca_completed", "failed", 15))
+    got = {i["id"] for i in _items(ALICE)}
+    assert got == {f"I{open_stopped}", f"I{ack_stopped}"}
+
+
+def test_an_agent_on_the_issue_means_it_is_not_waiting_on_a_person(db, no_claims):
+    iid, _ = _issue("investigating", rca=None)
+    _rca_events(iid, ("rca_started", "started", 50), ("rca_completed", "failed", 35))
+    run = no_claims.begin("rca", iid, "user:bob", now=NOW - timedelta(minutes=2))
+    assert _row(ALICE, f"I{iid}") is None                                       # somebody asked again: it is being diagnosed
+    no_claims.end(run)
+    assert _row(ALICE, f"I{iid}") is not None
+
+
+def test_a_claim_past_its_time_limit_does_not_hide_the_issue(db, no_claims, monkeypatch):
+    """The watchdog gave up and said so on the timeline; the thread may still be alive. The claim is kept (the live
+    page shows it as overdue) but the issue is handed to a person all the same."""
+    monkeypatch.setattr(db, "rca_timeout_seconds", 900)
+    iid, _ = _issue("investigating", rca=None)
+    _rca_events(iid, ("rca_started", "started", 40), ("rca_completed", "failed", 25))
+    no_claims.begin("rca", iid, no_claims.PIPELINE, now=NOW - timedelta(minutes=40))
+    assert _row(ALICE, f"I{iid}")["reason_detail"] == "rca_stopped"
+
+
+def test_the_stopped_rows_keep_the_queue_inside_its_query_bound(db, no_claims):
+    for _ in range(10):
+        iid, _ = _issue("investigating", rca=None)
+        _rca_events(iid, ("rca_started", "started", 50), ("rca_completed", "failed", 35))
+        _issue("open", rca=None)
+        _issue("fix_planned", plan="pending_approval")
+    import agenticops.models as models_mod
+    count = {"n": 0}
+    def on_exec(*_a, **_k):
+        count["n"] += 1
+    event.listen(models_mod.get_engine(), "before_cursor_execute", on_exec)
+    try:
+        page = att.attention_page(ALICE, now=NOW)
+    finally:
+        event.remove(models_mod.get_engine(), "before_cursor_execute", on_exec)
+    assert sum(1 for i in page["items"] if i["reason_detail"] == "rca_stopped") == 10
+    assert count["n"] <= 12, count
+
+
+def test_the_issue_as_the_api_shows_it_says_its_diagnosis_stopped(db, no_claims):
+    from agenticops.web import deps
+    from agenticops.web.app import app
+    stopped, _ = _issue("investigating", rca=None)
+    _rca_events(stopped, ("rca_started", "started", 50), ("rca_completed", "failed", 35))
+    running, _ = _issue("investigating", rca=None)
+    s = get_session()        # the route reads the real clock: a diagnosis that began a minute ago is under way
+    s.add(PipelineEvent(health_issue_id=running, event_type="rca_started", stage="rca", status="started",
+                        created_at=datetime.now(timezone.utc) - timedelta(minutes=1)))
+    s.commit(); s.close()
+    app.dependency_overrides[deps.current_actor] = lambda: ALICE
+    try:
+        c = TestClient(app)
+        one = c.get(f"/api/health-issues/{stopped}").json()
+        assert (one["rca_stopped"], one["waiting_on"]) == (True, "you")
+        other = c.get(f"/api/health-issues/{running}").json()
+        assert (other["rca_stopped"], other["waiting_on"]) == (False, "rca_agent")
+        rows = {r["id"]: r for r in c.get("/api/health-issues").json()["items"]}
+        assert rows[stopped]["rca_stopped"] is True and rows[running]["rca_stopped"] is False
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_a_diagnosis_that_started_and_never_ended_waits_on_a_person_once_its_limit_has_passed(db, no_claims, monkeypatch):
+    """A run that died with its process leaves a start and no end. Measured on a copy of the local database: one
+    issue had been «being diagnosed» for 79 days."""
+    monkeypatch.setattr(db, "rca_timeout_seconds", 900)
+    orphan, _ = _issue("investigating", rca=None)
+    _rca_events(orphan, ("rca_started", "started", 60 * 24 * 79))
+    young, _ = _issue("investigating", rca=None)
+    _rca_events(young, ("rca_started", "started", 10))                          # inside its limit: under way
+    assert {i["id"] for i in _items(ALICE)} == {f"I{orphan}"}
+    row = _row(ALICE, f"I{orphan}")
+    assert row["reason_detail"] == "rca_stopped"
+    assert row["occurred_at"] == (NOW - timedelta(minutes=60 * 24 * 79) + timedelta(seconds=900)).isoformat().replace("+00:00", "Z")
+
+
+def test_an_issue_reopened_after_its_diagnosis_is_not_a_stopped_diagnosis(db, no_claims):
+    reopened, _ = _issue("open", rca=0.9)
+    _rca_events(reopened, ("rca_started", "started", 60 * 24 * 40), ("rca_completed", "completed", 60 * 24 * 40 - 3))
+    s = get_session()
+    s.add(PipelineEvent(health_issue_id=reopened, event_type="status_changed", stage="issue", status="completed",
+                        created_at=NOW - timedelta(hours=3)))                    # dismissed … and opened again 3 h ago
+    s.commit(); s.close()
+    assert _row(ALICE, f"I{reopened}") is None
+    with_failure, _ = _issue("investigating", rca=None)
+    _rca_events(with_failure, ("rca_started", "started", 50), ("rca_completed", "failed", 35))
+    s = get_session()
+    s.add(PipelineEvent(health_issue_id=with_failure, event_type="status_changed", stage="issue", status="completed",
+                        created_at=NOW - timedelta(minutes=49)))                 # open → investigating as the diagnosis began
+    s.commit(); s.close()
+    assert _row(ALICE, f"I{with_failure}")["reason_detail"] == "rca_stopped"

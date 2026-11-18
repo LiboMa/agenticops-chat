@@ -19,6 +19,8 @@ describe("issueSpine — an issue's six steps: found, diagnosed, planned, approv
     expect(states(issueSpine("running", none))).toBe("done now todo todo todo todo");
     expect(states(issueSpine("needsReview", { ...none, rca: true }))).toBe("done now todo todo todo todo");
     expect(states(issueSpine("rcaRejected", { ...none, rca: true }))).toBe("done bad todo todo todo todo");
+    // N11: a diagnosis that ended without a result — the issue stands at «diagnose», and it went wrong there
+    expect(states(issueSpine("rcaStopped", none))).toBe("done bad todo todo todo todo");
   });
 
   it("stands at the plan when one is to be made, and marks a plan that was sent back", () => {

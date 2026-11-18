@@ -14,11 +14,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 
 from agenticops.config import settings
 from agenticops.models import (ChangeRequest, CloudResource, FixExecution, FixPlan, HealthIssue, PipelineEvent, RCAResult,
                                get_db_session)
+from agenticops.services import agent_runs
 from agenticops.services import ui_actions as ua
 from agenticops.services import work_phases as wp
 
@@ -28,6 +29,7 @@ _FIX_TERMINAL = ("executed", "failed", "rejected")
 
 # sub → (reason, reason_detail, hash anchor); awaitingApproval routes to the plan page instead
 ISSUE_ROWS = {
+    "rcaStopped": ("review_required", "rca_stopped", "diagnose"),
     "needsNewPlan": ("execution_failed", "run_failed", "plan"),
     "planRejected": ("review_required", "plan_rejected", "plan"),
     "needsReview": ("review_required", "rca_gate", "diagnose"),
@@ -116,10 +118,14 @@ class IssueWait:
     rca: Optional[RCAResult] = None
     events: list = field(default_factory=list)
     auto: bool = False
+    # when the issue's newest diagnosis ended without a result, with nothing started since (N11); None otherwise
+    rca_stopped_at: Optional[datetime] = None
 
 
-def _since(issue, sub, plan, run, rca, now) -> datetime:
-    if sub == "awaitingApproval" and plan is not None:
+def _since(issue, sub, plan, run, rca, now, stopped_at=None) -> datetime:
+    if sub == "rcaStopped" and stopped_at is not None:
+        ts = stopped_at
+    elif sub == "awaitingApproval" and plan is not None:
         ts = plan.updated_at or plan.created_at
     elif sub == "notQueued" and plan is not None:
         ts = plan.approved_at or plan.updated_at
@@ -155,6 +161,11 @@ def issue_waits(s, issues, *, now: datetime) -> dict[int, IssueWait]:
         PipelineEvent.health_issue_id.in_(approved),
         PipelineEvent.event_type.in_(("execution_started", "execution_completed"))).all(),
         "health_issue_id") if approved else {}
+    # An issue still waiting for a diagnosis: did its newest one end without a result (N11)? One query for all.
+    diagnosing = [i.id for i in issues if i.status in wp._DIAGNOSING]
+    rca_events_by = _group(s.query(PipelineEvent.health_issue_id, PipelineEvent.event_type, PipelineEvent.created_at).filter(
+        PipelineEvent.health_issue_id.in_(diagnosing),
+        PipelineEvent.event_type.in_(("rca_started", "rca_completed"))).all(), "health_issue_id") if diagnosing else {}
     out: dict[int, IssueWait] = {}
     for issue in issues:
         plans = plans_by.get(issue.id, [])
@@ -162,11 +173,16 @@ def issue_waits(s, issues, *, now: datetime) -> dict[int, IssueWait]:
         run, rca, events = runs.get(issue.id), rcas.get(issue.id), events_by.get(issue.id, [])
         auto = (plan is not None and plan.status == "approved" and wp.in_flight_auto_run(
             events, plan.id, timeout_seconds=settings.executor_total_timeout, now=now) is not None)
+        stopped_at = wp.rca_stopped_at(issue.status, rca_events_by.get(issue.id, ()), now=now,
+                                       limit_seconds=settings.rca_timeout_seconds, moved_at=moved.get(issue.id))
+        # an agent that is on the issue and within its time limit will move it: then it is not a person's turn
+        if stopped_at is not None and agent_runs.in_time(issue.id, now=now) is not None:
+            stopped_at = None
         phase = wp.issue_phase(issue.status, rca=rca, threshold=settings.rca_min_confidence_for_autofix,
                                plan=plan, latest_run=run, auto_run_in_flight=auto,
-                               auto_fix_enabled=bool(settings.auto_fix_enabled))
-        since = max(_since(issue, phase.sub, plan, run, rca, now), _aware(moved.get(issue.id)) or _EPOCH)
-        out[issue.id] = IssueWait(phase, since, plan, plans, run, rca, events, auto)
+                               auto_fix_enabled=bool(settings.auto_fix_enabled), rca_stopped=stopped_at is not None)
+        since = max(_since(issue, phase.sub, plan, run, rca, now, stopped_at), _aware(moved.get(issue.id)) or _EPOCH)
+        out[issue.id] = IssueWait(phase, since, plan, plans, run, rca, events, auto, stopped_at)
     return out
 
 
@@ -183,7 +199,12 @@ def _resources(s, issues) -> dict[int, CloudResource]:
 
 
 def _issue_items(s, actor, account_id, now) -> list[dict]:
-    q = s.query(HealthIssue).filter(HealthIssue.status.in_(ISSUE_STATUSES))
+    # the four statuses a person moves on — and an issue still waiting for a diagnosis on which one has been TRIED
+    # (N11; whether it stopped is decided below). Never-diagnosed `open` issues are not loaded: nothing ran on them.
+    tried = (s.query(PipelineEvent.id).filter(PipelineEvent.health_issue_id == HealthIssue.id,
+                                              PipelineEvent.event_type.in_(("rca_started", "rca_completed"))).exists())
+    q = s.query(HealthIssue).filter(or_(HealthIssue.status.in_(ISSUE_STATUSES),
+                                        and_(HealthIssue.status.in_(wp._DIAGNOSING), tried)))
     if account_id is not None:
         q = q.filter(HealthIssue.account_id == account_id)
     issues = q.all()

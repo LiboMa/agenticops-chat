@@ -6,7 +6,7 @@ the next plan was never told — so «send it back with a reason» could not cha
 """
 import json
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -219,8 +219,9 @@ def test_an_objection_to_a_plan_of_an_older_diagnosis_is_not_passed_on(client):
     assert "do not touch the bastion" in rejection_feedback(iid)
     s = get_session()
     try:
+        # newer than the first diagnosis whatever today's date is (a fixed date here failed the day it arrived)
         s.add(RCAResult(health_issue_id=iid, root_cause="another cause", confidence=0.8,
-                        created_at=datetime(2026, 11, 18, tzinfo=timezone.utc)))
+                        created_at=datetime.now(timezone.utc) + timedelta(hours=1)))
         s.commit()
     finally:
         s.close()

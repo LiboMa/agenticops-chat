@@ -17,7 +17,7 @@ import contextvars
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Iterator, Optional
+from typing import Any, Iterator, Optional
 
 
 @dataclass(frozen=True)
@@ -38,6 +38,9 @@ class RunContext:
     # Facts the code knows and the model does not (2.7.0 E2E observations 4 / 5): what its save tool records
     model_id: Optional[str] = None             # the model rca_agent built its agent with → RCAResult.model_id
     run_started_at: Optional[datetime] = None  # when executor_agent began this run → the run's measured duration_ms
+    # The claim this thread holds on an issue (services/agent_runs, MVP-2.9.0 N11): rca_agent / sre_agent use it as
+    # it is instead of claiming the issue a second time — and refuse when someone else's run is on the issue
+    agent_run: Optional[Any] = None
 
 
 _run_context_var: contextvars.ContextVar[RunContext] = contextvars.ContextVar(

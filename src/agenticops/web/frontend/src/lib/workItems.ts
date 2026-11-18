@@ -30,7 +30,7 @@ export function shortId(id: string): string {
 const PEOPLE = new Set(["you", "approver", "requester", "acceptor"]);
 
 export function issueRow(a: HealthIssue, search = ""): WorkItemRow {
-  const p = issuePhases({ status: a.status });
+  const p = issuePhases({ status: a.status, rcaStopped: a.rca_stopped === true });
   // MVP-2.8.0 S2: the server says who it waits on (work_phases with the plans, runs and RCA); an older server
   // without the field keeps the list-mode guess
   const waitingFor = a.waiting_on !== undefined ? a.waiting_on : p.waitingFor;

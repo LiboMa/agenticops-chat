@@ -60,6 +60,17 @@ def _run_auto_rca(health_issue_id: int, trace_id: Optional[str] = None) -> None:
         if not get_trace_id():
             set_trace_id(trace_id)
 
+    # One agent run per issue (MVP-2.9.0 N11): the automatic diagnosis claims its issue like a person's request
+    # does — the live page lists it, and a person asking meanwhile is told one is under way instead of starting a
+    # second. It stands back when a run is already on the issue: no «started» is written for a diagnosis that
+    # does not start.
+    from agenticops.services import agent_runs
+    claim = agent_runs.begin("rca", health_issue_id, agent_runs.PIPELINE)
+    if claim is None:
+        logger.info("Auto-RCA skipped for HealthIssue #%d: an agent run is already on it", health_issue_id)
+        return
+    agent_runs.log_replaced(claim, by=agent_runs.PIPELINE)
+
     from agenticops.config import get_agent_model_config
     rca_model_id, _ = get_agent_model_config("rca")
     # Record the effort actually given to the model — this is what makes the
@@ -77,7 +88,9 @@ def _run_auto_rca(health_issue_id: int, trace_id: Optional[str] = None) -> None:
     # thread never leaks it. Read by the tools rca_agent calls (audit attribution), not by log_event.
     from agenticops.config import get_trace_id
     from agenticops.run_context import RunContext, reset_run_context, set_run_context
-    _rc_token = set_run_context(RunContext(actor="agent:auto-pipeline", trace_id=get_trace_id(), agent_name="rca"))
+    _rc_token = set_run_context(RunContext(actor="agent:auto-pipeline", trace_id=get_trace_id(), agent_name="rca",
+                                           agent_run=claim))
+    worker = None
     try:
         from agenticops.agents.rca_agent import rca_agent
 
@@ -93,6 +106,10 @@ def _run_auto_rca(health_issue_id: int, trace_id: Optional[str] = None) -> None:
                     result_box.append(rca_agent(issue_id=health_issue_id))
                 except BaseException as e:  # propagate to the outer handler
                     error_box.append(e)
+                finally:
+                    # The claim goes when the agent's thread ends — not when the watchdog gives up on it: a
+                    # timed-out run cannot be killed and may still be working (the live page shows it as overdue).
+                    agent_runs.end(claim)
 
             # ContextVars do not cross threading.Thread: carry this thread's context (Run Context,
             # trace id) onto the watchdog thread so the agent's tools attribute correctly there too.
@@ -120,6 +137,8 @@ def _run_auto_rca(health_issue_id: int, trace_id: Optional[str] = None) -> None:
         log_event(health_issue_id, "rca_completed", "rca", "failed", trace_id=trace_id)
         logger.exception("Auto-RCA failed for HealthIssue #%d", health_issue_id)
     finally:
+        if worker is None or not worker.is_alive():
+            agent_runs.end(claim)
         reset_run_context(_rc_token)
 
 

@@ -19,6 +19,7 @@ const TABLE: Record<string, BriefKind> = {
   "issue|review_required|rca_gate": "confirm",
   "issue|review_required|rca_missing": "rerun",
   "issue|review_required|rca_rejected": "rerun",
+  "issue|review_required|rca_stopped": "rerun",          // its diagnosis ended without a result (N11): the same page, other words
   "issue|review_required|rca_confirmed": "generate",
   "issue|review_required|rca_ready": "generate",
   "issue|review_required|plan_rejected": "replan",

@@ -8,6 +8,7 @@
     {"kind": "issue", "reason": "review_required", "reason_detail": "rca_gate", "brief": "confirm"},
     {"kind": "issue", "reason": "review_required", "reason_detail": "rca_missing", "brief": "rerun"},
     {"kind": "issue", "reason": "review_required", "reason_detail": "rca_rejected", "brief": "rerun"},
+    {"kind": "issue", "reason": "review_required", "reason_detail": "rca_stopped", "brief": "rerun"},
     {"kind": "issue", "reason": "review_required", "reason_detail": "rca_confirmed", "brief": "generate"},
     {"kind": "issue", "reason": "review_required", "reason_detail": "rca_ready", "brief": "generate"},
     {"kind": "issue", "reason": "review_required", "reason_detail": "plan_rejected", "brief": "replan"},

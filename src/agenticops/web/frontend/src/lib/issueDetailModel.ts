@@ -34,7 +34,7 @@ const runText = (r: FixExecution | null) =>
 
 /** IssueDetail's view model: everything the status line and the phase cards say, i18n-free (keys + data). */
 export function issueDetailModel(input: {
-  issue: Pick<HealthIssue, "status">;
+  issue: Pick<HealthIssue, "status"> & Partial<Pick<HealthIssue, "rca_stopped">>;
   rca: RCAResult | null | undefined;
   threshold: number | null | undefined;
   plans: FixPlan[] | undefined;
@@ -58,6 +58,7 @@ export function issueDetailModel(input: {
   // undefined (still loading) keeps list mode — never a flash of "rerun RCA"; null means there is no RCA
   // likewise runs not known yet are undefined, loaded-and-none is null
   const known = issuePhases({ status: issue.status, rca, threshold, plan, autoRunInFlight: !!autoRun, autoFixEnabled: input.autoFixEnabled,
+                              rcaStopped: issue.rca_stopped === true,   // the server's answer (N11): its diagnosis ended without a result
                               latestRun: input.executions === undefined ? undefined : latestRun });
   const unknown = (failed: boolean | undefined): IssuePhaseResult =>
     ({ ...known, sub: failed ? "runsUnavailable" : "loadingRuns", waitingFor: null, primary: null });
@@ -87,6 +88,7 @@ export function issueDetailModel(input: {
       } else reason = { key: "workitem.reason.noRca" };
       break;
     case "rcaRejected": reason = { key: "workitem.reason.rcaRejected" }; break;
+    case "rcaStopped": reason = { key: "workitem.reason.rcaStopped" }; break;
     case "needsNewPlan": { const t = runText(latestRun); reason = t ? { text: t } : { key: "workitem.reason.runFailed" }; break; }
     case "planRejected": reason = plan?.rejection_reason ? { text: plan.rejection_reason } : { key: "workitem.reason.planRejected" }; break;
     case "notQueued": reason = { key: "workitem.reason.notQueued" }; break;
@@ -112,7 +114,7 @@ export function issueDetailModel(input: {
   ];
 
   const tone = phase.sub === "needsNewPlan" ? "bad"
-    : ["needsReview", "rcaRejected", "planRejected", "notQueued", "awaitingAcceptance", "awaitingApproval", "unverified", "reviewOrPlan",
+    : ["needsReview", "rcaRejected", "rcaStopped", "planRejected", "notQueued", "awaitingAcceptance", "awaitingApproval", "unverified", "reviewOrPlan",
        "runsUnavailable", "rcaUnavailable", "runStateUnavailable"].includes(phase.sub) ? "warn"
     : phase.sub === "passed" || phase.sub === "resolved" ? "ok" : "info";
 

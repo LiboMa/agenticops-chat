@@ -2216,6 +2216,7 @@ def _with_waits(session, issues, responses):
         w = waits.get(issue.id)
         if w is not None:
             resp.waiting_on, resp.waiting_since = w.phase.waiting_for, w.since
+            resp.rca_stopped = w.phase.sub == "rcaStopped"
     return responses
 
 
@@ -2493,7 +2494,7 @@ def _run_issue_agent(agent_name: str, issue_id: int, trace_id: Optional[str], on
     from agenticops.run_context import RunContext, reset_run_context, set_run_context
     _tid_token = set_trace_id(trace_id)
     _rc_token = set_run_context(RunContext(actor=f"agent:{agent_name}", on_behalf_of=on_behalf_of,
-                                           trace_id=trace_id, agent_name=agent_name))
+                                           trace_id=trace_id, agent_name=agent_name, agent_run=run))
     done_label, failed_label = _ISSUE_AGENT_LABELS[agent_name]
     try:
         result = _invoke_issue_agent(agent_name, issue_id)
@@ -2529,6 +2530,7 @@ def _start_issue_agent(agent_name: str, issue_id: int, trace_id: Optional[str], 
             "started_at": busy.started_at.isoformat().replace("+00:00", "Z") if busy else None,
             "requested_by": busy.requested_by if busy else None,
         })
+    agent_runs.log_replaced(run, by=actor.key)     # it took the issue over from a run past its limit: say so (N11)
     event, stage = _ISSUE_AGENT_EVENTS[agent_name][0]
     prefix = "rca-trigger" if agent_name == "rca" else "fixplan-trigger"
     try:

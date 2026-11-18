@@ -39,21 +39,65 @@ class TestRegistry:
         assert agent_runs.get(12, now=T0) is None
         assert agent_runs.begin("rca", 12, "user:alice", now=T0) is not None
 
-    def test_a_claim_older_than_the_watchdog_is_abandoned(self, monkeypatch):
+    def test_a_claim_past_the_watchdog_is_kept_but_no_longer_blocks(self, monkeypatch):
+        """MVP-2.9.0 N11: until then an overdue claim read as no claim, and a second agent started beside the first
+        without a word. Its thread may be alive, so it stays listed; the next request takes the issue over — on record."""
         from agenticops.config import settings
         monkeypatch.setattr(settings, "rca_timeout_seconds", 900)
         old = agent_runs.begin("rca", 12, "user:alice", now=T0)
-        assert agent_runs.get(12, now=T0 + timedelta(seconds=899)) is old
-        assert agent_runs.get(12, now=T0 + timedelta(seconds=900)) is None               # a hung call does not block for good
+        assert old.replaced is None
+        assert agent_runs.in_time(12, now=T0 + timedelta(seconds=899)) is old and not agent_runs.overdue(old, now=T0 + timedelta(seconds=899))
+        late = T0 + timedelta(seconds=900)
+        assert agent_runs.get(12, now=late) is old                                          # still claimed: its thread may be alive
+        assert agent_runs.overdue(old, now=late) and agent_runs.in_time(12, now=late) is None
         new = agent_runs.begin("rca", 12, "user:bob", now=T0 + timedelta(seconds=901))
-        assert new is not None
+        assert new is not None and new.replaced is old                                      # a hung call does not block for good
         agent_runs.end(old)                                                                 # the old thread ending late …
-        assert agent_runs.get(12, now=T0 + timedelta(seconds=902)) is new                  # … does not free the new claim
+        assert agent_runs.get(12) is new                                                    # … does not free the new claim
 
-    def test_running_lists_the_live_claims_oldest_first(self):
+    def test_running_lists_every_claim_oldest_first_an_overdue_one_too(self, monkeypatch):
+        from agenticops.config import settings
+        monkeypatch.setattr(settings, "rca_timeout_seconds", 900)
         a = agent_runs.begin("rca", 12, "user:alice", now=T0)
-        b = agent_runs.begin("sre", 7, "user:bob", now=T0 - timedelta(minutes=3))
+        b = agent_runs.begin("sre", 7, "user:bob", now=T0 - timedelta(hours=3))             # long past its limit
         assert agent_runs.running(now=T0 + timedelta(seconds=1)) == [b, a]
+
+
+class TestEnter:
+    """What rca_agent / sre_agent hold when they start (MVP-2.9.0 N11): a run started from a chat used to claim
+    nothing — the page said nobody was on the issue, and a person could start a second agent beside it."""
+
+    def _ctx(self, **kw):
+        from agenticops.run_context import RunContext, set_run_context
+        return set_run_context(RunContext(actor="user:carol", **kw))
+
+    def test_the_callers_own_claim_is_used_as_it_is(self):
+        from agenticops.run_context import reset_run_context
+        mine = agent_runs.begin("rca", 12, "user:alice", now=T0)
+        token = self._ctx(agent_run=mine)
+        try:
+            assert agent_runs.enter("rca", 12) == (mine, False)                             # not made here: not released here
+        finally:
+            reset_run_context(token)
+
+    def test_a_run_started_without_a_claim_makes_one(self):
+        from agenticops.run_context import reset_run_context
+        token = self._ctx()
+        try:
+            run, owned = agent_runs.enter("sre", 12)
+            assert owned and agent_runs.get(12) is run and (run.agent, run.requested_by) == ("sre", "user:carol")
+        finally:
+            reset_run_context(token)
+
+    def test_it_is_refused_while_another_run_is_on_the_issue(self):
+        from agenticops.run_context import reset_run_context
+        theirs = agent_runs.begin("rca", 12, "user:alice")
+        token = self._ctx()
+        try:
+            assert agent_runs.enter("rca", 12) == (None, False)
+            assert agent_runs.get(12) is theirs                                             # untouched
+        finally:
+            reset_run_context(token)
 
 
 @pytest.fixture
@@ -182,3 +226,125 @@ class TestStartFailure:
             with pytest.raises(RuntimeError):
                 client.post(f"/api/health-issues/{iid}/rca")
         assert agent_runs.get(iid) is None
+
+
+# ── MVP-2.9.0 N11: every way an agent starts on an issue claims it ───────────
+
+def test_taking_over_an_overdue_claim_is_said_on_the_timeline(client, monkeypatch):
+    from agenticops.config import settings
+    monkeypatch.setattr(settings, "rca_timeout_seconds", 900)
+    iid = _issue()
+    old = agent_runs.begin("rca", iid, agent_runs.PIPELINE, now=datetime.now(timezone.utc) - timedelta(minutes=40))
+    agent = _Agent(monkeypatch)
+    assert client.post(f"/api/health-issues/{iid}/rca").status_code == 202                 # not 409: the old one is overdue
+    assert agent.started.wait(10)
+    [gone] = [d for t, _s, _a, d in _events(iid) if t == "agent_run_abandoned"]
+    assert gone["agent"] == "rca" and gone["requested_by"] == agent_runs.PIPELINE and gone["started_at"].endswith("Z")
+    assert gone["replaced_by"].startswith(("web:", "user:"))
+    assert agent_runs.get(iid) is not old
+    agent.finish()
+
+
+def _agent_patches(module):
+    from unittest.mock import MagicMock, patch
+    return [patch(f"{module}.BedrockModel"),
+            patch("agenticops.config.get_agent_model_config", return_value=("m", 16384)),
+            patch("agenticops.config.get_bedrock_boto_session", return_value=MagicMock()),
+            patch("agenticops.services.agent_log_service.track_agent")]
+
+
+def test_a_diagnosis_started_from_a_chat_claims_the_issue_while_it_runs(client):
+    """rca_agent called as Main's tool: no route claimed the issue for it."""
+    from contextlib import ExitStack
+    from unittest.mock import patch
+    from agenticops.run_context import RunContext, reset_run_context, set_run_context
+    iid = _issue()
+    seen = {}
+
+    def invoke(agent, prompt, **kw):
+        held = agent_runs.get(iid)
+        seen["during"] = (held.agent, held.requested_by) if held else None
+        return "done"
+
+    ra = "agenticops.agents.rca_agent"
+    token = set_run_context(RunContext(actor="user:carol", agent_name="main"))
+    try:
+        with ExitStack() as stack:
+            for p in _agent_patches(ra):
+                stack.enter_context(p)
+            agent_cls = stack.enter_context(patch(f"{ra}.Agent"))
+            stack.enter_context(patch(f"{ra}.resolve_rca_effort", return_value=(0, None)))
+            stack.enter_context(patch("agenticops.agents.preamble.invoke_with_retry", side_effect=invoke))
+            stack.enter_context(patch("agenticops.services.rca_quality.run_post_rca_pipeline"))
+            agent_cls.return_value.messages = []
+            from agenticops.agents.rca_agent import rca_agent
+            assert rca_agent(issue_id=iid) == "done"
+    finally:
+        reset_run_context(token)
+    assert seen["during"] == ("rca", "user:carol")
+    assert agent_runs.get(iid) is None                                                      # released when it ended
+
+
+def test_an_agent_called_from_a_chat_is_refused_while_a_run_is_on_the_issue(client):
+    from unittest.mock import patch
+    from agenticops.agents.rca_agent import rca_agent
+    from agenticops.agents.sre_agent import sre_agent
+    iid = _issue()
+    theirs = agent_runs.begin("rca", iid, "user:alice")
+    with patch("agenticops.agents.rca_agent.Agent") as rca_cls, patch("agenticops.agents.sre_agent._create_sre_agent") as sre_new:
+        said = rca_agent(issue_id=iid)
+        also = sre_agent(issue_id=iid)
+    assert said.startswith("REJECTED") and "alice" in said and f"#{iid}" in said
+    assert also.startswith("REJECTED") and "alice" in also
+    rca_cls.assert_not_called(); sre_new.assert_not_called()                                # no model was built
+    assert agent_runs.get(iid) is theirs
+    assert _events(iid) == []                                                               # a refusal is not a failed run
+
+
+def test_the_automatic_diagnosis_claims_its_issue_and_stands_back_when_one_is_on_it(client, monkeypatch):
+    from unittest.mock import patch
+    from agenticops.config import settings
+    from agenticops.services import rca_service
+    monkeypatch.setattr(settings, "rca_timeout_seconds", 0)                                 # the direct path: no watchdog thread
+    iid = _issue(rca=False)
+    seen = {}
+
+    def fake_rca(issue_id):
+        held = agent_runs.get(issue_id)
+        seen["during"] = (held.agent, held.requested_by) if held else None
+        return "done"
+
+    with patch("agenticops.agents.rca_agent.rca_agent", side_effect=fake_rca) as rca:
+        rca_service._run_auto_rca(iid)
+        assert seen["during"] == ("rca", agent_runs.PIPELINE) and agent_runs.get(iid) is None
+        assert rca.call_count == 1
+        theirs = agent_runs.begin("rca", iid, "user:alice")                                 # a person asked in the meantime
+        rca_service._run_auto_rca(iid)
+        assert rca.call_count == 1                                                          # no second agent beside theirs
+        assert agent_runs.get(iid) is theirs
+    assert [t for t, _s, _a, _d in _events(iid)].count("rca_started") == 1                  # the skipped one left no «started»
+
+
+def test_a_timed_out_automatic_diagnosis_keeps_its_claim_while_its_thread_lives(client, monkeypatch):
+    """The watchdog gives up and says so; the agent's thread cannot be killed. Its claim goes when IT ends."""
+    from unittest.mock import patch
+    from agenticops.config import settings
+    from agenticops.services import rca_service
+    monkeypatch.setattr(settings, "rca_timeout_seconds", 0.2)
+    iid = _issue(rca=False)
+    release = threading.Event()
+
+    def slow_rca(issue_id):
+        assert release.wait(10)
+        return "late"
+
+    with patch("agenticops.agents.rca_agent.rca_agent", side_effect=slow_rca):
+        rca_service._run_auto_rca(iid)                                                      # returns at the timeout
+        assert ("rca_completed", "failed") in [(t, s) for t, s, _a, _d in _events(iid)]
+        held = agent_runs.get(iid)
+        assert held is not None and held.requested_by == agent_runs.PIPELINE               # still claimed: the thread is alive
+        release.set()
+        for t in threading.enumerate():
+            if t.name.startswith("auto-rca-run-"):
+                t.join(10)
+    assert agent_runs.get(iid) is None

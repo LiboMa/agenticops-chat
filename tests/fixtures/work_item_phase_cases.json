@@ -476,6 +476,69 @@
         "waitingFor": null,
         "primary": null
       }
+    },
+    {
+      "name": "investigating, its diagnosis ended without a result and nobody is on it (N11)",
+      "input": {
+        "status": "investigating",
+        "rcaStopped": true
+      },
+      "expect": {
+        "sub": "rcaStopped",
+        "waitingFor": "you",
+        "primary": "rerunRca"
+      }
+    },
+    {
+      "name": "open, its diagnosis ended without a result (N11)",
+      "input": {
+        "status": "open",
+        "rcaStopped": true
+      },
+      "expect": {
+        "sub": "rcaStopped",
+        "waitingFor": "you",
+        "primary": "rerunRca"
+      }
+    },
+    {
+      "name": "acknowledged, its diagnosis ended without a result (N11)",
+      "input": {
+        "status": "acknowledged",
+        "rcaStopped": true
+      },
+      "expect": {
+        "sub": "rcaStopped",
+        "waitingFor": "you",
+        "primary": "rerunRca"
+      }
+    },
+    {
+      "name": "investigating, a diagnosis is under way (N11: not stopped)",
+      "input": {
+        "status": "investigating",
+        "rcaStopped": false
+      },
+      "expect": {
+        "sub": "running",
+        "waitingFor": "rca_agent",
+        "primary": null
+      }
+    },
+    {
+      "name": "past diagnosis: a stopped diagnosis is not this status's question (N11)",
+      "input": {
+        "status": "fix_planned",
+        "plan": {
+          "status": "pending_approval"
+        },
+        "rcaStopped": true
+      },
+      "expect": {
+        "sub": "awaitingApproval",
+        "waitingFor": "approver",
+        "primary": "approveAndRun"
+      }
     }
   ],
   "change": [

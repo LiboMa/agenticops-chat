@@ -5,9 +5,11 @@ import { useAccounts } from "@/hooks/useAccounts";
 import { useReadOnly } from "@/hooks/useBootstrap";
 import { parseItem } from "@/lib/inbox";
 import type { AttentionItem } from "@/lib/attention";
+import { useActivity } from "../hooks/useActivity";
 import { useDecideQueue } from "../hooks/useDecideQueue";
 import { useMyItem } from "../hooks/useMyItem";
 import { useNfT } from "../i18n";
+import { agentOn } from "../lib/activity";
 import { briefKind, itemKind } from "../lib/briefKind";
 import { swapGuard } from "../lib/keys";
 import {
@@ -145,6 +147,9 @@ export function DecideLens() {
   // the item named by an address that is not on this list may still wait on the person — under another filter, or
   // in another account than the scope: ask the unfiltered, unscoped list before saying «not waiting on you»
   const elsewhere = useMyItem(link === "gone" ? itemParam : null);
+  // … or it is not waiting on anyone because an agent is on it (you just asked for a diagnosis; N11) — the server's
+  // own record, the one the rail beside the brief reads
+  const activity = useActivity(accountId);
 
   let key: string, body: React.ReactNode;
   if (view !== "ready") {
@@ -157,7 +162,9 @@ export function DecideLens() {
     const gone = parseItem(itemParam);
     const ref = gone ? `${gone.kind === "issue" ? "I" : "C"}#${gone.id}` : itemParam;
     const still = elsewhere.data ?? null;                         // it does wait on this person, just not in this list
-    key = `gone:${itemParam}:${still ? "elsewhere" : elsewhere.isPending ? "asking" : "gone"}`;
+    const lane = itemParam ? agentOn(activity.data, itemParam) : null;
+    const withAgent = lane && !lane.overdue ? lane : null;          // one past its time limit is not «an agent is on it»
+    key = `gone:${itemParam}:${still ? "elsewhere" : elsewhere.isPending ? "asking" : withAgent ? "agent" : "gone"}`;
     body = elsewhere.isPending ? <StateBlock kind="loading" /> : still ? (
       <Message big={t("gone.elsewhere.big", { ref })}>
         <p>{t(filter !== "all" ? "gone.elsewhere.filter" : "gone.elsewhere.scope")}</p>
@@ -167,6 +174,14 @@ export function DecideLens() {
             if (accountId !== null && still.account_id !== accountId) setAccountId(still.account_id ?? null);
             navigate(place(still.id, "all"));
           }}><span className="t">{t("gone.elsewhere.show")}</span></button>
+        </p>
+      </Message>
+    ) : withAgent ? (
+      <Message big={t("gone.agent.big", { ref })}>
+        <p>{t("gone.agent.p", { what: t(`lane.${withAgent.kind}`) })}</p>
+        <p className="row">
+          <button type="button" className="btn primary" onClick={() => navigate(`/app/new/live/${encodeURIComponent(withAgent.id)}`)}><span className="t">{t("gone.agent.live")}</span></button>
+          {items.length > 0 && <button type="button" className="btn" onClick={() => move(1)}><span className="t">{t("gone.next")}</span><kbd>J</kbd></button>}
         </p>
       </Message>
     ) : (

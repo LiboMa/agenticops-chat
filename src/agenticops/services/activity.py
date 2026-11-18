@@ -98,7 +98,8 @@ def activity(actor, *, account_id: Optional[int] = None, now: Optional[datetime]
         if issues:
             for e in s.query(PipelineEvent).filter(
                     PipelineEvent.health_issue_id.in_(list(issues)),
-                    PipelineEvent.event_type.in_(("rca_started", "rca_completed", "execution_started", "execution_completed"))):
+                    PipelineEvent.event_type.in_(("rca_started", "rca_completed", "execution_started", "execution_completed",
+                                                  "status_changed"))):
                 events.setdefault(e.health_issue_id, []).append(e)
         approved = [i for i in issues.values() if i.status == "fix_approved"]
         plans: dict[int, list] = {}
@@ -145,9 +146,10 @@ def activity(actor, *, account_id: Optional[int] = None, now: Optional[datetime]
                 continue
             taken.add(issue.id)
             auto = r.requested_by == agent_runs.PIPELINE          # nobody asked: the basis says who started it
+            # a claim past the watchdog is kept — its thread may be alive — and listed as overdue (N11)
             running.append(_lane(f"I{issue.id}:{_AGENT_KIND.get(r.agent, r.agent)}", _AGENT_KIND.get(r.agent, r.agent), r.agent,
                                  issue.title, now=now, basis="pipeline" if auto else "requested", item=f"I{issue.id}",
-                                 account_id=issue.account_id, since=r.started_at,
+                                 account_id=issue.account_id, since=r.started_at, limit=rca_limit,
                                  requested_by=None if auto else r.requested_by))
         for x in run_rows:             # a run row that is pending or running
             issue = mine(x.health_issue_id)
@@ -161,9 +163,12 @@ def activity(actor, *, account_id: Optional[int] = None, now: Optional[datetime]
             if issue.id in taken:
                 continue
             if issue.status == "investigating":
-                started, ended = _newest(events, issue.id, "rca_started"), _newest(events, issue.id, "rca_completed")
-                # the diagnosis ended and the status stayed (it left no result): nothing is at work — say it stopped
-                stopped = ended is not None and (started is None or ended >= started)
+                started = _newest(events, issue.id, "rca_started")
+                # the diagnosis ended and the status stayed (it left no result): nothing is at work — say it stopped.
+                # The one rule the queue uses too (work_phases.rca_stopped_at): such an issue now waits on a person.
+                ended = wp.rca_stopped_at(issue.status, events.get(issue.id, ()), now=now, limit_seconds=rca_limit,
+                                          moved_at=_newest(events, issue.id, "status_changed"))
+                stopped = ended is not None
                 lane = _lane(f"I{issue.id}:diagnosis", "diagnosis", "rca", issue.title, now=now,
                              basis="stopped" if stopped else "status", item=f"I{issue.id}", account_id=issue.account_id,
                              since=ended if stopped else started, limit=rca_limit)

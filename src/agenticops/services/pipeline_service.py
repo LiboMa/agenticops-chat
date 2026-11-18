@@ -115,7 +115,8 @@ def _run_auto_sre(health_issue_id: int, trace_id: Optional[str] = None, run=None
     _restore_trace_id(trace_id)
     from agenticops.config import get_trace_id
     from agenticops.run_context import RunContext, reset_run_context, set_run_context
-    _rc_token = set_run_context(RunContext(actor="agent:auto-pipeline", trace_id=get_trace_id(), agent_name="sre"))
+    _rc_token = set_run_context(RunContext(actor="agent:auto-pipeline", trace_id=get_trace_id(), agent_name="sre",
+                                           agent_run=run))
     try:
         from agenticops.agents.sre_agent import sre_agent
 

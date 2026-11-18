@@ -396,6 +396,13 @@ def rca_agent(issue_id: int) -> str:
     Returns:
         RCA summary with root cause, confidence, recommendations, and fix plan.
     """
+    # One agent run per issue (MVP-2.9.0 N11): a route's or the pipeline's thread arrives with its claim; a run
+    # started from a chat, the CLI or a schedule claims the issue here — and is refused, before any model is built,
+    # while another run is on it.
+    from agenticops.services import agent_runs
+    claim, claimed_here = agent_runs.enter("rca", issue_id)
+    if claim is None:
+        return agent_runs.refusal(issue_id)
     try:
         from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_bedrock_boto_session
         from agenticops.services.notification_service import batch_mode
@@ -521,3 +528,6 @@ def rca_agent(issue_id: int) -> str:
         from agenticops.services.pipeline_events import log_agent_failed
         log_agent_failed(issue_id, "rca", error=e)
         return f"RCA agent error: {e}"
+    finally:
+        if claimed_here:
+            agent_runs.end(claim)

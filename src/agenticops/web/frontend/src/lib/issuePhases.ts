@@ -7,7 +7,7 @@ export interface PhaseView<I extends string = string> { id: I; state: PhaseState
 export type WaitingFor = "rca_agent" | "you" | "sre_agent" | "approver" | "executor" | "requester" | "acceptor" | null;
 export type IssuePrimary = "reviewRca" | "rerunRca" | "generatePlan" | "approveAndRun" | "retryExecution"
   | "acceptResult" | "markResolved" | null;
-export type IssueSub = "running" | "needsReview" | "rcaRejected" | "reviewOrPlan" | "toGenerate" | "needsNewPlan" | "planRejected"
+export type IssueSub = "running" | "rcaStopped" | "needsReview" | "rcaRejected" | "reviewOrPlan" | "toGenerate" | "needsNewPlan" | "planRejected"
   | "awaitingApproval" | "notQueued" | "executing" | "awaitingAcceptance" | "passed" | "unverified" | "resolved" | "dismissed"
   | "loadingRuns" | "runsUnavailable" // detail page only (issueDetailModel): the runs are not known yet / failed to load
   | "rcaUnavailable"                   // detail page only: the RCA failed to load, so where the issue stands is not known
@@ -23,6 +23,9 @@ export interface IssuePhaseInput {
   latestRun?: Pick<FixExecution, "status" | "verification_status"> | null;
   autoRunInFlight?: boolean; // the approval's auto-run is under way: it has no run row until it ends (final review C1)
   autoFixEnabled?: boolean;  // settings.auto_fix_enabled; undefined = not known (treated as on). Off = nobody hands the RCA to the SRE agent
+  /** MVP-2.9.0 N11: the server's answer (HealthIssue.rca_stopped) — the newest diagnosis ended without a result and
+   *  no agent is on the issue. Nothing will move it by itself: it waits on a person. */
+  rcaStopped?: boolean;
 }
 
 export interface IssuePhaseResult {
@@ -58,6 +61,7 @@ export function issuePhases(i: IssuePhaseInput): IssuePhaseResult {
     case "open":
     case "investigating":
     case "acknowledged":
+      if (i.rcaStopped) return result("diagnose", "rcaStopped", "you", "rerunRca", ["diagnose"]);
       return result("diagnose", "running", "rca_agent", null);
     case "root_cause_identified": {
       if (run && (run.verification_status === "failed" || run.status === "failed" || run.status === "aborted"

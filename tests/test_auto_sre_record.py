@@ -40,11 +40,16 @@ class TestTake:
         agent_runs.end(sre)
         assert agent_runs.get(12, now=T0 + timedelta(seconds=94)) is None
 
-    def test_a_taken_claim_is_abandoned_after_the_watchdog_like_any_other(self, monkeypatch):
+    def test_a_taken_claim_is_overdue_after_the_watchdog_like_any_other(self, monkeypatch):
+        """MVP-2.9.0 N11: past its limit a claim is kept (its thread may be alive) but no longer keeps the issue to
+        itself — until then it simply read as no claim."""
         from agenticops.config import settings
         monkeypatch.setattr(settings, "rca_timeout_seconds", 900)
-        agent_runs.take("sre", 12, agent_runs.PIPELINE, now=T0)
-        assert agent_runs.get(12, now=T0 + timedelta(seconds=900)) is None
+        run = agent_runs.take("sre", 12, agent_runs.PIPELINE, now=T0)
+        late = T0 + timedelta(seconds=900)
+        assert agent_runs.get(12, now=late) is run and agent_runs.overdue(run, now=late)
+        assert agent_runs.in_time(12, now=late) is None
+        assert agent_runs.begin("sre", 12, "user:alice", now=late).replaced is run
 
 
 @pytest.fixture

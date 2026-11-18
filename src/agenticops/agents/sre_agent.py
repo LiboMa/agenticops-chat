@@ -397,6 +397,12 @@ def sre_agent(issue_id: int) -> str:
     Returns:
         Fix plan summary with risk level, steps, and rollback plan.
     """
+    # One agent run per issue (MVP-2.9.0 N11): see rca_agent — the caller's claim, or one made here; refused while
+    # another run is on the issue (a plan written beside a diagnosis in flight would be a plan for the old one).
+    from agenticops.services import agent_runs
+    claim, claimed_here = agent_runs.enter("sre", issue_id)
+    if claim is None:
+        return agent_runs.refusal(issue_id)
     try:
         # Resolve provider CLI tool from issue's account
         cli_tool = None
@@ -433,6 +439,9 @@ def sre_agent(issue_id: int) -> str:
         from agenticops.services.pipeline_events import log_agent_failed
         log_agent_failed(issue_id, "sre", error=e)
         return f"SRE agent error: {e}"
+    finally:
+        if claimed_here:
+            agent_runs.end(claim)
 
 
 _FEEDBACK_CLOSING = re.compile(r"</\s*(reviewer_feedback)", re.IGNORECASE)

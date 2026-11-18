@@ -76,11 +76,55 @@ def gate_passed(rca: Any, threshold: Any) -> Optional[bool]:
     return final >= threshold and _get(rca, "critic_verdict") != "refuted"
 
 
+_DIAGNOSING = ("open", "investigating", "acknowledged")
+
+
+def rca_stopped_at(status: str, events: Iterable, *, now: Optional[datetime] = None,
+                   limit_seconds: Optional[float] = None, moved_at: Optional[datetime] = None) -> Optional[datetime]:
+    """Since when the newest diagnosis of an issue that is still waiting for one is not going to produce anything
+    (MVP-2.9.0 N11), or None: none has been tried, one is under way, or the issue is past diagnosis.
+
+    Two ways a diagnosis stops without moving the issue. It ENDED — it failed, it timed out, or it ended and the
+    status stayed (a saved diagnosis moves the issue before its end is logged, so an end that left the issue here
+    left nothing to act on): the time is that end. Or it STARTED AND NEVER ENDED and its time limit passed — the run
+    died with its process, or hangs: the time is when it should have ended at the latest (`now` and `limit_seconds`
+    are needed to tell; without them only an end counts).
+
+    `moved_at` = the issue's last status move. One AFTER that time voids it: the issue has been somewhere else since
+    (diagnosed, planned, dismissed, reopened …) and stands here again for another reason than that old diagnosis.
+
+    `events` = the issue's timeline (rows or dicts; only rca_started / rca_completed are read). Whether an agent is on
+    the issue NOW is the caller's question (services/agent_runs): the timeline cannot answer it."""
+    if status not in _DIAGNOSING:
+        return None
+    started = ended = None
+    for e in events or ():
+        kind, at = _get(e, "event_type"), _ts(_get(e, "created_at"))
+        if at is None:
+            continue
+        if kind == "rca_started" and (started is None or at > started):
+            started = at
+        elif kind == "rca_completed" and (ended is None or at > ended):
+            ended = at
+    stopped = None
+    if ended is not None and (started is None or ended >= started):
+        stopped = ended
+    elif started is not None and now is not None and limit_seconds and limit_seconds > 0:
+        due = started + timedelta(seconds=limit_seconds)
+        if (now if now.tzinfo else now.replace(tzinfo=timezone.utc)) >= due:
+            stopped = due
+    moved = _ts(moved_at)
+    return None if stopped is not None and moved is not None and moved > stopped else stopped
+
+
 def issue_phase(status: str, *, rca: Any = UNKNOWN, threshold: Any = None, plan: Any = UNKNOWN,
                 latest_run: Any = UNKNOWN, auto_run_in_flight: bool = False,
-                auto_fix_enabled: Optional[bool] = None) -> Phase:
+                auto_fix_enabled: Optional[bool] = None, rca_stopped: bool = False) -> Phase:
     run = None if latest_run is UNKNOWN else latest_run
-    if status in ("open", "investigating", "acknowledged"):
+    if status in _DIAGNOSING:
+        # its diagnosis ended without a result and no agent is on it: nothing will move it — a person does (N11)
+        if rca_stopped:
+            return Phase("rcaStopped", "you", "rerunRca")
         return Phase("running", "rca_agent", None)
     if status == "root_cause_identified":
         if run is not None and (_get(run, "verification_status") == "failed"
