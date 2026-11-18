@@ -1061,3 +1061,17 @@ def test_the_api_takes_confirmed_checks_and_the_accept_route_is_plain_def(db, qu
         assert ok.status_code == 200, ok.text
     finally:
         webapp.app.dependency_overrides.clear()
+
+
+def test_a_stopped_change_run_whose_steps_had_run_needs_review_instead_of_completing(db, quiet):
+    """MVP-2.9.0 round-2 review (A-I4), the change side: a person asked the run to stop; the stop landed after
+    its last change, so nothing was refused and the checks pass. It is recorded as it happened — and a person
+    decides whether it stands; it does not complete by itself."""
+    from agenticops.services.run_tickets import request_stop
+    cr_id, plan_id, ex_id = _change(db)
+    assert request_stop(ex_id, by="user:alice")
+    _save_change(cr_id, plan_id, ex_id, post=[OK])
+    cr = _fresh(ChangeRequest, cr_id)
+    ex = _fresh(FixExecution, ex_id)
+    assert (ex.status, ex.verification_status) == ("succeeded", PENDING)
+    assert cr.status == "needs_review" and "stopped by user:alice" in (cr.needs_review_reason or "")
