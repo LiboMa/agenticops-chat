@@ -5,6 +5,8 @@ import { useItemRefresh } from "../hooks/useItemData";
 import { useNfT } from "../i18n";
 import { toneOf } from "../lib/queue";
 import { storyPath } from "../lib/story";
+import { utcHm } from "../lib/time";
+import type { Later } from "./briefs/briefContext";
 import { waitedText } from "./Queue";
 import { useAgentOn } from "./widgets/AgentAtWork";
 
@@ -20,11 +22,13 @@ interface Props {
   /** the action row; a read-only account gets a sentence instead */
   actions: ReactNode;
   readOnly: boolean;
+  /** «later» (N14): put this item off / take that back. Absent where there is no queue to move it in */
+  later?: Later;
   children: ReactNode;
 }
 
 /** One item's page: who it is, how long it has waited and where — then what is needed of you, the body, the actions. */
-export function BriefFrame({ item, index, total, accountName, now, ask, actions, readOnly, children }: Props) {
+export function BriefFrame({ item, index, total, accountName, now, ask, actions, readOnly, later, children }: Props) {
   const t = useNfT();
   const location = useLocation();
   useItemRefresh(item.id, useAgentOn(item.id));
@@ -42,8 +46,14 @@ export function BriefFrame({ item, index, total, accountName, now, ask, actions,
         <Link className="story-link" to={storyPath(item.id)} state={{ from: "decide", back: location.pathname + location.search }}>
           {t("act.story")}<kbd>↵</kbd>
         </Link>
+        {later && !readOnly && (
+          <button type="button" className="story-link" disabled={later.busy} aria-pressed={later.until !== null} onClick={later.toggle}>
+            {t(later.until ? "act.unsnooze" : "act.snooze")}<kbd>S</kbd>
+          </button>
+        )}
         <span className="pos">{t("pos", { i: index + 1, n: total })}</span>
       </div>
+      {later?.until && <p className="note later" role="status">{t("snoozed.until", { t: utcHm(later.until) })}</p>}
       <h1>{item.title}</h1>
       <p className="ask"><b>{t("ask.lead")}</b>{ask}</p>
       {children}

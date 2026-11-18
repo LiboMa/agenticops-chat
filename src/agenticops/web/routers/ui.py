@@ -148,18 +148,47 @@ def api_ui_attention(account_id: Optional[int] = Query(None, ge=1), limit: int =
                      q: Optional[str] = Query(None, max_length=200),
                      item: Optional[str] = Query(None, pattern=r"^[IC][1-9]\d{0,8}$"),
                      sort: str = Query("waiting_longest", pattern="^(waiting_longest|newest|severity|decision)$"),
-                     actor: Actor = Depends(current_actor), _user=Depends(signed_in_user)) -> dict:
+                     snoozed: Optional[str] = Query(None, pattern="^last$"),
+                     actor: Actor = Depends(current_actor), user=Depends(signed_in_user)) -> dict:
     """Work that waits on this actor (contract workspace-ui-1 AttentionPage, plus `ref` / `reason_detail` and the
     reasons review_required / execution_not_started). MVP-2.8.0 S2: `reason` (comma list) / `q` / `sort`, and each
     item's severity / risk level / resource / region / waiting_on, `counts` per reason. MVP-2.9.0: `item` (I12 / C3)
-    = that one work item, when it is on this actor's list. Plain def: DB work (S1)."""
+    = that one work item, when it is on this actor's list. N14: every item carries `snoozed_until` (this person's
+    «later», while it applies); `snoozed=last` puts those at the end of their group — only NewUI asks for it, so
+    the classic lists keep their order. Plain def: DB work (S1)."""
     from agenticops.services.attention import attention_page
     reasons = [r for r in (reason or "").split(",") if r] or None
     try:
         return attention_page(actor, account_id=account_id, reason=reasons, q=q, item=item, sort=sort, limit=limit,
-                              offset=int(cursor or 0))
+                              offset=int(cursor or 0), snooze_user_id=getattr(user, "id", None),
+                              snoozed_last=snoozed == "last")
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+class SnoozeBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    item: str = Field(..., pattern=r"^[IC][1-9]\d{0,8}$")
+
+
+@router.post("/api/ui/attention/snooze")
+def api_ui_attention_snooze(data: SnoozeBody, actor: Actor = Depends(current_actor), user=Depends(signed_in_user)):
+    """«Later» (MVP-2.9.0 N14): put one of MY waiting items at the end of its group for `attention_snooze_minutes`.
+    It changes nothing about the item, and nothing for anyone else. 409 `not_waiting` when the item is not on this
+    person's list. Plain def: DB work."""
+    from agenticops.services import attention_snooze
+    got = attention_snooze.snooze(user.id, actor, data.item)
+    if got is None:
+        return _ui_error(409, "not_waiting", f"{data.item} is not waiting on you; there is nothing to put off.")
+    return got
+
+
+@router.delete("/api/ui/attention/snooze", status_code=204)
+def api_ui_attention_unsnooze(item: str = Query(..., pattern=r"^[IC][1-9]\d{0,8}$"), user=Depends(signed_in_user)):
+    """Take my «later» back: the item returns to its place. 204 whether or not there was one."""
+    from agenticops.services import attention_snooze
+    attention_snooze.unsnooze(user.id, item)
+    return Response(status_code=204)
 
 
 @router.get("/api/ui/activity")

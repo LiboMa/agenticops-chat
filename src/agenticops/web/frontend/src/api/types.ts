@@ -227,6 +227,31 @@ export interface UiAction { action: string; allowed: boolean; reason_code: strin
 export interface FixPlanTarget { resource_id: string | null; resource_ref: number | null; anchor_status: string | null;
   resource_type: string | null; region: string | null }
 
+/** One list of a plan against the same list of the plan before it (MVP-2.9.0 N14; change_steps.plan_diff): by what
+ *  would run — a step's command, or for a step without one its words. Step numbers are 1-based, each in its own plan. */
+export interface PlanLineDiff {
+  added: { step: number; text: string }[];
+  removed: { previous_step: number; text: string }[];
+  modified: { previous_step: number; step: number; previous: string; now: string }[];
+  unchanged: number;
+}
+
+/** GET /api/fix-plans/{id}/previous-diff — `previous` is null for an issue's first plan (and for a change plan). */
+export interface PreviousPlanDiff {
+  plan_id: number;
+  previous: {
+    id: number; status: string; plan_version: number; risk_level: string | null; created_at: string | null;
+    rejected_by: string | null; rejected_at: string | null; rejection_reason: string | null;
+    /** a person wrote the reason about the plan — only then is it quoted under their name */
+    rejection_is_feedback: boolean;
+    same_diagnosis: boolean | null;
+  } | null;
+  /** the two content hashes are equal: redone word for word. null = one of them has no hash */
+  same_content: boolean | null;
+  steps: PlanLineDiff | null;
+  rollback: PlanLineDiff | null;
+}
+
 export interface FixPlan {
   id: number;
   plan_kind: PlanKind;

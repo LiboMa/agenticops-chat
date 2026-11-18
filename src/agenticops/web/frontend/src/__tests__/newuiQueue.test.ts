@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { groupOf } from "@/lib/inbox";
 import {
-  FILTERS, currentItem, deepLinkState, emptyKind, flattenPages, groupCounts, parseFilter, pruneHandled, reasonsParam, situation, step,
-  settle, toneOf, waitedParts, withoutHandled,
+  FILTERS, afterSnooze, currentItem, deepLinkState, emptyKind, flattenPages, groupCounts, parseFilter, pruneHandled, reasonsParam, situation,
+  snoozedUntil, step, settle, toneOf, waitedParts, withoutHandled,
 } from "@/newui/lib/queue";
 import type { AttentionItem } from "@/lib/attention";
 
@@ -208,3 +208,23 @@ describe("settle — the answer to a decision arrives, possibly after the person
   });
 });
 
+
+describe("snooze — «later» is the server's mark, and it ends by itself (N14)", () => {
+  const now = Date.parse("2026-11-18T10:00:00Z");
+
+  it("is on only while the server's time lies ahead", () => {
+    expect(snoozedUntil(item("I12", { snoozed_until: "2026-11-18T10:30:00Z" }), now)).toBe("2026-11-18T10:30:00Z");
+    expect(snoozedUntil(item("I12", { snoozed_until: "2026-11-18T10:00:00Z" }), now)).toBeNull();   // its time is up: the next refresh drops the mark
+    expect(snoozedUntil(item("I12", { snoozed_until: null }), now)).toBeNull();
+    expect(snoozedUntil(item("I12"), now)).toBeNull();                                               // an older server: no field
+    expect(snoozedUntil(item("I12", { snoozed_until: "nonsense" }), now)).toBeNull();
+  });
+
+  it("after snoozing, the page goes to the item that followed — and stays when there is none", () => {
+    const list = [item("I12"), item("I13"), item("I14")];
+    expect(afterSnooze(list, "I12")).toBe("I13");
+    expect(afterSnooze(list, "I14")).toBeNull();          // the last one: it is already at the end
+    expect(afterSnooze(list, "I99")).toBeNull();
+    expect(afterSnooze([], "I12")).toBeNull();
+  });
+});

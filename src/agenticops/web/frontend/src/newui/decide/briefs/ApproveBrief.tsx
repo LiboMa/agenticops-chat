@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { ApiError } from "@/api/client";
-import { useApproveFixPlan, useFixPlan, useRejectFixPlan } from "@/hooks/useFixPlans";
+import { useApproveFixPlan, useFixPlan } from "@/hooks/useFixPlans";
 import { findAction } from "@/lib/approval";
 import { parseItem } from "@/lib/inbox";
+import { useRequestChanges } from "../../hooks/usePlanReview";
 import { useNfT } from "../../i18n";
 import { approveState, approvedToastKey } from "../../lib/briefs/plan";
 import type { HoldTarget } from "../../lib/hold";
@@ -15,6 +16,7 @@ import { CauseSection, useCause } from "../widgets/CauseSection";
 import { HoldButton } from "../widgets/HoldButton";
 import { ImpactSection } from "../widgets/ImpactSection";
 import { ChecksSection, PlanSection } from "../widgets/PlanSection";
+import { PrevDiffSection } from "../widgets/PrevDiffSection";
 import { ReasonForm } from "../widgets/ReasonForm";
 import { useHold } from "../widgets/useHold";
 import { errorText, useBriefKeys, useDecide, useDecision, type BriefProps } from "./briefContext";
@@ -34,8 +36,14 @@ export const approveError = (e: unknown, t: (k: string, v?: Record<string, strin
  *  the executor being switched on. */
 export const PLAN_REFRESH_MS = 15_000;
 
+/** A request for changes that was refused, in words: an agent already on the issue means the plan was NOT sent back. */
+export const changesError = (e: unknown, t: (k: string, v?: Record<string, string>) => string): string =>
+  e instanceof ApiError && e.code === "agent_run_in_flight" ? t("err.changesBusy") : approveError(e, t);
+
 /** A fix plan that waits for approval. Approving is bound to the content hash that was on the page; with the executor
- *  on it runs at once — so the key must be held, and the hold approves only the plan it began on. */
+ *  on it runs at once — so the key must be held, and the hold approves only the plan it began on. «R» asks for
+ *  changes (N14): the plan is sent back with the reason and the plan agent redoes it — one request, both or neither;
+ *  when the new plan comes back, the brief says what it changed (PrevDiffSection). */
 export function ApproveBrief({ item, frame }: BriefProps) {
   const t = useNfT();
   const { openPeek } = useDecide();
@@ -44,14 +52,14 @@ export function ApproveBrief({ item, frame }: BriefProps) {
   const planQ = useFixPlan(item.entity.entity_id, PLAN_REFRESH_MS);
   const source = useCause(issueId);
   const approve = useApproveFixPlan();
-  const reject = useRejectFixPlan();
-  const [form, setForm] = useState<null | "reject" | "close">(null);
+  const changes = useRequestChanges();
+  const [form, setForm] = useState<null | "changes" | "close">(null);
   const [error, setError] = useState<string | null>(null);
 
   const plan = planQ.data;
   const state = plan ? approveState(plan) : null;
   const basis = plan ? planBasis(plan, source.rca) : "unknown";     // an approver should know a plan was not written from the diagnosis above it
-  const canReject = !!plan && !!findAction(plan.available_actions, "reject")?.allowed;
+  const canChange = !!plan && !!findAction(plan.available_actions, "request_changes")?.allowed;
   const target: HoldTarget | null = plan && state?.can && plan.content_hash && !frame.readOnly && !form && !approve.isPending
     ? { itemId: item.id, planId: plan.id, hash: plan.content_hash } : null;
 
@@ -71,7 +79,7 @@ export function ApproveBrief({ item, frame }: BriefProps) {
       hold.cancel();                                      // any other key lets go of a hold
       if (key === " " && source.cause?.evidence.length) { openPeek(source.cause.evidence, 0); return true; }
       if (frame.readOnly) return false;
-      if (key === "r" && canReject) { setError(null); setForm("reject"); return true; }
+      if (key === "r" && canChange) { setError(null); setForm("changes"); return true; }
       if (key === "d") { setError(null); setForm("close"); return true; }
       return false;
     },
@@ -82,18 +90,19 @@ export function ApproveBrief({ item, frame }: BriefProps) {
   const ask = !state ? t("ask.approve.loading") : !state.can ? t("ask.approve.cannot", { why: refusal(state.why, t) })
     : t(`ask.approve.${state.effect}`);
 
-  const actions = form === "reject" && plan ? (
-    <ReasonForm label={t("reject.label")} placeholder={t("reject.placeholder")} note={t("reject.note")} submit={t("act.reject")}
-                busy={reject.isPending} error={error} onCancel={() => setForm(null)}
+  const actions = form === "changes" && plan ? (
+    <ReasonForm label={t("changes.label")} placeholder={t("changes.placeholder")} note={t("changes.note")} submit={t("act.changes")}
+                busy={changes.isPending} error={error} onCancel={() => setForm(null)}
                 onSubmit={async (reason) => {
                   setError(null);
-                  setError(await decide(() => reject.mutateAsync({ id: plan.id, reason }), t("toast.rejected", { ref: item.ref }), undefined, t("pend.reject")));
+                  setError(await decide(() => changes.mutateAsync({ id: plan.id, reason }), t("toast.changesAsked", { ref: item.ref }),
+                                        (e) => changesError(e, t), t("pend.changes")));
                 }} />
   ) : form === "close" ? <DismissForm item={item} onCancel={() => setForm(null)} /> : (
     <>
       <HoldButton label={t(state?.effect === "run" ? "act.approve" : "act.approveOnly")} disabled={!target} holding={hold.holding} hint={hold.hint}
                   onDown={hold.down} onUp={hold.up} onCancel={hold.cancel} />
-      {canReject && <button type="button" className="btn" onClick={() => { setError(null); setForm("reject"); }}><span className="t">{t("act.reject")}</span><kbd>R</kbd></button>}
+      {canChange && <button type="button" className="btn" onClick={() => { setError(null); setForm("changes"); }}><span className="t">{t("act.changes")}</span><kbd>R</kbd></button>}
       <span className="spacer" />
       <button type="button" className="btn quiet" onClick={() => { setError(null); setForm("close"); }}><span className="t">{t("act.close")}</span><kbd>D</kbd></button>
       {state?.shadow && <p className="note wide">{t("approve.shadow")}</p>}
@@ -104,6 +113,7 @@ export function ApproveBrief({ item, frame }: BriefProps) {
   return (
     <BriefFrame item={item} {...frame} ask={ask} actions={actions}>
       <CauseSection heading={t("sec.why")} source={source} />
+      {plan && <PrevDiffSection plan={plan} now={frame.now} />}
       {planQ.isPending ? <div className="sec"><h2>{t("sec.plan")}</h2><StateBlock kind="loading" /></div>
         : planQ.isError || !plan ? <div className="sec"><h2>{t("sec.plan")}</h2><StateBlock kind="failed" failKey="sec.failedLoad" onRetry={() => void planQ.refetch()} /></div>
         : (

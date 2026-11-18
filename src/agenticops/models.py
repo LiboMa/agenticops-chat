@@ -839,6 +839,23 @@ class PipelineEvent(Base):
 # ============================================================================
 
 
+class AttentionSnooze(Base):
+    """«Later» (MVP-2.9.0 N14): one person put one of their waiting items at the end of its group until `until`.
+    It says nothing about the item itself — it still waits on them and still counts. `situation` is what the item
+    waited for when it was snoozed (services/attention_snooze.situation): once it waits for something else, the
+    snooze no longer applies. One row per person and item."""
+
+    __tablename__ = "attention_snoozes"
+    __table_args__ = (UniqueConstraint("user_id", "item", name="uq_attention_snooze_user_item"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(index=True)                     # users.id — whose list it is
+    item: Mapped[str] = mapped_column(String(16))                        # "I12" | "C3"
+    situation: Mapped[str] = mapped_column(String(255))
+    until: Mapped[datetime] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class AgentStep(Base):
     """One step of an rca / sre / executor run as the code saw it (agents/step_recorder): a tool call — when it
     started, when it ended and how —, a line the model said between calls, or a note a person sent the run (N12).

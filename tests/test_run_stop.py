@@ -293,6 +293,21 @@ def test_the_run_as_the_api_shows_it_carries_the_stop(db, client):
     ({"steps": [{"command": f"{ROLLBACK} && {STEP_2}"}, {"command": "aws ec2 deregister-image --image-id <AMI_ID>"},
                 {"command": ROLLBACK}]}, {"steps": 3, "commands": 3, "as_written": 1}),
     ('{"steps": [{"command": "aws ec2 start-instances --instance-ids i-1"}]}', {"steps": 1, "commands": 1, "as_written": 1}),   # a legacy JSON string
+    # A sentence is not a command even when a shell would not split it, and neither is a label before a command.
+    # Measured on the copy database (N14): 80 of the 116 lines the first rule called «runnable as written» were one
+    # of these — the page promised a rollback for ~50 plans whose rollback is sentences.
+    ({"steps": ["Start instance and verify status checks",
+                "Re-enable key: aws iam update-access-key --user-name app --access-key-id AKIAEXAMPLE --status Active",
+                {"command": "Restore the previous security group rules"}, {"command": ROLLBACK}, "systemctl restart nginx"]},
+     {"steps": 5, "commands": 5, "as_written": 2}),
+    # … and a command the tools refuse outright cannot run, however it is written
+    ({"steps": [{"command": "kubectl delete namespace kube-system"}, {"command": ROLLBACK}]}, {"steps": 2, "commands": 2, "as_written": 1}),
+    # a placeholder inside a quoted argument is still a placeholder (a shell would not split the line, and the
+    # command would run — with «<OWNER_APPROVED_IP>» as its value); a comparison in a --query is not one
+    ({"steps": [{"command": "aws ec2 authorize-security-group-ingress --group-id sg-1 --ip-permissions 'IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=<OWNER_APPROVED_IP>/32}]'"},
+                {"command": "aws ec2 describe-volumes --query 'Volumes[?Size < `100` && Iops > `3000`].VolumeId' --output text"},
+                {"command": 'aws ec2 create-tags --resources sg-1 --tags "Key=owner,Value=<team-name>"'}]},
+     {"steps": 3, "commands": 3, "as_written": 1}),
 ])
 def test_how_much_of_a_rollback_can_run_exactly_as_written(rollback, want):
     from agenticops.services.change_steps import rollback_outlook

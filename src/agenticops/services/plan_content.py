@@ -8,6 +8,7 @@ version it approved, and get_approved_fix_plan refuses a plan whose recomputed h
 
 import hashlib
 import json
+from datetime import timezone
 from typing import Optional
 
 from agenticops.models import FIXPLAN_TERMINAL_STATUSES, ChangeRequest, FixPlan, HealthIssue
@@ -29,6 +30,48 @@ def rejection_is_feedback(plan) -> bool:
     by = getattr(plan, "rejected_by", None) or ""
     return (getattr(plan, "status", None) == "rejected" and bool(reason) and by.startswith(HUMAN_ACTORS)
             and reason not in (CONTENT_CHANGED, DEPRECATED_REJECT))
+
+
+def _utc(ts) -> Optional[str]:
+    if ts is None:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def previous_plan_diff(session, plan: FixPlan) -> dict:
+    """What this fix plan changed relative to the plan before it on the same issue (MVP-2.9.0 N14) — the newest
+    OLDER fix plan of the issue, whatever became of it (sent back, failed, run and not accepted). A redone plan is
+    a new row, and the old row keeps its content, so nothing new is stored. `previous` is None for an issue's first
+    plan and for a change plan (it belongs to its change request).
+
+    `steps` / `rollback`: change_steps.plan_diff. `same_content`: the two content hashes are equal — the plan was
+    redone word for word (None when either has no hash). `same_diagnosis`: both were written from the same
+    diagnosis (None when either does not say). `rejection_is_feedback`: a person wrote the reason about the plan
+    (the one rule, above) — only then is it quoted under their name."""
+    from agenticops.services.change_steps import plan_diff, plan_steps, rollback_steps
+    out = {"plan_id": plan.id, "previous": None, "same_content": None, "steps": None, "rollback": None}
+    if plan.plan_kind != "fix" or plan.health_issue_id is None:
+        return out
+    prev = (session.query(FixPlan)
+            .filter(FixPlan.health_issue_id == plan.health_issue_id, FixPlan.plan_kind == "fix", FixPlan.id < plan.id)
+            .order_by(FixPlan.id.desc()).first())
+    if prev is None:
+        return out
+    out["previous"] = {
+        "id": prev.id, "status": prev.status, "plan_version": prev.plan_version or 1, "risk_level": prev.risk_level,
+        "created_at": _utc(prev.created_at),
+        "rejected_by": prev.rejected_by, "rejected_at": _utc(prev.rejected_at), "rejection_reason": prev.rejection_reason,
+        "rejection_is_feedback": rejection_is_feedback(prev),
+        "same_diagnosis": (prev.rca_result_id == plan.rca_result_id
+                           if prev.rca_result_id is not None and plan.rca_result_id is not None else None),
+    }
+    if prev.content_hash and plan.content_hash:
+        out["same_content"] = prev.content_hash == plan.content_hash
+    out["steps"] = plan_diff(plan_steps(prev.steps), plan_steps(plan.steps))
+    out["rollback"] = plan_diff(rollback_steps(prev.rollback_plan), rollback_steps(plan.rollback_plan))
+    return out
 
 
 def content_hash(*, steps, rollback_plan, pre_checks, post_checks, account_id, risk_level) -> str:

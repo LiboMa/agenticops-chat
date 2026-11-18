@@ -64,7 +64,8 @@ def _execute(actor, permission: str, subject: Any, blocked: Optional[str]) -> di
 
 
 def plan_actions(plan: Any, actor, *, issue_status: Optional[str], run_in_flight: bool) -> list[dict]:
-    """A fix plan's actions (PUT /approve, POST /reject, POST /execute). A change plan's belong to its change."""
+    """A fix plan's actions (PUT /approve, POST /reject, POST /request-changes, POST /execute). A change plan's
+    belong to its change."""
     if getattr(plan, "plan_kind", "fix") != "fix":
         return []
     out = []
@@ -78,6 +79,14 @@ def plan_actions(plan: Any, actor, *, issue_status: Optional[str], run_in_flight
         if ok and plan.status == "approved" and run_in_flight:
             ok, code = False, "run_in_flight"   # withdrawing mid-run would leave the executor running (route: 409)
         out.append(_action("reject", ok, code, "update"))
+    if plan.status in ("draft", "pending_approval"):
+        # MVP-2.9.0 N14: send it back AND ask the plan agent for the next one. A rejection by another name, so the
+        # same permission; a closed issue gets no new plan. (An agent already on the issue is the route's 409 —
+        # it is not known here without making this read depend on the process's claims.)
+        ok, code = route_allows(actor, "plan.reject", plan)
+        if ok and issue_status in ("resolved", "dismissed"):
+            ok, code = False, "issue_closed"
+        out.append(_action("request_changes", ok, code, "reject_and_request_plan"))
     if plan.status == "approved":
         out.append(_execute(actor, "plan.execute", plan, "run_in_flight" if run_in_flight else None))
     return out

@@ -217,6 +217,7 @@ signal_retention_days: 30
 # RCA Quality (MVP-2.2.0)
 # Workbench (MVP-2.8.0 S2): an item waiting on a person longer than this is in the Cases 'waiting long' view
 attention_long_wait_hours: 24
+attention_snooze_minutes: 60   # «later» in NewUI: how long a snoozed item stays at the end of its group (MVP-2.9.0 N14)
 rca_min_confidence_for_autofix: 0.6
 rca_critic_enabled: true
 rca_critic_model_id: ''

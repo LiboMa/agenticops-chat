@@ -681,3 +681,90 @@ def test_an_issue_reopened_after_its_diagnosis_is_not_a_stopped_diagnosis(db, no
                         created_at=NOW - timedelta(minutes=49)))                 # open → investigating as the diagnosis began
     s.commit(); s.close()
     assert _row(ALICE, f"I{with_failure}")["reason_detail"] == "rca_stopped"
+
+
+# ── MVP-2.9.0 N14: an issue an agent is working on is not waiting on a person ─────────────────────────────────────
+# N11 said so for one row (a diagnosis that stopped). It holds for every row: after «request changes» the plan
+# agent is redoing the plan — until N14 the item sat in the person's queue as «the plan was sent back» for as long
+# as that took, counted and with nothing to do; the same for «diagnose again» and «get a new plan».
+
+def _sent_back(by="user:alice"):
+    iid, pid = _issue("fix_planned", plan="rejected")
+    s = get_session()
+    try:
+        plan = s.get(FixPlan, pid)
+        plan.rejected_by, plan.rejection_reason, plan.rejected_at = by, "restart only the web tier", NOW - timedelta(minutes=10)
+        s.commit()
+    finally:
+        s.close()
+    return iid
+
+
+def test_a_plan_being_redone_is_not_in_anyones_queue(db, no_claims):
+    iid = _sent_back()
+    assert _row(ALICE, f"I{iid}")["reason_detail"] == "plan_rejected"           # nobody is on it: a person decides what next
+    run = no_claims.begin("sre", iid, "user:alice", now=NOW - timedelta(minutes=1))
+    assert _row(ALICE, f"I{iid}") is None and _row(ADMIN, f"I{iid}") is None    # the plan agent is on it
+    assert att.attention_page(ALICE, now=NOW)["total"] == 0                     # … and it does not count
+    no_claims.end(run)
+    assert _row(ALICE, f"I{iid}")["reason_detail"] == "plan_rejected"           # it ended without a new plan: back to a person
+
+
+def test_who_it_waits_on_names_the_agent_that_is_on_it(db, no_claims):
+    iid = _sent_back()
+    no_claims.begin("sre", iid, "user:alice", now=NOW - timedelta(minutes=1))
+    s = get_session()
+    try:
+        w = att.issue_waits(s, [s.get(HealthIssue, iid)], now=NOW)[iid]
+    finally:
+        s.close()
+    assert (w.phase.sub, w.phase.waiting_for, w.phase.primary) == ("agentAtWork", "sre_agent", None)
+    assert w.since == NOW - timedelta(minutes=1)                                # since the agent started
+
+
+def test_every_kind_of_row_leaves_while_an_agent_is_on_its_issue(db, no_claims):
+    approval, _ = _issue("fix_planned", plan="pending_approval")
+    confirm, _ = _issue("root_cause_identified", rca=0.4)                       # below the gate: a person confirms
+    failed, _ = _issue("root_cause_identified", plan="failed", run=("failed", "failed"))
+    assert {i["id"] for i in _items(ALICE)} == {f"I{approval}", f"I{confirm}", f"I{failed}"}
+    no_claims.begin("rca", approval, "user:bob", now=NOW)                       # its diagnosis is being redone: not the moment to approve
+    no_claims.begin("rca", confirm, "user:bob", now=NOW)
+    no_claims.begin("sre", failed, "user:bob", now=NOW)
+    assert _items(ALICE) == []
+
+
+def test_a_claim_past_its_limit_hides_nothing(db, no_claims, monkeypatch):
+    monkeypatch.setattr(db, "rca_timeout_seconds", 900)
+    iid = _sent_back()
+    no_claims.begin("sre", iid, "user:alice", now=NOW - timedelta(minutes=16))
+    assert _row(ALICE, f"I{iid}")["reason_detail"] == "plan_rejected"
+
+
+def test_an_issue_that_waits_on_no_person_keeps_its_own_answer(db, no_claims):
+    """The rule replaces only a PERSON's turn: an issue that is executing still says «the executor», whatever claim
+    is on it."""
+    iid, _ = _issue("fix_executing", plan="executing", run=("running", None))
+    no_claims.begin("rca", iid, "user:bob", now=NOW)
+    s = get_session()
+    try:
+        w = att.issue_waits(s, [s.get(HealthIssue, iid)], now=NOW)[iid]
+    finally:
+        s.close()
+    assert w.phase.waiting_for == "executor"
+
+
+def test_the_issue_list_says_the_agent_too(db, no_claims):
+    from starlette.testclient import TestClient
+    from agenticops.web import deps
+    from agenticops.web.app import app
+    iid = _sent_back()
+    app.dependency_overrides[deps.current_actor] = lambda: ALICE
+    try:
+        client = TestClient(app)
+        assert client.get(f"/api/health-issues/{iid}").json()["waiting_on"] == "you"
+        no_claims.begin("sre", iid, "user:alice")
+        assert client.get(f"/api/health-issues/{iid}").json()["waiting_on"] == "sre_agent"
+        rows = client.get("/api/health-issues").json()["items"]
+        assert next(r for r in rows if r["id"] == iid)["waiting_on"] == "sre_agent"
+    finally:
+        app.dependency_overrides.clear()

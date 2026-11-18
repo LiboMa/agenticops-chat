@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { ApiError } from "@/api/client";
 import { useAccountScope } from "@/components/layout/AccountScope";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useReadOnly } from "@/hooks/useBootstrap";
@@ -8,18 +9,20 @@ import type { AttentionItem } from "@/lib/attention";
 import { useActivity } from "../hooks/useActivity";
 import { useDecideQueue } from "../hooks/useDecideQueue";
 import { useMyItem } from "../hooks/useMyItem";
+import { useSnooze } from "../hooks/useSnooze";
 import { useNfT } from "../i18n";
 import { agentOn } from "../lib/activity";
 import { briefKind, itemKind } from "../lib/briefKind";
 import { swapGuard } from "../lib/keys";
 import {
-  currentItem, deepLinkState, emptyKind, flattenPages, groupCounts, parseFilter, pruneHandled, settle, situation, step, withoutHandled,
-  type QueueFilter,
+  afterSnooze, currentItem, deepLinkState, emptyKind, flattenPages, groupCounts, parseFilter, pruneHandled, settle, situation, snoozedUntil,
+  step, withoutHandled, type QueueFilter,
 } from "../lib/queue";
 import { storyPath } from "../lib/story";
+import { utcHm } from "../lib/time";
 import { Message, StateBlock } from "../shell/StateBlock";
 import { useLensKeys, useShell } from "../shell/shellContext";
-import { DecideContext, type BriefKeys, type DecideApi } from "./briefs/briefContext";
+import { DecideContext, errorText, type BriefKeys, type DecideApi } from "./briefs/briefContext";
 import { BRIEFS } from "./briefs/registry";
 import { Feed } from "./Feed";
 import { GenericBrief } from "./GenericBrief";
@@ -137,6 +140,23 @@ export function DecideLens() {
     };
   }, [notify, navigate, peek.show]);
 
+  // «later» (N14): the item on the page goes to the end of its severity for a while and the page moves to the one
+  // that followed it — or, when it is put off already, comes back to its place. Nothing about the item changes, so
+  // this is no decision: no undo window, «S» again takes it back.
+  const snoozing = useSnooze();
+  const later = useCallback((item: AttentionItem) => {
+    if (readOnly || snoozing.isPending) return;
+    const on = snoozedUntil(item, Date.now()) === null;
+    const next = on ? afterSnooze(now_.current.items, item.id) : null;
+    snoozing.mutate({ item: item.id, on }, {
+      onSuccess: (res) => {
+        notify(res ? t("toast.snoozed", { ref: item.ref, t: utcHm(res.snoozed_until) }) : t("toast.unsnoozed", { ref: item.ref }));
+        if (next && now_.current.shown.id === item.id) { ownMove.current = true; navigate(place(next, now_.current.filter), { replace: true }); }
+      },
+      onError: (e) => notify(`${item.ref}　${e instanceof ApiError && e.code === "not_waiting" ? t("snooze.notWaiting") : t("err.failed", { msg: errorText(e) })}`),
+    });
+  }, [readOnly, snoozing, notify, navigate, t]);
+
   useLensKeys({
     onKey: (key, e, repeat) => {
       if (peek.onKey(key)) return true;
@@ -145,7 +165,10 @@ export function DecideLens() {
       if (key === "enter" && curId) { if (!repeat && performance.now() >= guardUntil.current) openStory(curId); return true; }
       // a held key repeating, or a key pressed just after the page changed by itself, is not this brief's
       if (repeat || performance.now() < guardUntil.current) return true;
-      return briefKeys.current?.onKey?.(key, e, repeat);
+      if (briefKeys.current?.onKey?.(key, e, repeat)) return true;
+      // not while a reason is being written: moving on would drop it (its field has the keys while it is focused)
+      if (key === "s" && cur && !readOnly && !document.querySelector(".nf .brief form")) { later(cur.item); return true; }
+      return false;
     },
     onKeyUp: (key) => briefKeys.current?.onKeyUp?.(key),
     onEscape: () => {
@@ -229,7 +252,8 @@ export function DecideLens() {
     // the brief is a new component when the item's situation changes (a confirmed diagnosis becomes «generate the plan»)
     key = `${item.id}:${kind ?? "generic"}`;
     body = <Brief item={item} frame={{ index: cur ? cur.index : lastIndex.current, total: total ?? items.length, now, readOnly,
-                                       accountName: accounts.data?.find((a) => a.id === item.account_id)?.name ?? null }} />;
+                                       accountName: accounts.data?.find((a) => a.id === item.account_id)?.name ?? null,
+                                       later: { until: snoozedUntil(item, now), busy: snoozing.isPending, toggle: () => later(item) } }} />;
   }
 
   // a brief the person did not open — the item was decided elsewhere, changed situation, or a decision moved the

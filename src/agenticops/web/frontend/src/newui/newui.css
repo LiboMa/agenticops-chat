@@ -239,6 +239,17 @@
 .nf .diff .del{border-color:color-mix(in srgb,var(--red) 55%,transparent);background:color-mix(in srgb,var(--red) 8%,transparent);text-decoration:line-through;color:var(--dim)} .nf .diff .del b{color:var(--red);text-decoration:none}
 .nf .diff .chg{border-color:color-mix(in srgb,var(--amber) 55%,transparent);background:color-mix(in srgb,var(--amber) 8%,transparent)} .nf .diff .chg b{color:var(--amber)}
 .nf .diff .same{color:var(--faint)}
+.nf .diff li>span{min-width:0}
+.nf .more > .diff{margin-top:8px}
+.nf .diff .lbl{display:inline-block;width:100%;font-size:var(--fs-xs);color:var(--dim)}
+.nf .diff code{font-family:var(--mono);font-size:var(--fs-sm);overflow-wrap:anywhere}
+.nf .diff .was{display:inline-block;width:100%;margin-top:2px;color:var(--dim)} .nf .diff .was code{text-decoration:line-through}
+.nf .note.warn{color:var(--amber)}
+.nf .note.later{color:var(--violet)}
+.nf .meta button.story-link{background:none;border:0;padding:0;font:inherit;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.nf .meta button.story-link[aria-pressed="true"]{color:var(--violet)}
+.nf .meta button.story-link:disabled{opacity:.5;cursor:default}
+.nf .q.later{opacity:.72} .nf .q.later .r span:last-child{color:var(--violet)}
 .nf .actions{position:sticky;bottom:0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:16px -24px 0;padding:12px 24px 14px;border-top:1px solid var(--line);background:var(--solid);border-radius:0 0 var(--r-3) var(--r-3)}
 .nf .spacer{flex:1}
 .nf .pos{font-family:var(--num);font-size:var(--fs-sm);color:var(--faint)}
@@ -593,4 +604,6 @@
 @media (max-width:760px){
   .nf kbd{display:none}                                            /* no keyboard on a phone: the hints are noise */
   .nf .dialog kbd{display:inline-flex}                             /* …except in the list that explains them */
+  /* the brief's first row: «the story» and «later» are touched, not typed, here — a finger's width each */
+  .nf .meta .story-link{min-height:44px;min-width:44px;justify-content:center}
 }

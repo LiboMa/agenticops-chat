@@ -2513,34 +2513,51 @@ def _run_issue_agent(agent_name: str, issue_id: int, trace_id: Optional[str], on
         _tid_token.var.reset(_tid_token)  # contextvars.Token.var is the ContextVar the token came from
 
 
-def _start_issue_agent(agent_name: str, issue_id: int, trace_id: Optional[str], actor: Actor):
-    """Claim the issue, write the request onto its timeline and start the agent thread — or answer 409 when an
-    agent a person asked for is still working on this issue (MVP-2.9.0: a second click started a second agent)."""
+def _claim_issue(agent_name: str, issue_id: int, actor: Actor):
+    """(the claim, None) — or (None, the 409 `agent_run_in_flight` answer) while an agent is on this issue and
+    within its time limit."""
+    from agenticops.services import agent_runs
+    run = agent_runs.begin(agent_name, issue_id, actor.key)
+    if run is not None:
+        return run, None
+    busy = agent_runs.get(issue_id)
+    return None, JSONResponse(status_code=409, content={
+        "detail": f"An agent is already working on issue #{issue_id}; wait for it to finish.",
+        "code": "agent_run_in_flight",
+        "agent": busy.agent if busy else agent_name,
+        "started_at": busy.started_at.isoformat().replace("+00:00", "Z") if busy else None,
+        "requested_by": busy.requested_by if busy else None,
+    })
+
+
+def _launch_issue_agent(agent_name: str, issue_id: int, trace_id: Optional[str], actor: Actor, run,
+                        detail: Optional[dict] = None) -> None:
+    """Write the request onto the issue's timeline and start the agent thread under `run`, the caller's claim —
+    released here when the thread cannot start (the thread releases it otherwise; one that never started never
+    would). `detail` adds to the event what the request was about."""
     import threading
     from agenticops.services import agent_runs
     from agenticops.services.pipeline_events import log_event
-
-    run = agent_runs.begin(agent_name, issue_id, actor.key)
-    if run is None:
-        busy = agent_runs.get(issue_id)
-        return JSONResponse(status_code=409, content={
-            "detail": f"An agent is already working on issue #{issue_id}; wait for it to finish.",
-            "code": "agent_run_in_flight",
-            "agent": busy.agent if busy else agent_name,
-            "started_at": busy.started_at.isoformat().replace("+00:00", "Z") if busy else None,
-            "requested_by": busy.requested_by if busy else None,
-        })
-    agent_runs.log_replaced(run, by=actor.key)     # it took the issue over from a run past its limit: say so (N11)
     event, stage = _ISSUE_AGENT_EVENTS[agent_name][0]
     prefix = "rca-trigger" if agent_name == "rca" else "fixplan-trigger"
     try:
-        log_event(issue_id, event, stage, "started", detail={"trigger": "manual", "requested_by": actor.key},
+        agent_runs.log_replaced(run, by=actor.key)     # it took the issue over from a run past its limit: say so (N11)
+        log_event(issue_id, event, stage, "started", detail={"trigger": "manual", "requested_by": actor.key, **(detail or {})},
                   actor=actor.key, trace_id=trace_id)
         threading.Thread(target=_run_issue_agent, args=(agent_name, issue_id, trace_id, actor.key, run),
                          daemon=True, name=f"{prefix}-{issue_id}").start()
     except BaseException:
-        agent_runs.end(run)      # the thread releases the claim; one that never started never would
+        agent_runs.end(run)
         raise
+
+
+def _start_issue_agent(agent_name: str, issue_id: int, trace_id: Optional[str], actor: Actor):
+    """Claim the issue, write the request onto its timeline and start the agent thread — or answer 409 when an
+    agent a person asked for is still working on this issue (MVP-2.9.0: a second click started a second agent)."""
+    run, busy = _claim_issue(agent_name, issue_id, actor)
+    if busy is not None:
+        return busy
+    _launch_issue_agent(agent_name, issue_id, trace_id, actor, run)
     return None
 
 
@@ -2996,6 +3013,69 @@ async def api_reject_fix_plan(plan_id: int, data: FixPlanRejectBody, actor: Acto
         _reject_plan(session, plan, actor, data.reason)
         session.flush()
         return _fix_plan_response(session, plan, actor)
+
+
+@app.get("/api/fix-plans/{plan_id}/previous-diff")
+def api_fix_plan_previous_diff(plan_id: int):
+    """What this fix plan changed relative to the plan before it on the same issue, and what became of that one
+    (MVP-2.9.0 N14; services/plan_content.previous_plan_diff). `previous` is null for an issue's first plan.
+    Plain `def`: DB work."""
+    from agenticops.services.plan_content import previous_plan_diff
+    with get_db_session() as session:
+        plan = session.query(FixPlan).filter_by(id=plan_id).first()
+        if not plan:
+            raise HTTPException(status_code=404, detail="Fix plan not found")
+        return previous_plan_diff(session, plan)
+
+
+@app.post("/api/fix-plans/{plan_id}/request-changes", status_code=202)
+def api_request_plan_changes(plan_id: int, data: FixPlanRejectBody, actor: Actor = Depends(current_actor)):
+    """Send a fix plan that waits for approval back AND ask the plan agent for the next one — both, or neither
+    (MVP-2.9.0 N14). The reason is the person's; the agent asked for the next plan is given it
+    (sre_agent.rejection_feedback). Plain `def`: it writes.
+
+    404 → 409 (a change plan; `not_awaiting_approval`; `issue_closed`) → 422 (no reason) → 403 / 409 of a rejection
+    → 409 `agent_run_in_flight` (an agent is on the issue: the plan is NOT sent back) → 202. The rejection is
+    written first and committed only once the issue is claimed for the plan agent, so a refusal leaves nothing behind;
+    the claim is released if the commit or the thread fails."""
+    from agenticops.services import agent_runs
+    from agenticops.services.change_service import fix_path_refusal
+    reason = data.reason.strip()
+    run = None
+    try:
+        with get_db_session() as session:
+            plan = session.query(FixPlan).filter_by(id=plan_id).first()
+            if not plan:
+                raise HTTPException(status_code=404, detail="Fix plan not found")
+            refusal = fix_path_refusal(plan, "sent back")
+            if refusal:
+                raise HTTPException(status_code=409, detail=refusal)
+            if plan.status not in ("draft", "pending_approval"):
+                return JSONResponse(status_code=409, content={
+                    "detail": f"Fix plan #{plan.id} is '{plan.status}': only a plan that waits for approval can be sent back for changes.",
+                    "code": "not_awaiting_approval", "status": plan.status})
+            issue = session.get(HealthIssue, plan.health_issue_id)
+            if issue is None or issue.status in ("resolved", "dismissed"):
+                return JSONResponse(status_code=409, content={
+                    "detail": f"Issue #{plan.health_issue_id} is closed; reopen it before asking for a new plan.",
+                    "code": "issue_closed", "status": issue.status if issue else None})
+            if not reason:
+                raise HTTPException(status_code=422, detail="a reason is required")
+            issue_id, trace_id = issue.id, issue.trace_id
+            _reject_plan(session, plan, actor, reason)          # 403 / 409; added to this session, not committed yet
+            session.flush()
+            run, busy = _claim_issue("sre", issue_id, actor)
+            if busy is not None:
+                session.rollback()                              # an agent is on the issue: the plan stays as it was
+                return busy
+    except BaseException:
+        if run is not None:
+            agent_runs.end(run)                                 # the commit failed: nobody is going to work under it
+        raise
+    _launch_issue_agent("sre", issue_id, trace_id, actor, run, detail={"after_plan": plan_id})
+    return JSONResponse(status_code=202, content={
+        "message": f"Fix plan #{plan_id} sent back; a new plan was requested for issue #{issue_id}.",
+        "health_issue_id": issue_id, "fix_plan_id": plan_id})
 
 
 @app.delete("/api/fix-plans/{plan_id}", status_code=204)

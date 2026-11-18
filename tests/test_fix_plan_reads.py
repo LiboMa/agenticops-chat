@@ -44,7 +44,7 @@ def test_rows_carry_issue_context_target_and_actions(client):
     assert row["id"] == pid and row["issue_title"] == "nginx down" and row["issue_status"] == "fix_planned"
     assert row["target"] == {"resource_id": "i-0abc123", "resource_ref": None, "anchor_status": None,
                              "resource_type": "EC2", "region": "us-east-1"}
-    assert {a["action"] for a in row["available_actions"]} == {"approve", "reject"}
+    assert {a["action"] for a in row["available_actions"]} == {"approve", "reject", "request_changes"}   # N14
     assert client.get(f"/api/fix-plans/{pid}").json()["available_actions"] == row["available_actions"]
 
 

@@ -6,14 +6,14 @@ import { reasonsParam, type QueueFilter } from "../lib/queue";
 const PAGE = 50;
 
 /** «待决»'s queue: GET /api/ui/attention sorted the way the design reads (sort=severity: the most severe first, then
- *  the longest wait), 50 a page. Polled — agents move work without any UI event — and under the attention key, so
+ *  the longest wait; what the reader put off — «later», N14 — at the end of its severity), 50 a page. Polled — agents move work without any UI event — and under the attention key, so
  *  every decision that refreshes the classic top bar's number refreshes this list too. */
 export function useDecideQueue({ accountId, filter }: { accountId: number | null; filter: QueueFilter }) {
   return useInfiniteQuery({
     queryKey: [...ATTENTION_QUERY_KEY, "nf-queue", accountId ?? "all", filter],
     initialPageParam: "0",
     queryFn: ({ pageParam }) => {
-      const qs = new URLSearchParams({ limit: String(PAGE), cursor: pageParam, sort: "severity" });
+      const qs = new URLSearchParams({ limit: String(PAGE), cursor: pageParam, sort: "severity", snoozed: "last" });
       if (accountId != null) qs.set("account_id", String(accountId));
       const reason = reasonsParam(filter);
       if (reason) qs.set("reason", reason);

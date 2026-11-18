@@ -54,6 +54,22 @@ export function currentItem<T extends { id: string }>(items: T[], curId: string 
   return { item: items[index], index };
 }
 
+/** Until when the reader put this item off («later», N14) — the server's own mark, while its time still lies ahead;
+ *  null otherwise (the next refresh drops a mark whose time is up). */
+export function snoozedUntil(item: Pick<AttentionItem, "snoozed_until">, now: number): string | null {
+  const until = item.snoozed_until;
+  if (!until) return null;
+  const at = Date.parse(until);
+  return Number.isFinite(at) && at > now ? until : null;
+}
+
+/** Where the page goes after an item is snoozed: the item that followed it — null when there is none (it is the
+ *  last of the list, or no longer on it), and the page stays. */
+export function afterSnooze(items: AttentionItem[], id: string): string | null {
+  const at = items.findIndex((i) => i.id === id);
+  return at < 0 ? null : items[at + 1]?.id ?? null;
+}
+
 /** J / K: the next or previous place, round the ends. */
 export function step(length: number, index: number, delta: number): number {
   return length ? (index + delta + length) % length : 0;

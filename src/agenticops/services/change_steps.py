@@ -208,18 +208,29 @@ def rollback_commands(rollback_plan) -> frozenset[str]:
     return frozenset(c for c in (_command(s) for s in rollback_steps(rollback_plan)) if c)
 
 
+# `<AMI_ID>`, `<team-name>`: one name between angle brackets, wherever it stands — inside a quoted argument too,
+# where a shell sees nothing to split. A comparison in a --query (`Size < \`100\` && Iops > \`3000\``) is not one.
+_PLACEHOLDER = re.compile(r"<[A-Za-z_][A-Za-z0-9_.\-]*>")
+
+
 def rollback_outlook(rollback_plan) -> dict:
     """What a stop could roll back, as the plan is written (MVP-2.9.0 N10): how many rollback steps there are, how
-    many carry a command, and how many of those are ONE command a tool can run exactly as it is written — not a
-    line that chains commands, pipes, substitutes, or carries a placeholder (`<AMI_ID>`) or a comment. After a stop
-    the run's guard lets through only the plan's own rollback text, so a step the executor would have to rewrite
-    before running it cannot be rolled back that way. Measured on a copy of the local database (166 plans): 99 had
-    no rollback command at all, 67 had some (270 commands, 116 of them runnable as written), and in 8 every one
-    could run as written."""
+    many carry a line of text (`commands`), and how many of those are ONE command a tool can run exactly as it is
+    written (`as_written`): a line a shell would not split — no chain, pipe, substitution, placeholder (`<AMI_ID>`)
+    or comment — AND one the code recognises as a command that may run (its tier is read-only or write). After a
+    stop the run's guard lets through only the plan's own rollback text, so a step the executor would have to
+    rewrite before running it cannot be rolled back that way.
+
+    The second condition is N14's: a sentence («Start instance and verify status checks») or a label before a
+    command («Re-enable key: aws iam update-access-key …») is no command, though a shell would not split it — and a
+    command the tools refuse outright cannot run; nor does a line that still holds a placeholder inside a quoted
+    argument (`--ip-permissions '…CidrIp=<OWNER_APPROVED_IP>/32…'`). The numbers measured on a copy of the local
+    database are in docs/MVP-2.9.0-RELEASE.md (N10, corrected at N14)."""
     steps = rollback_steps(rollback_plan)
     commands = [c for c in (_command(s) for s in steps) if c]
     return {"steps": len(steps), "commands": len(commands),
-            "as_written": sum(1 for c in commands if not _shell_would_split(c))}
+            "as_written": sum(1 for c in commands if not _shell_would_split(c) and not _PLACEHOLDER.search(c)
+                              and command_tier(c) in ("readonly", "write"))}
 
 
 def unclassified_commands(*step_lists) -> list[str]:
@@ -272,18 +283,59 @@ def outage_commands(*step_lists) -> list[str]:
     return seen
 
 
-def diff_steps(proposed, planned) -> dict:
-    """What the plan changed relative to the request, by command and in order. A replaced run pairs its steps
-    one-to-one as modified; the rest of it is added / removed. Step numbers are 1-based."""
-    a, b = [_command(s) for s in proposed or []], [_command(s) for s in planned or []]
+def _line_changes(a: list[str], b: list[str]):
+    """Two lists of lines, in order → (added [(j, line)], removed [(i, line)], modified [(i, j, old, new)],
+    unchanged). A replaced run pairs its lines one-to-one as modified; the rest of it is added / removed.
+    Indexes are 0-based."""
     added, removed, modified, unchanged = [], [], [], 0
     for tag, i1, i2, j1, j2 in SequenceMatcher(a=a, b=b, autojunk=False).get_opcodes():
         if tag == "equal":
             unchanged += i2 - i1
             continue
         pairs = min(i2 - i1, j2 - j1) if tag == "replace" else 0
-        modified += [{"proposed_step": i1 + k + 1, "plan_step": j1 + k + 1, "proposed": a[i1 + k], "plan": b[j1 + k]}
-                     for k in range(pairs)]
-        removed += [{"proposed_step": i + 1, "command": a[i]} for i in range(i1 + pairs, i2)]
-        added += [{"plan_step": j + 1, "command": b[j]} for j in range(j1 + pairs, j2)]
-    return {"added": added, "removed": removed, "modified": modified, "unchanged": unchanged}
+        modified += [(i1 + k, j1 + k, a[i1 + k], b[j1 + k]) for k in range(pairs)]
+        removed += [(i, a[i]) for i in range(i1 + pairs, i2)]
+        added += [(j, b[j]) for j in range(j1 + pairs, j2)]
+    return added, removed, modified, unchanged
+
+
+def diff_steps(proposed, planned) -> dict:
+    """What the plan changed relative to the request, by command and in order. A replaced run pairs its steps
+    one-to-one as modified; the rest of it is added / removed. Step numbers are 1-based."""
+    added, removed, modified, unchanged = _line_changes([_command(s) for s in proposed or []],
+                                                        [_command(s) for s in planned or []])
+    return {"added": [{"plan_step": j + 1, "command": line} for j, line in added],
+            "removed": [{"proposed_step": i + 1, "command": line} for i, line in removed],
+            "modified": [{"proposed_step": i + 1, "plan_step": j + 1, "proposed": old, "plan": new}
+                         for i, j, old, new in modified],
+            "unchanged": unchanged}
+
+
+def step_line(step) -> str:
+    """One step as ONE comparable line — what would run: its command; for a step without one, what it says it does
+    (the keys the plan views read: action, description, step); a step written with other keys, as it is (keys
+    sorted, so the same step is the same line). Whitespace collapsed."""
+    if step is None:
+        return ""
+    if not isinstance(step, dict):
+        return " ".join(str(step).split())
+    text = _raw_command(step)
+    if not text.strip():
+        text = next((v for v in (step.get(k) for k in ("action", "description", "step")) if isinstance(v, str) and v.strip()), "")
+    if not text.strip():
+        return json.dumps(step, sort_keys=True, ensure_ascii=False, default=str) if step else ""
+    return " ".join(text.split())
+
+
+def plan_diff(previous, current) -> dict:
+    """What a plan changed relative to the plan before it (MVP-2.9.0 N14), step by step and in order, by
+    `step_line` — so a step without a command is compared by its words (diff_steps compares commands only: there
+    two command-less steps are «the same» whatever they say), and reworded text around an unchanged command is
+    not a change to what runs. Step numbers are 1-based, each in its own plan."""
+    added, removed, modified, unchanged = _line_changes(
+        [step_line(s) for s in previous] if isinstance(previous, list) else [],
+        [step_line(s) for s in current] if isinstance(current, list) else [])
+    return {"added": [{"step": j + 1, "text": line} for j, line in added],
+            "removed": [{"previous_step": i + 1, "text": line} for i, line in removed],
+            "modified": [{"previous_step": i + 1, "step": j + 1, "previous": old, "now": new} for i, j, old, new in modified],
+            "unchanged": unchanged}

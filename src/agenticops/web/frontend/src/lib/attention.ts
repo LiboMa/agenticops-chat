@@ -10,6 +10,8 @@ export interface AttentionItem {
   /** MVP-2.8.0 S2 — who it waits on (work_phases), severity (issues) / risk level (changes), its resource, region */
   waiting_on?: string | null; severity?: string | null; risk_level?: string | null;
   resource?: { ref: number; name: string | null; type: string; resource_id: string } | null; region?: string | null;
+  /** MVP-2.9.0 N14 — until when THIS reader put the item off («later»); it still waits and still counts */
+  snoozed_until?: string | null;
 }
 export interface AttentionPage {
   items: AttentionItem[]; total: number; next_cursor: string | null; generated_at: string;

@@ -176,11 +176,19 @@ def issue_waits(s, issues, *, now: datetime) -> dict[int, IssueWait]:
         stopped_at = wp.rca_stopped_at(issue.status, rca_events_by.get(issue.id, ()), now=now,
                                        limit_seconds=settings.rca_timeout_seconds, moved_at=moved.get(issue.id))
         # an agent that is on the issue and within its time limit will move it: then it is not a person's turn
-        if stopped_at is not None and agent_runs.in_time(issue.id, now=now) is not None:
+        claim = agent_runs.in_time(issue.id, now=now)
+        if stopped_at is not None and claim is not None:
             stopped_at = None
         phase = wp.issue_phase(issue.status, rca=rca, threshold=settings.rca_min_confidence_for_autofix,
                                plan=plan, latest_run=run, auto_run_in_flight=auto,
                                auto_fix_enabled=bool(settings.auto_fix_enabled), rca_stopped=stopped_at is not None)
+        if claim is not None and phase.waiting_for in wp.HUMAN:
+            # N14: the same for EVERY row a person would get. A plan being redone after «request changes», a
+            # diagnosis being run again, a plan being written: the agent is on it now, and what it leaves decides
+            # whose turn is next. Until it ends (or runs past its limit) the issue is in nobody's queue.
+            out[issue.id] = IssueWait(wp.Phase("agentAtWork", f"{claim.agent}_agent", None), _aware(claim.started_at),
+                                      plan, plans, run, rca, events, auto, None)
+            continue
         since = max(_since(issue, phase.sub, plan, run, rca, now, stopped_at), _aware(moved.get(issue.id)) or _EPOCH)
         out[issue.id] = IssueWait(phase, since, plan, plans, run, rca, events, auto, stopped_at)
     return out
@@ -326,31 +334,39 @@ def _matches(item: dict, q: str) -> bool:
     return any(needle in h.casefold() for h in hay)
 
 
-def _sort_key(sort: str):
+def _sort_key(sort: str, snoozed_last: bool = False):
+    """The order of a list. `snoozed_last` (MVP-2.9.0 N14, asked for by NewUI only): an item its reader snoozed goes
+    to the end of its group — its severity, its decision group — or, in an ungrouped order, of the list."""
+    later = (lambda i: bool(i.get("snoozed_until"))) if snoozed_last else (lambda i: False)
     if sort == "decision":    # by group, then the longest wait first: pages only ever append to the last group
-        return lambda i: (DECISION_GROUPS.index(DECISION_OF[i["reason"]]), i["occurred_at"], i["id"])
+        return lambda i: (DECISION_GROUPS.index(DECISION_OF[i["reason"]]), later(i), i["occurred_at"], i["id"])
     if sort == "newest":
-        return lambda i: (-i["occurred_at"].timestamp(), i["id"])
+        return lambda i: (later(i), -i["occurred_at"].timestamp(), i["id"])
     if sort == "severity":
-        return lambda i: (_SEV_RANK.get(i["severity"] or "", _RISK_RANK.get(i["risk_level"] or "", 4)),
+        return lambda i: (_SEV_RANK.get(i["severity"] or "", _RISK_RANK.get(i["risk_level"] or "", 4)), later(i),
                           i["occurred_at"], i["id"])
-    return lambda i: (i["occurred_at"], i["id"])   # waiting_longest: the longest wait first
+    return lambda i: (later(i), i["occurred_at"], i["id"])   # waiting_longest: the longest wait first
 
 
 def attention_page(actor, *, account_id: Optional[int] = None, reason: Optional[list[str]] = None,
                    q: Optional[str] = None, item: Optional[str] = None, sort: str = "waiting_longest", limit: int = 25,
-                   offset: int = 0, now: Optional[datetime] = None) -> dict:
+                   offset: int = 0, now: Optional[datetime] = None, snooze_user_id: Optional[int] = None,
+                   snoozed_last: bool = False) -> dict:
     """The actor's work items. `counts` = items per reason after the account scope and the search, before the
     reason filter — so a workbench tab's number does not move with the selected tab. Sort: the longest wait first
     (default), newest, severity (a change ranks by its risk level), or decision (grouped as DECISION_GROUPS, then
     the longest wait first). `item` ("I12" / "C3", MVP-2.9.0) keeps that one work item: whether it is on this
-    actor's list, and as what — `q` cannot say (it also matches titles, resources and I#1 for I#10's digits)."""
+    actor's list, and as what — `q` cannot say (it also matches titles, resources and I#1 for I#10's digits).
+    Every item carries `snoozed_until` (N14; services/attention_snooze): set while the person `snooze_user_id`
+    has put it off — it still waits and still counts; `snoozed_last` moves it to the end of its group."""
     if reason and not set(reason) <= REASONS:
         raise ValueError(f"unknown reason {sorted(set(reason) - REASONS)}; expected one of {sorted(REASONS)}")
     if sort not in SORTS:
         raise ValueError(f"unknown sort {sort!r}; expected one of {list(SORTS)}")
     now = now or datetime.now(timezone.utc)
     items = attention_items(actor, account_id=account_id, now=now)
+    from agenticops.services.attention_snooze import mark
+    mark(items, snooze_user_id, now)
     if item:
         items = [i for i in items if i["id"] == item]
     if q:
@@ -360,7 +376,7 @@ def attention_page(actor, *, account_id: Optional[int] = None, reason: Optional[
         counts[i["reason"]] = counts.get(i["reason"], 0) + 1
     if reason:
         items = [i for i in items if i["reason"] in reason]
-    items.sort(key=_sort_key(sort))
+    items.sort(key=_sort_key(sort, snoozed_last))
     page = items[offset:offset + limit]
     for i in page:
         i["occurred_at"] = _iso(i["occurred_at"])

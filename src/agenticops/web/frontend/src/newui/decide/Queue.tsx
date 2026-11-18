@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { AttentionItem } from "@/lib/attention";
 import { useNfT, type NfT } from "../i18n";
-import { FILTERS, toneOf, waitedParts, type GroupCounts, type QueueFilter } from "../lib/queue";
+import { FILTERS, snoozedUntil, toneOf, waitedParts, type GroupCounts, type QueueFilter } from "../lib/queue";
 import { utcHm } from "../lib/time";
 
 /** "等了 3 小时" — how long an item has waited on a person. */
@@ -51,10 +51,11 @@ export function Queue({ items, currentId, filter, counts, view, staleSince, tota
         {view === "loading" && [0, 1, 2, 3].map((i) => <div key={i} className="skel" style={{ height: 62, borderRadius: 10 }} />)}
         {view === "ready" && items.map((i) => {
           const on = i.id === currentId;
+          const put = snoozedUntil(i, now) !== null;         // the reader put it off: it says so where the wait would be
           return (
-            <button key={i.id} ref={on ? selected : undefined} type="button" className={`q ${toneOf(i)}`} role="option"
+            <button key={i.id} ref={on ? selected : undefined} type="button" className={`q ${toneOf(i)}${put ? " later" : ""}`} role="option"
                     aria-selected={on} onClick={() => onPick(i.id)}>
-              <span className="r"><span className="id">{i.ref}</span><span>{waitedText(i.occurred_at, now, t)}</span></span>
+              <span className="r"><span className="id">{i.ref}</span><span>{put ? t("snoozed") : waitedText(i.occurred_at, now, t)}</span></span>
               <span className="t">{i.title}</span>
               <span className="need">{t(`need.${i.reason}`)}</span>
             </button>

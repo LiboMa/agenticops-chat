@@ -50,8 +50,11 @@ export function useBriefKeys(keys: BriefKeys): void {
 /** What every brief is given: the item, and what its frame needs. */
 export interface BriefProps {
   item: AttentionItem;
-  frame: { index: number; total: number; accountName: string | null; now: number; readOnly: boolean };
+  frame: { index: number; total: number; accountName: string | null; now: number; readOnly: boolean; later?: Later };
 }
+
+/** «Later» (N14) as the brief's frame shows it: until when the item is put off (null = it is not), and the switch. */
+export interface Later { until: string | null; busy: boolean; toggle: () => void }
 
 /** An error as one sentence. */
 export const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));

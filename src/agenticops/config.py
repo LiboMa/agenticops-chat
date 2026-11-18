@@ -971,6 +971,11 @@ class Settings(BaseSettings):
         default=24, ge=1,
         description="A work item waiting on a person longer than this is in the Cases 'waiting long' view",
     )
+    attention_snooze_minutes: int = Field(
+        default=60, ge=1, le=1440,
+        description="How long «later» keeps a waiting item at the end of its group for the person who snoozed it "
+        "(MVP-2.9.0 N14)",
+    )
     # RCA Quality (MVP-2.2.0)
     rca_min_confidence_for_autofix: float = Field(
         default=0.6,

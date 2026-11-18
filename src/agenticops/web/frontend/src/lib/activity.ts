@@ -52,11 +52,14 @@ function entry(e: PipelineEvent, hide: string): ActivityEntry {
   const type = e.event_type;
   const known = KNOWN.has(type);
   const isAuthz = type === "authz.denied" || type === "authz.denied_shadow";
+  // MVP-2.9.0 N14: «request changes» sends a plan back and asks for the next one in one go — sending a plan back is
+  // not a timeline event, so the request says which plan it followed
+  const afterPlan = type === "fix_plan_requested" && typeof d.after_plan === "number" && Number.isInteger(d.after_plan) ? String(d.after_plan) : null;
   return {
     ts: e.created_at ?? "",
-    labelKey: known ? `activity.type.${type.replace(/\./g, "_")}` : "activity.type.unknown",
+    labelKey: afterPlan ? "activity.type.fix_plan_requested_after" : known ? `activity.type.${type.replace(/\./g, "_")}` : "activity.type.unknown",
     labelParams: isAuthz ? { rule: String(d.rule ?? ""), permission: String(d.permission ?? "") }
-      : known ? {} : { type },
+      : afterPlan ? { plan: afterPlan } : known ? {} : { type },
     summary: isAuthz ? "" : hideSummary(summarize(d), hide),
     actor: e.actor || "system",
     tone: BAD.has(type) || e.status === "failed" ? "bad" : WARN.has(type) ? "warn"
