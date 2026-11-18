@@ -14,12 +14,14 @@ export function isComposingKey(e: Pick<KeyLike, "isComposing" | "keyCode">): boo
 }
 
 /** For a single-line field inside a <form> (the browser submits the form on Enter): keep the Enter that picks an
- *  input method's candidate from submitting it. Chrome keeps that Enter to the input method; Safari ends the
- *  composition first and then delivers the key (keyCode 229, isComposing false) — and would submit a half-typed
- *  sentence. Call from the field's onKeyDown; true = it was that Enter, and the submit was stopped. */
+ *  input method's candidate from submitting it. While a composition is going on (`isComposing`) Chrome and Firefox
+ *  keep that Enter to the input method and submit nothing — the key is recognised here and left alone: cancelling a
+ *  key the input method is still handling is not ours to do. Safari ends the composition first and THEN delivers
+ *  the key (keyCode 229, isComposing false) — and would submit a half-typed sentence: that one is cancelled.
+ *  Call from the field's onKeyDown; true = it was an input method's Enter. */
 export function keepsImeEnter(e: { key: string; preventDefault: () => void; nativeEvent: Pick<KeyLike, "isComposing" | "keyCode"> }): boolean {
   if (e.key !== "Enter" || !isComposingKey(e.nativeEvent)) return false;
-  e.preventDefault();
+  if (!e.nativeEvent.isComposing) e.preventDefault();
   return true;
 }
 

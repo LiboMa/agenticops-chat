@@ -54,11 +54,15 @@ describe("keepsImeEnter — a field inside a <form>: the Enter that picks a cand
                   nativeEvent: { isComposing: over.isComposing ?? false, keyCode: over.keyCode ?? 13 } },
              prevented: () => prevented };
   };
-  it("stops Safari's Enter after a composition, and an Enter during one", () => {
-    const safari = ev({ keyCode: 229 });
+  it("stops Safari's Enter after a composition from submitting the form", () => {
+    const safari = ev({ keyCode: 229 });                              // the composition has ended; the key arrives anyway
     expect([keepsImeEnter(safari.e), safari.prevented()]).toEqual([true, true]);
-    const composing = ev({ isComposing: true });
-    expect([keepsImeEnter(composing.e), composing.prevented()]).toEqual([true, true]);
+  });
+  it("leaves an Enter DURING a composition to the input method — it is recognised, never cancelled", () => {
+    // Chrome and Firefox keep that key to the input method and do not submit the form; cancelling a key the input
+    // method is still handling is not this helper's business (it could keep a candidate from being picked)
+    const composing = ev({ isComposing: true, keyCode: 229 });
+    expect([keepsImeEnter(composing.e), composing.prevented()]).toEqual([true, false]);
   });
   it("leaves an ordinary Enter and every other key alone", () => {
     const enter = ev();

@@ -91,6 +91,16 @@ export class Pending {
   }
 }
 
+/** Wait for `done` — but not for ever: `ms` at most. For what waits on a decision's answer before it goes on (signing
+ *  out): a server that never answers must not keep the person from leaving. The timer is handed in for the tests. */
+export function settleWithin(done: Promise<unknown>, ms: number,
+                             later: (fn: () => void, ms: number) => unknown = (fn, t) => window.setTimeout(fn, t)): Promise<void> {
+  return new Promise<void>((resolve) => {
+    later(resolve, ms);
+    void done.then(() => resolve(), () => resolve());
+  });
+}
+
 /** One decision on a queue item, deferred: the item leaves the list NOW (`hide` returns «put it back»), the request
  *  is made when the window is over, and the item comes back when the decision is taken back or the server refuses
  *  it — a refusal after the window is said (`onFailed`), never silent. */

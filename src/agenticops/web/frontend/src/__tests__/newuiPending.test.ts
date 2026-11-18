@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Pending, UNDO_MS, deferDecision, type Clock } from "@/newui/lib/pending";
+import { Pending, UNDO_MS, deferDecision, settleWithin, type Clock } from "@/newui/lib/pending";
 
 /** A clock the test moves by hand: timers fire when `tick` passes their time, in order. */
 function fakeClock() {
@@ -200,6 +200,20 @@ describe("Pending — what the shell needs to know about the decision that is wa
     answer("approved");
     await flushed;
     expect([log, over]).toEqual([["request", "done approved"], true]);
+  });
+
+  it("waiting for the answer has an end: a server that never answers does not keep the person from signing out", async () => {
+    const { clock } = fakeClock();
+    const p = new Pending(clock);
+    p.add({ label: "x", send: () => new Promise(() => {}), undo: () => {} });          // never answered
+    let waited = 0;
+    await settleWithin(p.flush(), 4000, (fn, ms) => { waited = ms; fn(); });
+    expect(waited).toBe(4000);
+    // … and an answer that arrives first ends the wait at once
+    p.add({ label: "y", send: () => Promise.resolve("ok"), undo: () => {} });
+    let timer = false;
+    await settleWithin(p.flush(), 4000, () => { timer = true; });
+    expect(timer).toBe(true);                                                           // the timer was set; it is the answer that ended the wait
   });
 
   it("flush with nothing waiting, or a send that fails, is over at once and never rejects", async () => {
