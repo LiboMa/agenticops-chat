@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import { mergeSteps, nextAfter, type StepRow, type StepsAnswer } from "../lib/steps";
 
@@ -14,6 +14,15 @@ export interface StepsOf {
 
 export interface StepsState { run: StepsAnswer["run"]; steps: StepRow[] }
 
+const stepsKey = (of: StepsOf | null) =>
+  ["ui-activity-steps", of?.item ?? null, of?.agent ?? null, of?.execution ?? null, of?.since ?? null, of?.before ?? null];
+
+/** The run whose steps the page has for `of` (its key) — null when it has none yet. What a note is addressed to:
+ *  the run the person was reading, not whichever run is on the lane when the note arrives. */
+export function shownRunKey(qc: QueryClient, of: StepsOf): string | null {
+  return qc.getQueryData<StepsState>(stepsKey(of))?.run?.key ?? null;
+}
+
 const PAGES_MAX = 10;        // 200 steps a page: an ended run is read whole, up to 2,000 steps
 
 /** One run's recorded steps (GET /api/ui/activity/steps, N10). While `live`, asked again every three seconds — only
@@ -21,7 +30,7 @@ const PAGES_MAX = 10;        // 200 steps a page: an ended run is read whole, up
  *  the page (the lane began a new run) starts the list over. `enabled` false = not asked at all (a closed panel). */
 export function useLaneSteps(of: StepsOf | null, live: boolean, enabled = true) {
   const qc = useQueryClient();
-  const key = ["ui-activity-steps", of?.item ?? null, of?.agent ?? null, of?.execution ?? null, of?.since ?? null, of?.before ?? null];
+  const key = stepsKey(of);
   return useQuery({
     queryKey: key,
     enabled: !!of && enabled,
@@ -31,8 +40,10 @@ export function useLaneSteps(of: StepsOf | null, live: boolean, enabled = true) 
       if (!of) return { run: null, steps: [] };
       const q = new URLSearchParams({ item: of.item, agent: of.agent });
       if (of.execution) q.set("execution", String(of.execution));
-      else if (of.since) q.set("since", of.since);
-      else if (of.before) q.set("before", of.before);
+      else {
+        if (of.since) q.set("since", of.since);
+        if (of.before) q.set("before", of.before);
+      }
       const ask = (after: number) => apiFetch<StepsAnswer>(`/ui/activity/steps?${q.toString()}&after=${after}`);
       const had = qc.getQueryData<StepsState>(key);
       let answer = await ask(had?.run ? nextAfter(had.steps) : 0);

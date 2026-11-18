@@ -293,7 +293,9 @@ export function WorldLens() {
                     onPick={(i) => pick(i)} onDecide={() => navigate("/app/new/decide")} />
           </div>
           {pathMode && <PathHint g={g!} ask={ask} sc={sc!} onExit={() => togglePath()} />}
-          {past && !pathMode && <p className="wpast" role="status">{t("replay.banner", { t: utcStamp(asOf, now) })}</p>}
+          {/* the moment the reading ON the map is of — not the one that was asked for: a reading that is still on
+              its way, or one the map could not take (another build landed), must not be announced as shown */}
+          {past && !pathMode && shownPast !== null && <p className="wpast" role="status">{t("replay.banner", { t: utcStamp(shownPast, now) })}</p>}
           {selNode && !pathMode && (
             <NodeCard key={selNode.id} g={g!} i={selNode.i} ask={ask} mine={mine} accountName={accountName} now={now} healthAt={world.healthAt} asOf={shownPast}
                       onPick={(i) => pick(i)} onClose={() => { patch({ sel: null, near: null }); cam?.home(); }} onFocus={toggleFocus}

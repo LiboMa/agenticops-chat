@@ -715,6 +715,7 @@
   "activity.type.rca_human_feedback": "人工判断 RCA",
   "activity.type.rca_disputed": "RCA 被质疑",
   "activity.type.agent_run_abandoned": "上一次 agent 运行超过了时限，被新的一次接替",
+  "activity.type.rca_superseded": "被接替的那次诊断后来回来了：结果已保存，但没有据此自动出方案（这件事已经归新的一次运行）",
   "activity.type.fix_approved": "修复方案已批准",
   "activity.type.execution_started": "执行开始",
   "activity.type.execution_completed": "执行结束",

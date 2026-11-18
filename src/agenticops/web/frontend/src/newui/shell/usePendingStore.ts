@@ -13,10 +13,13 @@ export function usePendingStore() {
   const [waiting, setWaiting] = useState(store.waiting);
   useEffect(() => store.subscribe(() => setWaiting(store.waiting)), [store]);
   useEffect(() => {
-    const leaving = () => { if (store.waiting) { keepaliveFor(3000); store.flush(); } };
+    const leaving = () => { if (store.waiting) { keepaliveFor(3000); void store.flush(); } };
     window.addEventListener("pagehide", leaving);
-    return () => { window.removeEventListener("pagehide", leaving); store.flush(); };
+    return () => { window.removeEventListener("pagehide", leaving); void store.flush(); };
   }, [store]);
-  const act = useMemo(() => ({ defer: (d: Deferred) => store.add(d), undo: () => store.undo() }), [store]);
+  // `settle`: send the waiting decision now and wait for its answer — for what must not happen before it (signing
+  // out takes the session away: a decision still waiting then left without credentials, or with ones the server had
+  // just withdrawn, and nothing said that it never happened)
+  const act = useMemo(() => ({ defer: (d: Deferred) => store.add(d), undo: () => store.undo(), settle: () => store.flush() }), [store]);
   return { waiting, ...act };
 }

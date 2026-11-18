@@ -250,6 +250,11 @@ export interface PreviousPlanDiff {
   same_content: boolean | null;
   steps: PlanLineDiff | null;
   rollback: PlanLineDiff | null;
+  /** whole against whole (a rollback written as a sentence has no line to compare): is the rollback the same */
+  rollback_same?: boolean | null;
+  /** the declared checks: the same, and how many before / after a run — [the previous plan, this plan] */
+  checks?: { same: boolean; pre: [number, number]; post: [number, number] } | null;
+  risk_same?: boolean | null;
 }
 
 export interface FixPlan {

@@ -10,8 +10,11 @@ import { ACTIVITY_QUERY_KEY } from "./useActivity";
 export function useRequestChanges() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
-      apiFetch<{ health_issue_id: number; fix_plan_id: number }>(`/fix-plans/${id}/request-changes`, { method: "POST", body: JSON.stringify({ reason }) }),
+    // `content_hash` = the plan as the reviewer read it: a draft rewritten since then is not sent back with a reason
+    // that was about the old one (409 `plan_changed`)
+    mutationFn: ({ id, reason, content_hash }: { id: number; reason: string; content_hash?: string | null }) =>
+      apiFetch<{ health_issue_id: number; fix_plan_id: number }>(`/fix-plans/${id}/request-changes`, {
+        method: "POST", body: JSON.stringify(content_hash ? { reason, content_hash } : { reason }) }),
     onSettled: (_data, _error, vars) => {
       for (const queryKey of [...fixPlanMutationKeys(vars.id), [...ACTIVITY_QUERY_KEY]]) qc.invalidateQueries({ queryKey });
     },

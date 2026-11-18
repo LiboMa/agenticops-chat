@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/api/client";
 import { useAccountScope } from "@/components/layout/AccountScope";
 import { useReadOnly } from "@/hooks/useBootstrap";
@@ -8,6 +9,7 @@ import { DecideContext, errorText, type DecideApi } from "../decide/briefs/brief
 import { useHold } from "../decide/widgets/useHold";
 import { usePeek } from "../decide/widgets/usePeek";
 import { useActivity } from "../hooks/useActivity";
+import { shownRunKey } from "../hooks/useLaneSteps";
 import { useMyItem } from "../hooks/useMyItem";
 import { useSteer } from "../hooks/useSteer";
 import { useStopExecution } from "../hooks/useStopExecution";
@@ -73,6 +75,7 @@ export function LiveLens() {
   // a word for the agent of the lane on the page (N12): a diagnosis, a plan or a review at work — «E» goes to the
   // field, Enter sends; the note shows in the run's step list as soon as the server has it
   const steer = useSteer();
+  const qc = useQueryClient();
   const steerField = useRef<HTMLInputElement>(null);
   const canSteer = steerable(lane) && !readOnly;
   const [steerError, setSteerError] = useState<{ lane: string; text: string } | null>(null);
@@ -80,7 +83,9 @@ export function LiveLens() {
     if (!lane || !canSteer || steer.isPending || !text.trim()) return;
     const to = lane.id, ref = lane.ref ?? lane.title;
     setSteerError(null);
-    steer.mutate({ lane: to, text: text.trim() }, {
+    // the run whose steps are on the page: the note is for that one (the lane keeps its id when a new run starts)
+    const run = lane.item ? shownRunKey(qc, { item: lane.item, agent: lane.kind === "diagnosis" ? "rca" : "sre", since: lane.at }) : null;
+    steer.mutate({ lane: to, text: text.trim(), run }, {
       onSuccess: () => { if (steerField.current) steerField.current.value = ""; notify(t("steer.sent", { ref })); },
       onError: (e) => {
         const code = e instanceof ApiError ? e.code : undefined;

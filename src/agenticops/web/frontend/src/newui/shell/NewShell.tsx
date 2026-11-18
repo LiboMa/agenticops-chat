@@ -170,7 +170,8 @@ export function NewShell({ children }: { children: ReactNode }) {
   }, []);
   const api = useMemo<ShellApi>(() => ({
     setLensKeys: (keys) => { lensKeys.current = keys; }, notify, singleKeys, setRootFlag, defer: pending.defer,
-  }), [notify, singleKeys, setRootFlag, pending.defer]);
+    pendingItem: pending.waiting?.item ?? null,
+  }), [notify, singleKeys, setRootFlag, pending.defer, pending.waiting?.item]);
   const nfTheme = theme === "dark" ? "night" : "day";
 
   return (
@@ -220,7 +221,9 @@ export function NewShell({ children }: { children: ReactNode }) {
                   {user && <Link className="mi" role="menuitem" to="/app/account/api-keys">{t("shell.menu.apiKeys")}</Link>}
                   <div className="sep" />
                   <button type="button" className="mi" role="menuitem"
-                          onClick={async () => { await logout(); navigate("/app/login", { replace: true }); }}>
+                          // a decision still inside its undo window is sent first, and has its answer, before the
+                          // session goes: signing out is leaving — the person had decided
+                          onClick={async () => { await pending.settle(); await logout(); navigate("/app/login", { replace: true }); }}>
                     {t("shell.menu.signOut")}
                   </button>
                 </div>

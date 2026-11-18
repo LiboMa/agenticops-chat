@@ -93,3 +93,30 @@ describe("rollbackHint — what a stop could roll back, said before the stop", (
     expect(rollbackHint(undefined)).toBeNull();
   });
 });
+
+// Round-2 review.
+describe("stepVm — what a row says once its run is over, and to a read-only account", () => {
+  const note = (over: Partial<StepRow>) => row(1, { kind: "you", tool: null, look: null, tier: null, preview: null, outcome: null, ended_at: null,
+                                                       summary: "the deploy was rolled back", by: "user:alice", ...over });
+
+  it("a note the run never read says so — it is not «the agent will read it» for ever (B-I3)", () => {
+    expect(stepVm(note({ outcome: "missed" as StepRow["outcome"], ended_at: "2026-11-18T03:53:00Z" })).state).toBe("missed");
+    expect(stepVm(note({})).state).toBe("waiting");                          // the run is on: it may still be read
+    expect(stepVm(note({}), false).state).toBe("missed");                    // an ended run's list: nobody will read it now
+    expect(stepVm(note({ delivered_at: "2026-11-18T03:52:30Z" }), false).state).toBe("done");
+  });
+
+  it("a step with no recorded end is «running» only while its run is (B-m5)", () => {
+    const open = row(1, { tool: "describe_vpcs", ended_at: null, outcome: null, preview: null });
+    expect(stepVm(open).state).toBe("now");
+    expect(stepVm(open, false).state).toBe("unended");                       // a restart mid-call, or the end was not written
+  });
+
+  it("a read-only account is told that a command and its result are not shown — not that there were none (B-I6)", () => {
+    const held = stepVm(row(1, { tool: "run_on_host", look: "act", tier: "unknown", summary: "", preview: null, withheld: true }));
+    expect([held.withheld, held.cmd, held.say]).toEqual([true, "run_on_host", ""]);
+    const read = stepVm(row(1, { tool: "describe_vpcs", tier: null, summary: "region=us-east-1", preview: null, withheld: true }));
+    expect([read.withheld, read.cmd]).toEqual([true, "describe_vpcs　region=us-east-1"]);
+    expect(stepVm(row(1)).withheld).toBe(false);
+  });
+});

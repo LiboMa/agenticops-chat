@@ -40,9 +40,10 @@ function Part({ part, which }: { part: DiffPart; which: "steps" | "rollback" }) 
 }
 
 /** «What changed since the previous plan (#N)» on the approve brief (N14): what became of the plan before this one
- *  — a person's reason is quoted, a reason code wrote is said as the code's —, then the difference by what would
- *  run. Nothing for an issue's first plan. «No line changed» is never said as «nothing changed»: the plan is word
- *  for word the old one, or something else in it differs, or that is not known. */
+ *  — a person's reason is quoted, a reason code wrote is said as the code's —, then the difference, part by part:
+ *  the steps and the rollback by what would run, a rollback written as a sentence by whether its text is the same,
+ *  the checks by number and content, the risk level. Nothing for an issue's first plan. «No line changed» is
+ *  never said as «nothing changed». */
 export function PrevDiffSection({ plan, now }: { plan: FixPlan; now: number }) {
   const t = useNfT();
   const { user } = useAuth();
@@ -67,10 +68,24 @@ export function PrevDiffSection({ plan, now }: { plan: FixPlan; now: number }) {
         : vm.ended === "byCode" ? <p className="note" style={{ marginTop: 0 }}><Prov code />{t("diff.byCode", { reason: vm.reason })}</p>
         : <p className="note" style={{ marginTop: 0 }}>{t(`diff.ended.${vm.ended}`, { status: vm.status })}</p>}
       {vm.otherDiagnosis && <p className="note">{t("diff.otherDiagnosis")}</p>}
-      {vm.verdict === "changed"
-        ? <><Part part={vm.steps} which="steps" /><Part part={vm.rollback} which="rollback" /></>
-        : <p className={`note${vm.verdict === "identical" ? " warn" : ""}`}>{t(`diff.${vm.verdict}`)}</p>}
-      {vm.risk && <p className="note">{t("diff.risk", { from: vm.risk.from, to: vm.risk.to })}</p>}
+      {vm.verdict === "identical" ? <p className="note warn">{t("diff.identical")}</p> : (
+        <>
+          {/* each part on its own line — never one sentence for all of them */}
+          <Part part={vm.steps} which="steps" />
+          {vm.rollbackText
+            ? <p className={`note${vm.rollbackText === "rewritten" ? " warn" : ""}`}>{t(vm.rollbackText === "same" ? "diff.rollback.sameText" : "diff.rollback.rewritten")}</p>
+            : <Part part={vm.rollback} which="rollback" />}
+          {vm.checks && (
+            <p className={`note${vm.checks.how === "same" ? "" : " warn"}`}>
+              {t(`diff.checks.${vm.checks.how}`, { pre: vm.checks.pre[1], post: vm.checks.post[1], pre0: vm.checks.pre[0], pre1: vm.checks.pre[1],
+                                                   post0: vm.checks.post[0], post1: vm.checks.post[1] })}
+              {vm.checks.fewerAfter && t("diff.checks.fewer")}
+            </p>
+          )}
+          {vm.risk && <p className="note">{t("diff.risk", { from: vm.risk.from, to: vm.risk.to })}</p>}
+          {(vm.verdict === "unexplained" || vm.verdict === "unknown") && <p className="note">{t(`diff.${vm.verdict}`)}</p>}
+        </>
+      )}
       <p className="note"><Prov code />{t("diff.how")}</p>
     </div>
   );

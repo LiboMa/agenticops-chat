@@ -6,6 +6,7 @@ const KNOWN = new Set([
   "rca_started", "rca_completed", "rca_evidence_check", "rca_critic", "rca_needs_review", "rca_human_feedback",
   "rca_disputed", "fix_plan_requested", "fix_plan_created", "fix_plan_updated", "fix_approved", "execution_started", "execution_completed", "resolved", "post_resolution",
   "execution_stop_requested", "agent_run_abandoned",       // MVP-2.9.0: a person stopped a run · an overdue agent run was taken over
+  "rca_superseded",                                        // … and the run that was taken over came back: its result starts no plan
   "change_requested", "change_review_started", "policy_decision", "change_reviewed", "review_failed",
   "change_clarified", "change_approved", "change_rejected", "change_cancelled", "change_review_resolved",
   "change.requested", "change.reviewed", "change.clarified", "change.approved", "change.rejected", "change.cancelled",

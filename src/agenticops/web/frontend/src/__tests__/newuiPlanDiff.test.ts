@@ -66,9 +66,38 @@ describe("prevDiffVm — what the approver is told about the plan before this on
     expect(prevDiffVm(answer({ same_content: true }), "L2")!.verdict).toBe("identical");
   });
 
-  it("no changed line is not «nothing changed»: the content differs, or it is not known", () => {
-    expect(prevDiffVm(answer({ same_content: false }), "L2")!.verdict).toBe("sameCommands");
-    expect(prevDiffVm(answer({ same_content: null }), "L2")!.verdict).toBe("sameCommandsUnknown");
+  // Round-2 review C-I2. The section compared command lines only and summed that up in ONE sentence: «no command of
+  // the steps or the rollback changed; something else did (wording, checks or risk level)». A rollback written as a
+  // sentence has no line — so a REWRITTEN one got that sentence — and the checks were never compared at all.
+  it("a rollback rewritten in prose is said to be rewritten, never «no command changed»", () => {
+    const vm = prevDiffVm(answer({ rollback_same: false, checks: { same: true, pre: [0, 0], post: [1, 1] }, risk_same: true }), "L2")!;
+    expect(vm.verdict).toBe("changed");
+    expect(vm.rollbackText).toBe("rewritten");
+    expect(prevDiffVm(answer({ rollback_same: true, checks: { same: true, pre: [0, 0], post: [1, 1] }, risk_same: true }), "L2")!.rollbackText).toBe("same");
+  });
+
+  it("a rollback that has lines is compared by its lines: no second verdict on its text", () => {
+    const rollback = { ...NONE, unchanged: 2 };
+    expect(prevDiffVm(answer({ rollback, rollback_same: true }), "L2")!.rollbackText).toBeNull();
+    expect(prevDiffVm(answer({}), "L2")!.rollbackText).toBeNull();             // an older server: not said, «nothing to compare» stays
+  });
+
+  it("says how the checks compare", () => {
+    const fewer = prevDiffVm(answer({ checks: { same: false, pre: [1, 1], post: [2, 1] } }), "L2")!;
+    expect([fewer.verdict, fewer.checks]).toEqual(["changed", { how: "count", pre: [1, 1], post: [2, 1], fewerAfter: true }]);
+    const reworded = prevDiffVm(answer({ checks: { same: false, pre: [0, 0], post: [1, 1] } }), "L2")!;
+    expect(reworded.checks).toEqual({ how: "content", pre: [0, 0], post: [1, 1], fewerAfter: false });
+    const same = prevDiffVm(answer({ checks: { same: true, pre: [0, 0], post: [2, 2] }, rollback_same: true, risk_same: true }), "L2")!;
+    expect(same.checks).toEqual({ how: "same", pre: [0, 0], post: [2, 2], fewerAfter: false });
+    expect(prevDiffVm(answer({}), "L2")!.checks).toBeNull();                    // not told: not said
+  });
+
+  it("a different content with nothing this page compares differing says exactly that", () => {
+    const all = { rollback_same: true, checks: { same: true, pre: [0, 0] as [number, number], post: [1, 1] as [number, number] }, risk_same: true };
+    expect(prevDiffVm(answer({ same_content: false, ...all }), "L2")!.verdict).toBe("unexplained");
+    expect(prevDiffVm(answer({ same_content: null, ...all }), "L2")!.verdict).toBe("unknown");   // a plan without a hash: not known
+    expect(prevDiffVm(answer({ same_content: false, ...all, risk_same: false }), "L1")!.verdict).toBe("changed");
+    expect(prevDiffVm(answer({ same_content: false }), "L2")!.verdict).toBe("unknown");          // an older server said less
   });
 
   it("any changed step or rollback line is a change", () => {
@@ -114,5 +143,23 @@ describe("tallyOf — one list's changes in one sentence's worth of numbers", ()
     expect(tallyOf(partOf({ added: [], removed: [], modified: [], unchanged: 0 })).comparable).toBe(false);
     expect(tallyOf(partOf({ added: [], removed: [], modified: [], unchanged: 2 })).comparable).toBe(true);
     expect(tallyOf(partOf(null)).comparable).toBe(false);
+  });
+});
+
+// Round-2 review C-I1: a value the database scrub removed. The stored text is what the approver sees, what the hash
+// covers and what the executor is handed — and it does not say which value. The brief says so.
+import { scrubbedCount } from "@/newui/lib/briefs/plan";
+describe("scrubbedCount — how many places of a plan lost a value when it was stored", () => {
+  it("counts steps, rollback lines and checks that hold the placeholder", () => {
+    expect(scrubbedCount({
+      steps: [{ action: "deactivate", command: "aws iam update-access-key --access-key-id [REDACTED-SECRET] --status Inactive" },
+              { action: "look", command: "aws sts get-caller-identity" }],
+      rollback_plan: { steps: [{ command: "aws iam update-access-key --access-key-id [REDACTED-SECRET] --status Active" }] },
+      pre_checks: [], post_checks: [{ check: "the key [REDACTED-SECRET] is inactive" }],
+    })).toBe(3);
+  });
+  it("is zero for a plan that lost nothing, whatever its shape", () => {
+    expect(scrubbedCount({ steps: [{ command: "kubectl get pods" }], rollback_plan: { description: "put it back" }, pre_checks: null, post_checks: null })).toBe(0);
+    expect(scrubbedCount({ steps: null, rollback_plan: null, pre_checks: null, post_checks: null })).toBe(0);
   });
 });

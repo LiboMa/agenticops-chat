@@ -7,7 +7,8 @@ import { whoText } from "../lib/activity";
 import { runTally, stepVm, type LiveStepVm, type StepRow } from "../lib/steps";
 import { utcStamp } from "../lib/time";
 
-const STATE_CLASS: Record<LiveStepVm["state"], string> = { now: "now", done: "done", bad: "done bad", refused: "skip", waiting: "" };
+const STATE_CLASS: Record<LiveStepVm["state"], string> = { now: "now", done: "done", bad: "done bad", refused: "skip", unended: "skip",
+                                                           waiting: "", missed: "skip" };
 
 /** A step's time to the second (steps follow each other within seconds): "03:52:07"; "—" when it cannot be read. */
 function clock(at: string): string {
@@ -22,15 +23,18 @@ function planTag(v: LiveStepVm, t: NfT): string | null {
 
 function Step({ v, t, me }: { v: LiveStepVm; t: NfT; me: string | null | undefined }) {
   const tag = planTag(v, t);
-  // a tool call reads «what it ran» first, then what came back (the start of it); words are just the words
-  const came = v.state === "now" ? t("steps.running") : v.state === "refused" ? t("steps.refused", { why: v.say || "—" }) : v.say || t("steps.noOutput");
+  // a tool call reads «what it ran» first, then what came back (the start of it); words are just the words.
+  // A read-only account is not sent a result (nor a command's own line): that is said — it is not «no output».
+  const came = v.state === "now" ? t("steps.running") : v.state === "unended" ? t("steps.unended")
+    : v.state === "refused" ? t("steps.refused", { why: v.say || "—" })
+    : v.withheld ? t(v.tier ? "steps.withheld.command" : "steps.withheld.result") : v.say || t("steps.noOutput");
   return (
     <li className={`${STATE_CLASS[v.state]}${v.mark === "you" ? " you" : ""}`.trim() || undefined}>
       <span className="say">
         {v.mark === "fact" ? <Prov code /> : v.mark === "say" ? <Prov code={false} /> : v.mark === "act" ? <span className="actm" aria-hidden="true">▸</span>
           : <b className="youtag">{whoText(v.by, me, t) || t("who.someone")}</b>}
         {v.cmd ? <code className="what">{v.cmd}</code> : v.say}
-        {v.mark === "you" && <small className="note">{"　"}{t(v.state === "waiting" ? "steps.you.waiting" : "steps.you.read")}</small>}
+        {v.mark === "you" && <small className={v.state === "missed" ? "note err" : "note"}>{"　"}{t(v.state === "waiting" ? "steps.you.waiting" : v.state === "missed" ? "steps.you.missed" : "steps.you.read")}</small>}
         {v.tier && v.tier !== "readonly" && <span className="tier w">{t(`tier.${v.tier}`)}</span>}
         {tag && <span className={`tier${v.plan?.part === "off" ? " w" : ""}`}>{tag}</span>}
       </span>
@@ -91,7 +95,7 @@ export function LiveSteps({ of, live, executor = false, now, heading, onSteps }:
               {tally && tally.refused > 0 && `　${t("steps.tally.refused", { n: tally.refused })}`}
             </p>
             <ol className="lsteps">
-              {steps!.map((s) => <Step key={s.id} v={stepVm(s)} t={t} me={user?.email} />)}
+              {steps!.map((s) => <Step key={s.id} v={stepVm(s, live)} t={t} me={user?.email} />)}
             </ol>
             <div ref={end} className="lsteps-end" aria-hidden="true" />
             <p className="note">{t("steps.legend")}</p>

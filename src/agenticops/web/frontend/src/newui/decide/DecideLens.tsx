@@ -38,7 +38,7 @@ export function DecideLens() {
   const t = useNfT();
   const navigate = useNavigate();
   const location = useLocation();
-  const { notify } = useShell();
+  const { notify, pendingItem } = useShell();
   const { item: itemParam = null } = useParams();
   const [search] = useSearchParams();
   const filter = parseFilter(search.get("f"));
@@ -51,7 +51,9 @@ export function DecideLens() {
   const [handled, setHandled] = useState<ReadonlyMap<string, string>>(new Map());
   const listed = useMemo(() => flattenPages(q.data?.pages), [q.data]);
   useEffect(() => { setHandled((old) => pruneHandled(listed, old)); }, [listed]);
-  const items = useMemo(() => withoutHandled(listed, handled), [listed, handled]);
+  // … and so does the item whose decision is waiting out its undo window — the shell knows it, so a lens opened
+  // inside the window (lens 2 and back) does not list it again with its brief armed
+  const items = useMemo(() => withoutHandled(listed, handled).filter((i) => i.id !== pendingItem), [listed, handled, pendingItem]);
   const first = q.data?.pages[0];
   const counts = groupCounts(first?.counts);
   const total = first?.total ?? null;

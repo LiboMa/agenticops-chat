@@ -13,11 +13,14 @@ export interface StepRow {
   plan_ref: string | null;
   summary: string;
   preview: string | null;
-  outcome: "ok" | "error" | "refused" | null;
+  /** a tool call: ok · error · refused; a note: ok (the agent read it) · missed (its run ended first) */
+  outcome: "ok" | "error" | "refused" | "missed" | null;
   by: string | null;
   started_at: string | null;
   ended_at: string | null;
   delivered_at: string | null;
+  /** the reader is a read-only account: a tool call's result — and a command's own line — are not sent */
+  withheld?: boolean;
 }
 
 export interface StepsAnswer {
@@ -32,9 +35,10 @@ export interface LiveStepVm {
   id: number;
   /** fact = the code fetched it (◆) · act = the agent did it (▸) · say = the model's own words (◇) · you = a person's note */
   mark: "fact" | "act" | "say" | "you";
-  /** now = running · done · bad = it failed · refused = a guard cancelled it, it never ran · waiting = a note the
-   *  agent has not read yet */
-  state: "now" | "done" | "bad" | "refused" | "waiting";
+  /** now = running · done · bad = it failed · refused = a guard cancelled it, it never ran · unended = no end was
+   *  recorded and the run is over (a restart mid-call, or the end was not written) · waiting = a note the agent
+   *  has not read yet · missed = a note the run ended without reading */
+  state: "now" | "done" | "bad" | "refused" | "unended" | "waiting" | "missed";
   /** the sentence: a tool's result (empty while it runs), the model's words, the note */
   say: string;
   /** what was run: the tool and its input on one line; null for words */
@@ -43,6 +47,8 @@ export interface LiveStepVm {
   plan: PlanPlace | null;
   by: string | null;
   at: string | null;
+  /** a read-only account: the result — and for a command its line — were not sent. Said, never shown as «no output» */
+  withheld: boolean;
 }
 
 const PLACE = /^(step|rollback|pre|post):([1-9]\d*)$/;
@@ -52,11 +58,16 @@ function place(ref: string | null): PlanPlace | null {
   return m ? { part: m[1] as PlanPlace["part"], n: Number(m[2]) } : null;
 }
 
-export function stepVm(row: StepRow): LiveStepVm {
-  const base = { id: row.id, tier: row.tier, plan: place(row.plan_ref), by: row.by, at: row.started_at };
+/** `live` = the run the row belongs to is still at work. Once it is not, a step that never got its end is not
+ *  «running», and a note that was not read will not be. */
+export function stepVm(row: StepRow, live = true): LiveStepVm {
+  const base = { id: row.id, tier: row.tier, plan: place(row.plan_ref), by: row.by, at: row.started_at, withheld: row.withheld === true };
   if (row.kind === "say") return { ...base, mark: "say", state: "done", say: row.summary, cmd: null };
-  if (row.kind === "you") return { ...base, mark: "you", state: row.delivered_at ? "done" : "waiting", say: row.summary, cmd: null };
-  const state = row.outcome === "refused" ? "refused" : row.outcome === "error" ? "bad" : row.ended_at ? "done" : "now";
+  if (row.kind === "you") {
+    const state = row.delivered_at ? "done" : row.outcome === "missed" || !live ? "missed" : "waiting";
+    return { ...base, mark: "you", state, say: row.summary, cmd: null };
+  }
+  const state = row.outcome === "refused" ? "refused" : row.outcome === "error" ? "bad" : row.ended_at ? "done" : live ? "now" : "unended";
   return { ...base, mark: row.look === "read" ? "fact" : "act", state, say: row.preview ?? "",
            cmd: [row.tool, row.summary].filter(Boolean).join("　") || null };
 }
@@ -98,7 +109,7 @@ export function planMarks(steps: StepRow[], total: number): ("done" | "now" | "b
     const p = place(s.plan_ref);
     if (s.kind !== "tool" || p?.part !== "step" || p.n === null || p.n > total) continue;
     const state = stepVm(s).state;
-    marks[p.n - 1] = state === "waiting" ? null : state;
+    marks[p.n - 1] = state === "done" || state === "now" || state === "bad" || state === "refused" ? state : null;
   }
   return marks;
 }

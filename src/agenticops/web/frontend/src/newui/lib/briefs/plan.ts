@@ -36,6 +36,22 @@ export function stepsVm(plan: Pick<FixPlan, "steps" | "step_tiers">): StepVm[] {
   return steps.map((s, i) => step(s, tiers && TIERS.includes(tiers[i]) ? (tiers[i] as Tier) : null));
 }
 
+/** What the database's secret scrub leaves in place of a value (security/redaction.PLACEHOLDER). */
+export const SCRUBBED = "[REDACTED-SECRET]";
+
+/** How many places of a plan — a step, a rollback line, a check — lost a value when the plan was stored. The stored
+ *  text is what the approver is shown, what the approval's hash covers and what the executor is handed; it does not
+ *  say which value. The server marks such a command «unknown» (so it is never approved without a person); the brief
+ *  says why. */
+export function scrubbedCount(plan: { steps?: unknown; rollback_plan?: unknown; pre_checks?: unknown; post_checks?: unknown }): number {
+  const held = (v: unknown): boolean => (v == null ? false : (typeof v === "string" ? v : JSON.stringify(v)).includes(SCRUBBED));
+  const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+  const r = obj(plan.rollback_plan);
+  const rollback = r ? [...list(r.steps), ...list(r.commands), ...Object.entries(r).filter(([k]) => k !== "steps" && k !== "commands").map(([, v]) => v)]
+    : list(plan.rollback_plan).length ? list(plan.rollback_plan) : [plan.rollback_plan];
+  return [...list(plan.steps), ...rollback, ...list(plan.pre_checks), ...list(plan.post_checks)].filter(held).length;
+}
+
 export interface CheckVm { id: string; text: string; cmd: string | null }
 
 /** The declared checks of one list, each with its command. A post-check's id is its position (pc-1 … pc-n): the id

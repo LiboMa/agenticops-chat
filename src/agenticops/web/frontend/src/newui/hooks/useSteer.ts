@@ -8,8 +8,10 @@ import type { StepRow } from "../lib/steps";
 export function useSteer() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ lane, text }: { lane: string; text: string }) =>
-      apiFetch<StepRow>("/ui/activity/note", { method: "POST", body: JSON.stringify({ lane, text }) }),
+    // `run` = the run whose steps were on the page when the note was written (its key, when the list has one): a
+    // new run of the same agent on the same item has the same lane id, and must not get a note about the old one
+    mutationFn: ({ lane, text, run }: { lane: string; text: string; run?: string | null }) =>
+      apiFetch<StepRow>("/ui/activity/note", { method: "POST", body: JSON.stringify(run ? { lane, text, run } : { lane, text }) }),
     onSettled: () => { void qc.invalidateQueries({ queryKey: ["ui-activity-steps"] }); },
   });
 }

@@ -2,7 +2,10 @@ import type { PlanLineDiff, PreviousPlanDiff } from "@/api/types";
 
 /** What a fix plan changed relative to the plan before it on the same issue (N14), as the approve brief says it.
  *  The server compares by what would RUN (a step's command; a step without one, its words) — so reworded text
- *  around an unchanged command is not a line here, and «no line changed» is never said as «nothing changed». */
+ *  around an unchanged command is not a line here, and «no line changed» is never said as «nothing changed».
+ *  Each part is said on its own line — steps, rollback, checks, risk level — never summed up in one sentence: a
+ *  rollback written as a sentence has no line, and «no command of the rollback changed» was said of one that had
+ *  been rewritten (round-2 review). */
 
 export interface DiffLine {
   kind: "add" | "del" | "chg";
@@ -53,12 +56,19 @@ export interface PrevDiffVm {
   reason: string;
   /** the two plans were written from different diagnoses (known, not guessed) */
   otherDiagnosis: boolean;
-  /** identical = the same content hash · sameCommands = no step or rollback line differs, yet the content does
-   *  (wording, checks, risk level) · sameCommandsUnknown = no line differs and nothing says whether the rest does ·
-   *  changed = at least one line differs */
-  verdict: "identical" | "sameCommands" | "sameCommandsUnknown" | "changed";
+  /** identical = the same content hash · changed = something this page compares differs (a step or rollback line,
+   *  the rollback's text, the checks, the risk level) · unexplained = the content differs and nothing this page
+   *  compares does (the account the issue belongs to is part of the content too) · unknown = nothing compared
+   *  differs and nothing says whether the content does */
+  verdict: "identical" | "changed" | "unexplained" | "unknown";
   steps: DiffPart;
   rollback: DiffPart;
+  /** a rollback with no line on either side (a sentence): is its text the same, or was it rewritten — null when
+   *  it has lines (they are compared) or the server did not say */
+  rollbackText: "same" | "rewritten" | null;
+  /** the declared checks, [the previous plan, this plan]: the same · another number · the same number, other content.
+   *  `fewerAfter` = fewer checks after a run than before: an easier «passed». null = the server did not say */
+  checks: { how: "same" | "count" | "content"; pre: [number, number]; post: [number, number]; fewerAfter: boolean } | null;
   risk: { from: string; to: string } | null;
 }
 
@@ -69,12 +79,22 @@ export function prevDiffVm(answer: PreviousPlanDiff | null | undefined, riskNow:
   const ended = prev.status === "rejected" ? (prev.rejection_is_feedback && reason ? "feedback" : reason ? "byCode" : "rejected")
     : prev.status === "failed" ? "failed" : prev.status === "executed" ? "ran" : "other";
   const steps = partOf(answer.steps), rollback = partOf(answer.rollback);
-  const verdict = answer.same_content === true ? "identical"
-    : steps.lines.length || rollback.lines.length ? "changed"
-    : answer.same_content === false ? "sameCommands" : "sameCommandsUnknown";
+  const rollbackText = tallyOf(rollback).comparable || typeof answer.rollback_same !== "boolean" ? null
+    : answer.rollback_same ? "same" : "rewritten";
+  const c = answer.checks;
+  const checks = !c ? null : {
+    how: c.same ? "same" as const : c.pre[0] !== c.pre[1] || c.post[0] !== c.post[1] ? "count" as const : "content" as const,
+    pre: c.pre, post: c.post, fewerAfter: c.post[1] < c.post[0],
+  };
+  const risk = prev.risk_level && riskNow && prev.risk_level !== riskNow ? { from: prev.risk_level, to: riskNow } : null;
+  const differs = steps.lines.length > 0 || rollback.lines.length > 0 || rollbackText === "rewritten"
+    || (checks !== null && checks.how !== "same") || risk !== null || answer.risk_same === false;
+  // «everything this page compares is the same» can only be said when the server told us about all of it
+  const told = typeof answer.rollback_same === "boolean" && !!c && typeof answer.risk_same === "boolean";
+  const verdict = answer.same_content === true ? "identical" : differs ? "changed"
+    : answer.same_content === false && told ? "unexplained" : "unknown";
   return {
     previousId: prev.id, ended, status: prev.status, by: prev.rejected_by, at: prev.rejected_at, reason,
-    otherDiagnosis: prev.same_diagnosis === false, verdict, steps, rollback,
-    risk: prev.risk_level && riskNow && prev.risk_level !== riskNow ? { from: prev.risk_level, to: riskNow } : null,
+    otherDiagnosis: prev.same_diagnosis === false, verdict, steps, rollback, rollbackText, checks, risk,
   };
 }

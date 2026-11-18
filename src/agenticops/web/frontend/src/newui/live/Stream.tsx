@@ -12,6 +12,7 @@ import { useSettings } from "@/hooks/useSettings";
 import { useLocale } from "@/i18n/LocaleContext";
 import { toActivity } from "@/lib/activity";
 import { safeRoute, type AttentionItem } from "@/lib/attention";
+import { keepsImeEnter } from "@/lib/composerKeys";
 import { activeChangePlan, toPipelineEvents } from "@/lib/changeDetail";
 import { parseItem } from "@/lib/inbox";
 import { currentFixPlan } from "@/lib/issuePhases";
@@ -244,7 +245,8 @@ export function Stream({ lane, moved, mine, now, stop, steer, onBack, onStory, o
         {steer && (
           <form className="steer" onSubmit={(e) => { e.preventDefault(); steer.onSay(steer.field.current?.value ?? ""); }}>
             <input ref={steer.field} className="field" type="text" maxLength={200} autoComplete="off" disabled={steer.busy}
-                   placeholder={t("steer.placeholder")} aria-label={t("steer.label")} />
+                   placeholder={t("steer.placeholder")} aria-label={t("steer.label")}
+                   onKeyDown={(e) => { keepsImeEnter(e); }} />
             <button type="submit" className="btn" disabled={steer.busy}><span className="t">{t("steer.send")}</span><kbd>↵</kbd></button>
             <kbd className="wide">E</kbd>
           </form>

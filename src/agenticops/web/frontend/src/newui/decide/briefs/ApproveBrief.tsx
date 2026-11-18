@@ -38,7 +38,8 @@ export const PLAN_REFRESH_MS = 15_000;
 
 /** A request for changes that was refused, in words: an agent already on the issue means the plan was NOT sent back. */
 export const changesError = (e: unknown, t: (k: string, v?: Record<string, string>) => string): string =>
-  e instanceof ApiError && e.code === "agent_run_in_flight" ? t("err.changesBusy") : approveError(e, t);
+  e instanceof ApiError && e.code === "agent_run_in_flight" ? t("err.changesBusy")
+    : e instanceof ApiError && e.code === "plan_changed" ? t("err.changesStale") : approveError(e, t);
 
 /** A fix plan that waits for approval. Approving is bound to the content hash that was on the page; with the executor
  *  on it runs at once — so the key must be held, and the hold approves only the plan it began on. «R» asks for
@@ -95,7 +96,7 @@ export function ApproveBrief({ item, frame }: BriefProps) {
                 busy={changes.isPending} error={error} onCancel={() => setForm(null)}
                 onSubmit={async (reason) => {
                   setError(null);
-                  setError(await decide(() => changes.mutateAsync({ id: plan.id, reason }), t("toast.changesAsked", { ref: item.ref }),
+                  setError(await decide(() => changes.mutateAsync({ id: plan.id, reason, content_hash: plan.content_hash }), t("toast.changesAsked", { ref: item.ref }),
                                         (e) => changesError(e, t), t("pend.changes")));
                 }} />
   ) : form === "close" ? <DismissForm item={item} onCancel={() => setForm(null)} /> : (

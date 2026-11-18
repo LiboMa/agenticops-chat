@@ -22,10 +22,13 @@ export interface ShellApi {
   /** a decision that shows now and is sent after the undo window (N13; lib/pending). Outside the shell — a test, a
    *  page of its own — there is no window: it is sent at once */
   defer: (d: Deferred) => void;
+  /** the queue item whose decision is waiting out its undo window, or null: a lens keeps it off its list (a lens
+   *  opened inside the window never saw the decision being made) */
+  pendingItem: string | null;
 }
 
 export const ShellContext = createContext<ShellApi>({ setLensKeys: () => {}, notify: () => {}, singleKeys: true, setRootFlag: () => {},
-                                                      defer: (d) => d.send() });
+                                                      defer: (d) => { void d.send(); }, pendingItem: null });
 export const useShell = () => useContext(ShellContext);
 
 /** The lens's keys, registered while it is on the page. The handlers may be new functions on every render. */

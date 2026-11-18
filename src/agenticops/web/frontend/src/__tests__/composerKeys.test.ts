@@ -42,3 +42,28 @@ describe("isComposingKey — an input method is composing (MVP-2.8.0 S1, the sea
     expect(isComposingKey({ isComposing: false })).toBe(false);
   });
 });
+
+import { keepsImeEnter } from "@/lib/composerKeys";
+describe("keepsImeEnter — a field inside a <form>: the Enter that picks a candidate must not submit it", () => {
+  // Round-2 review (B, S1). The reason box and the «say a word» field submit through the browser's own form
+  // submission. Chrome keeps the candidate-picking Enter to the input method; Safari ends the composition first and
+  // then delivers that Enter (keyCode 229, isComposing false) — and submits the form with a half-typed sentence.
+  const ev = (over: Partial<{ key: string; isComposing: boolean; keyCode: number }> = {}) => {
+    let prevented = false;
+    return { e: { key: over.key ?? "Enter", preventDefault: () => { prevented = true; },
+                  nativeEvent: { isComposing: over.isComposing ?? false, keyCode: over.keyCode ?? 13 } },
+             prevented: () => prevented };
+  };
+  it("stops Safari's Enter after a composition, and an Enter during one", () => {
+    const safari = ev({ keyCode: 229 });
+    expect([keepsImeEnter(safari.e), safari.prevented()]).toEqual([true, true]);
+    const composing = ev({ isComposing: true });
+    expect([keepsImeEnter(composing.e), composing.prevented()]).toEqual([true, true]);
+  });
+  it("leaves an ordinary Enter and every other key alone", () => {
+    const enter = ev();
+    expect([keepsImeEnter(enter.e), enter.prevented()]).toEqual([false, false]);
+    const letter = ev({ key: "a", keyCode: 229 });                     // typing a candidate's letters: the input method's own
+    expect([keepsImeEnter(letter.e), letter.prevented()]).toEqual([false, false]);
+  });
+});

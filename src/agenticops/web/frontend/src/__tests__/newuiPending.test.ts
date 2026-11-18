@@ -33,7 +33,7 @@ describe("Pending — a decision shows at once and is sent a little later", () =
     const { clock, tick } = fakeClock(), log: string[] = [];
     const p = new Pending(clock);
     p.add(decision("approve I12", log));
-    expect(p.waiting).toEqual({ label: "approve I12", due: 5000 });
+    expect(p.waiting).toEqual({ label: "approve I12", due: 5000, item: null });
     tick(4999);
     expect(log).toEqual([]);
     tick(1);
@@ -69,7 +69,7 @@ describe("Pending — a decision shows at once and is sent a little later", () =
     tick(1000);
     p.add(decision("dismiss I7", log));
     expect(log).toEqual(["send approve I12"]);
-    expect(p.waiting).toEqual({ label: "dismiss I7", due: 6000 });
+    expect(p.waiting).toEqual({ label: "dismiss I7", due: 6000, item: null });
     expect(p.undo()).toBe(true);
     expect(log).toEqual(["send approve I12", "undo dismiss I7"]);
     tick(10_000);
@@ -168,5 +168,47 @@ describe("deferDecision — a queue decision: shown now, sent later, put back wh
     tick(5000);
     await flushed();
     expect(log).toEqual(["hide", "request", "restore", "failed Error: offline"]);
+  });
+});
+
+// Round-2 review.
+describe("Pending — what the shell needs to know about the decision that is waiting", () => {
+  it("names the item the waiting decision is on, so every lens keeps it off its list (C-M4)", () => {
+    const { clock, tick } = fakeClock(), log: string[] = [];
+    const p = new Pending(clock);
+    p.add({ ...decision("approve I12", log), item: "I12" });
+    expect(p.waiting).toEqual({ label: "approve I12", due: UNDO_MS, item: "I12" });
+    tick(UNDO_MS);
+    expect(p.waiting).toBeNull();
+    p.add(decision("something else", log));
+    expect(p.waiting?.item).toBeNull();
+  });
+
+  it("flush tells when the request it sent has an answer — signing out waits for that (C-I3)", async () => {
+    const { clock } = fakeClock(), log: string[] = [];
+    const p = new Pending(clock);
+    let answer: (v: string) => void = () => {};
+    deferDecision(p, {
+      label: "approve I12", item: "I12", hide: () => () => {},
+      request: () => { log.push("request"); return new Promise<string>((ok) => { answer = ok; }); },
+      onDone: (r) => { log.push(`done ${r}`); }, onFailed: () => { log.push("failed"); },
+    });
+    let over = false;
+    const flushed = p.flush().then(() => { over = true; });
+    await Promise.resolve(); await Promise.resolve();
+    expect([log, over]).toEqual([["request"], false]);                // sent, and still waiting for the server
+    answer("approved");
+    await flushed;
+    expect([log, over]).toEqual([["request", "done approved"], true]);
+  });
+
+  it("flush with nothing waiting, or a send that fails, is over at once and never rejects", async () => {
+    const { clock } = fakeClock();
+    const p = new Pending(clock);
+    await expect(p.flush()).resolves.toBeUndefined();
+    p.add({ label: "x", send: () => Promise.reject(new Error("401")), undo: () => {} });
+    await expect(p.flush()).resolves.toBeUndefined();
+    p.add({ label: "y", send: () => { throw new Error("boom"); }, undo: () => {} });
+    await expect(p.flush()).resolves.toBeUndefined();
   });
 });

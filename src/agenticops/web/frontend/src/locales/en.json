@@ -715,6 +715,7 @@
   "activity.type.rca_human_feedback": "Human verdict on the RCA",
   "activity.type.rca_disputed": "RCA disputed",
   "activity.type.agent_run_abandoned": "An agent run past its time limit was replaced by a new one",
+  "activity.type.rca_superseded": "The diagnosis that had been replaced came back: its result is saved, but no plan was started from it (the issue belongs to the newer run)",
   "activity.type.fix_approved": "Fix plan approved",
   "activity.type.execution_started": "Run started",
   "activity.type.execution_completed": "Run finished",

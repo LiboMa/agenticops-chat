@@ -72,6 +72,7 @@ export function useDecision(item: AttentionItem) {
                                words: (e: unknown) => string = (e) => t("err.failed", { msg: errorText(e) }), what?: string): Promise<string | null> => {
     deferDecision({ add: defer }, {
       label: `${item.ref}：${what ?? t("pend.generic")}`,
+      item: item.id,
       hide: () => hide(item),
       request,
       onDone: (result) => notify(typeof toast === "string" ? toast : toast(result)),

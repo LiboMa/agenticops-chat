@@ -12,8 +12,11 @@ export const UNDO_MS = 5000;
 export interface Deferred {
   /** what the toast says while it waits */
   label: string;
-  /** do it now (the request leaves) */
-  send: () => void;
+  /** the queue item it decides on, if it is one: every lens keeps it off its list while the decision waits */
+  item?: string;
+  /** do it now (the request leaves). A promise it returns is over when the request has its answer — whoever
+   *  must not go on before that (signing out) waits for it; it must not reject */
+  send: () => void | Promise<unknown>;
   /** it was taken back: put the page back as it was */
   undo: () => void;
 }
@@ -36,15 +39,15 @@ export class Pending {
 
   constructor(private clock: Clock = browserClock, private ms: number = UNDO_MS) {}
 
-  /** what is waiting to be sent, and when it will be (epoch ms of the clock) */
-  get waiting(): { label: string; due: number } | null {
-    return this.cur ? { label: this.cur.d.label, due: this.cur.due } : null;
+  /** what is waiting to be sent, when it will be (epoch ms of the clock), and the queue item it is on (or null) */
+  get waiting(): { label: string; due: number; item: string | null } | null {
+    return this.cur ? { label: this.cur.d.label, due: this.cur.due, item: this.cur.d.item ?? null } : null;
   }
 
   /** A new decision: the one before it is sent now, this one waits. */
   add(d: Deferred): void {
-    this.flush();
-    this.cur = { d, due: this.clock.now() + this.ms, timer: this.clock.set(() => this.flush(), this.ms) };
+    void this.flush();
+    this.cur = { d, due: this.clock.now() + this.ms, timer: this.clock.set(() => { void this.flush(); }, this.ms) };
     this.tell();
   }
 
@@ -56,11 +59,17 @@ export class Pending {
     return true;
   }
 
-  /** Send the waiting decision now: its time is up, a new decision came, or the page is going away. */
-  flush(): void {
+  /** Send the waiting decision now: its time is up, a new decision came, or the page is going away. The promise
+   *  is over when the request it sent has its answer (at once when nothing was waiting); it never rejects — the
+   *  sender reports its own failure, and the next decision must still be able to wait. */
+  flush(): Promise<void> {
     const cur = this.take();
-    if (!cur) return;
-    try { cur.d.send(); } catch { /* the sender reports its own failure; the next decision must still be able to wait */ }
+    if (!cur) return Promise.resolve();
+    try {
+      return Promise.resolve(cur.d.send()).then(() => undefined, () => undefined);
+    } catch {
+      return Promise.resolve();
+    }
   }
 
   subscribe(listener: () => void): () => void {
@@ -87,6 +96,8 @@ export class Pending {
  *  it — a refusal after the window is said (`onFailed`), never silent. */
 export function deferDecision<T>(p: Pick<Pending, "add">, d: {
   label: string;
+  /** the queue item's id */
+  item?: string;
   /** hide the item now → «put it back»; `goBack` = also bring the page back to it (the person took the decision
    *  back themselves — a refusal that arrives later must not pull them away from what they are doing now) */
   hide: () => (goBack: boolean) => void;
@@ -98,10 +109,11 @@ export function deferDecision<T>(p: Pick<Pending, "add">, d: {
   const refused = (e: unknown) => { restore(false); d.onFailed(e); };
   p.add({
     label: d.label,
+    item: d.item,
     send: () => {
       let sent: Promise<T>;
       try { sent = d.request(); } catch (e) { refused(e); return; }
-      sent.then(d.onDone, refused);
+      return sent.then(d.onDone, refused);
     },
     undo: () => restore(true),
   });

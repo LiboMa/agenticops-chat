@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { FixPlan } from "@/api/types";
 import { useNfT } from "../../i18n";
-import { checksVm, planHead, rollbackVm, stepsVm, type CheckVm } from "../../lib/briefs/plan";
+import { checksVm, planHead, rollbackVm, scrubbedCount, stepsVm, type CheckVm } from "../../lib/briefs/plan";
 import { Prov } from "./Cause";
 import { Steps } from "./Steps";
 
@@ -14,6 +14,7 @@ export function PlanSection({ plan, heading, kind, rollback = true, children }: 
   const head = planHead(plan);
   const steps = stepsVm(plan);
   const rb = rollbackVm(plan);
+  const scrubbed = scrubbedCount(plan);
   return (
     <div className="sec">
       <h2>
@@ -23,6 +24,7 @@ export function PlanSection({ plan, heading, kind, rollback = true, children }: 
       </h2>
       {steps.length ? <Steps steps={steps} /> : <p className="note">{t("plan.noSteps")}</p>}
       {steps.some((s) => s.tier) && <p className="note"><Prov code />{t("plan.tierNote")}</p>}
+      {scrubbed > 0 && <p className="note warn"><Prov code />{t("plan.scrubbed", { n: scrubbed })}</p>}
       {children}
       {rollback && (
         <>

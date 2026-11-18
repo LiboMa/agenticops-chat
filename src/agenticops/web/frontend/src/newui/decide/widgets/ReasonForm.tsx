@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { isComposingKey } from "@/lib/composerKeys";
+import { isComposingKey, keepsImeEnter } from "@/lib/composerKeys";
 import { useNfT } from "../../i18n";
 
 /** The one reason box of a brief, in place of its action row: every «no» needs a reason. Enter sends, Esc closes
@@ -23,6 +23,9 @@ export function ReasonForm({ label, placeholder, note, submit, busy, error, onSu
              placeholder={missing ? t("reject.required") : placeholder}
              onChange={(e) => { setValue(e.target.value); setMissing(false); }}
              onKeyDown={(e) => {
+               // the Enter that picks an input method's candidate is the input method's too: it must not send a
+               // half-typed reason (Safari delivers it after the composition has ended)
+               if (keepsImeEnter(e)) return;
                // Escape that cancels an input method's candidate is the input method's (isComposing, or keyCode 229)
                if (e.key === "Escape" && !isComposingKey(e.nativeEvent)) { e.nativeEvent.stopPropagation(); onCancel(); }
              }} />
