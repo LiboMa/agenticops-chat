@@ -124,11 +124,13 @@
 .nf .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc((var(--bar) - 46px)/2);z-index:12;display:flex;align-items:center;gap:10px;
   width:min(720px,calc(100% - 32px));height:46px;padding:0 14px 0 16px;border:1px solid var(--line);border-radius:14px;background:var(--solid);font-size:var(--fs-sm);overflow:hidden}
 .nf .toast.count{border-color:var(--amber)}
+.nf .toast.above{bottom:calc((var(--bar) - 46px)/2 + 56px)}                     /* a plain line while a decision waits: above it, never over it */
 .nf .toast .msg{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .nf .toast .cd{position:absolute;left:0;bottom:0;height:2px;background:var(--amber);width:100%}
 .nf .toast.count .cd{animation:nf-cd 5s linear forwards}
 @keyframes nf-cd{to{width:0}}
-.nf .toast button{color:var(--amber);font-weight:600;display:inline-flex;gap:6px;align-items:center}
+.nf .toast button{color:var(--amber);font-weight:600;display:inline-flex;gap:6px;align-items:center;align-self:stretch;
+  min-width:56px;justify-content:center;margin-right:-14px;padding:0 14px}   /* «undo»: the whole right end of the line, tall as the line — on a phone it is the only way to undo */
 
 .nf .overlay{position:fixed;inset:0;z-index:30;background:rgba(5,6,18,.6);display:grid;place-items:center;padding:16px}
 .nf .dialog{width:min(640px,100%);max-height:90dvh;overflow:auto;border:1px solid var(--line);border-radius:var(--r-3);background:var(--solid);padding:20px 22px}
@@ -490,6 +492,7 @@
 @media (prefers-reduced-motion:reduce){
   .nf *{animation:none !important;transition:none !important}
   .nf .btn.holding .fill{transition:width .9s linear !important}      /* the hold is the confirmation, not decoration */
+  .nf .toast.count .cd{animation:nf-cd 5s linear forwards !important} /* the time a decision has left is information, not decoration */
 }
 
 /* ── NewUI only (not in the design prototype): what the classic shell gave for free, and what real data needs ───── */

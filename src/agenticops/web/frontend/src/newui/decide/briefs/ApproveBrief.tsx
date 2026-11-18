@@ -61,7 +61,7 @@ export function ApproveBrief({ item, frame }: BriefProps) {
       () => approve.mutateAsync({ id: tg.planId, content_hash: tg.hash }),
       // what the server's answer says happened — the executor may have been switched on or off since the page was read
       (res) => t(approvedToastKey(res?.run_queued ?? undefined, state?.effect ?? "unknown"), { ref: item.ref }),
-      (e) => approveError(e, t)));
+      (e) => approveError(e, t), t("pend.approve")));
   });
 
   useBriefKeys({
@@ -87,7 +87,7 @@ export function ApproveBrief({ item, frame }: BriefProps) {
                 busy={reject.isPending} error={error} onCancel={() => setForm(null)}
                 onSubmit={async (reason) => {
                   setError(null);
-                  setError(await decide(() => reject.mutateAsync({ id: plan.id, reason }), t("toast.rejected", { ref: item.ref })));
+                  setError(await decide(() => reject.mutateAsync({ id: plan.id, reason }), t("toast.rejected", { ref: item.ref }), undefined, t("pend.reject")));
                 }} />
   ) : form === "close" ? <DismissForm item={item} onCancel={() => setForm(null)} /> : (
     <>

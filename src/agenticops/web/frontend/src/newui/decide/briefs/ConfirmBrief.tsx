@@ -25,7 +25,7 @@ const CHOICES: [VerdictChoice, string][] = [["correct", "Y"], ["partial", "P"], 
  *  request names the diagnosis so the server refuses it when a newer one exists. */
 export function ConfirmBrief({ item, frame }: BriefProps) {
   const t = useNfT();
-  const { notify } = useShell();
+  const { notify, defer } = useShell();
   const { done, failed, openPeek } = useDecide();
   const issueId = parseItem(item.id)?.id ?? 0;
   const rcaQ = useFreshRca(issueId);
@@ -79,10 +79,17 @@ export function ConfirmBrief({ item, frame }: BriefProps) {
     setBusy(false);
     finish(choice);
   };
+  // A verdict shows at once and is sent after the undo window (N13). It is the verdict on the diagnosis that was
+  // on the page when it was given: `send` is this render's, with this render's diagnosis.
+  const later = (req: VerdictRequests, choice: VerdictChoice) => {
+    setBusy(true);
+    setError(null);
+    defer({ label: `${item.ref}：${t("pend.verdict", { v: t(`verdict.${choice}`) })}`, send: () => void send(req, choice), undo: () => setBusy(false) });
+  };
   const choose = (choice: VerdictChoice) => {
     if (busy || frame.readOnly || !fresh || !choiceAvailable(choice, rca)) return;
     setError(null);
-    if (noteRequired(choice)) setAsking(choice); else void send(verdictRequests(choice, rca, ""), choice);
+    if (noteRequired(choice)) setAsking(choice); else later(verdictRequests(choice, rca, ""), choice);
   };
   const again = () => { if (!frame.readOnly) void agent.ask("rca"); };
 
@@ -101,7 +108,7 @@ export function ConfirmBrief({ item, frame }: BriefProps) {
   const actions = asking ? (
     <ReasonForm label={t("reject.label")} placeholder={t(`verdict.ph.${asking}`)} note={t(`verdict.note.${asking}`)} submit={t("verdict.send")}
                 busy={busy} error={error} onCancel={() => setAsking(null)}
-                onSubmit={(reason) => void send(verdictRequests(asking, rca, reason), asking)} />
+                onSubmit={(reason) => later(verdictRequests(asking, rca, reason), asking)} />
   ) : (
     <>
       <button type="button" className="btn" disabled={agent.busy} onClick={again}><span className="t">{t("verdict.rerun")}</span><kbd>M</kbd></button>

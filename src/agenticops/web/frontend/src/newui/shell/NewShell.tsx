@@ -18,6 +18,8 @@ import { pageTitle } from "../lib/story";
 import { WorldLayer } from "../world/WorldData";
 import { CommandBar } from "./CommandBar";
 import { Help } from "./Help";
+import { PendingToast } from "./PendingToast";
+import { usePendingStore } from "./usePendingStore";
 import { ShellContext, type LensKeys, type ShellApi } from "./shellContext";
 
 const LENSES: Lens[] = ["decide", "live", "world"];
@@ -79,6 +81,15 @@ export function NewShell({ children }: { children: ReactNode }) {
   }, []);
   useEffect(() => () => { if (noticeTimer.current) window.clearTimeout(noticeTimer.current); }, []);
 
+  // the one decision that is waiting out its undo window (N13): «Z» or the toast's button takes it back
+  const pending = usePendingStore();
+  const pendingUndo = pending.undo;
+  const undo = useCallback(() => {
+    const took = pendingUndo();
+    if (took) notify(t("toast.undone"));
+    return took;
+  }, [pendingUndo, notify, t]);
+
   const closeMenu = useCallback((refocus: boolean) => {
     setMenu(false);
     if (refocus) avatar.current?.focus();
@@ -105,13 +116,15 @@ export function NewShell({ children }: { children: ReactNode }) {
       if (intent.type === "help") return setHelp(true);
       if (intent.type === "theme") return toggle();
       if (intent.type === "lens") return go(intent.lens);
+      // «Z» takes the waiting decision back — before the lens sees the key: it works on every lens
+      if (intent.key === "z" && !intent.repeat && undo()) { e.preventDefault(); return; }
       if (lensKeys.current?.onKey?.(intent.key, e, intent.repeat)) e.preventDefault();
     };
     const up = (e: KeyboardEvent) => lensKeys.current?.onKeyUp?.(e.key.toLowerCase(), e);
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
-  }, [help, menu, singleKeys, toggle, go, closeMenu]);
+  }, [help, menu, singleKeys, toggle, go, closeMenu, undo]);
 
   // the account menu: the pointer anywhere else closes it; opening it puts the focus on its first line
   useEffect(() => {
@@ -155,8 +168,8 @@ export function NewShell({ children }: { children: ReactNode }) {
     setFlags((old) => (old.includes(flag) === on ? old : on ? [...old, flag] : old.filter((f) => f !== flag)));
   }, []);
   const api = useMemo<ShellApi>(() => ({
-    setLensKeys: (keys) => { lensKeys.current = keys; }, notify, singleKeys, setRootFlag,
-  }), [notify, singleKeys, setRootFlag]);
+    setLensKeys: (keys) => { lensKeys.current = keys; }, notify, singleKeys, setRootFlag, defer: pending.defer,
+  }), [notify, singleKeys, setRootFlag, pending.defer]);
   const nfTheme = theme === "dark" ? "night" : "day";
 
   return (
@@ -216,7 +229,9 @@ export function NewShell({ children }: { children: ReactNode }) {
         </header>
         <main>{children}</main>
         <CommandBar input={command} lens={lens} onTheme={toggle} onHelp={() => setHelp(true)} />
-        {notice && <div className="toast" role="status"><span className="spark" aria-hidden="true" /><span className="msg">{notice}</span></div>}
+        {pending.waiting && <PendingToast label={pending.waiting.label} due={pending.waiting.due} onUndo={undo} />}
+        {/* a plain line never covers a decision's undo window: it sits above it */}
+        {notice && <div className={`toast${pending.waiting ? " above" : ""}`} role="status"><span className="spark" aria-hidden="true" /><span className="msg">{notice}</span></div>}
         {help && <Help onClose={() => setHelp(false)} />}
         </WorldLayer>
       </div>

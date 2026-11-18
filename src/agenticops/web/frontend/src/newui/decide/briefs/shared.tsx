@@ -26,7 +26,7 @@ export function DismissForm({ item, onCancel }: { item: AttentionItem; onCancel:
                 busy={dismiss.isPending} error={error} onCancel={onCancel}
                 onSubmit={async (reason) => {
                   setError(null);
-                  setError(await decide(() => dismiss.mutateAsync(reason), t("toast.closed", { ref: item.ref })));
+                  setError(await decide(() => dismiss.mutateAsync(reason), t("toast.closed", { ref: item.ref }), undefined, t("pend.dismiss")));
                 }} />
   );
 }
@@ -35,24 +35,32 @@ export function DismissForm({ item, onCancel }: { item: AttentionItem; onCancel:
  *  record): while there is one, nothing can be asked again — here, in another tab, or by someone else. */
 export function useAgentAsk(item: AttentionItem) {
   const t = useNfT();
-  const { notify } = useShell();
+  const { notify, defer } = useShell();
   const issueId = parseItem(item.id)?.id ?? 0;
+  const [waiting, setWaiting] = useState(false);       // asked, and still inside its undo window (N13)
   const lane = useAgentOn(item.id);
   const rca = useTriggerRca(issueId);
   const plan = useTriggerPlan(issueId);
   const [error, setError] = useState<string | null>(null);
   // an agent within its time limit keeps the item; one past it does not (N11) — asking again takes the item over,
   // and the old run is recorded as abandoned
-  const busy = rca.isPending || plan.isPending || (!!lane && !lane.overdue);
-  const ask = async (what: "rca" | "plan") => {
-    if (busy) return;
-    setError(null);
+  const busy = waiting || rca.isPending || plan.isPending || (!!lane && !lane.overdue);
+  const send = async (what: "rca" | "plan") => {
+    setWaiting(false);
     try {
       await (what === "rca" ? rca : plan).mutateAsync();
       notify(t(what === "rca" ? "toast.sentRca" : "toast.sentPlan", { ref: item.ref }));
     } catch (e) {
-      setError(triggerError(e, t));
+      const text = triggerError(e, t);
+      setError(text);
+      notify(`${item.ref}　${text}`);               // the brief may be gone by now: a refusal is always said
     }
+  };
+  const ask = async (what: "rca" | "plan") => {
+    if (busy) return;
+    setError(null);
+    setWaiting(true);
+    defer({ label: `${item.ref}：${t(what === "rca" ? "pend.rca" : "pend.plan")}`, send: () => void send(what), undo: () => setWaiting(false) });
   };
   return { issueId, lane, busy, error, setError, ask };
 }

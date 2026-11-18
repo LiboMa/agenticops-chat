@@ -66,6 +66,14 @@ export function errorFromBody(status: number, body: unknown, statusText: string)
   return new ApiError(status, formatErrorDetail(d ?? b.error ?? statusText));
 }
 
+let keepaliveUntil = 0;
+
+/** Requests that leave in the next `ms` are marked keep-alive: the page is going away and they must still be sent
+ *  (MVP-2.9.0 N13: a decision that was waiting out its undo window when the tab closed). */
+export function keepaliveFor(ms: number): void {
+  keepaliveUntil = Date.now() + ms;
+}
+
 export async function apiFetch<T>(
   path: string,
   options?: RequestInit,
@@ -82,7 +90,7 @@ export async function apiFetch<T>(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch(url, { ...options, headers });
+  const res = await fetch(url, { ...options, headers, ...(Date.now() < keepaliveUntil ? { keepalive: true } : {}) });
 
   // A wrong password is the login endpoint's own 401: say why, don't treat it as an expired session
   if (res.status === 401 && path.startsWith("/auth/login")) {

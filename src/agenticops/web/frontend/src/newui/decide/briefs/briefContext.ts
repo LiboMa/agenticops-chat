@@ -2,6 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useRef } from "react
 import type { AttentionItem } from "@/lib/attention";
 import { useNfT } from "../../i18n";
 import type { EvidenceVm } from "../../lib/briefs/cause";
+import { deferDecision } from "../../lib/pending";
+import { useShell } from "../../shell/shellContext";
 
 /** What the open brief does with the keys «待决» does not use itself (J / K move through the queue). */
 export interface BriefKeys {
@@ -22,9 +24,13 @@ export interface DecideApi {
   failed: (item: AttentionItem, message: string) => void;
   /** open the evidence panel on one of these */
   openPeek: (evidence: EvidenceVm[], index: number) => void;
+  /** a decision on `item` was made and waits out its undo window (N13): take the item off the list now and show
+   *  what is next. → «put it back» (`goBack` = and bring the page back to it) */
+  hide: (item: AttentionItem) => (goBack: boolean) => void;
 }
 
-export const DecideContext = createContext<DecideApi>({ setBriefKeys: () => {}, done: () => {}, failed: () => {}, openPeek: () => {} });
+export const DecideContext = createContext<DecideApi>({ setBriefKeys: () => {}, done: () => {}, failed: () => {}, openPeek: () => {},
+                                                        hide: () => () => {} });
 export const useDecide = () => useContext(DecideContext);
 
 export function useBriefKeys(keys: BriefKeys): void {
@@ -50,17 +56,25 @@ export interface BriefProps {
 /** An error as one sentence. */
 export const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-/** One decision request for `item`, settled through the lens: on success the toast and the next item, on failure
- *  the error — returned for the brief's own line, and said by the lens when the brief is no longer on the page. */
+/** One decision on `item` (N13: with an undo window). It shows at once — the item leaves the list and the next one
+ *  is on the page — and the request is made five seconds later, unless it is taken back first («Z»): then nothing
+ *  was ever sent. `what` says the decision in the waiting toast («批准»). When the request goes through, `toast` is
+ *  said; when the server refuses it, the item comes back to the list and the refusal is said (`words`) — by then the
+ *  brief is gone, so nothing is returned for its own line (always null). */
 export function useDecision(item: AttentionItem) {
-  const { done, failed } = useDecide();
+  const { failed, hide } = useDecide();
+  const { defer, notify } = useShell();
   const t = useNfT();
   return useCallback(async <T,>(request: () => Promise<T>, toast: string | ((result: T) => string),
-                               words: (e: unknown) => string = (e) => t("err.failed", { msg: errorText(e) })): Promise<string | null> => {
-    let result: T;
-    try { result = await request(); } catch (e) { const text = words(e); failed(item, text); return text; }
-    done(item, typeof toast === "string" ? toast : toast(result));
+                               words: (e: unknown) => string = (e) => t("err.failed", { msg: errorText(e) }), what?: string): Promise<string | null> => {
+    deferDecision({ add: defer }, {
+      label: `${item.ref}：${what ?? t("pend.generic")}`,
+      hide: () => hide(item),
+      request,
+      onDone: (result) => notify(typeof toast === "string" ? toast : toast(result)),
+      onFailed: (e) => failed(item, words(e)),
+    });
     return null;
-  }, [done, failed, item, t]);
+  }, [defer, notify, failed, hide, item, t]);
 }
 

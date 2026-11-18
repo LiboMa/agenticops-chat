@@ -46,13 +46,13 @@ function NotStartedView({ item, frame, kind, query, plan, actions, canWithdraw, 
   const state = executeState(actions);
   const target: HoldTarget | null = plan && state.can && plan.content_hash && !frame.readOnly && !form && !busy
     ? { itemId: item.id, planId: plan.id, hash: plan.content_hash } : null;
-  const act = async (what: () => Promise<unknown>, toast: string) => {
+  const act = async (what: () => Promise<unknown>, toast: string, label: string) => {
     setBusy(true);
     setError(null);
-    setError(await decide(what, toast));
+    setError(await decide(what, toast, undefined, label));
     setBusy(false);
   };
-  const hold = useHold(target, (tg) => void act(() => run(tg.planId), t("toast.queued", { ref: item.ref })));
+  const hold = useHold(target, (tg) => void act(() => run(tg.planId), t("toast.queued", { ref: item.ref }), t("pend.retry")));
 
   useBriefKeys({
     onKey: (key, _e, repeat) => {
@@ -69,7 +69,7 @@ function NotStartedView({ item, frame, kind, query, plan, actions, canWithdraw, 
 
   const buttons: ReactNode = form ? (
     <ReasonForm label={t("reject.label")} placeholder={withdrawn.placeholder} note={withdrawn.note} submit={withdrawn.label}
-                busy={busy} error={error} onCancel={() => setForm(false)} onSubmit={(reason) => void act(() => withdraw(reason), withdrawn.toast)} />
+                busy={busy} error={error} onCancel={() => setForm(false)} onSubmit={(reason) => void act(() => withdraw(reason), withdrawn.toast, withdrawn.label)} />
   ) : (
     <>
       <HoldButton label={t("act.retry")} disabled={!target} holding={hold.holding} hint={hold.hint} onDown={hold.down} onUp={hold.up} onCancel={hold.cancel} />

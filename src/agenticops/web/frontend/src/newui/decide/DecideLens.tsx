@@ -124,6 +124,16 @@ export function DecideLens() {
       done: (item, message) => settled(item, true, message),
       failed: (item, message) => settled(item, false, message),
       openPeek: peek.show,
+      hide: (item) => {
+        const { items: list, shown, filter: f } = now_.current;
+        const r = settle(list, shown, item, true);
+        setHandled((old) => new Map(old).set(item.id, situation(item)));
+        if (r.goTo !== undefined) navigate(place(r.goTo, f), { replace: true });
+        return (goBack) => {
+          setHandled((old) => { if (!old.has(item.id)) return old; const next = new Map(old); next.delete(item.id); return next; });
+          if (goBack) { ownMove.current = true; navigate(place(item.id, now_.current.filter), { replace: true }); }
+        };
+      },
     };
   }, [notify, navigate, peek.show]);
 

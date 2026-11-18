@@ -59,11 +59,11 @@ export function StartReviewBrief({ item, frame }: BriefProps) {
   const action = useChangeAction();
   const [form, setForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const send = async (what: () => Promise<unknown>, toast: string) => {
+  const send = async (what: () => Promise<unknown>, toast: string, label: string) => {
     setError(null);
-    setError(await decide(what, toast));
+    setError(await decide(what, toast, undefined, label));
   };
-  const start = () => { if (!action.isPending && !frame.readOnly && cr) void send(() => action.mutateAsync({ id, action: "review" }), t("toast.sentReview", { ref: item.ref })); };
+  const start = () => { if (!action.isPending && !frame.readOnly && cr) void send(() => action.mutateAsync({ id, action: "review" }), t("toast.sentReview", { ref: item.ref }), t("pend.review")); };
   useBriefKeys({
     onKey: (key, _e, repeat) => {
       if (form || frame.readOnly) return false;
@@ -77,7 +77,7 @@ export function StartReviewBrief({ item, frame }: BriefProps) {
   const actions = form ? (
     <ReasonForm label={t("reject.label")} placeholder={t("cancel.placeholder")} note={t("cancel.note")} submit={t("act.cancelChange")}
                 busy={action.isPending} error={error} onCancel={() => setForm(false)}
-                onSubmit={(reason) => void send(() => action.mutateAsync({ id, action: "cancel", body: { reason } }), t("toast.cancelled", { ref: item.ref }))} />
+                onSubmit={(reason) => void send(() => action.mutateAsync({ id, action: "cancel", body: { reason } }), t("toast.cancelled", { ref: item.ref }), t("pend.cancel"))} />
   ) : (
     <>
       <button type="button" className="btn primary" disabled={!cr || action.isPending} onClick={start}><span className="t">{t("act.startReview")}</span><kbd>A</kbd></button>
@@ -117,7 +117,7 @@ export function ClarifyBrief({ item, frame }: BriefProps) {
     if (!ready || action.isPending || frame.readOnly) return;
     setError(null);
     setError(await decide(() => action.mutateAsync({ id, action: "clarify", body: { message: clarifyMessage(questions, answers) } }),
-                          t("toast.answered", { ref: item.ref })));
+                          t("toast.answered", { ref: item.ref }), undefined, t("pend.clarify")));
   };
   useBriefKeys({ onKey: (key, _e, repeat) => { if (key !== "a") return false; if (!repeat) void submit(); return true; } });
   const field = (k: number) => frame.readOnly ? null : (
@@ -176,7 +176,7 @@ export function ChangeApproveBrief({ item, frame }: BriefProps) {
       // the answer is the change as it now stands: «executing» = its run was queued, «approved» = it was not
       (res) => t(approvedToastKey("status" in res && (res.status === "executing" || res.status === "approved") ? res.status === "executing" : undefined,
                                   state?.effect ?? "unknown"), { ref: item.ref }),
-      (e) => approveError(e, t)));
+      (e) => approveError(e, t), t("pend.approve")));
   });
   // the reason comes first. The focus moves to its box when the key comes UP: a key still held would repeat into
   // the box («aaaa…» as the reason) on systems that repeat letters
@@ -211,7 +211,8 @@ export function ChangeApproveBrief({ item, frame }: BriefProps) {
                 busy={action.isPending} error={error} onCancel={() => setForm(false)}
                 onSubmit={async (why) => {
                   setError(null);
-                  setError(await decide(() => action.mutateAsync({ id, action: "reject", body: { reason: why } }), t("toast.rejectedChange", { ref: item.ref })));
+                  setError(await decide(() => action.mutateAsync({ id, action: "reject", body: { reason: why } }), t("toast.rejectedChange", { ref: item.ref }),
+                                        undefined, t("pend.rejectChange")));
                 }} />
   ) : (
     <>
@@ -271,7 +272,8 @@ export function ChangeAcceptBrief({ item, frame }: BriefProps) {
     setError(null);
     setError(await decide(
       () => action.mutateAsync({ id, action: "resolve-review", body: { outcome, reason, ...(outcome === "completed" ? { confirmed_checks: list.confirmed() } : {}) } }),
-      t(outcome === "completed" ? "toast.completed" : "toast.changeFailed", { ref: item.ref })));
+      t(outcome === "completed" ? "toast.completed" : "toast.changeFailed", { ref: item.ref }), undefined,
+      t(outcome === "completed" ? "pend.complete" : "pend.changeFailed")));
   };
   const complete = () => { if (list.ready && !action.isPending) void send("completed", list.reason()); };
   useBriefKeys({

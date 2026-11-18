@@ -118,7 +118,8 @@ export function LiveLens() {
   const toDecide = (item: string) => navigate(`/app/new/decide/${item}`);
 
   const api = useMemo<DecideApi>(() => ({ setBriefKeys: () => {}, done: (_item, message) => notify(message),
-                                          failed: (item, message) => notify(`${item.ref}　${message}`), openPeek: peek.show }), [notify, peek.show]);
+                                          failed: (item, message) => notify(`${item.ref}　${message}`), openPeek: peek.show,
+                                          hide: () => () => {} }), [notify, peek.show]);      // no queue here: nothing to take off a list
 
   useLensKeys({
     onKey: (key, _e, repeat) => {

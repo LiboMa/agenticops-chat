@@ -37,7 +37,8 @@ export function ResolveBrief({ item, frame }: BriefProps) {
     ? { itemId: item.id, planId: run.id, hash: `${run.id}:${run.status}:${status}` } : null;
   const hold = useHold(target, async (tg) => {
     setError(null);
-    setError(await decide(() => resolve.mutateAsync(tg.hash.slice(tg.hash.lastIndexOf(":") + 1)), t("toast.resolved", { ref: item.ref })));
+    setError(await decide(() => resolve.mutateAsync(tg.hash.slice(tg.hash.lastIndexOf(":") + 1)), t("toast.resolved", { ref: item.ref }), undefined,
+                          t("pend.resolve")));
   });
   useBriefKeys({
     onKey: (key, _e, repeat) => {

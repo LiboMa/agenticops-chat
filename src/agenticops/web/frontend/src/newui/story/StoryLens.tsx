@@ -59,6 +59,7 @@ export function StoryLens() {
   const api = useMemo<DecideApi>(() => ({
     setBriefKeys: (keys) => { pageKeys.current = keys; }, done: (_item, message) => notify(message),
     failed: (item, message) => notify(`${item.ref}　${message}`), openPeek: peek.show,
+    hide: () => () => {},            // no queue here: nothing to take off a list
   }), [notify, peek.show]);
 
   useLensKeys({

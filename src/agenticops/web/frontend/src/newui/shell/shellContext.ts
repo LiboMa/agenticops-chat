@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef } from "react";
+import type { Deferred } from "../lib/pending";
 
 /** What the open lens does with the keyboard. The shell decides first whether a key press counts at all
  *  (lib/keys.keyIntent); what is left comes here. */
@@ -18,9 +19,13 @@ export interface ShellApi {
   singleKeys: boolean;
   /** a state class on NewUI's root, for layout that depends on what a lens has open (`peeking`, `lane-open`, `view3d`) */
   setRootFlag: (flag: string, on: boolean) => void;
+  /** a decision that shows now and is sent after the undo window (N13; lib/pending). Outside the shell — a test, a
+   *  page of its own — there is no window: it is sent at once */
+  defer: (d: Deferred) => void;
 }
 
-export const ShellContext = createContext<ShellApi>({ setLensKeys: () => {}, notify: () => {}, singleKeys: true, setRootFlag: () => {} });
+export const ShellContext = createContext<ShellApi>({ setLensKeys: () => {}, notify: () => {}, singleKeys: true, setRootFlag: () => {},
+                                                      defer: (d) => d.send() });
 export const useShell = () => useContext(ShellContext);
 
 /** The lens's keys, registered while it is on the page. The handlers may be new functions on every render. */

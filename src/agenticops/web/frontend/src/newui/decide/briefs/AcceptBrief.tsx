@@ -30,7 +30,8 @@ export function AcceptBrief({ item, frame }: BriefProps) {
     setError(null);
     setError(await decide(
       () => accept.mutateAsync({ id: run.id, decision, reason, ...(decision === "accepted" ? { confirmed_checks: list.confirmed() } : {}) }),
-      t(decision === "accepted" ? "toast.accepted" : "toast.notAccepted", { ref: item.ref })));
+      t(decision === "accepted" ? "toast.accepted" : "toast.notAccepted", { ref: item.ref }), undefined,
+      t(decision === "accepted" ? "pend.accept" : "pend.notAccept")));
   };
   const acceptNow = () => { if (list.ready && !accept.isPending) void send("accepted", list.reason()); };
 
