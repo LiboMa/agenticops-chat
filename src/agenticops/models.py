@@ -835,6 +835,46 @@ class PipelineEvent(Base):
 
 
 # ============================================================================
+# Agent steps (MVP-2.9.0 N10) — what an agent run did, step by step, while it works
+# ============================================================================
+
+
+class AgentStep(Base):
+    """One step of an rca / sre / executor run as the code saw it (agents/step_recorder): a tool call — when it
+    started, when it ended and how —, a line the model said between calls, or a note a person sent the run (N12).
+    Display only: nothing decides on these rows. `summary` and `preview` are redacted for display before they are
+    written (chat/tool_steps)."""
+
+    __tablename__ = "agent_steps"
+    __table_args__ = (
+        Index("idx_agent_step_run", "run_key", "id"),
+        Index("idx_agent_step_item", "item", "agent", "id"),
+        Index("idx_agent_step_execution", "execution_id"),
+        Index("idx_agent_step_started", "started_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_key: Mapped[str] = mapped_column(String(64))                     # one agent run (a uuid made when it is built)
+    agent: Mapped[str] = mapped_column(String(32))                       # rca | sre | executor
+    item: Mapped[str] = mapped_column(String(32))                        # the work item it belongs to: "I12" | "C3"
+    execution_id: Mapped[Optional[int]] = mapped_column(nullable=True)   # an executor run's record (fix_executions.id)
+    kind: Mapped[str] = mapped_column(String(8))                         # tool | say | you
+    tool_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    call_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)   # the model's toolUseId: pairs an end with its start
+    look: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)        # read = a fact the code fetched | act = something the agent did
+    tier: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)       # a command's tier: readonly | write | unknown | blocked
+    # an executor's command against its plan: step:3 | rollback:1 | pre:1 | post:2 | off (not read-only, and none of them)
+    plan_ref: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
+    summary: Mapped[str] = mapped_column(Text, default="")               # one line: the call's input, or what was said
+    preview: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # the start of the result; a refusal's reason
+    outcome: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)     # ok | error | refused; NULL while it runs
+    by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)        # kind "you": who wrote it
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    delivered_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)   # kind "you": the model call that carried it
+
+
+# ============================================================================
 # Command Audit (MVP-2.6.0) — tool-layer ledger of write-tier commands
 # ============================================================================
 

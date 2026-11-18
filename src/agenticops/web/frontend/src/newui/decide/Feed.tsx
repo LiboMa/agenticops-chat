@@ -6,9 +6,11 @@ import { railRows, type ActivityLane } from "../lib/activity";
 import { waitedParts } from "../lib/queue";
 
 /** "诊断 · 已经 3 分钟": what a lane is doing and for how long — or that nothing on record says since when. A diagnosis
- *  that stopped (its end is on the timeline, the status stayed) reads "诊断停了 · 42 天前". */
-export function laneLabel(lane: Pick<ActivityLane, "kind" | "since" | "basis">, now: number, t: NfT): string {
+ *  that stopped (its end is on the timeline, the status stayed) reads "诊断停了 · 42 天前"; a run a person asked to
+ *  stop reads "执行 · 已叫停" while it winds down. */
+export function laneLabel(lane: Pick<ActivityLane, "kind" | "since" | "basis" | "execution">, now: number, t: NfT): string {
   const what = t(`lane.${lane.kind}`) === `lane.${lane.kind}` ? lane.kind : t(`lane.${lane.kind}`);
+  if (lane.execution?.status === "running" && lane.execution.stop_requested_at) return t("lane.stopping", { what });
   const w = waitedParts(lane.since, now);
   const span = !w ? null : w.unit === "now" ? t("unit.min", { n: 0 }) : t(`unit.${w.unit}`, { n: w.n });
   if (lane.basis === "stopped") return span ? t("lane.stopped", { what, t: span }) : t("lane.stopped.unknown", { what });

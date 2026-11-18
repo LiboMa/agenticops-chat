@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { FixExecution, FixPlan, PipelineEvent } from "@/api/types";
 import { useAnomalyRca } from "@/hooks/useAnomalyRca";
@@ -26,14 +26,16 @@ import { causeVm } from "../lib/briefs/cause";
 import { requestVm } from "../lib/briefs/change";
 import { stepsVm } from "../lib/briefs/plan";
 import type { LaneView, StopState } from "../lib/live";
+import { planMarks, rollbackHint, type StepRow } from "../lib/steps";
 import { utcStamp } from "../lib/time";
 import { RunList } from "../story/StoryBits";
 import { LANE_CLASS, agentName, laneState } from "./Lanes";
+import { LiveSteps } from "./LiveSteps";
 
 const RECORD_MAX = 8;
 
 /** The newest few entries of the item's timeline, oldest first — what is on record about it, in the classic page's
- *  own sentences. The agents' steps are not recorded while they work; this is. */
+ *  own sentences: the item's timeline (the run's own steps are listed by LiveSteps). */
 function Record({ events, failed, now }: { events: PipelineEvent[] | undefined; failed: boolean; now: number }) {
   const t = useNfT();
   const { t: classic } = useLocale();
@@ -59,37 +61,60 @@ function Record({ events, failed, now }: { events: PipelineEvent[] | undefined; 
 const Block = ({ heading, children }: { heading: string; children: ReactNode }) => <div className="sec"><h2>{heading}</h2>{children}</div>;
 const Loading = () => <div className="skel" style={{ height: 54 }} />;
 
-/** The plan a run in flight is executing. The executor writes each step's result only when the run ends. */
-function PlanInFlight({ plan, pending, failed }: { plan: FixPlan | null; pending: boolean; failed: boolean }) {
+/** A run in flight: the plan it is executing, each step marked from the run's recorded steps — by the command that
+ *  is word for word that step's own — and then the steps themselves, as they are recorded (N10). */
+function RunInFlight({ item, lane, plan, pending, failed, now }: {
+  item: string; lane: LaneView; plan: FixPlan | null; pending: boolean; failed: boolean; now: number;
+}) {
   const t = useNfT();
+  const [recorded, setRecorded] = useState<StepRow[]>([]);
+  const steps = plan ? stepsVm(plan) : [];
+  // what a stop could roll back, as this plan's rollback is written — said before anybody stops it
+  const hint = rollbackHint(plan?.rollback_outlook);
   return (
-    <Block heading={t("live.plan")}>
-      {pending ? <Loading /> : failed ? <p className="note err">{t("sec.failedLoad")}</p>
-        : !plan ? <p className="note">{t("live.plan.none")}</p>
-        : <><Steps steps={stepsVm(plan)} /><p className="note"><Prov code />{t("live.noSteps.run")}</p></>}
-    </Block>
+    <>
+      <Block heading={t("live.plan")}>
+        {pending ? <Loading /> : failed ? <p className="note err">{t("sec.failedLoad")}</p>
+          : !plan ? <p className="note">{t("live.plan.none")}</p>
+          : (
+            <>
+              <Steps steps={steps} marks={planMarks(recorded, steps.length)} />
+              <p className="note"><Prov code />{t("live.plan.marks")}</p>
+              {hint && <p className={hint.key === "stop.rollback.all" ? "note" : "note err"}><Prov code />{t(hint.key, { n: hint.n, rest: hint.rest })}</p>}
+            </>
+          )}
+      </Block>
+      <LiveSteps of={{ item, agent: "executor", execution: lane.execution?.id ?? null, since: lane.at }} live executor now={now} onSteps={setRecorded} />
+    </>
   );
 }
 
 function IssueLane({ lane, issueId, now }: { lane: LaneView; issueId: number; now: number }) {
   const t = useNfT();
   const timeline = useIssueTimeline(issueId);
+  const item = `I${issueId}`;
   return (
     <>
-      {lane.group === "running" && (lane.kind === "diagnosis" || lane.kind === "plan") && <p className="note"><Prov code />{t("live.noSteps.agent")}</p>}
       {lane.stopped && <p className="note">{t("live.stopped.next")}</p>}
-      {lane.group === "running" && lane.kind === "run" && <RunningRun issueId={issueId} />}
+      {lane.group === "running" && (lane.kind === "diagnosis" || lane.kind === "plan") && (
+        <LiveSteps of={{ item, agent: lane.kind === "diagnosis" ? "rca" : "sre", since: lane.at }} live now={now} />
+      )}
+      {lane.group === "running" && lane.kind === "run" && <RunningRun issueId={issueId} lane={lane} now={now} />}
       {lane.group === "recent" && lane.kind === "run" && lane.row !== null && <EndedRun issueId={issueId} runId={lane.row} now={now} />}
       {lane.group === "recent" && lane.kind === "diagnosis" && lane.row !== null && <EndedDiagnosis issueId={issueId} rcaId={lane.row} />}
       {lane.group === "recent" && lane.kind === "plan" && lane.row !== null && <EndedPlan planId={lane.row} />}
+      {lane.group === "recent" && (lane.kind === "diagnosis" || lane.kind === "plan") && (
+        <LiveSteps of={{ item, agent: lane.kind === "diagnosis" ? "rca" : "sre", before: lane.at }} live={false} now={now} heading={t("steps.title.ended")} />
+      )}
       <Record events={timeline.data} failed={timeline.isError} now={now} />
     </>
   );
 }
 
-function RunningRun({ issueId }: { issueId: number }) {
+function RunningRun({ issueId, lane, now }: { issueId: number; lane: LaneView; now: number }) {
   const plans = useFixPlans({ health_issue_id: issueId });
-  return <PlanInFlight plan={currentFixPlan(plans.data)} pending={plans.isPending} failed={plans.isError && !plans.data} />;
+  return <RunInFlight item={`I${issueId}`} lane={lane} plan={currentFixPlan(plans.data)} pending={plans.isPending}
+                      failed={plans.isError && !plans.data} now={now} />;
 }
 
 function EndedRun({ issueId, runId, now }: { issueId: number; runId: number; now: number }) {
@@ -142,13 +167,16 @@ function ChangeLane({ lane, changeId, now }: { lane: LaneView; changeId: number;
     <>
       {lane.kind === "change_review" && (
         <>
-          <p className="note"><Prov code />{t("live.noSteps.review")}</p>
+          <p className="note"><Prov code />{t("live.review.readonly")}</p>
           <Block heading={t("sec.request")}>
             {q.isPending ? <Loading /> : !cr ? <p className="note err">{t("sec.failedLoad")}</p> : <p style={{ whiteSpace: "pre-wrap" }}>{requestVm(cr).text}</p>}
           </Block>
+          <LiveSteps of={{ item: `C${changeId}`, agent: "sre", since: lane.at }} live now={now} />
         </>
       )}
-      {lane.kind === "change_run" && <PlanInFlight plan={cr ? activeChangePlan(cr.plans) : null} pending={q.isPending} failed={q.isError && !cr} />}
+      {lane.kind === "change_run" && (
+        <RunInFlight item={`C${changeId}`} lane={lane} plan={cr ? activeChangePlan(cr.plans) : null} pending={q.isPending} failed={q.isError && !cr} now={now} />
+      )}
       <Record events={timeline.data ? toPipelineEvents(timeline.data) : undefined} failed={timeline.isError} now={now} />
     </>
   );

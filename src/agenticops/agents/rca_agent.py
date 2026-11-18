@@ -431,6 +431,7 @@ def rca_agent(issue_id: int) -> str:
                 **cache_kwargs,
             )
 
+            from agenticops.agents.step_recorder import StepRecorder
             agent = Agent(
                 system_prompt=build_system_prompt(RCA_SYSTEM_PROMPT + topology_evidence_prompt(), include_account=False,
                                                   agent_type="rca", agent_name="rca"),
@@ -438,6 +439,8 @@ def rca_agent(issue_id: int) -> str:
                 callback_handler=None,
                 conversation_manager=get_agent_conversation_manager("rca"),
                 plugins=get_agent_context_plugins("rca"),
+                # what it looks at, step by step, is on record while it works (MVP-2.9.0 N10) — display only
+                hooks=[StepRecorder("rca", f"I{issue_id}")],
                 tools=[
                     assume_role,
                     get_active_account,

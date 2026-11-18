@@ -62,7 +62,7 @@ export function AcceptBrief({ item, frame }: BriefProps) {
       {runsQ.isPending ? <StateBlock kind="loading" />
         : runsQ.isError ? <StateBlock kind="failed" failKey="sec.failedLoad" onRetry={() => void runsQ.refetch()} />
         : !list.vm ? <Message big={t("accept.none")} />
-        : <AcceptBody list={list} readOnly={frame.readOnly} />}
+        : <AcceptBody list={list} readOnly={frame.readOnly} item={item.id} now={frame.now} />}
     </BriefFrame>
   );
 }

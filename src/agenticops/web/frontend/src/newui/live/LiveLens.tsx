@@ -21,8 +21,9 @@ import { Lanes } from "./Lanes";
 import { Stream } from "./Stream";
 
 /** «现场»: what agents are doing now, what is due next and what ended in the last day — one lane each, and the lane
- *  you opened. Everything is the server's own record (GET /api/ui/activity), refreshed every ten seconds; the agents'
- *  steps are not streamed, and the page says so. The lane lives in the address (`/app/new/live/I12%3Adiagnosis`).
+ *  you opened. Everything is the server's own record (GET /api/ui/activity), refreshed every ten seconds; the opened
+ *  lane lists its run's steps as the code recorded them (N10: GET /api/ui/activity/steps, every three seconds).
+ *  The lane lives in the address (`/app/new/live/I12%3Adiagnosis`).
  *  A run in progress can be stopped from here (N9): hold «A» — the same hold as an approval, on the run's record. */
 export function LiveLens() {
   const t = useNfT();

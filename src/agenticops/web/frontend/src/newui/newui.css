@@ -212,6 +212,7 @@
 .nf .steps li.ok::before{content:"✓";background:var(--mint);border-color:var(--mint);color:var(--ink2)}
 .nf .steps li.bad::before{content:"✕";background:var(--red);border-color:var(--red);color:var(--ink2)}
 .nf .steps li.skip{color:var(--faint)}
+.nf .steps li.now::before{border-color:var(--mint);box-shadow:0 0 0 4px color-mix(in srgb,var(--mint) 25%,transparent);animation:nf-blink 1s infinite}   /* a run in flight: the step it is on */
 .nf .steps .say{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
 .nf .cmd{display:block;font-family:var(--mono);font-size:var(--fs-xs);color:var(--faint);margin-top:2px;overflow-wrap:anywhere}
 .nf .note{font-size:var(--fs-sm);color:var(--dim);margin-top:8px}
@@ -337,6 +338,13 @@
 .nf .lsteps li.now{color:var(--chalk)} .nf .lsteps li.now::before{border-color:var(--mint);box-shadow:0 0 0 4px color-mix(in srgb,var(--mint) 25%,transparent);animation:nf-blink 1s infinite}
 .nf .lsteps li.held::before,.nf .lsteps li.wait::before{border-color:var(--amber);background:var(--amber)}
 .nf .lsteps li.skip{text-decoration:line-through;text-decoration-color:var(--faint)} .nf .lsteps li.skip::before{border-style:dashed}
+.nf .lsteps li.bad::before{background:var(--red);border-color:var(--red)}                 /* a step that failed */
+.nf .lsteps-end{height:1px;scroll-margin-bottom:112px}                                       /* followed into view above the sticky controls */
+.nf .lsteps .what{font-family:var(--mono);font-size:var(--fs-sm);color:inherit;background:none;padding:0}   /* what a step ran */
+.nf .lsteps .res{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;margin-top:2px;font-size:var(--fs-sm);color:var(--dim)}   /* the start of what came back */
+.nf .lsteps .res.err{color:var(--red)}
+.nf .lsteps li.skip .res{text-decoration:none}
+.nf .lsteps li.skip .cmd,.nf .lsteps li.skip .tier{text-decoration:none}
 .nf .lsteps li.you{color:var(--chalk)} .nf .lsteps li.you::before{background:var(--amber);border-color:var(--amber)}
 .nf .lsteps li.you .say{display:inline-block;padding:4px 10px;border-radius:var(--r-2);background:var(--raise);border-left:3px solid var(--amber)}
 .nf .lsteps li.more{font-size:var(--fs-sm)}

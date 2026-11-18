@@ -498,6 +498,20 @@ class FixPlanResponse(BaseModel):
 
     @computed_field
     @property
+    def rollback_outlook(self) -> dict:
+        """MVP-2.9.0 N10 read context: what stopping a run of this plan could roll back, as the rollback is written
+        — {steps, commands, as_written} (services/change_steps.rollback_outlook). After a stop only the plan's own
+        rollback text may run, so «as_written» is how many of its commands a tool can run exactly as they stand.
+        Computed on the way out: never stored, never part of the content hash."""
+        from agenticops.services.change_steps import rollback_outlook
+        try:
+            return rollback_outlook(self.rollback_plan)
+        except Exception:        # must not take the plan pages down; claims nothing can be rolled back
+            _log.warning("rollback_outlook failed for fix plan #%s", self.id, exc_info=True)
+            return {"steps": 0, "commands": 0, "as_written": 0}
+
+    @computed_field
+    @property
     def rejection_is_feedback(self) -> bool:
         """MVP-2.9.0 read context: whether `rejection_reason` is something a person wrote about this plan
         (services/plan_content.rejection_is_feedback) — what a page may quote under `rejected_by`'s name, and what the

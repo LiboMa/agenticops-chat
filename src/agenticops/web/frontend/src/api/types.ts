@@ -260,6 +260,9 @@ export interface FixPlan {
   /** MVP-2.9.0: how the code classifies each step's command (services/change_steps.step_tier), one per step:
    *  write | readonly | blocked | unknown. Read context, never part of the content hash. */
   step_tiers?: string[];
+  /** MVP-2.9.0 N10: what stopping a run of this plan could roll back, as its rollback is written — how many
+   *  rollback steps, how many carry a command, how many of those can run exactly as written. Read context. */
+  rollback_outlook?: { steps: number; commands: number; as_written: number };
   /** MVP-2.9.0: whether `rejection_reason` is something a person wrote about this plan (not a reason code wrote) */
   rejection_is_feedback?: boolean;
   /** MVP-2.9.0, on the approve response only: whether the approval queued the plan's run */

@@ -310,6 +310,18 @@ def executor_agent(fix_plan_id: int) -> str:
 
         from strands.tools.executors import SequentialToolExecutor
         from agenticops.agents.run_guard import RunGuard
+        from agenticops.agents.step_recorder import StepRecorder
+        # The run's steps are on record while it works (MVP-2.9.0 N10), under the work item its plan belongs to.
+        # After the guard, so a call the guard refuses is recorded as refused.
+        step_item = None
+        try:
+            with get_db_session() as db:
+                owner = db.query(FixPlan.health_issue_id, FixPlan.change_request_id).filter_by(id=fix_plan_id).first()
+            step_item = None if owner is None else f"I{owner[0]}" if owner[0] else f"C{owner[1]}" if owner[1] else None
+        except Exception:
+            logger.debug("Executor step recorder: no work item for FixPlan #%d", fix_plan_id, exc_info=True)
+        run_hooks = ([RunGuard(execution_id)] if execution_id else []) + (
+            [StepRecorder("executor", step_item, execution_id=execution_id, plan_id=fix_plan_id)] if step_item else [])
         agent = Agent(
             system_prompt=build_system_prompt(_build_executor_prompt(), include_account=False, agent_type="executor", agent_name="executor"),
             model=model,
@@ -320,7 +332,7 @@ def executor_agent(fix_plan_id: int) -> str:
             # One command at a time, in the order the model wrote them (the SDK's default runs a turn's tool calls
             # concurrently): a plan's steps are a sequence, and «it stops after the step it is on» must be true.
             tool_executor=SequentialToolExecutor(),
-            hooks=[RunGuard(execution_id)] if execution_id else [],
+            hooks=run_hooks,
             tools=[
                 # Plan verification (safety gate)
                 get_approved_fix_plan,

@@ -208,6 +208,20 @@ def rollback_commands(rollback_plan) -> frozenset[str]:
     return frozenset(c for c in (_command(s) for s in rollback_steps(rollback_plan)) if c)
 
 
+def rollback_outlook(rollback_plan) -> dict:
+    """What a stop could roll back, as the plan is written (MVP-2.9.0 N10): how many rollback steps there are, how
+    many carry a command, and how many of those are ONE command a tool can run exactly as it is written — not a
+    line that chains commands, pipes, substitutes, or carries a placeholder (`<AMI_ID>`) or a comment. After a stop
+    the run's guard lets through only the plan's own rollback text, so a step the executor would have to rewrite
+    before running it cannot be rolled back that way. Measured on a copy of the local database (166 plans): 99 had
+    no rollback command at all, 67 had some (270 commands, 116 of them runnable as written), and in 8 every one
+    could run as written."""
+    steps = rollback_steps(rollback_plan)
+    commands = [c for c in (_command(s) for s in steps) if c]
+    return {"steps": len(steps), "commands": len(commands),
+            "as_written": sum(1 for c in commands if not _shell_would_split(c))}
+
+
 def unclassified_commands(*step_lists) -> list[str]:
     """Every step, across the given step lists, that no execution tool can classify: its command's tier is
     'unknown', or it has no command, so the executor would decide what to run (2.7.0 E2E observation 3).

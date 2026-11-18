@@ -5,6 +5,7 @@ here when the middleware is off — so they work in either auth mode (the web UI
 says what this deployment can do; it never carries a secret or connector configuration.
 """
 
+from datetime import datetime
 from typing import List, Literal, Optional
 
 from fastapi import HTTPException, APIRouter, Depends, Header, Query, Request, Response
@@ -169,6 +170,20 @@ def api_ui_activity(account_id: Optional[int] = Query(None, ge=1), actor: Actor 
     not an agent at work. Any signed-in user. Plain def: DB work."""
     from agenticops.services.activity import activity
     return activity(actor, account_id=account_id)
+
+
+@router.get("/api/ui/activity/steps")
+def api_ui_activity_steps(item: str = Query(..., pattern=r"^[IC][1-9]\d*$"), agent: str = Query(..., pattern="^(rca|sre|executor)$"),
+                          execution: Optional[int] = Query(None, ge=1), since: Optional[datetime] = Query(None),
+                          before: Optional[datetime] = Query(None), after: int = Query(0, ge=0),
+                          limit: int = Query(200, ge=1, le=200), _user=Depends(signed_in_user)) -> dict:
+    """One agent run's steps as the code recorded them while it worked (MVP-2.9.0 N10; agents/step_recorder,
+    services/agent_steps): each tool call with its start, its end and how it ended, and what the model said in
+    between. Which run: `execution` (a run record), else the newest run of `agent` on `item` that began at or after
+    `since` (a lane in flight) or before `before` (the run that left a result); `after` = the last step id the page
+    has. Any signed-in user — what an agent did on an item is as readable as the item. Plain def: DB work."""
+    from agenticops.services.agent_steps import run_steps
+    return run_steps(item, agent, execution_id=execution, since=since, before=before, after=after, limit=limit)
 
 
 @router.get("/api/ui/nav-counts")

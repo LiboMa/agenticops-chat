@@ -9,6 +9,7 @@ import { executionStatusLabel } from "@/lib/issueDetail";
 import { fillPlaceholders } from "@/lib/placeholders";
 import { Prov } from "../decide/widgets/Cause";
 import { Quote, RunSteps, StopLine } from "../decide/widgets/RunSteps";
+import { RecordedSteps } from "../live/LiveSteps";
 import { useNfT } from "../i18n";
 import { whoText } from "../lib/activity";
 import { briefKind } from "../lib/briefKind";
@@ -195,6 +196,8 @@ export function RunList({ runs, planOf, now }: { runs: FixExecution[]; planOf: (
               </summary>
               <RunSteps steps={runStepsVm(run, runPlan)} />
             </details>
+            <RecordedSteps item={run.health_issue_id ? `I${run.health_issue_id}` : runPlan?.change_request_id ? `C${runPlan.change_request_id}` : null}
+                           executionId={run.id} now={now} />
             <StopLine stop={stopOf(run)} now={now} />
             {run.error_message && <p className="note err"><Prov code />{t("ran.error", { msg: run.error_message })}</p>}
             {f && f.failedChecks.length > 0 && (

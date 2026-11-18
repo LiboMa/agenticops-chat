@@ -280,3 +280,42 @@ def test_the_run_as_the_api_shows_it_carries_the_stop(db, client):
     request_stop(ticket, by="user:alice", note="n")
     [row] = client.get(f"/api/fix-executions?fix_plan_id={plan_id}").json()
     assert row["stop_requested_by"] == "user:alice" and row["stop_note"] == "n" and row["stop_requested_at"]
+
+
+# ── what a stop could roll back, as the plan is written ──────────────────────
+
+@pytest.mark.parametrize("rollback, want", [
+    ({"steps": [{"action": "reopen", "command": ROLLBACK}]}, {"steps": 1, "commands": 1, "as_written": 1}),
+    ({"description": "restore the rule by hand"}, {"steps": 0, "commands": 0, "as_written": 0}),          # prose: nothing to run
+    (None, {"steps": 0, "commands": 0, "as_written": 0}),
+    ({"steps": [{"action": "talk to the owner"}, {"command": ROLLBACK}]}, {"steps": 2, "commands": 1, "as_written": 1}),
+    # a line that chains commands, or carries a placeholder, cannot be run exactly as it is written
+    ({"steps": [{"command": f"{ROLLBACK} && {STEP_2}"}, {"command": "aws ec2 deregister-image --image-id <AMI_ID>"},
+                {"command": ROLLBACK}]}, {"steps": 3, "commands": 3, "as_written": 1}),
+    ('{"steps": [{"command": "aws ec2 start-instances --instance-ids i-1"}]}', {"steps": 1, "commands": 1, "as_written": 1}),   # a legacy JSON string
+])
+def test_how_much_of_a_rollback_can_run_exactly_as_written(rollback, want):
+    from agenticops.services.change_steps import rollback_outlook
+    assert rollback_outlook(rollback) == want
+
+
+def test_the_guard_passes_the_plans_own_rollback_text_and_the_outlook_says_how_much_of_it_a_tool_can_run(db):
+    """Two different questions: the guard lets the plan's own text through whatever it looks like; the page says, before
+    a stop, how many of those lines are one command a tool can run as it stands."""
+    from agenticops.services.change_steps import rollback_commands, rollback_outlook
+    chained, placeholder = f"{ROLLBACK} && {STEP_2}", "aws ec2 deregister-image --image-id <AMI_ID>"
+    rollback = {"steps": [{"command": chained}, {"command": placeholder}, {"command": ROLLBACK}]}
+    issue_id, plan_id, ticket = _run(db, rollback=rollback)
+    request_stop(ticket, by="user:alice")
+    state = ticket_state(ticket)
+    passed = [c for c in rollback_commands(rollback) if guard_decision(state, "run_aws_cli", {"command": c}) is None]
+    assert len(passed) == 3                                           # each is the plan's own text: the guard lets it through
+    assert rollback_outlook(rollback)["as_written"] == 1              # … but only one of them is a command a tool can run as it is
+
+
+def test_the_plan_as_the_api_shows_it_says_what_a_stop_could_roll_back(db, client):
+    issue_id, plan_id, ticket = _run(db)
+    body = client.get(f"/api/fix-plans/{plan_id}").json()
+    assert body["rollback_outlook"] == {"steps": 1, "commands": 1, "as_written": 1}
+    refused = client.put(f"/api/fix-plans/{plan_id}", json={"content_hash": body["content_hash"], "rollback_outlook": {"as_written": 9}})
+    assert refused.status_code in (409, 422)                          # computed on the way out: a client cannot write it

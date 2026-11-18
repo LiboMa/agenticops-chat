@@ -6,6 +6,7 @@ import { runSummary } from "@/lib/runSummary";
 import { useNfT } from "../../i18n";
 import { acceptVm } from "../../lib/briefs/accept";
 import { Prov } from "./Cause";
+import { RecordedSteps } from "../../live/LiveSteps";
 import { StopLine } from "./RunSteps";
 
 /** The acceptance checklist of one run: a box per declared check still to verify (no result, or a warning), then
@@ -29,7 +30,11 @@ export function useAcceptChecklist(run: FixExecution | null, runPlan: FixPlan | 
 
 /** What ran, what the code verified, and what a person must look at — with the tick boxes (none for a read-only
  *  account). `why` = the server's sentence on why this run needs a person. */
-export function AcceptBody({ list, readOnly, why }: { list: ReturnType<typeof useAcceptChecklist>; readOnly: boolean; why?: string | null }) {
+export function AcceptBody({ list, readOnly, why, item, now }: {
+  list: ReturnType<typeof useAcceptChecklist>; readOnly: boolean; why?: string | null;
+  /** the work item ("I12" / "C3"): the run's recorded steps are read under it */
+  item: string; now: number;
+}) {
   const t = useNfT();
   const vm = list.vm;
   if (!vm) return null;
@@ -51,6 +56,7 @@ export function AcceptBody({ list, readOnly, why }: { list: ReturnType<typeof us
         }</p>
         {reason && <p className="note"><Prov code />{t("ran.why", { reason })}</p>}
         <StopLine stop={vm.stop} />
+        <RecordedSteps item={item} executionId={vm.runId} now={now} />
       </div>
       {vm.failed.length > 0 && (
         <div className="sec">

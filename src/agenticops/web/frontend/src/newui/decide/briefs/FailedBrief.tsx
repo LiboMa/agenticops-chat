@@ -11,6 +11,7 @@ import { BriefFrame } from "../BriefFrame";
 import { AgentAtWork } from "../widgets/AgentAtWork";
 import { Prov } from "../widgets/Cause";
 import { CauseSection, useCause } from "../widgets/CauseSection";
+import { RecordedSteps } from "../../live/LiveSteps";
 import { Quote, RunSteps } from "../widgets/RunSteps";
 import { useBriefKeys, useDecide, type BriefProps } from "./briefContext";
 import { DismissForm, useAgentAsk } from "./shared";
@@ -79,6 +80,7 @@ export function FailedBrief({ item, frame }: BriefProps) {
                 <summary>{t("sec.steps")}</summary>
                 <RunSteps steps={runStepsVm(run, runPlan)} />
               </details>
+              <RecordedSteps item={item.id} executionId={run.id} now={frame.now} />
             </div>
             {vm.variant === "rejected" && (
               <div className="sec">

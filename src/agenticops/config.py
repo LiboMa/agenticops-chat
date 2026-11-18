@@ -762,6 +762,11 @@ class Settings(BaseSettings):
         default=365,
         description="Days of audit_logs + command_audits rows retained; 0 disables pruning (AIOPS_AUDIT_RETENTION_DAYS)",
     )
+    agent_steps_retention_days: int = Field(
+        default=30,
+        description="Days of agent_steps rows retained (what an rca / sre / executor run did, step by step — MVP-2.9.0 "
+        "N10); 0 disables pruning (AIOPS_AGENT_STEPS_RETENTION_DAYS)",
+    )
     command_audit_enabled: bool = Field(
         default=True,
         description="Record every write/unknown/blocked command attempt from run_aws_cli / run_on_host / "

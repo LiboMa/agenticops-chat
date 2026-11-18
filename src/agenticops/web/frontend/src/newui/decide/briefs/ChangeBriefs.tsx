@@ -298,7 +298,7 @@ export function ChangeAcceptBrief({ item, frame }: BriefProps) {
   );
   return (
     <BriefFrame item={item} {...frame} ask={n > 0 ? t("ask.acceptChange", { n }) : t("ask.acceptChange.none")} actions={actions}>
-      {state ?? (!list.vm ? <Message big={t("accept.none")} /> : <AcceptBody list={list} readOnly={frame.readOnly} why={cr?.needs_review_reason} />)}
+      {state ?? (!list.vm ? <Message big={t("accept.none")} /> : <AcceptBody list={list} readOnly={frame.readOnly} why={cr?.needs_review_reason} item={item.id} now={frame.now} />)}
     </BriefFrame>
   );
 }
