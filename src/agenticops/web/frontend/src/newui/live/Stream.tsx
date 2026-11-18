@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, type ReactNode, type RefObject } from "react";
 import { Link } from "react-router-dom";
 import type { FixExecution, FixPlan, PipelineEvent } from "@/api/types";
 import { useAnomalyRca } from "@/hooks/useAnomalyRca";
@@ -189,8 +189,11 @@ export interface StopControl {
   onDown: (key?: string) => void; onUp: () => void; onCancel: () => void;
 }
 
+/** A word for the lane's agent (N12): the field «E» focuses, and what happened to the last one. */
+export interface SteerControl { field: RefObject<HTMLInputElement>; busy: boolean; error: string | null; onSay: (text: string) => void }
+
 /** The opened lane: who is doing what, since when and how the server knows — then what there is to show of it. */
-export function Stream({ lane, moved, mine, now, stop, onBack, onStory, onDecide }: {
+export function Stream({ lane, moved, mine, now, stop, steer, onBack, onStory, onDecide }: {
   lane: LaneView;
   /** the address named a lane that has ended; this is what it left behind */
   moved: boolean;
@@ -198,6 +201,8 @@ export function Stream({ lane, moved, mine, now, stop, onBack, onStory, onDecide
   mine: AttentionItem | null;
   /** null = this lane is not a run that can be stopped, and nobody stopped it */
   stop: StopControl | null;
+  /** null = no word can be said to this lane (not a diagnosis / plan / review at work, or a read-only account) */
+  steer: SteerControl | null;
   now: number; onBack: () => void; onStory: () => void; onDecide: () => void;
 }) {
   const t = useNfT();
@@ -230,11 +235,20 @@ export function Stream({ lane, moved, mine, now, stop, onBack, onStory, onDecide
         </p>
       )}
       {stop?.state === "can" && stop.offered && <p className="note">{t("live.noSteer")}</p>}
+      {steer && <p className="note">{t("steer.note")}</p>}
       {lane.group === "upcoming" && <p className="note"><Prov code />{t("live.upcoming", { t: utcStamp(lane.at, now) })}</p>}
       {lane.group === "recent" && !target && <p className="note"><Prov code />{t("live.ended", { t: utcStamp(lane.at, now), outcome: t(`outcome.${lane.outcome ?? "done"}`) })}</p>}
       {target?.kind === "issue" && <IssueLane key={lane.id} lane={lane} issueId={target.id} now={now} />}
       {target?.kind === "change" && <ChangeLane key={lane.id} lane={lane} changeId={target.id} now={now} />}
       <div className="controls">
+        {steer && (
+          <form className="steer" onSubmit={(e) => { e.preventDefault(); steer.onSay(steer.field.current?.value ?? ""); }}>
+            <input ref={steer.field} className="field" type="text" maxLength={200} autoComplete="off" disabled={steer.busy}
+                   placeholder={t("steer.placeholder")} aria-label={t("steer.label")} />
+            <button type="submit" className="btn" disabled={steer.busy}><span className="t">{t("steer.send")}</span><kbd>↵</kbd></button>
+            <kbd className="wide">E</kbd>
+          </form>
+        )}
         {stop?.state === "can" && stop.offered && (
           <HoldButton danger label={t("live.stop")} disabled={stop.busy} holding={stop.holding} hint={stop.hint}
                       onDown={stop.onDown} onUp={stop.onUp} onCancel={stop.onCancel} />
@@ -243,6 +257,7 @@ export function Stream({ lane, moved, mine, now, stop, onBack, onStory, onDecide
         {target && <button type="button" className="btn" onClick={onStory}><span className="t">{t("live.openStory")}</span><kbd>↵</kbd></button>}
         {!target && classicRoute && <Link className="btn" to={classicRoute}><span className="t">{t("live.openClassic")}</span></Link>}
         {stop?.error && <p className="note err wide" role="alert">{stop.error}</p>}
+        {steer?.error && <p className="note err wide" role="alert">{steer.error}</p>}
       </div>
     </>
   );

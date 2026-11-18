@@ -403,6 +403,7 @@ def rca_agent(issue_id: int) -> str:
     claim, claimed_here = agent_runs.enter("rca", issue_id)
     if claim is None:
         return agent_runs.refusal(issue_id)
+    recorder = None      # the run's step record — and where a person's note reaches it (N10, N12)
     try:
         from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_bedrock_boto_session
         from agenticops.services.notification_service import batch_mode
@@ -439,6 +440,7 @@ def rca_agent(issue_id: int) -> str:
             )
 
             from agenticops.agents.step_recorder import StepRecorder
+            recorder = StepRecorder("rca", f"I{issue_id}")
             agent = Agent(
                 system_prompt=build_system_prompt(RCA_SYSTEM_PROMPT + topology_evidence_prompt(), include_account=False,
                                                   agent_type="rca", agent_name="rca"),
@@ -447,7 +449,7 @@ def rca_agent(issue_id: int) -> str:
                 conversation_manager=get_agent_conversation_manager("rca"),
                 plugins=get_agent_context_plugins("rca"),
                 # what it looks at, step by step, is on record while it works (MVP-2.9.0 N10) — display only
-                hooks=[StepRecorder("rca", f"I{issue_id}")],
+                hooks=[recorder],
                 tools=[
                     assume_role,
                     get_active_account,
@@ -529,5 +531,7 @@ def rca_agent(issue_id: int) -> str:
         log_agent_failed(issue_id, "rca", error=e)
         return f"RCA agent error: {e}"
     finally:
+        if recorder is not None:
+            recorder.close()            # the run is over: it takes no more notes
         if claimed_here:
             agent_runs.end(claim)

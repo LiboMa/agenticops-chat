@@ -748,5 +748,13 @@
   "steps.title.stopped": "How far it got",
   "gone.agent.big": "{ref} is with an agent now",
   "gone.agent.p": "An agent is working on it ({what}). If it needs you once that is done, it comes back here.",
-  "gone.agent.live": "Watch it live"
+  "gone.agent.live": "Watch it live",
+  "steer.label": "A word for the agent",
+  "steer.placeholder": "Add a word for it",
+  "steer.send": "Send",
+  "steer.note": "You can add a word for it (press E). It reads it before its next thought; the note is added information — it changes neither the agent's task nor what it may do — and it stays in this run's record.",
+  "steer.notRunning": "It has ended; the note was not delivered.",
+  "steer.notSteerable": "This lane takes no notes.",
+  "steer.sent": "{ref}: noted — the agent reads it before its next thought",
+  "help.steer": "live: add a word for an agent that is diagnosing, planning or reviewing"
 }

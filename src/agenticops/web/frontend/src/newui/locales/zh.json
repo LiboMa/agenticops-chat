@@ -748,5 +748,13 @@
   "steps.title.stopped": "它做到了哪一步",
   "gone.agent.big": "{ref} 现在在 agent 手里",
   "gone.agent.p": "agent 正在处理这件事（{what}）。做完之后如果需要你，它会回到这里。",
-  "gone.agent.live": "看现场"
+  "gone.agent.live": "看现场",
+  "steer.label": "给 agent 的一句话",
+  "steer.placeholder": "给它补一句话",
+  "steer.send": "发出",
+  "steer.note": "可以给它补一句话（按 E）。它在下一次思考前读到；这是补充的信息，不改变它的任务和权限，并且留在这次运行的记录里。",
+  "steer.notRunning": "它已经结束了，这句话没有送到。",
+  "steer.notSteerable": "这一条不能插话。",
+  "steer.sent": "{ref}：这句话记下了，agent 下一次思考前会读到",
+  "help.steer": "现场：给正在诊断、出方案或审核的 agent 补一句话"
 }

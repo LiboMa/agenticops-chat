@@ -475,3 +475,32 @@ def test_the_result_of_a_kubectl_command_that_reads_secrets_is_not_kept(db):
     assert "LS0tLS1" not in (secret.preview or "") and "not kept" in secret.preview and secret.outcome == "ok"
     assert secret.summary == "get secret tls-cert -o yaml"                 # what was asked stays on record
     assert "LS0tLS1" in pods.preview                                        # any other read keeps the start of its result
+
+
+# ── found on the first real runs (the copy database) ─────────────────────────
+
+@pytest.mark.parametrize("name, tool_input, want", [
+    # run_kubectl takes the subcommand without the word «kubectl»: it is judged as the kubectl command it is
+    ("run_kubectl", {"cluster_name": "c1", "command": "get pods -A -o wide"}, ("read", "readonly")),
+    ("run_kubectl", {"cluster_name": "c1", "command": "kubectl get pods -A"}, ("read", "readonly")),
+    ("run_kubectl", {"cluster_name": "c1", "command": "delete pod web-1"}, ("act", "write")),
+])
+def test_a_kubectl_subcommand_is_judged_as_a_kubectl_command(name, tool_input, want):
+    assert step_look(name, tool_input) == want
+
+
+@pytest.mark.parametrize("returned, failed", [
+    ("Error: AccessDenied when calling DescribeInstances", True),
+    ("Error (exit code 254): An error occurred (AccessDenied)", True),
+    ("kubectl error (exit 1): Unauthorized", True),
+    ("kubectl error: executable not found", True),
+    ("SSH error (exit 255) to 10.0.0.1: timed out", True),
+    ("Errors found: 0", False),                                       # a result that merely talks about errors
+    ('{"Reservations": [], "note": "no error"}', False),
+    ("0 errors, 3 warnings", False),
+])
+def test_a_tool_that_says_it_failed_is_recorded_as_failed(db, returned, failed):
+    agent, _, _ = _agent([[("run_aws_cli", {"command": "x"})], "done"], [StepRecorder("rca", "I7")], fail={"x": returned})
+    agent("go")
+    [step] = [r for r in _rows(db) if r.kind == "tool"]
+    assert step.outcome == ("error" if failed else "ok")

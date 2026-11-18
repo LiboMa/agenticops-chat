@@ -83,6 +83,14 @@ export function stopState(lane: LaneView | null): StopState {
   return x.stopRequestedAt ? "stopping" : "can";
 }
 
+/** Whether a word can be said to the agent of the opened lane (N12): a diagnosis, a plan or a change review that is
+ *  at work now and within its time limit. Not an execution — it follows the plan that was approved and can only be
+ *  stopped — and not a lane nothing is at work on. Whether THIS person may is the server's answer. */
+const STEERABLE = new Set(["diagnosis", "plan", "change_review"]);
+export function steerable(lane: LaneView | null): boolean {
+  return !!lane && lane.group === "running" && STEERABLE.has(lane.kind) && !lane.overdue && !lane.stopped;
+}
+
 /** How many lanes are at work within their own time limit — the number beside the «现场» tab. A diagnosis that
  *  stopped is not at work; work that outlived its limit is listed and flagged, but not counted as going on.
  *  undefined = not known yet. */

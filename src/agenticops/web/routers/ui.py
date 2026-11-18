@@ -10,7 +10,7 @@ from typing import List, Literal, Optional
 
 from fastapi import HTTPException, APIRouter, Depends, Header, Query, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agenticops.auth.actor import Actor
 from agenticops.auth.viewer import can_view_settings, is_viewer
@@ -184,6 +184,51 @@ def api_ui_activity_steps(item: str = Query(..., pattern=r"^[IC][1-9]\d*$"), age
     has. Any signed-in user — what an agent did on an item is as readable as the item. Plain def: DB work."""
     from agenticops.services.agent_steps import run_steps
     return run_steps(item, agent, execution_id=execution, since=since, before=before, after=after, limit=limit)
+
+
+class ActivityNote(BaseModel):
+    lane: str = Field(..., pattern=r"^([IC][1-9]\d*:[a-z_]+|[A-Z]+\d+)$", max_length=64)
+    text: str = Field(..., min_length=1, max_length=200)
+
+    @field_validator("text")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("the note is empty")
+        return v
+
+
+# a lane of «现场» that takes a word from a person → the agent whose run it is; an execution, a schedule, a graph
+# build are not steered
+_STEERABLE_LANES = {"diagnosis": "rca", "plan": "sre", "change_review": "sre"}
+
+
+@router.post("/api/ui/activity/note", status_code=201)
+def api_ui_activity_note(data: ActivityNote, actor: Actor = Depends(current_actor), _user=Depends(signed_in_user)):
+    """Say a word to an agent while it works (MVP-2.9.0 N12): the note is recorded as a step of the run (kind `you`,
+    the session actor — never the body) and handed to the agent before its next model call, as information from
+    the person watching, not as a new task. Only a diagnosis, a plan or a change review in flight in THIS process;
+    an execution follows the plan that was approved and can only be stopped. 403 a read-only account ·
+    409 `not_steerable` (not that kind of lane) · 409 `not_running` (nothing in flight there, or it just ended).
+    Plain def: DB work."""
+    from agenticops.agents.step_recorder import live_recorder
+    from agenticops.auth import authz
+
+    if actor.read_only:
+        raise HTTPException(status_code=403, detail={"detail": "A read-only account cannot say a word to an agent.", "code": "read_only"})
+    item, _, kind = data.lane.partition(":")
+    agent = _STEERABLE_LANES.get(kind)
+    if agent is None:
+        return _ui_error(409, "not_steerable", "This lane takes no notes: only a diagnosis, a plan or a change review in flight does.")
+    try:
+        authz.check(actor, "issue.note", subject=None)
+    except authz.AuthzDenied as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    recorder = live_recorder(item, agent)
+    row = recorder.note(data.text, by=actor.key) if recorder is not None else None
+    if row is None:
+        return _ui_error(409, "not_running", "No such run is in flight: it has ended, or it never started here. The note was not delivered.")
+    return row
 
 
 @router.get("/api/ui/nav-counts")

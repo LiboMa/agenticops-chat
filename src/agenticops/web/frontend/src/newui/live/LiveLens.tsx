@@ -9,10 +9,11 @@ import { useHold } from "../decide/widgets/useHold";
 import { usePeek } from "../decide/widgets/usePeek";
 import { useActivity } from "../hooks/useActivity";
 import { useMyItem } from "../hooks/useMyItem";
+import { useSteer } from "../hooks/useSteer";
 import { useStopExecution } from "../hooks/useStopExecution";
 import { useNfT } from "../i18n";
 import type { HoldTarget } from "../lib/hold";
-import { lanePath, laneViews, pickLane, recentCut, staleSince, stopState } from "../lib/live";
+import { lanePath, laneViews, pickLane, recentCut, staleSince, steerable, stopState } from "../lib/live";
 import { step } from "../lib/queue";
 import { storyPath } from "../lib/story";
 import { Message, StateBlock } from "../shell/StateBlock";
@@ -69,6 +70,27 @@ export function LiveLens() {
     });
   });
 
+  // a word for the agent of the lane on the page (N12): a diagnosis, a plan or a review at work — «E» goes to the
+  // field, Enter sends; the note shows in the run's step list as soon as the server has it
+  const steer = useSteer();
+  const steerField = useRef<HTMLInputElement>(null);
+  const canSteer = steerable(lane) && !readOnly;
+  const [steerError, setSteerError] = useState<{ lane: string; text: string } | null>(null);
+  const say = (text: string) => {
+    if (!lane || !canSteer || steer.isPending || !text.trim()) return;
+    const to = lane.id, ref = lane.ref ?? lane.title;
+    setSteerError(null);
+    steer.mutate({ lane: to, text: text.trim() }, {
+      onSuccess: () => { if (steerField.current) steerField.current.value = ""; notify(t("steer.sent", { ref })); },
+      onError: (e) => {
+        const code = e instanceof ApiError ? e.code : undefined;
+        const words = code === "not_running" ? t("steer.notRunning") : code === "not_steerable" ? t("steer.notSteerable") : t("err.failed", { msg: errorText(e) });
+        setSteerError({ lane: to, text: words });
+        if (shownLane.current !== to) notify(`${ref}　${words}`);
+      },
+    });
+  };
+
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 30_000);
@@ -102,6 +124,7 @@ export function LiveLens() {
     onKey: (key, _e, repeat) => {
       if (peek.onKey(key)) return true;
       if (key === "a" && stopTarget) { if (!repeat) hold.down("a"); return true; }
+      if (key === "e" && canSteer) { steerField.current?.focus(); return true; }
       if (key === "j" || key === "arrowdown") { move(1); return true; }
       if (key === "k" || key === "arrowup") { move(-1); return true; }
       if (key === "enter" && lane?.item) { if (!repeat) toStory(lane.item); return true; }
@@ -137,6 +160,7 @@ export function LiveLens() {
             )
             : !lane ? <Message big={t("live.empty.big")}><p>{t("live.empty.p")}</p></Message>
             : <Stream lane={lane} moved={moved} mine={mine} now={now} onBack={() => navigate(lanePath(null))}
+                      steer={canSteer ? { field: steerField, busy: steer.isPending, error: steerError?.lane === lane.id ? steerError.text : null, onSay: say } : null}
                       stop={stopping ? { state: stopping, offered: !readOnly, busy: stopRun.isPending, holding: hold.holding, hint: hold.hint,
                                          error: stopError?.lane === lane.id ? stopError.text : null,
                                          onDown: hold.down, onUp: hold.up, onCancel: hold.cancel } : null}

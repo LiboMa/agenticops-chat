@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Activity, ActivityLane, ActivityRecent } from "@/newui/lib/activity";
-import { atWork, lanePath, laneViews, pickLane, recentCut, staleSince, type LaneView, stopState } from "@/newui/lib/live";
+import { atWork, lanePath, laneViews, pickLane, recentCut, staleSince, steerable, type LaneView, stopState } from "@/newui/lib/live";
 
 const running = (over: Partial<ActivityLane>): ActivityLane => ({
   id: "I12:diagnosis", kind: "diagnosis", agent: "rca", item: "I12", ref: "I#12", title: "disk full", account_id: 1,
@@ -178,5 +178,29 @@ describe("stopState — whether the opened lane's run can be stopped (N9)", () =
     expect(stopState(run({ kind: "diagnosis", execution: undefined }))).toBeNull();
     expect(stopState({ ...run(), group: "recent" })).toBeNull();
     expect(stopState(null)).toBeNull();
+  });
+});
+
+describe("steerable — whether a word can be said to the opened lane's agent (N12)", () => {
+  const lane = (over: Record<string, unknown> = {}): LaneView =>
+    laneViews(activity({ running: [running({ id: "I12:diagnosis", kind: "diagnosis", item: "I12", basis: "requested", ...over })] }))[0];
+
+  it("a diagnosis, a plan or a change review in flight takes a word", () => {
+    expect(steerable(lane())).toBe(true);
+    expect(steerable(lane({ id: "I12:plan", kind: "plan", agent: "sre", basis: "pipeline" }))).toBe(true);
+    expect(steerable(lane({ id: "C3:change_review", kind: "change_review", agent: "sre", item: "C3", basis: "status" }))).toBe(true);
+  });
+
+  it("an execution does not: it follows the plan that was approved and can only be stopped", () => {
+    expect(steerable(lane({ id: "I12:run", kind: "run", agent: "executor" }))).toBe(false);
+    expect(steerable(lane({ id: "C3:change_run", kind: "change_run", agent: "executor", item: "C3" }))).toBe(false);
+  });
+
+  it("nor does a lane nothing is at work on: one that stopped, one past its limit, one that ended, a schedule, no lane", () => {
+    expect(steerable(lane({ basis: "stopped", overdue: true }))).toBe(false);
+    expect(steerable(lane({ overdue: true }))).toBe(false);
+    expect(steerable({ ...lane(), group: "recent" })).toBe(false);
+    expect(steerable(lane({ id: "S5", kind: "schedule", agent: "scheduler", item: null }))).toBe(false);
+    expect(steerable(null)).toBe(false);
   });
 });

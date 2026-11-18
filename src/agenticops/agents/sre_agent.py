@@ -372,14 +372,26 @@ def _create_sre_agent(cli_tool=None, cli_tools: list | None = None, *, change_re
     )
 
 
-def _record_steps(agent, item: str) -> None:
-    """Put this run's steps on record while it works (MVP-2.9.0 N10; agents/step_recorder — display only). Only the
-    runs that belong to a work item: a fix plan for an issue, the review of a change; never an ad-hoc sre_query."""
+def _record_steps(agent, item: str):
+    """Put this run's steps on record while it works (MVP-2.9.0 N10; agents/step_recorder — display only), and give a
+    person's note a way to it (N12). Only the runs that belong to a work item: a fix plan for an issue, the review
+    of a change; never an ad-hoc sre_query. → the recorder (the caller closes it when the run ends), or None."""
     try:
         from agenticops.agents.step_recorder import StepRecorder
-        agent.hooks.add_hook(StepRecorder("sre", item))
+        recorder = StepRecorder("sre", item)
+        agent.hooks.add_hook(recorder)
+        return recorder
     except Exception:
         logger.debug("SRE step recorder not attached for %s", item, exc_info=True)
+        return None
+
+
+def _close_steps(recorder) -> None:
+    if recorder is not None:
+        try:
+            recorder.close()
+        except Exception:
+            logger.debug("SRE step recorder not closed", exc_info=True)
 
 
 @tool
@@ -403,6 +415,7 @@ def sre_agent(issue_id: int) -> str:
     claim, claimed_here = agent_runs.enter("sre", issue_id)
     if claim is None:
         return agent_runs.refusal(issue_id)
+    recorder = None
     try:
         # Resolve provider CLI tool from issue's account
         cli_tool = None
@@ -420,7 +433,7 @@ def sre_agent(issue_id: int) -> str:
         from agenticops.services.agent_log_service import track_agent
         from agenticops.services.pipeline_events import log_agent_failed, plan_written_since
         agent = _create_sre_agent(cli_tool=cli_tool)
-        _record_steps(agent, f"I{issue_id}")
+        recorder = _record_steps(agent, f"I{issue_id}")
         started_at = datetime.now(timezone.utc)
         with track_agent("sre", "fix_plan", f"issue_id={issue_id}", parent_agent=infer_parent_agent()) as tracker:
             result = invoke_with_retry(agent,
@@ -440,6 +453,7 @@ def sre_agent(issue_id: int) -> str:
         log_agent_failed(issue_id, "sre", error=e)
         return f"SRE agent error: {e}"
     finally:
+        _close_steps(recorder)
         if claimed_here:
             agent_runs.end(claim)
 
@@ -527,15 +541,18 @@ def sre_agent_review_change(change_request_id: int) -> str:
             if name:
                 account_hint = f" Target account: '{name}' — pass account='{name}' to every tool that takes an account."
         agent = _create_sre_agent(cli_tool=cli_tool, change_review=True)
-        _record_steps(agent, f"C{change_request_id}")
+        recorder = _record_steps(agent, f"C{change_request_id}")
         prompt = (
             f"Review ChangeRequest #{change_request_id}. Follow MODE C — CHANGE REVIEW PROTOCOL exactly: "
             "read, ground every target (fail closed), assess risk and action_type, evaluate policy, save the change plan "
             "with plan_kind='change' (post_checks + rollback_plan mandatory), then submit_change_review with your verdict."
         ) + account_hint
-        with track_agent("sre", "change_review", f"change_request_id={change_request_id}", parent_agent=infer_parent_agent()) as tracker:
-            result = invoke_with_retry(agent, prompt)
-            tracker.set_result(result)
+        try:
+            with track_agent("sre", "change_review", f"change_request_id={change_request_id}", parent_agent=infer_parent_agent()) as tracker:
+                result = invoke_with_retry(agent, prompt)
+                tracker.set_result(result)
+        finally:
+            _close_steps(recorder)
     return str(result)
 
 
