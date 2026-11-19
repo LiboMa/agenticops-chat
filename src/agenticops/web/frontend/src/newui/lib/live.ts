@@ -27,6 +27,8 @@ export interface LaneView {
   /** how the server knows a running lane is running */
   basis: string | null;
   requestedBy: string | null;
+  /** N26: another person asked for this run — it takes a word only from them or an administrator */
+  notYours: boolean;
   overdue: boolean;
   /** listed among the running ones, but nothing is at work: a diagnosis that ended while its status stayed */
   stopped: boolean;
@@ -53,6 +55,7 @@ export function laneViews(activity: Activity | undefined): LaneView[] {
     ...live.map((l): LaneView => ({
       id: l.id, group: stopped(l) ? "stalled" : "running", kind: l.kind, agent: l.agent, item: l.item, ref: l.ref, title: l.title, at: l.since,
       tone: l.execution?.stop_requested_at ? "bad" : l.overdue ? "late" : "run", basis: l.basis, requestedBy: l.requested_by,
+      notYours: l.notes_from_you === false,
       overdue: l.overdue, stopped: stopped(l),
       outcome: null, route: l.route, row: null,
       execution: l.execution ? { id: l.execution.id, status: l.execution.status, stopRequestedAt: l.execution.stop_requested_at,
@@ -60,12 +63,12 @@ export function laneViews(activity: Activity | undefined): LaneView[] {
     })),
     ...activity.upcoming.map((l): LaneView => ({
       id: `next:${l.id}`, group: "upcoming", kind: l.kind, agent: l.agent, item: null, ref: null, title: l.title, at: l.at,
-      tone: "wait", basis: null, requestedBy: null, overdue: false, stopped: false, outcome: null, route: l.route, row: null,
+      tone: "wait", basis: null, requestedBy: null, notYours: false, overdue: false, stopped: false, outcome: null, route: l.route, row: null,
       execution: null,
     })),
     ...activity.recent.map((l): LaneView => ({
       id: l.id, group: "recent", kind: l.kind, agent: l.agent, item: l.item, ref: l.ref, title: l.title, at: l.at,
-      tone: OUTCOME_TONE[l.outcome] ?? "done", basis: null, requestedBy: null, overdue: false, stopped: false, outcome: l.outcome, route: l.route,
+      tone: OUTCOME_TONE[l.outcome] ?? "done", basis: null, requestedBy: null, notYours: false, overdue: false, stopped: false, outcome: l.outcome, route: l.route,
       row: rowOf(l.id), execution: null,
     })),
   ];
@@ -87,8 +90,15 @@ export function stopState(lane: LaneView | null): StopState {
  *  at work now and within its time limit. Not an execution — it follows the plan that was approved and can only be
  *  stopped — and not a lane nothing is at work on. Whether THIS person may is the server's answer. */
 const STEERABLE = new Set(["diagnosis", "plan", "change_review"]);
+const takesNotes = (lane: LaneView | null): lane is LaneView =>
+  !!lane && lane.group === "running" && STEERABLE.has(lane.kind) && !lane.overdue && !lane.stopped;
 export function steerable(lane: LaneView | null): boolean {
-  return !!lane && lane.group === "running" && STEERABLE.has(lane.kind) && !lane.overdue && !lane.stopped;
+  return takesNotes(lane) && !lane.notYours;
+}
+/** N26: the lane takes notes, but not from this person — another person asked for the run, and it takes a word only
+ *  from them or an administrator (the server's answer, `notes_from_you`). The page says so instead of the field. */
+export function notYourRun(lane: LaneView | null): boolean {
+  return takesNotes(lane) && lane.notYours;
 }
 
 /** How many lanes are at work within their own time limit — the number beside the «现场» tab. A diagnosis that

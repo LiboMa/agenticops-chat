@@ -30,7 +30,9 @@ function lay<S extends string>(steps: readonly S[], at: S, state: SpineState): S
 const ISSUE_AT: Partial<Record<IssueSub, [IssueStep, SpineState]>> = {
   running: ["rca", "now"], needsReview: ["rca", "now"], reviewOrPlan: ["rca", "now"], rcaUnavailable: ["rca", "now"], rcaRejected: ["rca", "bad"],
   rcaStopped: ["rca", "bad"],            // its diagnosis ended without a result (N11)
+  reopened: ["rca", "now"],              // reopened, and not diagnosed since (N26): the diagnosis is the step it stands at
   toGenerate: ["plan", "now"], planRejected: ["plan", "bad"],
+  planStopped: ["plan", "bad"],          // its plan run ended without a plan (N26)
   awaitingApproval: ["approve", "now"],
   executing: ["run", "now"], checkingRun: ["run", "now"], runStateUnavailable: ["run", "now"], notQueued: ["run", "bad"], needsNewPlan: ["run", "bad"],
   awaitingAcceptance: ["accept", "now"], passed: ["accept", "now"], unverified: ["accept", "now"],

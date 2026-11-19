@@ -145,6 +145,18 @@ def end(run: AgentRun) -> None:
             del _runs[run.issue_id]
 
 
+def may_note(run: Optional[AgentRun], actor) -> bool:
+    """Whether `actor` may say a word to the run that holds the issue (MVP-2.9.0 N26). A run a PERSON asked for —
+    from a page, a chat (which may be private), the IM bot — takes a word from that person and from an
+    administrator. A run the pipeline started, and a run with no claim on record, from anyone who may write notes,
+    as before. (Whether the account may write notes at all is the route's own check.)"""
+    from agenticops.services.plan_content import HUMAN_ACTORS
+    from agenticops.services.ui_actions import is_admin
+    if run is None or not (run.requested_by or "").startswith(HUMAN_ACTORS):
+        return True
+    return run.requested_by == actor.key or is_admin(actor)
+
+
 def refusal(issue_id: int) -> str:
     """What an agent function answers when another run is on the issue: who, which agent, since when."""
     held = get(issue_id)

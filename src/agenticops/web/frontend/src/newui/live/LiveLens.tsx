@@ -15,7 +15,7 @@ import { useSteer } from "../hooks/useSteer";
 import { useStopExecution } from "../hooks/useStopExecution";
 import { useNfT } from "../i18n";
 import type { HoldTarget } from "../lib/hold";
-import { lanePath, laneViews, pickLane, recentCut, staleSince, steerable, stopState } from "../lib/live";
+import { lanePath, laneViews, pickLane, recentCut, staleSince, notYourRun, steerable, stopState } from "../lib/live";
 import { step } from "../lib/queue";
 import { storyPath } from "../lib/story";
 import { Message, StateBlock } from "../shell/StateBlock";
@@ -78,6 +78,7 @@ export function LiveLens() {
   const qc = useQueryClient();
   const steerField = useRef<HTMLInputElement>(null);
   const canSteer = steerable(lane) && !readOnly;
+  const notYours = notYourRun(lane) && !readOnly;        // N26: another person asked for this run
   const [steerError, setSteerError] = useState<{ lane: string; text: string } | null>(null);
   const say = (text: string) => {
     if (!lane || !canSteer || steer.isPending || !text.trim()) return;
@@ -89,7 +90,8 @@ export function LiveLens() {
       onSuccess: () => { if (steerField.current) steerField.current.value = ""; notify(t("steer.sent", { ref })); },
       onError: (e) => {
         const code = e instanceof ApiError ? e.code : undefined;
-        const words = code === "not_running" ? t("steer.notRunning") : code === "not_steerable" ? t("steer.notSteerable") : t("err.failed", { msg: errorText(e) });
+        const words = code === "not_running" ? t("steer.notRunning") : code === "not_steerable" ? t("steer.notSteerable")
+          : code === "not_your_run" ? t("steer.notYours") : t("err.failed", { msg: errorText(e) });
         setSteerError({ lane: to, text: words });
         if (shownLane.current !== to) notify(`${ref}　${words}`);
       },
@@ -166,7 +168,7 @@ export function LiveLens() {
             )
             : !lane ? <Message big={t("live.empty.big")}><p>{t("live.empty.p")}</p></Message>
             : <Stream lane={lane} moved={moved} mine={mine} now={now} onBack={() => navigate(lanePath(null))}
-                      steer={canSteer ? { field: steerField, busy: steer.isPending, error: steerError?.lane === lane.id ? steerError.text : null, onSay: say } : null}
+                      steer={canSteer ? { field: steerField, busy: steer.isPending, error: steerError?.lane === lane.id ? steerError.text : null, onSay: say } : null} notYours={notYours}
                       stop={stopping ? { state: stopping, offered: !readOnly, busy: stopRun.isPending, holding: hold.holding, hint: hold.hint,
                                          error: stopError?.lane === lane.id ? stopError.text : null,
                                          onDown: hold.down, onUp: hold.up, onCancel: hold.cancel } : null}

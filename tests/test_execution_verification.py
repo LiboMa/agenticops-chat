@@ -496,13 +496,25 @@ def test_a_failed_run_sends_its_issue_back_and_is_disputed_once(db, quiet):
     assert _event_types(db, crashed_issue).count("rca_disputed") == 1
 
 
-def test_a_run_aborted_before_it_started_still_disputes_its_rca(db):
-    """2.2.0 execution-failure feedback kept: the issue stays at fix_approved (retry), its RCA is disputed."""
+def test_a_run_aborted_before_anything_was_tried_does_not_dispute_its_rca(db):
+    """MVP-2.9.0 N26 (the owner's ruling): a pre-check failed before any step — nothing was tried, so the failure
+    says nothing about the diagnosis. Since 2.2.0 it had disputed the RCA all the same. The issue stays at
+    fix_approved, as before."""
     from agenticops.tools.metadata_tools import mark_fix_failed
     issue_id, plan_id, rca_id = _fix(db)
     _save(plan_id, status="aborted", steps=(), error="pre-check failed")
     mark_fix_failed(issue_id, _only_execution(plan_id).id, reason="pre-check failed")
     assert _fresh(HealthIssue, issue_id).status == "fix_approved"
+    assert _fresh(RCAResult, rca_id).critic_verdict is None
+    assert _event_types(db, issue_id).count("rca_disputed") == 0
+
+
+def test_a_run_aborted_after_a_step_was_tried_still_disputes_its_rca(db):
+    """2.2.0 execution-failure feedback kept where something was tried: the run reports a step."""
+    from agenticops.tools.metadata_tools import mark_fix_failed
+    issue_id, plan_id, rca_id = _fix(db)
+    _save(plan_id, status="aborted", steps=({"step_index": 1, "status": "failed"},), error="step 1 failed, stopped")
+    mark_fix_failed(issue_id, _only_execution(plan_id).id, reason="step 1 failed")
     assert _fresh(RCAResult, rca_id).critic_verdict == "disputed_by_execution"
 
 

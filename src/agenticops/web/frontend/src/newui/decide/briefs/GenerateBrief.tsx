@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useNfT } from "../../i18n";
 import { BriefFrame } from "../BriefFrame";
+import { LiveSteps } from "../../live/LiveSteps";
+import { utcStamp } from "../../lib/time";
 import { AgentAtWork } from "../widgets/AgentAtWork";
 import { Prov } from "../widgets/Cause";
 import { CauseSection, useCause } from "../widgets/CauseSection";
@@ -8,7 +10,8 @@ import { useBriefKeys, useDecide, type BriefProps } from "./briefContext";
 import { DismissForm, useAgentAsk, VerdictQuote } from "./shared";
 
 /** A diagnosis that stands — a person confirmed it, or it passed the gate while auto-fix is off — and has no plan
- *  yet: nobody asks the SRE agent by itself, so a person does. */
+ *  yet: nobody asks the SRE agent by itself, so a person does. Also (N26) one whose plan run ended without a plan
+ *  and that no agent is on: nothing will write the plan by itself. */
 export function GenerateBrief({ item, frame }: BriefProps) {
   const t = useNfT();
   const { openPeek } = useDecide();
@@ -16,6 +19,7 @@ export function GenerateBrief({ item, frame }: BriefProps) {
   const source = useCause(agent.issueId);
   const [closing, setClosing] = useState(false);
   const confirmed = item.reason_detail === "rca_confirmed";
+  const stopped = item.reason_detail === "plan_stopped";
 
   useBriefKeys({
     onKey: (key, _e, repeat) => {
@@ -40,10 +44,20 @@ export function GenerateBrief({ item, frame }: BriefProps) {
     </>
   );
   return (
-    <BriefFrame item={item} {...frame} ask={t("ask.generate")} actions={actions}>
+    <BriefFrame item={item} {...frame} ask={t(stopped ? "ask.generate.stopped" : "ask.generate")} actions={actions}>
       <AgentAtWork lane={agent.lane} now={frame.now} />
-      <CauseSection heading={t(confirmed ? "sec.confirmedRca" : "sec.readyRca")} source={source}>
-        {!confirmed && <p className="note"><Prov code />{t("generate.ready")}</p>}
+      {stopped && (
+        <>
+          <div className="sec">
+            <h2>{t("sec.stoppedPlan")}</h2>
+            <p><Prov code />{t("generate.stopped", { t: utcStamp(item.occurred_at, frame.now) })}</p>
+          </div>
+          {/* what the code recorded of that run, if it ran after steps began to be recorded */}
+          <LiveSteps of={{ item: item.id, agent: "sre", before: item.occurred_at }} live={false} now={frame.now} heading={t("steps.title.stopped")} />
+        </>
+      )}
+      <CauseSection heading={t(confirmed ? "sec.confirmedRca" : stopped ? "sec.standingRca" : "sec.readyRca")} source={source}>
+        {!confirmed && !stopped && <p className="note"><Prov code />{t("generate.ready")}</p>}
       </CauseSection>
       {confirmed && (
         <div className="sec">

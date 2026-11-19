@@ -196,6 +196,11 @@ def classify_kubectl_command(cmd: str) -> str:
         if re.search(pattern, cmd_lower):
             return "blocked"
 
+    # `cluster-info dump --output-directory=…` writes the dump into a directory on the host AgenticOps runs on:
+    # not a read (MVP-2.9.0 N26). Without the option the dump is the command's answer, and it stays one.
+    if cmd_lower.startswith("cluster-info dump") and any(t.split("=", 1)[0] == "--output-directory" for t in cmd_lower.split()):
+        return "write"
+
     # Check readonly subcommands
     for ro_cmd in KUBECTL_READONLY_SUBCOMMANDS:
         if cmd_lower == ro_cmd or cmd_lower.startswith(ro_cmd + " "):

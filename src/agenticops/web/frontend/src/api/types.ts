@@ -115,6 +115,9 @@ export interface HealthIssue {
   waiting_since?: string | null;
   /** MVP-2.9.0 N11: its newest diagnosis ended without a result and no agent is on it — it waits on a person */
   rca_stopped?: boolean;
+  /** MVP-2.9.0 N26: a person reopened it and nothing has diagnosed it since / its plan run ended without a plan */
+  reopened?: boolean;
+  plan_stopped?: boolean;
   available_actions?: UiAction[]; // the detail route only (MVP-2.7.0 S4): "note"
 }
 

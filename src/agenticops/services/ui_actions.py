@@ -90,7 +90,10 @@ def plan_actions(plan: Any, actor, *, issue_status: Optional[str], run_in_flight
             ok, code = False, "issue_closed"
         out.append(_action("request_changes", ok, code, "reject_and_request_plan"))
     if plan.status == "approved":
-        out.append(_execute(actor, "plan.execute", plan, "run_in_flight" if run_in_flight else None))
+        # a closed issue's plan does not run (N26: the route's and open_ticket's 409) — said before a run in flight
+        blocked = ("issue_closed" if issue_status in ("resolved", "dismissed")
+                   else "run_in_flight" if run_in_flight else None)
+        out.append(_execute(actor, "plan.execute", plan, blocked))
     return out
 
 

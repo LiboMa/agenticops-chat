@@ -12,6 +12,9 @@ describe("Needs your attention (MVP-2.7.0 S3)", () => {
   it("says the detail when known, the reason otherwise, a neutral line for anything new", () => {
     expect(reasonKey(item({ reason: "review_required", reason_detail: "rca_gate" }))).toBe("attention.detail.rca_gate");
     expect(reasonKey(item({ reason: "clarification_required" }))).toBe("attention.reason.clarification_required");
+    // N26: a reopened issue, a plan run that left no plan — each has its own sentence
+    expect(reasonKey(item({ reason: "review_required", reason_detail: "reopened" }))).toBe("attention.detail.reopened");
+    expect(reasonKey(item({ reason: "review_required", reason_detail: "plan_stopped" }))).toBe("attention.detail.plan_stopped");
     expect(reasonKey(item({ reason: "something_new", reason_detail: "also_new" }))).toBe("attention.reason.unknown");
   });
   it("only ever navigates inside the app", () => {

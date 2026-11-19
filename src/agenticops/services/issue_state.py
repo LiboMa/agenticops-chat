@@ -93,10 +93,12 @@ def advance_issue(session, issue_id: int, new_status: str, *, actor: str, reason
         return str(e)
 
 
-def closed_issue_refusal(session, issue_id: Optional[int]) -> Optional[str]:
-    """Why a plan of this issue may not be approved: a resolved or dismissed issue is reopened first, so no
-    approval (human, agent or auto) puts a fix in motion for it. None = approvable (or a change plan)."""
+def closed_issue_refusal(session, issue_id: Optional[int], doing: str = "approving") -> Optional[str]:
+    """Why a plan of this issue may not be approved — or, since MVP-2.9.0 N26, run (`doing="running"`): a resolved
+    or dismissed issue is reopened first, so no approval (human, agent or auto) and no run puts a fix in motion for
+    it. An approved plan whose issue was closed afterwards could still be executed until N26. None = it may (or it
+    is a change plan)."""
     issue = session.get(HealthIssue, issue_id) if issue_id else None
     if issue is not None and issue.status in ("resolved", "dismissed"):
-        return f"HealthIssue #{issue_id} is '{issue.status}'; reopen it before approving its plan"
+        return f"HealthIssue #{issue_id} is '{issue.status}'; reopen it before {doing} its plan"
     return None

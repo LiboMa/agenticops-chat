@@ -7,7 +7,7 @@ export interface PhaseView<I extends string = string> { id: I; state: PhaseState
 export type WaitingFor = "rca_agent" | "you" | "sre_agent" | "approver" | "executor" | "requester" | "acceptor" | null;
 export type IssuePrimary = "reviewRca" | "rerunRca" | "generatePlan" | "approveAndRun" | "retryExecution"
   | "acceptResult" | "markResolved" | null;
-export type IssueSub = "running" | "rcaStopped" | "needsReview" | "rcaRejected" | "reviewOrPlan" | "toGenerate" | "needsNewPlan" | "planRejected"
+export type IssueSub = "running" | "rcaStopped" | "reopened" | "planStopped" | "needsReview" | "rcaRejected" | "reviewOrPlan" | "toGenerate" | "needsNewPlan" | "planRejected"
   | "awaitingApproval" | "notQueued" | "executing" | "awaitingAcceptance" | "passed" | "unverified" | "resolved" | "dismissed"
   | "loadingRuns" | "runsUnavailable" // detail page only (issueDetailModel): the runs are not known yet / failed to load
   | "rcaUnavailable"                   // detail page only: the RCA failed to load, so where the issue stands is not known
@@ -26,6 +26,11 @@ export interface IssuePhaseInput {
   /** MVP-2.9.0 N11: the server's answer (HealthIssue.rca_stopped) — the newest diagnosis ended without a result and
    *  no agent is on the issue. Nothing will move it by itself: it waits on a person. */
   rcaStopped?: boolean;
+  /** MVP-2.9.0 N26: the server's answers (HealthIssue.reopened / plan_stopped) — a person reopened the issue and
+   *  nothing has diagnosed it since; its plan run ended without a plan and no agent is on it. Nothing will move
+   *  either by itself: each waits on a person. */
+  reopened?: boolean;
+  planStopped?: boolean;
 }
 
 export interface IssuePhaseResult {
@@ -62,6 +67,7 @@ export function issuePhases(i: IssuePhaseInput): IssuePhaseResult {
     case "investigating":
     case "acknowledged":
       if (i.rcaStopped) return result("diagnose", "rcaStopped", "you", "rerunRca", ["diagnose"]);
+      if (i.reopened) return result("diagnose", "reopened", "you", "rerunRca");      // nothing failed: none was tried since
       return result("diagnose", "running", "rca_agent", null);
     case "root_cause_identified": {
       if (run && (run.verification_status === "failed" || run.status === "failed" || run.status === "aborted"
@@ -71,7 +77,10 @@ export function issuePhases(i: IssuePhaseInput): IssuePhaseResult {
       if (i.rca === undefined) return result("diagnose", "reviewOrPlan", "you", null);
       if (i.rca === null) return result("diagnose", "needsReview", "you", "rerunRca");
       if (i.rca.human_verdict === "incorrect") return result("diagnose", "rcaRejected", "you", "rerunRca");
-      if (i.rca.human_verdict === "correct") return result("plan", "toGenerate", "you", "generatePlan");
+      // the diagnosis stands; its plan run ended without a plan and no agent is on it: a person asks again (N26)
+      if (i.rca.human_verdict === "correct") {
+        return i.planStopped ? result("plan", "planStopped", "you", "generatePlan", ["plan"]) : result("plan", "toGenerate", "you", "generatePlan");
+      }
       const gate = confidenceBreakdown(i.rca, i.threshold).gatePassed;
       if (gate === null) return result("diagnose", "reviewOrPlan", "you", null);
       if (!gate) return result("diagnose", "needsReview", "you", "reviewRca");
@@ -79,6 +88,7 @@ export function issuePhases(i: IssuePhaseInput): IssuePhaseResult {
       if (i.plan?.status === "rejected" && i.rca.id != null && i.plan.rca_result_id === i.rca.id) {
         return result("plan", "planRejected", "you", "generatePlan");
       }
+      if (i.planStopped) return result("plan", "planStopped", "you", "generatePlan", ["plan"]);
       // auto-fix off: nothing hands a passing RCA to the SRE agent (trigger_auto_sre returns early) — you generate it
       return i.autoFixEnabled === false ? result("plan", "toGenerate", "you", "generatePlan")
         : result("plan", "toGenerate", "sre_agent", "generatePlan");

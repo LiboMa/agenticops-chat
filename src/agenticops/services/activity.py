@@ -150,10 +150,13 @@ def activity(actor, *, account_id: Optional[int] = None, now: Optional[datetime]
             # «auto» = the pipeline's own diagnosis of a new issue (N11 made that one claim its issue too)
             basis = "requested" if not auto else "pipeline" if r.agent == "sre" else "auto"
             # a claim past the watchdog is kept — its thread may be alive — and listed as overdue (N11)
-            running.append(_lane(f"I{issue.id}:{_AGENT_KIND.get(r.agent, r.agent)}", _AGENT_KIND.get(r.agent, r.agent), r.agent,
-                                 issue.title, now=now, basis=basis, item=f"I{issue.id}",
-                                 account_id=issue.account_id, since=r.started_at, limit=rca_limit,
-                                 requested_by=None if auto else r.requested_by))
+            lane = _lane(f"I{issue.id}:{_AGENT_KIND.get(r.agent, r.agent)}", _AGENT_KIND.get(r.agent, r.agent), r.agent,
+                         issue.title, now=now, basis=basis, item=f"I{issue.id}",
+                         account_id=issue.account_id, since=r.started_at, limit=rca_limit,
+                         requested_by=None if auto else r.requested_by)
+            # N26: a run a person asked for takes a word from that person and administrators only
+            lane["notes_from_you"] = agent_runs.may_note(r, actor)
+            running.append(lane)
         # A run row that is pending or running ALWAYS has its own lane — beside an agent's lane on the same issue
         # too: «stop» lives on the run's lane, and a claim (a re-diagnosis asked from the classic page or a chat)
         # must not hide a run that is in progress (round-2 review B-I4).

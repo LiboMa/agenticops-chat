@@ -30,6 +30,8 @@ _FIX_TERMINAL = ("executed", "failed", "rejected")
 # sub → (reason, reason_detail, hash anchor); awaitingApproval routes to the plan page instead
 ISSUE_ROWS = {
     "rcaStopped": ("review_required", "rca_stopped", "diagnose"),
+    "reopened": ("review_required", "reopened", "diagnose"),
+    "planStopped": ("review_required", "plan_stopped", "plan"),
     "needsNewPlan": ("execution_failed", "run_failed", "plan"),
     "planRejected": ("review_required", "plan_rejected", "plan"),
     "needsReview": ("review_required", "rca_gate", "diagnose"),
@@ -123,7 +125,8 @@ class IssueWait:
 
 
 def _since(issue, sub, plan, run, rca, now, stopped_at=None) -> datetime:
-    if sub == "rcaStopped" and stopped_at is not None:
+    # a stopped diagnosis, a reopening, a plan run that left no plan: since that moment (N11, N26)
+    if sub in ("rcaStopped", "reopened", "planStopped") and stopped_at is not None:
         ts = stopped_at
     elif sub == "awaitingApproval" and plan is not None:
         ts = plan.updated_at or plan.created_at
@@ -163,12 +166,20 @@ def issue_waits(s, issues, *, now: datetime) -> dict[int, IssueWait]:
         "health_issue_id") if approved else {}
     # An issue still waiting for a diagnosis: did its newest one end without a result (N11)? One query for all.
     diagnosing = [i.id for i in issues if i.status in wp._DIAGNOSING]
-    # … and its status moves, which say whether it has been outside the diagnosing statuses since.
+    # … and its status moves, which say whether it has been outside the diagnosing statuses since — and whether it
+    # stands here because a person reopened it (N26).
     rca_events_by = _group(s.query(PipelineEvent.health_issue_id, PipelineEvent.event_type, PipelineEvent.created_at,
                                    PipelineEvent.detail).filter(
         PipelineEvent.health_issue_id.in_(diagnosing),
         PipelineEvent.event_type.in_(("rca_started", "rca_completed", "status_changed"))).all(),
         "health_issue_id") if diagnosing else {}
+    # A diagnosed issue: did its newest plan run end without a plan (N26)? One query for all of them.
+    diagnosed = [i.id for i in issues if i.status == "root_cause_identified"]
+    plan_events_by = _group(s.query(PipelineEvent.health_issue_id, PipelineEvent.event_type, PipelineEvent.status,
+                                    PipelineEvent.created_at).filter(
+        PipelineEvent.health_issue_id.in_(diagnosed),
+        PipelineEvent.event_type.in_(("fix_plan_requested", "fix_plan_created", "fix_plan_updated"))).all(),
+        "health_issue_id") if diagnosed else {}
     out: dict[int, IssueWait] = {}
     auto_fix_on = exec_switches.effective().auto_fix_enabled      # the value in force, read once for the page
     for issue in issues:
@@ -180,13 +191,19 @@ def issue_waits(s, issues, *, now: datetime) -> dict[int, IssueWait]:
         its_events = rca_events_by.get(issue.id, ())
         stopped_at = wp.rca_stopped_at(issue.status, its_events, now=now, limit_seconds=agent_runs.limit_seconds(),
                                        moved_at=wp.left_diagnosing_at(its_events))
+        # … or it was reopened and nothing has diagnosed it since; or its plan run left no plan (N26)
+        reopened_at = wp.reopened_at(issue.status, its_events)
+        plan_stopped_at = wp.plan_stopped_at(issue.status, plan_events_by.get(issue.id, ()), now=now,
+                                             limit_seconds=agent_runs.limit_seconds(), moved_at=moved.get(issue.id))
         # an agent that is on the issue and within its time limit will move it: then it is not a person's turn
+        # (for a reopened issue and a stopped plan run, the «agent at work» rule below says the same)
         claim = agent_runs.in_time(issue.id, now=now)
         if stopped_at is not None and claim is not None:
             stopped_at = None
         phase = wp.issue_phase(issue.status, rca=rca, threshold=settings.rca_min_confidence_for_autofix,
                                plan=plan, latest_run=run, auto_run_in_flight=auto,
-                               auto_fix_enabled=auto_fix_on, rca_stopped=stopped_at is not None)
+                               auto_fix_enabled=auto_fix_on, rca_stopped=stopped_at is not None,
+                               reopened=reopened_at is not None, plan_stopped=plan_stopped_at is not None)
         if claim is not None and phase.waiting_for in wp.HUMAN:
             # N14: the same for EVERY row a person would get. A plan being redone after «request changes», a
             # diagnosis being run again, a plan being written: the agent is on it now, and what it leaves decides
@@ -194,7 +211,8 @@ def issue_waits(s, issues, *, now: datetime) -> dict[int, IssueWait]:
             out[issue.id] = IssueWait(wp.Phase("agentAtWork", f"{claim.agent}_agent", None), _aware(claim.started_at),
                                       plan, plans, run, rca, events, auto, None)
             continue
-        since = max(_since(issue, phase.sub, plan, run, rca, now, stopped_at), _aware(moved.get(issue.id)) or _EPOCH)
+        at = {"reopened": reopened_at, "planStopped": plan_stopped_at}.get(phase.sub, stopped_at)
+        since = max(_since(issue, phase.sub, plan, run, rca, now, at), _aware(moved.get(issue.id)) or _EPOCH)
         out[issue.id] = IssueWait(phase, since, plan, plans, run, rca, events, auto, stopped_at)
     return out
 
@@ -213,9 +231,10 @@ def _resources(s, issues) -> dict[int, CloudResource]:
 
 def _issue_items(s, actor, account_id, now) -> list[dict]:
     # the four statuses a person moves on — and an issue still waiting for a diagnosis on which one has been TRIED
-    # (N11; whether it stopped is decided below). Never-diagnosed `open` issues are not loaded: nothing ran on them.
+    # (N11; whether it stopped is decided below) or whose status has ever MOVED (N26: it may have been reopened).
+    # Never-diagnosed, never-moved `open` issues are not loaded: nothing ran on them and nobody touched them.
     tried = (s.query(PipelineEvent.id).filter(PipelineEvent.health_issue_id == HealthIssue.id,
-                                              PipelineEvent.event_type.in_(("rca_started", "rca_completed"))).exists())
+                                              PipelineEvent.event_type.in_(("rca_started", "rca_completed", "status_changed"))).exists())
     q = s.query(HealthIssue).filter(or_(HealthIssue.status.in_(ISSUE_STATUSES),
                                         and_(HealthIssue.status.in_(wp._DIAGNOSING), tried)))
     if account_id is not None:

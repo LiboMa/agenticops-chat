@@ -795,7 +795,9 @@ def test_an_issue_that_left_the_diagnosing_statuses_and_came_back_is_not_a_stopp
     _rca_events(iid, ("rca_started", "started", 50), ("rca_completed", "failed", 35))
     _moved(iid, "investigating", "dismissed", 20)
     _moved(iid, "dismissed", "open", 10)
-    assert _row(ALICE, f"I{iid}") is None
+    # not «its diagnosis stopped» — that one is from before the dismissal. Since N26 it is in the queue all the same,
+    # for what it is: reopened, and not diagnosed since (until N26: in nobody's queue)
+    assert _row(ALICE, f"I{iid}")["reason_detail"] == "reopened"
 
 
 def test_without_a_watchdog_a_diagnosis_that_never_ended_still_stops_some_day(db, no_claims, monkeypatch):
@@ -808,3 +810,144 @@ def test_without_a_watchdog_a_diagnosis_that_never_ended_still_stops_some_day(db
     _rca_events(young, ("rca_started", "started", 10))
     assert agent_runs.CLAIM_LIMIT_WITHOUT_WATCHDOG > 10 * 60
     assert {i["id"] for i in _items(ALICE)} == {f"I{orphan}"}
+
+
+# ── nobody's turn, handed back to a person (MVP-2.9.0 N26) ───────────────────────────────────────────────────
+
+def test_a_reopened_issue_waits_on_a_person(db, no_claims):
+    """It read «waits on the RCA agent»: nothing diagnoses a reopened issue again by itself, and it was in nobody's
+    queue."""
+    iid, _ = _issue("open", rca=None)
+    _moved(iid, "investigating", "dismissed", 30)
+    _moved(iid, "dismissed", "open", 10)
+    row = _row(ALICE, f"I{iid}")
+    assert (row["reason"], row["reason_detail"], row["waiting_on"]) == ("review_required", "reopened", "you")
+    assert row["occurred_at"] == "2026-10-06T11:50:00Z"                         # it has waited since it was reopened
+    assert row["available_actions"][0]["action"] == "rerun_rca" and row["route"] == f"/app/issues/{iid}#diagnose"
+    assert _row(READER, f"I{iid}") is None                                      # a read-only account is not handed it
+
+
+def test_a_reopened_issue_with_an_old_diagnosis_is_reopened_not_diagnosed(db, no_claims):
+    """Its diagnosis of weeks ago is on record; the issue is `open` again and nothing has looked at it since."""
+    iid, _ = _issue("open", rca=0.9)
+    _rca_events(iid, ("rca_started", "started", 5000), ("rca_completed", "completed", 4990))
+    _moved(iid, "root_cause_identified", "dismissed", 60)
+    _moved(iid, "dismissed", "open", 10)
+    row = _row(ALICE, f"I{iid}")
+    assert (row["reason_detail"], row["occurred_at"]) == ("reopened", "2026-10-06T11:50:00Z")
+
+
+def test_the_issues_that_were_never_dismissed_stay_where_they_were(db, no_claims):
+    never, _ = _issue("open", rca=None)                                         # never diagnosed, never moved: the 780
+    acked, _ = _issue("acknowledged", rca=None)
+    _moved(acked, "open", "acknowledged", 10)                                   # a person acknowledged it: not a reopening
+    started, _ = _issue("investigating", rca=None)
+    _moved(started, "investigating", "dismissed", 30)
+    _moved(started, "dismissed", "open", 20)
+    _rca_events(started, ("rca_started", "started", 5))                         # reopened, and a diagnosis began since
+    claimed, _ = _issue("open", rca=None)
+    _moved(claimed, "open", "dismissed", 30)
+    _moved(claimed, "dismissed", "open", 20)
+    run = no_claims.begin("rca", claimed, "user:bob", now=NOW - timedelta(minutes=2))   # reopened, an agent is on it
+    assert {i["id"] for i in _items(ALICE)} == set()
+    no_claims.end(run)
+    assert {i["id"] for i in _items(ALICE)} == {f"I{claimed}"}
+
+
+def test_a_reopened_issue_whose_new_diagnosis_stopped_says_that(db, no_claims):
+    """Reopened, diagnosed again, and that diagnosis ended without a result: the newer fact is the stopped diagnosis."""
+    iid, _ = _issue("investigating", rca=None)
+    _moved(iid, "open", "dismissed", 60)
+    _moved(iid, "dismissed", "open", 50)
+    _rca_events(iid, ("rca_started", "started", 40), ("rca_completed", "failed", 30))
+    assert _row(ALICE, f"I{iid}")["reason_detail"] == "rca_stopped"
+
+
+def _plan_events(issue_id, *events):
+    """(status, minutes before NOW[, event type]) rows of a plan run on the issue's timeline."""
+    s = get_session()
+    try:
+        for status, ago, *rest in events:
+            s.add(PipelineEvent(health_issue_id=issue_id, event_type=rest[0] if rest else "fix_plan_requested",
+                                stage="plan", status=status, created_at=NOW - timedelta(minutes=ago)))
+        s.commit()
+    finally:
+        s.close()
+
+
+def test_a_plan_run_that_left_no_plan_waits_on_a_person(db, no_claims):
+    """Auto-fix on and the diagnosis passed its gate, so the issue read «waits on the SRE agent» — but its plan run
+    had ended without a plan, nothing was on it, and it was in nobody's queue."""
+    iid, _ = _issue("root_cause_identified")                                    # 0.9, supported: it passes the gate
+    assert _row(ALICE, f"I{iid}") is None                                       # the pipeline's turn: it starts the plan run
+    _plan_events(iid, ("started", 30), ("failed", 20))
+    row = _row(ALICE, f"I{iid}")
+    assert (row["reason"], row["reason_detail"], row["waiting_on"]) == ("review_required", "plan_stopped", "you")
+    assert row["occurred_at"] == "2026-10-06T11:40:00Z"                         # since the run ended
+    assert row["available_actions"][0]["action"] == "generate_plan" and row["route"] == f"/app/issues/{iid}#plan"
+    assert _row(READER, f"I{iid}") is None
+
+
+def test_a_plan_run_under_way_or_overtaken_is_not_stopped(db, no_claims):
+    under_way, _ = _issue("root_cause_identified")
+    _plan_events(under_way, ("failed", 40), ("started", 5))                     # a newer run has started
+    written, _ = _issue("root_cause_identified")
+    _plan_events(written, ("started", 30), ("failed", 20), ("completed", 10, "fix_plan_created"))   # a plan was written since
+    rediagnosed, _ = _issue("root_cause_identified")
+    _plan_events(rediagnosed, ("started", 30), ("failed", 20))
+    _moved(rediagnosed, "investigating", "root_cause_identified", 5)            # diagnosed again since
+    claimed, _ = _issue("root_cause_identified")
+    _plan_events(claimed, ("started", 30), ("failed", 20))
+    run = no_claims.begin("sre", claimed, "user:bob", now=NOW - timedelta(minutes=2))   # somebody asked again
+    assert {i["id"] for i in _items(ALICE)} == set()
+    no_claims.end(run)
+    assert {i["id"] for i in _items(ALICE)} == {f"I{claimed}"}
+
+
+def test_a_plan_run_that_never_ended_is_stopped_once_past_its_limit(db, no_claims):
+    iid, _ = _issue("root_cause_identified")
+    _plan_events(iid, ("started", 24 * 60))                                     # a day ago: the process that ran it is gone
+    assert _row(ALICE, f"I{iid}")["reason_detail"] == "plan_stopped"
+    fresh, _ = _issue("root_cause_identified")
+    _plan_events(fresh, ("started", 3))                                         # three minutes ago: under way
+    assert _row(ALICE, f"I{fresh}") is None
+
+
+def test_with_auto_fix_off_a_plan_run_that_left_no_plan_says_so(db, no_claims):
+    """Auto-fix off: a passing diagnosis already waits on a person («generate a plan»); once a plan run was asked for
+    and left nothing, the row says that instead."""
+    db.auto_fix_enabled = False
+    iid, _ = _issue("root_cause_identified")
+    assert _row(ALICE, f"I{iid}")["reason_detail"] == "rca_ready"
+    _plan_events(iid, ("started", 30), ("failed", 20))
+    assert _row(ALICE, f"I{iid}")["reason_detail"] == "plan_stopped"
+
+
+def test_a_diagnosis_a_person_must_look_at_first_is_not_a_stopped_plan_run(db, no_claims):
+    """Below the gate, or judged wrong: the next step is the diagnosis, whatever a plan run did."""
+    low, _ = _issue("root_cause_identified", rca=0.3)
+    _plan_events(low, ("started", 30), ("failed", 20))
+    assert _row(ALICE, f"I{low}")["reason_detail"] == "rca_gate"
+
+
+def test_the_issue_as_the_api_shows_it_says_reopened_and_plan_stopped(db, no_claims):
+    from agenticops.web import deps
+    from agenticops.web.app import app
+    reopened, _ = _issue("open", rca=None)
+    _moved(reopened, "open", "dismissed", 30)
+    _moved(reopened, "dismissed", "open", 10)
+    stopped, _ = _issue("root_cause_identified")
+    _plan_events(stopped, ("started", 30), ("failed", 20))
+    plain, _ = _issue("open", rca=None)
+    app.dependency_overrides[deps.current_actor] = lambda: ALICE
+    try:
+        c = TestClient(app)
+        one = c.get(f"/api/health-issues/{reopened}").json()
+        assert (one["reopened"], one["plan_stopped"], one["waiting_on"]) == (True, False, "you")
+        two = c.get(f"/api/health-issues/{stopped}").json()
+        assert (two["reopened"], two["plan_stopped"], two["waiting_on"]) == (False, True, "you")
+        rows = {r["id"]: r for r in c.get("/api/health-issues").json()["items"]}
+        assert (rows[reopened]["reopened"], rows[stopped]["plan_stopped"]) == (True, True)
+        assert (rows[plain]["reopened"], rows[plain]["plan_stopped"], rows[plain]["waiting_on"]) == (False, False, "rca_agent")
+    finally:
+        app.dependency_overrides.clear()

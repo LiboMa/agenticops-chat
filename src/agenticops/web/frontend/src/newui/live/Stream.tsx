@@ -195,7 +195,7 @@ export interface StopControl {
 export interface SteerControl { field: RefObject<HTMLInputElement>; busy: boolean; error: string | null; onSay: (text: string) => void }
 
 /** The opened lane: who is doing what, since when and how the server knows — then what there is to show of it. */
-export function Stream({ lane, moved, mine, now, stop, steer, onBack, onStory, onDecide }: {
+export function Stream({ lane, moved, mine, now, stop, steer, notYours = false, onBack, onStory, onDecide }: {
   lane: LaneView;
   /** the address named a lane that has ended; this is what it left behind */
   moved: boolean;
@@ -205,6 +205,8 @@ export function Stream({ lane, moved, mine, now, stop, steer, onBack, onStory, o
   stop: StopControl | null;
   /** null = no word can be said to this lane (not a diagnosis / plan / review at work, or a read-only account) */
   steer: SteerControl | null;
+  /** N26: the lane takes notes, but another person asked for this run — it takes a word only from them or an administrator */
+  notYours?: boolean;
   now: number; onBack: () => void; onStory: () => void; onDecide: () => void;
 }) {
   const t = useNfT();
@@ -238,6 +240,7 @@ export function Stream({ lane, moved, mine, now, stop, steer, onBack, onStory, o
       )}
       {stop?.state === "can" && stop.offered && <p className="note">{t("live.noSteer")}</p>}
       {steer && <p className="note">{t("steer.note")}</p>}
+      {notYours && <p className="note"><Prov code />{t("steer.notYours")}</p>}
       {lane.group === "upcoming" && <p className="note"><Prov code />{t("live.upcoming", { t: utcStamp(lane.at, now) })}</p>}
       {lane.group === "recent" && !target && <p className="note"><Prov code />{t("live.ended", { t: utcStamp(lane.at, now), outcome: t(`outcome.${lane.outcome ?? "done"}`) })}</p>}
       {target?.kind === "issue" && <IssueLane key={lane.id} lane={lane} issueId={target.id} now={now} />}

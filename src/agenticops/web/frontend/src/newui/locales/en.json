@@ -915,5 +915,14 @@
   "cmd.ask.hint": "into a new conversation — not sent",
   "act.ask": "Ask about it",
   "help.ask": "Ask an agent about this item (opens a conversation tied to it)",
-  "shell.menu.setup": "Setup overview"
+  "shell.menu.setup": "Setup overview",
+  "ask.rerun.reopened": "This issue was reopened and has not been diagnosed since: have the agent diagnose it, or dismiss it.",
+  "sec.reopened": "Since it was reopened",
+  "rerun.reopened": "This issue had been dismissed and was reopened at {t} UTC. Reopening does not start a diagnosis by itself, and no agent has diagnosed it since — it will not move on its own.",
+  "sec.earlierRca": "The diagnosis from before it was reopened",
+  "ask.generate.stopped": "The last plan run left no plan: have the agent write the plan again, or dismiss the issue.",
+  "sec.stoppedPlan": "The last plan run",
+  "generate.stopped": "The last plan run left no plan — it failed, gave up, or began and never ended. It has stood here since {t} UTC; no agent is on it now, and it will not move on its own.",
+  "sec.standingRca": "The diagnosis the plan is to be written from",
+  "steer.notYours": "Someone else asked for this run: only that person or an administrator can say a word to it."
 }

@@ -32,6 +32,29 @@ describe("issueDetailModel", () => {
     const moved = issueDetailModel({ issue: { status: "resolved" }, rca: rcaI1, threshold: 0.6, plans: [], executions: [pend] });
     expect(moved.pendingRun).toBeNull();
   });
+  it("reopened and not diagnosed since (N26): it waits on you — run the RCA — and the line says why", () => {
+    const m = issueDetailModel({ issue: { status: "open", reopened: true }, rca: null, threshold: 0.6, plans: [], executions: [] });
+    expect([m.statusKey, m.primaryKey, m.tone]).toEqual(["workitem.sub.reopened", "workitem.primary.rerunRca", "warn"]);
+    expect(m.reason).toEqual({ key: "workitem.reason.reopened" });
+    expect(m.phase.waitingFor).toBe("you");
+    expect(m.menu).not.toContain("runRca");                    // the primary is that action: the menu does not repeat it
+    const plain = issueDetailModel({ issue: { status: "open", reopened: false }, rca: null, threshold: 0.6, plans: [], executions: [] });
+    expect([plain.statusKey, plain.phase.waitingFor, plain.reason]).toEqual(["workitem.sub.running", "rca_agent", null]);
+    expect(m.phase.phases.map((p) => p.state)).toEqual(["current", "future", "future", "future"]);   // nothing went wrong at the diagnosis: none was tried
+  });
+  it("its plan run left no plan (N26): it waits on you — generate the plan again — and the line says why", () => {
+    const passing = { ...rcaI1, id: 3, confidence: 0.9, evidence_verified: true, critic_verdict: "supported" } as RCAResult;
+    const m = issueDetailModel({ issue: { status: "root_cause_identified", plan_stopped: true }, rca: passing, threshold: 0.6, plans: [], executions: [],
+                                 autoFixEnabled: true });
+    expect([m.statusKey, m.primaryKey, m.tone]).toEqual(["workitem.sub.planStopped", "workitem.primary.generatePlan", "warn"]);
+    expect(m.reason).toEqual({ key: "workitem.reason.planStopped" });
+    expect(m.phase.waitingFor).toBe("you");
+    const under = issueDetailModel({ issue: { status: "root_cause_identified", plan_stopped: false }, rca: passing, threshold: 0.6, plans: [], executions: [],
+                                     autoFixEnabled: true });
+    expect([under.statusKey, under.phase.waitingFor]).toEqual(["workitem.sub.toGenerate", "sre_agent"]);
+    expect(m.phase.phases.map((p) => p.state)).toEqual(["done", "failed", "future", "future"]);      // the plan step is where it went wrong
+    expect(under.phase.phases.map((p) => p.state)).toEqual(["done", "current", "future", "future"]);
+  });
   it("no RCA at all (Review Focus 1): running, no primary, menu offers Run RCA", () => {
     const m = issueDetailModel({ issue: { status: "open" }, rca: null, threshold: 0.6, plans: undefined, executions: undefined });
     expect([m.primaryKey, m.reason]).toEqual([null, null]);

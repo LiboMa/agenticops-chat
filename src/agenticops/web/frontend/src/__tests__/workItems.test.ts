@@ -17,6 +17,13 @@ describe("issueRow (list mode, R2)", () => {
     expect(r.subtitle).toBeNull(); // "unknown" is not a subtitle
     expect(r.dots.map((d) => d.state)).toEqual(["current", "future", "future", "future"]);
   });
+  it("a reopened issue (N26): it stands at the diagnosis — nothing failed there — and waits on a person", () => {
+    const r = issueRow(anomaly({ status: "open", reopened: true }));
+    expect(r.dots.map((d) => d.state)).toEqual(["current", "future", "future", "future"]);
+    expect(r.waitKey).toBe("workitem.wait.you");                       // a server without waiting_on: the list's own reading
+    expect(issueRow(anomaly({ status: "open" })).waitKey).toBe("workitem.wait.rca_agent");
+    expect(issueRow(anomaly({ status: "open", reopened: true, waiting_on: "rca_agent" })).waitKey).toBe("workitem.wait.rca_agent");   // the server's answer wins
+  });
   it("a resolved issue has no wait; a real resource id is the subtitle", () => {
     const r = issueRow(anomaly({ status: "resolved", resource_type: "EC2", resource_id: "i-0abc" }));
     expect(r.waitKey).toBeNull();

@@ -2207,5 +2207,11 @@
   "settings.mcp.foundMany": "找到 {n} 个服务器",
   "skills.dismissing": "正在忽略……",
   "skills.dismissSelected": "忽略选中的（{n}）",
-  "share.contentChars": "内容（{n} 个字符）"
+  "share.contentChars": "内容（{n} 个字符）",
+  "workitem.sub.reopened": "重新打开后还没有诊断",
+  "workitem.sub.planStopped": "出方案没有结果",
+  "workitem.reason.reopened": "这个问题被忽略后又重新打开，之后没有诊断过；重新打开不会自动触发诊断。请运行 RCA，或者忽略这个问题。",
+  "workitem.reason.planStopped": "上一次出方案结束了，没有留下方案，现在也没有 agent 在做。请重新生成修复方案。",
+  "attention.detail.reopened": "重新打开后还没有诊断，需要运行 RCA",
+  "attention.detail.plan_stopped": "上一次出方案没有留下方案，需要重新生成"
 }

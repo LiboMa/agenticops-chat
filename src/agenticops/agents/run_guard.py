@@ -32,6 +32,7 @@ reopens — once the guard has seen either, a read that fails afterwards decides
 """
 
 import logging
+import weakref
 from typing import Optional
 
 from strands.hooks import AfterToolCallEvent, BeforeModelCallEvent, BeforeToolCallEvent, HookProvider, HookRegistry
@@ -123,10 +124,24 @@ def guard_decision(state: Optional[dict], tool_name: Optional[str] = None, tool_
     return STOPPED.format(by=by)
 
 
+# The guards of the runs in flight in this process, by the id of the run's record — so that what a run let through
+# can be asked of the code that watched it (MVP-2.9.0 N26: save_execution_result), not of the agent's own account.
+# Weak: a guard lives as long as its agent, and nothing is kept of a run that is over.
+_GUARDS: "weakref.WeakValueDictionary[int, RunGuard]" = weakref.WeakValueDictionary()
+
+
+def applied_of(execution_id: Optional[int]) -> Optional[int]:
+    """How many commands that could have changed something the run with this record was let through — 0 = it tried
+    nothing. None = not known: no guard watched such a run in this process."""
+    guard = _GUARDS.get(execution_id) if execution_id else None
+    return None if guard is None else guard.applied
+
+
 class RunGuard(HookProvider):
     def __init__(self, execution_id: int):
         self.execution_id = execution_id
         self.applied = 0                 # commands let through that could have changed something
+        _GUARDS[execution_id] = self
         self.recorded = False            # the run closed its own record
         self._seen: Optional[dict] = None        # the last state that was closed or stopped (neither is ever undone)
         self._open: set[str] = set()     # calls let through while the record was running

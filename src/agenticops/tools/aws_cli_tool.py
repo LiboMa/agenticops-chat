@@ -41,6 +41,9 @@ READONLY_PREFIXES = [
     "aws cloudwatch describe-", "aws cloudwatch get-", "aws cloudwatch list-",
     # CloudTrail
     "aws cloudtrail lookup-", "aws cloudtrail describe-", "aws cloudtrail get-",
+    # CloudFormation — describe- and list- only (MVP-2.9.0 N26, the owner's ruling): `get-template` hands back the
+    # whole template, parameters and all, so `get-` stays unclassified and a person looks
+    "aws cloudformation describe-", "aws cloudformation list-",
     # IAM
     "aws iam get-", "aws iam list-",
     # STS
@@ -237,11 +240,11 @@ _AWS_FLAG_OPTIONS = frozenset({
 })
 
 
-def _aws_operation(command: str) -> str:
-    """The operation of `aws [options] <service> [options] <operation> …` — '' when there is none."""
+def _aws_service_operation(command: str) -> tuple[str, str]:
+    """The service and the operation of `aws [options] <service> [options] <operation> …` — '' where there is none."""
     tokens = command.lower().split()
     if not tokens or tokens[0] != "aws":
-        return ""
+        return "", ""
     positional, i = [], 1
     while i < len(tokens):
         token = tokens[i]
@@ -250,9 +253,23 @@ def _aws_operation(command: str) -> str:
             continue
         positional.append(token)
         if len(positional) == 2:
-            return token
+            return positional[0], token
         i += 1
-    return ""
+    return (positional[0] if positional else ""), ""
+
+
+def _aws_operation(command: str) -> str:
+    """The operation of `aws [options] <service> [options] <operation> …` — '' when there is none."""
+    return _aws_service_operation(command)[1]
+
+
+# «Reads» that save what they read to a file on the host AgenticOps runs on — the command names the path (MVP-2.9.0
+# N26). They change nothing in the cloud, but they are not read-only: classified `write`, so outside an approved
+# plan they need a confirmation, they are on the command ledger, a plan step holding one is not «read-only», and
+# after a stop they are refused. The operations beside them that only answer (get-object-acl, get-stages …) stay
+# reads: the match is on the exact operation.
+_SAVES_A_LOCAL_FILE = frozenset({("s3api", "get-object"), ("s3api", "get-object-torrent"),
+                                 ("apigateway", "get-export"), ("apigateway", "get-sdk")})
 
 
 def _is_write_verb(operation: str) -> bool:
@@ -272,6 +289,9 @@ def _classify_command(command: str) -> str:
     for prefix in WRITE_PREFIXES:
         if cmd_lower.startswith(prefix.lower()):
             return "write"
+
+    if _aws_service_operation(command) in _SAVES_A_LOCAL_FILE:
+        return "write"
 
     for prefix in READONLY_PREFIXES:
         if cmd_lower.startswith(prefix.lower()):

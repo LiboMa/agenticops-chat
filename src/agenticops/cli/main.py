@@ -2732,6 +2732,12 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
         except authz.AuthzDenied as e:
             return f"[red]{e}[/red]"
 
+        # the issue was resolved or dismissed since the approval: its plan does not run (MVP-2.9.0 N26)
+        from agenticops.services.issue_state import closed_issue_refusal
+        closed = closed_issue_refusal(session, plan.health_issue_id, "running")
+        if closed:
+            return f"[yellow]{_safe_text(closed)}[/yellow]"
+
         console.print(
             f"[bold]Execute fix plan #{plan_id}?[/bold]\n"
             f"  Title: {plan.title}\n"

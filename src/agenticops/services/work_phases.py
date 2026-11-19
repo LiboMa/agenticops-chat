@@ -144,14 +144,91 @@ def rca_stopped_at(status: str, events: Iterable, *, now: Optional[datetime] = N
     return None if stopped is not None and moved is not None and moved > stopped else stopped
 
 
+def reopened_at(status: str, events: Iterable) -> Optional[datetime]:
+    """Since when an issue that waits for a diagnosis stands there because a person REOPENED it (MVP-2.9.0 N26), or
+    None. The newest move that brought it into the diagnosing statuses came from `dismissed`, and no diagnosis has
+    been started since. Nothing diagnoses a reopened issue by itself — the automatic diagnosis runs when an issue is
+    created — so it is a person's turn; it used to read «waits on the RCA agent» for good.
+
+    A diagnosis from before the dismissal does not count. One started since makes it that diagnosis's turn — and
+    when that one stopped, rca_stopped_at says so. `events` = the issue's timeline (rows or dicts; only
+    status_changed and rca_started are read). Whether an agent is on the issue NOW is the caller's question."""
+    if status not in _DIAGNOSING:
+        return None
+    entered = came_from = started = None
+    for e in events or ():
+        kind, at = _get(e, "event_type"), _ts(_get(e, "created_at"))
+        if at is None:
+            continue
+        if kind == "rca_started":
+            if started is None or at > started:
+                started = at
+        elif kind == "status_changed":
+            detail = _detail(_get(e, "detail"))
+            if (isinstance(detail, Mapping) and detail.get("to") in _DIAGNOSING and detail.get("from") not in _DIAGNOSING
+                    and (entered is None or at > entered)):
+                entered, came_from = at, detail.get("from")
+    if entered is None or came_from != "dismissed":
+        return None
+    return None if started is not None and started >= entered else entered
+
+
+_PLAN_WRITTEN = ("fix_plan_created", "fix_plan_updated")
+
+
+def plan_stopped_at(status: str, events: Iterable, *, now: Optional[datetime] = None,
+                    limit_seconds: Optional[float] = None, moved_at: Optional[datetime] = None) -> Optional[datetime]:
+    """Since when the newest plan run of a diagnosed issue is not going to produce a plan (MVP-2.9.0 N26), or None:
+    none was asked for, one is under way, a plan was written since, or the issue is not at «diagnosed».
+
+    The same two ways as a diagnosis (rca_stopped_at). It ENDED without a plan — `fix_plan_requested` with status
+    `failed`: the agent raised, was refused, or gave up (`no_plan`); a run asked for in a chat has no start on
+    record, only that end. Or it STARTED AND NEVER ENDED and its time limit passed. A plan written at or after that
+    time (`fix_plan_created` / `fix_plan_updated`) means the run is not where the issue stands; so does a status move
+    after it (`moved_at` = the issue's last status move: it was diagnosed again since).
+
+    With auto-fix on, such an issue used to read «waits on the SRE agent» for good — nothing was on it, and it was
+    in nobody's queue. `events` = the issue's timeline (only fix_plan_requested / fix_plan_created / fix_plan_updated
+    are read). Whether an agent is on the issue NOW is the caller's question."""
+    if status != "root_cause_identified":
+        return None
+    started = failed = written = None
+    for e in events or ():
+        kind, at = _get(e, "event_type"), _ts(_get(e, "created_at"))
+        if at is None:
+            continue
+        if kind == "fix_plan_requested":
+            if _get(e, "status") == "failed":
+                failed = at if failed is None or at > failed else failed
+            else:
+                started = at if started is None or at > started else started
+        elif kind in _PLAN_WRITTEN:
+            written = at if written is None or at > written else written
+    stopped = None
+    if failed is not None and (started is None or failed >= started):
+        stopped = failed
+    elif started is not None and now is not None and limit_seconds and limit_seconds > 0:
+        due = started + timedelta(seconds=limit_seconds)
+        if (now if now.tzinfo else now.replace(tzinfo=timezone.utc)) >= due and (written is None or written < started):
+            stopped = due
+    if stopped is None or (written is not None and written >= stopped):
+        return None
+    moved = _ts(moved_at)
+    return None if moved is not None and moved > stopped else stopped
+
+
 def issue_phase(status: str, *, rca: Any = UNKNOWN, threshold: Any = None, plan: Any = UNKNOWN,
                 latest_run: Any = UNKNOWN, auto_run_in_flight: bool = False,
-                auto_fix_enabled: Optional[bool] = None, rca_stopped: bool = False) -> Phase:
+                auto_fix_enabled: Optional[bool] = None, rca_stopped: bool = False, reopened: bool = False,
+                plan_stopped: bool = False) -> Phase:
     run = None if latest_run is UNKNOWN else latest_run
     if status in _DIAGNOSING:
         # its diagnosis ended without a result and no agent is on it: nothing will move it — a person does (N11)
         if rca_stopped:
             return Phase("rcaStopped", "you", "rerunRca")
+        # a person reopened it and nothing has diagnosed it since: nothing will, by itself (N26)
+        if reopened:
+            return Phase("reopened", "you", "rerunRca")
         return Phase("running", "rca_agent", None)
     if status == "root_cause_identified":
         if run is not None and (_get(run, "verification_status") == "failed"
@@ -163,8 +240,11 @@ def issue_phase(status: str, *, rca: Any = UNKNOWN, threshold: Any = None, plan:
             return Phase("needsReview", "you", "rerunRca")
         if _get(rca, "human_verdict") == "incorrect":
             return Phase("rcaRejected", "you", "rerunRca")
+        # the diagnosis stands (a person confirmed it, or it passes the gate): the next step is a plan. Its plan run
+        # ended without one and no agent is on it — nothing will write the plan by itself: a person asks again (N26)
+        stopped = Phase("planStopped", "you", "generatePlan")
         if _get(rca, "human_verdict") == "correct":
-            return Phase("toGenerate", "you", "generatePlan")
+            return stopped if plan_stopped else Phase("toGenerate", "you", "generatePlan")
         gate = gate_passed(rca, threshold)
         if gate is None:
             return Phase("reviewOrPlan", "you", None)
@@ -175,6 +255,8 @@ def issue_phase(status: str, *, rca: Any = UNKNOWN, threshold: Any = None, plan:
         if (known_plan and _get(plan, "status") == "rejected" and _get(rca, "id") is not None
                 and _get(plan, "rca_result_id") == _get(rca, "id")):
             return Phase("planRejected", "you", "generatePlan")
+        if plan_stopped:
+            return stopped
         # auto-fix off: trigger_auto_sre returns early, so a passing RCA is handed to nobody — you generate the plan
         return Phase("toGenerate", "you" if auto_fix_enabled is False else "sre_agent", "generatePlan")
     if status == "fix_planned":

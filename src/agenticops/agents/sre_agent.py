@@ -156,6 +156,17 @@ MODE A — FIX PLAN PROTOCOL:
    issue describes. When the state before the fix IS the outage (e.g. replicas at 0, a stopped service),
    the rollback keeps what was restored and stops there. save_fix_plan refuses a fix plan whose rollback
    scales a workload to 0, deletes one, or stops an instance, database or service.
+   EXACT COMMANDS: every step, and every rollback step (rollback_plan is {"steps": [...]}, in the order
+   they run), is a dict with 'action' — what it does, in words — and 'command': ONE command line, written
+   exactly as it will be run by the tool that runs it (the provider's CLI, the cluster's CLI, or a command
+   on a host), with the real identifiers you found and every parameter filled in. In 'command' there is
+   no placeholder (<id>, $VAR, «the new value»), no sentence, no two commands joined (&&, ;, |), no
+   redirection and no comment — explanations go in 'action'. The same holds for the 'command' of a
+   pre-check and of a post-check. Why: the approver reads that line, the executor runs that line and
+   nothing else, and when a person stops a run only rollback lines that can run exactly as written are
+   run. A value you do not have yet is read with a tool first — never left as a placeholder. What cannot
+   be written as one exact command — a console-only action, a choice a person has to make — is not a
+   step: name it in the summary as something a person does.
 7. SAVE: Call save_fix_plan with ALL details in a SINGLE call.
    IMPORTANT: Each HealthIssue must have ONE consolidated fix plan covering ALL fix steps.
    Do NOT call save_fix_plan multiple times for the same issue.

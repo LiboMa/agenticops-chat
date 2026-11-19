@@ -337,6 +337,10 @@ class HealthIssueResponse(BaseModel):
     waiting_since: Optional[datetime] = None
     # MVP-2.9.0 N11: its newest diagnosis ended without a result and no agent is on it — it waits on a person
     rca_stopped: bool = False
+    # MVP-2.9.0 N26: a person reopened it and nothing has diagnosed it since / its plan run ended without a plan —
+    # nothing will move it by itself, so it waits on a person
+    reopened: bool = False
+    plan_stopped: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

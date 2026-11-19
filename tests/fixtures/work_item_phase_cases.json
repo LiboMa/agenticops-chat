@@ -539,6 +539,234 @@
         "waitingFor": "approver",
         "primary": "approveAndRun"
       }
+    },
+    {
+      "name": "open, reopened after a dismissal and not diagnosed since (N26)",
+      "input": {
+        "status": "open",
+        "reopened": true
+      },
+      "expect": {
+        "sub": "reopened",
+        "waitingFor": "you",
+        "primary": "rerunRca"
+      }
+    },
+    {
+      "name": "acknowledged, reopened and not diagnosed since (N26)",
+      "input": {
+        "status": "acknowledged",
+        "reopened": true
+      },
+      "expect": {
+        "sub": "reopened",
+        "waitingFor": "you",
+        "primary": "rerunRca"
+      }
+    },
+    {
+      "name": "open, not reopened (N26: the never-diagnosed ones stay with the RCA agent)",
+      "input": {
+        "status": "open",
+        "reopened": false
+      },
+      "expect": {
+        "sub": "running",
+        "waitingFor": "rca_agent",
+        "primary": null
+      }
+    },
+    {
+      "name": "a stopped diagnosis is said before a reopening (N26)",
+      "input": {
+        "status": "open",
+        "reopened": true,
+        "rcaStopped": true
+      },
+      "expect": {
+        "sub": "rcaStopped",
+        "waitingFor": "you",
+        "primary": "rerunRca"
+      }
+    },
+    {
+      "name": "past diagnosis: a reopening is not this status's question (N26)",
+      "input": {
+        "status": "root_cause_identified",
+        "rca": {
+          "confidence": 0.9,
+          "evidence_verified": true,
+          "critic_verdict": "supported",
+          "human_verdict": null
+        },
+        "threshold": 0.6,
+        "latestRun": null,
+        "reopened": true
+      },
+      "expect": {
+        "sub": "toGenerate",
+        "waitingFor": "sre_agent",
+        "primary": "generatePlan"
+      }
+    },
+    {
+      "name": "rci gate passed, its plan run ended without a plan and nobody is on it (N26)",
+      "input": {
+        "status": "root_cause_identified",
+        "rca": {
+          "confidence": 0.9,
+          "evidence_verified": true,
+          "critic_verdict": "supported",
+          "human_verdict": null
+        },
+        "threshold": 0.6,
+        "latestRun": null,
+        "planStopped": true
+      },
+      "expect": {
+        "sub": "planStopped",
+        "waitingFor": "you",
+        "primary": "generatePlan"
+      }
+    },
+    {
+      "name": "rci gate passed, a plan run is under way (N26: not stopped)",
+      "input": {
+        "status": "root_cause_identified",
+        "rca": {
+          "confidence": 0.9,
+          "evidence_verified": true,
+          "critic_verdict": "supported",
+          "human_verdict": null
+        },
+        "threshold": 0.6,
+        "latestRun": null,
+        "planStopped": false
+      },
+      "expect": {
+        "sub": "toGenerate",
+        "waitingFor": "sre_agent",
+        "primary": "generatePlan"
+      }
+    },
+    {
+      "name": "rci gate passed, auto-fix off, its plan run ended without a plan (N26)",
+      "input": {
+        "status": "root_cause_identified",
+        "rca": {
+          "confidence": 0.9,
+          "evidence_verified": true,
+          "critic_verdict": "supported",
+          "human_verdict": null
+        },
+        "threshold": 0.6,
+        "latestRun": null,
+        "autoFixEnabled": false,
+        "planStopped": true
+      },
+      "expect": {
+        "sub": "planStopped",
+        "waitingFor": "you",
+        "primary": "generatePlan"
+      }
+    },
+    {
+      "name": "rci confirmed by a person, its plan run ended without a plan (N26)",
+      "input": {
+        "status": "root_cause_identified",
+        "rca": {
+          "confidence": 0.9,
+          "evidence_verified": true,
+          "critic_verdict": "supported",
+          "human_verdict": "correct"
+        },
+        "threshold": 0.6,
+        "latestRun": null,
+        "planStopped": true
+      },
+      "expect": {
+        "sub": "planStopped",
+        "waitingFor": "you",
+        "primary": "generatePlan"
+      }
+    },
+    {
+      "name": "rci below the gate: the diagnosis comes first, whatever a plan run did (N26)",
+      "input": {
+        "status": "root_cause_identified",
+        "rca": {
+          "confidence": 0.3,
+          "evidence_verified": true,
+          "critic_verdict": "supported",
+          "human_verdict": null
+        },
+        "threshold": 0.6,
+        "latestRun": null,
+        "planStopped": true
+      },
+      "expect": {
+        "sub": "needsReview",
+        "waitingFor": "you",
+        "primary": "reviewRca"
+      }
+    },
+    {
+      "name": "rci judged wrong: diagnose again, whatever a plan run did (N26)",
+      "input": {
+        "status": "root_cause_identified",
+        "rca": {
+          "confidence": 0.9,
+          "evidence_verified": true,
+          "critic_verdict": "supported",
+          "human_verdict": "incorrect"
+        },
+        "threshold": 0.6,
+        "latestRun": null,
+        "planStopped": true
+      },
+      "expect": {
+        "sub": "rcaRejected",
+        "waitingFor": "you",
+        "primary": "rerunRca"
+      }
+    },
+    {
+      "name": "rci, its last run failed: a new plan, whatever a plan run did (N26)",
+      "input": {
+        "status": "root_cause_identified",
+        "rca": {
+          "confidence": 0.9,
+          "evidence_verified": true,
+          "critic_verdict": "supported",
+          "human_verdict": null
+        },
+        "threshold": 0.6,
+        "latestRun": {
+          "status": "failed",
+          "verification_status": null
+        },
+        "planStopped": true
+      },
+      "expect": {
+        "sub": "needsNewPlan",
+        "waitingFor": "you",
+        "primary": "generatePlan"
+      }
+    },
+    {
+      "name": "past «diagnosed»: a stopped plan run is not this status's question (N26)",
+      "input": {
+        "status": "fix_planned",
+        "plan": {
+          "status": "pending_approval"
+        },
+        "planStopped": true
+      },
+      "expect": {
+        "sub": "awaitingApproval",
+        "waitingFor": "approver",
+        "primary": "approveAndRun"
+      }
     }
   ],
   "change": [

@@ -20,9 +20,11 @@ const TABLE: Record<string, BriefKind> = {
   "issue|review_required|rca_missing": "rerun",
   "issue|review_required|rca_rejected": "rerun",
   "issue|review_required|rca_stopped": "rerun",          // its diagnosis ended without a result (N11): the same page, other words
+  "issue|review_required|reopened": "rerun",             // reopened after a dismissal, not diagnosed since (N26): likewise
   "issue|review_required|rca_confirmed": "generate",
   "issue|review_required|rca_ready": "generate",
   "issue|review_required|plan_rejected": "replan",
+  "issue|review_required|plan_stopped": "generate",      // its plan run ended without a plan (N26): the same page, other words
   "issue|execution_failed|run_failed": "failed",
   "issue|execution_failed|run_stopped": "failed",        // a person stopped the run (N9): the same page, other words
   "issue|execution_not_started|": "not_started",

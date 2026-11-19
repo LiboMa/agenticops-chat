@@ -31,7 +31,7 @@ def open_ticket(fix_plan_id: int, *, executed_by: str) -> tuple[Optional[int], s
     (change_service.request_execution), and executor_agent's own gate has already refused any other.
     """
     from agenticops.models import FixExecution, FixPlan, InvalidStatusTransition, get_db_session, transition_plan
-    from agenticops.services.issue_state import advance_issue
+    from agenticops.services.issue_state import advance_issue, closed_issue_refusal
 
     with get_db_session() as session:
         plan = session.query(FixPlan).filter_by(id=fix_plan_id).first()
@@ -46,6 +46,9 @@ def open_ticket(fix_plan_id: int, *, executed_by: str) -> tuple[Optional[int], s
             return None, f"a run of FixPlan #{fix_plan_id} is already in progress (Execution #{live[0]})"
         if plan.status != "approved":
             return None, f"FixPlan #{fix_plan_id} is '{plan.status}', not approved"
+        closed = closed_issue_refusal(session, plan.health_issue_id, "running")     # N26: as it could not be approved
+        if closed:
+            return None, closed
         try:
             transition_plan(plan, "executing")
         except InvalidStatusTransition as e:          # another executor, or a withdraw, moved it first

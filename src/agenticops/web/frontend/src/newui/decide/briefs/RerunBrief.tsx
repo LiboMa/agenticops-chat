@@ -9,8 +9,9 @@ import { CauseSection, useCause } from "../widgets/CauseSection";
 import { useBriefKeys, useDecide, type BriefProps } from "./briefContext";
 import { DismissForm, useAgentAsk, VerdictQuote } from "./shared";
 
-/** A diagnosis a person judged wrong, an issue with no diagnosis at all, or one whose diagnosis ended without a
- *  result (N11: it failed or timed out, and no agent is on it): ask the agent to diagnose it (again). */
+/** A diagnosis a person judged wrong, an issue with no diagnosis at all, one whose diagnosis ended without a result
+ *  (N11: it failed or timed out, and no agent is on it), or an issue a person reopened that nothing has diagnosed
+ *  since (N26): ask the agent to diagnose it (again). */
 export function RerunBrief({ item, frame }: BriefProps) {
   const t = useNfT();
   const { openPeek } = useDecide();
@@ -19,6 +20,7 @@ export function RerunBrief({ item, frame }: BriefProps) {
   const [closing, setClosing] = useState(false);
   const missing = item.reason_detail === "rca_missing";
   const stopped = item.reason_detail === "rca_stopped";
+  const reopened = item.reason_detail === "reopened";
 
   useBriefKeys({
     onKey: (key, _e, repeat) => {
@@ -41,7 +43,7 @@ export function RerunBrief({ item, frame }: BriefProps) {
     </>
   );
   return (
-    <BriefFrame item={item} {...frame} ask={t(stopped ? "ask.rerun.stopped" : missing ? "ask.rerun.missing" : "ask.rerun")} actions={actions}>
+    <BriefFrame item={item} {...frame} ask={t(stopped ? "ask.rerun.stopped" : reopened ? "ask.rerun.reopened" : missing ? "ask.rerun.missing" : "ask.rerun")} actions={actions}>
       <AgentAtWork lane={agent.lane} now={frame.now} />
       {stopped && (
         <>
@@ -53,14 +55,20 @@ export function RerunBrief({ item, frame }: BriefProps) {
           <LiveSteps of={{ item: item.id, agent: "rca", before: item.occurred_at }} live={false} now={frame.now} heading={t("steps.title.stopped")} />
         </>
       )}
-      {!missing && !stopped && (
+      {reopened && (
+        <div className="sec">
+          <h2>{t("sec.reopened")}</h2>
+          <p><Prov code />{t("rerun.reopened", { t: utcStamp(item.occurred_at, frame.now) })}</p>
+        </div>
+      )}
+      {!missing && !stopped && !reopened && (
         <div className="sec">
           <h2>{t("sec.humanVerdict")}</h2>
           <VerdictQuote issueId={agent.issueId} rcaId={source.rca?.id ?? null} />
           <p className="note">{t("rerun.note")}</p>
         </div>
       )}
-      {!stopped && <CauseSection heading={t("sec.rejectedRca")} source={source} />}
+      {!stopped && <CauseSection heading={t(reopened ? "sec.earlierRca" : "sec.rejectedRca")} source={source} />}
     </BriefFrame>
   );
 }

@@ -2310,6 +2310,8 @@ def _with_waits(session, issues, responses):
         if w is not None:
             resp.waiting_on, resp.waiting_since = w.phase.waiting_for, w.since
             resp.rca_stopped = w.phase.sub == "rcaStopped"
+            resp.reopened = w.phase.sub == "reopened"
+            resp.plan_stopped = w.phase.sub == "planStopped"
     return responses
 
 
@@ -3252,6 +3254,13 @@ async def api_execute_fix_plan(plan_id: int, actor: Actor = Depends(current_acto
             authz.check(actor, "plan.execute", subject=plan)
         except authz.AuthzDenied as e:
             raise HTTPException(status_code=403, detail=authz.http_detail(e))
+
+        # A plan approved while its issue was open does not run once the issue is resolved or dismissed (N26):
+        # the same rule as approving — reopen the issue first
+        from agenticops.services.issue_state import closed_issue_refusal
+        closed = closed_issue_refusal(session, plan.health_issue_id, "running")
+        if closed:
+            raise HTTPException(status_code=409, detail=closed)
 
         # An approval's auto-run writes no row until it ends and leaves the plan 'approved': a second executor
         # must not run the same plan alongside it (2026-10-05 final review C1)

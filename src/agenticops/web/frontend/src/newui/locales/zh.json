@@ -915,5 +915,14 @@
   "cmd.ask.hint": "带进新对话，不会自动发出",
   "act.ask": "问它",
   "help.ask": "问 agent 这件事（打开一个关联到它的对话）",
-  "shell.menu.setup": "配置介绍"
+  "shell.menu.setup": "配置介绍",
+  "ask.rerun.reopened": "这件事被重新打开了，之后还没有诊断过：让 agent 诊断，或者忽略这件事。",
+  "sec.reopened": "重新打开之后",
+  "rerun.reopened": "这件事被忽略过，{t} UTC 被重新打开。重新打开不会自动开始诊断，之后也没有 agent 诊断过它——它不会自己动。",
+  "sec.earlierRca": "重新打开之前的诊断",
+  "ask.generate.stopped": "上一次出方案没有留下方案：让 agent 重新出方案，或者忽略这件事。",
+  "sec.stoppedPlan": "上一次出方案",
+  "generate.stopped": "上一次出方案没有留下方案——它失败了、放弃了，或者开始之后再没有结束。从 {t} UTC 起它就停在这里；现在没有 agent 在做这件事，它不会自己动。",
+  "sec.standingRca": "这份方案要依据的诊断",
+  "steer.notYours": "这次运行是别人发起的：只有发起的人和管理员可以给它补一句话。"
 }

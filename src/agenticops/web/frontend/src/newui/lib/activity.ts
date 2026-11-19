@@ -16,6 +16,9 @@ export interface ActivityLane {
    *  or "stopped": the status says «investigating» but the timeline says the diagnosis ended */
   basis: string;
   requested_by: string | null;
+  /** N26: false = a person asked for this run, and it is not this person (nor are they an administrator) — it takes
+   *  no word from them. Absent on lanes that take notes from anyone who may write them (and on an older server). */
+  notes_from_you?: boolean;
   /** it outlived its own watchdog */
   overdue: boolean;
   route: string | null;

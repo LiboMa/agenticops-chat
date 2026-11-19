@@ -2207,5 +2207,11 @@
   "settings.mcp.foundMany": "{n} servers found",
   "skills.dismissing": "Dismissing…",
   "skills.dismissSelected": "Dismiss selected ({n})",
-  "share.contentChars": "Content ({n} chars)"
+  "share.contentChars": "Content ({n} chars)",
+  "workitem.sub.reopened": "Reopened, not diagnosed since",
+  "workitem.sub.planStopped": "The plan run left no plan",
+  "workitem.reason.reopened": "This issue was dismissed and then reopened, and nothing has diagnosed it since — reopening does not start a diagnosis by itself. Run the RCA, or dismiss the issue.",
+  "workitem.reason.planStopped": "The last plan run ended without a plan and no agent is on it now. Generate the fix plan again.",
+  "attention.detail.reopened": "Reopened and not diagnosed since — run the RCA",
+  "attention.detail.plan_stopped": "The last plan run left no plan — generate it again"
 }

@@ -272,6 +272,14 @@ def api_ui_activity_note(data: ActivityNote, actor: Actor = Depends(current_acto
         authz.check(actor, "issue.note", subject=None)
     except authz.AuthzDenied as e:
         raise HTTPException(status_code=403, detail=str(e))
+    # A diagnosis or a plan run a PERSON asked for takes a word from that person and from administrators only (N26:
+    # it may have been asked for in a private conversation). The pipeline's own runs, and change reviews, as before.
+    if item[:1] == "I" and item[1:].isdigit():        # an issue's lane (a change review's is C<n>)
+        from agenticops.services import agent_runs
+        if not agent_runs.may_note(agent_runs.get(int(item[1:])), actor):
+            raise HTTPException(status_code=403, detail={
+                "detail": "Only the person who asked for this run, or an administrator, can say a word to it.",
+                "code": "not_your_run"})
     recorder = live_recorder(item, agent)
     if recorder is not None and data.run is not None and recorder.run_key != data.run:
         return _ui_error(409, "not_running", "The run this note was written for has ended; another run is on it now. "

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Activity, ActivityLane, ActivityRecent } from "@/newui/lib/activity";
-import { atWork, lanePath, laneViews, pickLane, recentCut, staleSince, steerable, type LaneView, stopState } from "@/newui/lib/live";
+import { atWork, lanePath, laneViews, notYourRun, pickLane, recentCut, staleSince, steerable, type LaneView, stopState } from "@/newui/lib/live";
 
 const running = (over: Partial<ActivityLane>): ActivityLane => ({
   id: "I12:diagnosis", kind: "diagnosis", agent: "rca", item: "I12", ref: "I#12", title: "disk full", account_id: 1,
@@ -189,6 +189,18 @@ describe("steerable — whether a word can be said to the opened lane's agent (N
     expect(steerable(lane())).toBe(true);
     expect(steerable(lane({ id: "I12:plan", kind: "plan", agent: "sre", basis: "pipeline" }))).toBe(true);
     expect(steerable(lane({ id: "C3:change_review", kind: "change_review", agent: "sre", item: "C3", basis: "status" }))).toBe(true);
+  });
+
+  it("a run another person asked for takes no word from this person — and the page can say why (N26)", () => {
+    const theirs = lane({ notes_from_you: false });
+    expect(steerable(theirs)).toBe(false);
+    expect(notYourRun(theirs)).toBe(true);
+    expect([steerable(lane({ notes_from_you: true })), notYourRun(lane({ notes_from_you: true }))]).toEqual([true, false]);
+    expect([steerable(lane()), notYourRun(lane())]).toEqual([true, false]);                     // an older server says nothing: as before
+    // not a lane that takes notes at all: «not yours» is not the reason
+    expect(notYourRun(lane({ id: "I12:run", kind: "run", agent: "executor", notes_from_you: false }))).toBe(false);
+    expect(notYourRun(lane({ overdue: true, notes_from_you: false }))).toBe(false);
+    expect(notYourRun(null)).toBe(false);
   });
 
   it("an execution does not: it follows the plan that was approved and can only be stopped", () => {

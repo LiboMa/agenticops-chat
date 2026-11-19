@@ -1769,7 +1769,10 @@ def save_execution_result(
                     issue_status = target
                 except InvalidStatusTransition as e:  # moved concurrently: left where it is
                     issue_note = f" HealthIssue #{issue_id} left where it is: {e}."
-                if issue_status is not None and verdict == FAILED and not stopped_by:
+                # Not disputed: a run a person stopped (N9), and an aborted run that tried nothing (N26) — a
+                # pre-check that failed before any step says nothing about the cause. The plan has ended all the same.
+                if (issue_status is not None and verdict == FAILED and not stopped_by
+                        and not nothing_tried(status, parsed_steps, rc.execution_id)):
                     disputed = dispute_rca(session, issue_id, rc.execution_id or execution.id, why)
         execution_ref = rc.execution_id or execution.id
         auto_resolved = issue_status == "resolved"
@@ -1923,6 +1926,18 @@ def mark_fix_executed(health_issue_id: Optional[int], execution_id: int) -> str:
         session.close()
 
 
+def nothing_tried(status: Optional[str], steps: list, execution_id: Optional[int]) -> bool:
+    """An ABORTED run that tried nothing (MVP-2.9.0 N26): its failure says nothing about the diagnosis, so it is
+    not disputed. What was tried is the code's own knowledge where there is any — the run's guard counts the
+    commands it let through that could have changed something (agents/run_guard.applied_of); where no guard watched
+    the run in this process, the run's own step results decide: none reported."""
+    if status != "aborted":
+        return False
+    from agenticops.agents.run_guard import applied_of
+    applied = applied_of(execution_id)
+    return applied == 0 if applied is not None else not steps
+
+
 def dispute_rca(session, health_issue_id: int, execution_id: int, reason: str = "") -> Optional[RCAResult]:
     """Execution-failure feedback (MVP-2.2.0): a failed fix disputes the RCA it was based on — surfaced on the
     latest RCAResult for review, once per execution. Returns the disputed RCA (None = none, or already noted);
@@ -1970,6 +1985,7 @@ def mark_fix_failed(health_issue_id: Optional[int], execution_id: int, reason: s
     """
     if not health_issue_id:
         return "This is a change plan (no HealthIssue); nothing to mark — the change request state is derived from save_execution_result."
+    from agenticops.services.verification import as_results
     session = get_session()
     try:
         issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
@@ -2018,7 +2034,9 @@ def mark_fix_failed(health_issue_id: Optional[int], execution_id: int, reason: s
             outcome = (f"stays '{seen}' (FixPlan #{execution.fix_plan_id} is "
                        f"'{state}'{'; retry allowed' if state == 'approved' else ''})")
 
-        rca = dispute_rca(session, health_issue_id, execution_id, reason) if on_fix else None
+        # an aborted run that tried nothing says nothing about the diagnosis (MVP-2.9.0 N26)
+        tried = not nothing_tried(execution.status, as_results(execution.step_results), execution_id)
+        rca = dispute_rca(session, health_issue_id, execution_id, reason) if on_fix and tried else None
         session.commit()
         if rca is not None:
             log_rca_disputed(health_issue_id, rca.id, execution_id, reason)
