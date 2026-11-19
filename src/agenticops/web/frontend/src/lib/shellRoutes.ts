@@ -12,6 +12,7 @@ export type RouteKind = "hosted" | "native" | "lens" | "outside";
  *  classic one is reached through an exit, `stayClassic`); lens = NewUI itself; outside = no shell at all. */
 export const ROUTE_KINDS: Record<string, RouteKind> = {
   "/app/login": "outside",
+  "/app/setup": "outside",       // open signed out too
   "/app": "hosted",
   "new/*": "lens",
   overview: "hosted",

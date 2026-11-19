@@ -1175,6 +1175,52 @@ export interface GalaxyHealthRead {
   as_of?: string | null;
 }
 
+// ── Setup overview (MVP-2.9.0 N23) ─────────────────────────────────────────────
+/** The last time something was actually checked: who, when (UTC), and what it found. */
+export interface ReadinessCheckView {
+  ok: boolean;
+  detail: string;
+  checked_at: string;
+  checked_by: string;
+}
+
+/** GET /api/setup/readiness — how far the installation is set up. It reads only; it never runs a check. */
+export interface Readiness {
+  accounts: {
+    state: "connected" | "configured" | "failed" | "missing";
+    enabled: number;
+    regions: number;
+    /** `check` is of the credentials the account has NOW; null = never tested with them */
+    items: { id: number; name: string; provider: string; regions: number; check: ReadinessCheckView | null }[];
+  };
+  model: {
+    state: "verified" | "configured" | "failed";
+    model_id: string;
+    /** where the model is called — not where resources are scanned */
+    region: string;
+    check: ReadinessCheckView | null;
+  };
+  execution: {
+    state: "manual" | "partly_automatic" | "read_only";
+    executor_enabled: boolean;
+    auto_fix_enabled: boolean;
+    auto_approve_l0_l1: boolean;
+    rbac_enforce: boolean;
+    change_auto_approve_standard: boolean;
+    you_can_approve: boolean;
+    read_only: boolean;
+  };
+  notifications: { state: "optional"; channels: number };
+  can_verify: boolean;
+  generated_at: string;
+}
+
+/** POST /api/setup/verify-model */
+export interface ModelVerification extends ReadinessCheckView {
+  model_id: string;
+  region: string;
+}
+
 // ── Security review (MVP-2.5.0; per account since MVP-2.9.0 N20) ──────────────
 // `account_id` is cloud_accounts.id — the top bar's scope — and null when the snapshot's account is no longer
 // managed; `account_name` is always there.

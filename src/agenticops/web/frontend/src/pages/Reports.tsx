@@ -191,7 +191,7 @@ export default function Reports() {
                 {list.isFetchNextPageError && <span className="text-status-danger">{t("reports.more.failed")}</span>}
                 {remaining > 0 && (
                   <button type="button" onClick={() => void list.fetchNextPage()} disabled={list.isFetchingNextPage}
-                          className="min-h-11 rounded-lg border border-border px-3 text-sm text-foreground hover:bg-accent disabled:opacity-60 sm:min-h-9">
+                          className="min-h-[44px] rounded-lg border border-border px-3 text-sm text-foreground hover:bg-accent disabled:opacity-60 sm:min-h-9">
                     {list.isFetchingNextPage ? t("reports.more.busy") : t("reports.more").replace("{n}", String(Math.min(REPORTS_PAGE, remaining)))}
                   </button>
                 )}

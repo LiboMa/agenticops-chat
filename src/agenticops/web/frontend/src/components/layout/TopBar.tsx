@@ -150,6 +150,8 @@ function AvatarMenu() {
             <DropdownMenu.Item className={item} onSelect={() => setHomeOpen(true)}>{t("home.prefsTitle")}</DropdownMenu.Item>
             {/* MVP-2.8.0: every signed-in person's own API keys — a viewer's too (read-only keys) */}
             {user && <DropdownMenu.Item className={item} onSelect={() => navigate("/app/account/api-keys")}>{t("apiKeys.menu")}</DropdownMenu.Item>}
+            {/* N23: how far this installation is set up */}
+            <DropdownMenu.Item className={item} onSelect={() => navigate("/app/setup")}>{t("setup.entry")}</DropdownMenu.Item>
             <DropdownMenu.Separator className="my-1 h-px bg-border" />
             <DropdownMenu.Item className={item} onSelect={async () => { await logout(); navigate("/app/login", { replace: true }); }}>
               {t("topbar.signOut")}

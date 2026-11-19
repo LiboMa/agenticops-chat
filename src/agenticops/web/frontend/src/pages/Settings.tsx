@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useId } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import * as Tabs from "@radix-ui/react-tabs";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
@@ -9,6 +10,7 @@ import { Switch } from "@/components/ui/Switch";
 import { formatShortDate } from "@/lib/formatDate";
 import { buildAccountCredentials, hasStoredSecrets } from "@/lib/accountForm";
 import { useLocale } from "@/i18n/LocaleContext";
+import { settingsTab } from "@/lib/setup";
 import { useScanFocus } from "@/hooks/useScanFocus";
 import { useSettings, useUpdateSettings } from "@/hooks/useSettings";
 import { useExcludePatterns, useUpdateExcludePatterns } from "@/hooks/useExcludePatterns";
@@ -1175,18 +1177,29 @@ export default function Settings() {
   }
 
   const { t } = useLocale();
+  // the open tab is in the address (`?tab=accounts`): the setup overview links to the tab an item is changed on
+  const [params, setParams] = useSearchParams();
+  const tab = settingsTab(params.get("tab"));
+  const openTab = (value: string) => {
+    const next = new URLSearchParams(params);
+    if (value === "general") next.delete("tab"); else next.set("tab", value);
+    setParams(next, { replace: true });
+  };
   const tabTriggerClass = "px-4 py-2 text-sm font-medium border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:text-primary text-muted-foreground hover:text-foreground transition-colors";
 
   return (
     <div className="max-w-5xl">
-      <h1 className="text-2xl font-semibold text-foreground mb-4">{t("settings.title")}</h1>
+      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
+        <h1 className="text-2xl font-semibold text-foreground">{t("settings.title")}</h1>
+        <Link to="/app/setup" className="text-sm font-medium text-primary hover:underline">{t("setup.entry")}</Link>
+      </div>
       {readOnly && (
         <p role="status" className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
           {t("settings.readOnlyNotice")}
         </p>
       )}
 
-      <Tabs.Root defaultValue="general">
+      <Tabs.Root value={tab} onValueChange={openTab}>
         <Tabs.List className="flex border-b border-border mb-6 gap-0 overflow-x-auto">
           <Tabs.Trigger value="general" className={tabTriggerClass}>{t("settings.general")}</Tabs.Trigger>
           <Tabs.Trigger value="accounts" className={tabTriggerClass}>{t("settings.accounts")}</Tabs.Trigger>

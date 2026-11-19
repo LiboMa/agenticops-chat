@@ -2514,6 +2514,23 @@ class SecuritySnapshot(Base):
     collection_health: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
 
+class ReadinessCheck(Base):
+    """One time a cloud account's connection or the main model was actually checked (MVP-2.9.0 N23, the 2.8.0
+    spec's S6; services/readiness). `subject` names WHAT was checked — an account with its credential fingerprint, a
+    model id with its region — so a check counts only for the credentials / model it was made with. Append-only."""
+
+    __tablename__ = "readiness_checks"
+    __table_args__ = (Index("idx_readiness_checks_subject", "kind", "subject", "checked_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20))                # account | model
+    subject: Mapped[str] = mapped_column(String(255))
+    ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    detail: Mapped[str] = mapped_column(Text, default="")        # ≤ 500 characters, secrets masked
+    checked_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    checked_by: Mapped[str] = mapped_column(String(255), default="")
+
+
 class SecurityRecommendation(Base):
     """Evidence-grounded security recommendation (advisor output)."""
 

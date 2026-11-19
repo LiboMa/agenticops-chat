@@ -12,6 +12,7 @@ import { hubRedirect } from "@/lib/plans";
 import { useCanManageUsers, useCanViewSettings } from "@/hooks/useBootstrap";
 
 const Login = lazy(() => import("@/pages/Login"));
+const Setup = lazy(() => import("@/pages/Setup"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Chat = lazy(() => import("@/pages/Chat"));
 const Cases = lazy(() => import("@/pages/Cases"));
@@ -83,6 +84,8 @@ export default function App() {
               </Suspense>
             }
           />
+          {/* the setup overview (N23): open before and after signing in, so outside both shells */}
+          <Route path="/app/setup" element={<Suspense fallback={<Spinner />}><Setup /></Suspense>} />
           {/* one layout route, two shells (round 3): the classic workspace, or NewUI's frame around the same pages */}
           <Route path="/app" element={<RequireAuth><ShellSwitch /></RequireAuth>}>
             <Route path="new/*" element={<Suspense fallback={<Spinner />}><NewLenses /></Suspense>} />

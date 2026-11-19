@@ -202,7 +202,7 @@ export default function Security() {
           </p>
         </div>
         <button type="button" onClick={refreshAll} disabled={refreshing}
-                className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-60 sm:min-h-0">
+                className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-60 sm:min-h-0">
           <svg className={`h-4 w-4 ${refreshing ? "animate-spin motion-reduce:animate-none" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
@@ -357,10 +357,10 @@ export default function Security() {
                     <span role="status">{fill(t("security.showing"), { from: info.from, to: info.to, total: data.total })}</span>
                     <div className="flex items-center gap-2">
                       <button type="button" disabled={info.page <= 1} onClick={() => setFilters({ ...query, page: info.page - 1 })}
-                              className="min-h-11 rounded-md border border-border px-3 hover:bg-accent disabled:opacity-50 sm:min-h-8">{t("security.prev")}</button>
+                              className="min-h-[44px] rounded-md border border-border px-3 hover:bg-accent disabled:opacity-50 sm:min-h-8">{t("security.prev")}</button>
                       <span>{fill(t("security.page"), { page: info.page, pages: info.pages })}</span>
                       <button type="button" disabled={info.page >= info.pages} onClick={() => setFilters({ ...query, page: info.page + 1 })}
-                              className="min-h-11 rounded-md border border-border px-3 hover:bg-accent disabled:opacity-50 sm:min-h-8">{t("security.next")}</button>
+                              className="min-h-[44px] rounded-md border border-border px-3 hover:bg-accent disabled:opacity-50 sm:min-h-8">{t("security.next")}</button>
                     </div>
                   </div>
                 </>

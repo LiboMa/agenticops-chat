@@ -277,6 +277,7 @@ export function NewShell({ children, hosting = false, tucked = false }: { childr
                     {t("shell.menu.singleKeys")}<small>{t(singleKeys ? "shell.on" : "shell.off")}</small>
                   </button>
                   {user && <Link className="mi" role="menuitem" to="/app/account/api-keys" onClick={() => setMenu(null)}>{t("shell.menu.apiKeys")}</Link>}
+                  <Link className="mi" role="menuitem" to="/app/setup" onClick={() => setMenu(null)}>{t("shell.menu.setup")}</Link>
                   <div className="sep" />
                   <button type="button" className="mi" role="menuitem"
                           // a decision still inside its undo window is sent first, and has its answer, before the

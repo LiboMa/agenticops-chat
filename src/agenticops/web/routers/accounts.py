@@ -148,15 +148,19 @@ def api_delete_account(account_id: int, actor: Actor = Depends(current_actor)):
 
 
 @router.post("/api/accounts/{account_id}/test")
-def api_test_account_connection(account_id: int):
-    """Test credential chain for an account. Returns success/failure with identity."""
+def api_test_account_connection(account_id: int, actor: Actor = Depends(current_actor)):
+    """Test credential chain for an account. Returns success/failure with identity. What it found is kept
+    (MVP-2.9.0 N23: `readiness_checks` — who tested, when, with which credentials), so the setup overview can tell
+    «configured» from «connected»."""
     from agenticops.credentials.session_factory import get_session_factory
+    from agenticops.services import readiness
     with get_db_session() as session:
         acct = session.query(CloudAccount).filter_by(id=account_id).first()
         if not acct:
             raise HTTPException(status_code=404, detail="Account not found")
         factory = get_session_factory()
         result = factory.test_connection(acct.name)
+        readiness.record_account_test(session, acct, result, actor.key)
         result["provider"] = acct.provider
         result["name"] = acct.name
         return result

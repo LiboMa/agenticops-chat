@@ -914,5 +914,6 @@
   "cmd.ask": "Ask an agent: ",
   "cmd.ask.hint": "into a new conversation — not sent",
   "act.ask": "Ask about it",
-  "help.ask": "Ask an agent about this item (opens a conversation tied to it)"
+  "help.ask": "Ask an agent about this item (opens a conversation tied to it)",
+  "shell.menu.setup": "Setup overview"
 }

@@ -914,5 +914,6 @@
   "cmd.ask": "问 agent：",
   "cmd.ask.hint": "带进新对话，不会自动发出",
   "act.ask": "问它",
-  "help.ask": "问 agent 这件事（打开一个关联到它的对话）"
+  "help.ask": "问 agent 这件事（打开一个关联到它的对话）",
+  "shell.menu.setup": "配置介绍"
 }

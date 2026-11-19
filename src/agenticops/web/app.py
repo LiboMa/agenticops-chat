@@ -393,6 +393,8 @@ from agenticops.web.routers import signals as _signals_router
 app.include_router(_signals_router.router)
 from agenticops.web.routers import security as _security_router
 app.include_router(_security_router.router)
+from agenticops.web.routers import setup as _setup_router  # noqa: E402  (MVP-2.9.0 N23: the setup overview)
+app.include_router(_setup_router.router)
 from agenticops.web.routers import changes as _changes_router
 app.include_router(_changes_router.router)
 from agenticops.web.routers import plans as _plans_router
