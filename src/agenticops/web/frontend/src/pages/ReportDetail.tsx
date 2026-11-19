@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate, useParams, Link } from "react-router-dom";
 import { useReport } from "@/hooks/useReport";
 import { useNotificationChannels } from "@/hooks/useNotifications";
 import { useRendering, useRequestTranslation } from "@/hooks/useRendering";
@@ -8,8 +8,10 @@ import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { formatFullDate } from "@/lib/formatDate";
-import { renderMarkdown } from "@/lib/renderMarkdown";
+import { renderMarkdown, type Heading } from "@/lib/renderMarkdown";
 import { LANGS, canExport, paperState, type Lang } from "@/lib/reportView";
+import { coverageView } from "@/lib/reports";
+import { StatusText } from "@/components/ui/StatusText";
 import { publishableChannels } from "@/lib/publish";
 import ShareDialog from "@/components/ShareDialog";
 import { ExportDialog } from "@/components/reportview/ExportDialog";
@@ -48,12 +50,35 @@ export default function ReportDetail() {
   const [dialog, setDialog] = useState<"export" | "publish" | "share" | null>(null);
   const { data: channels } = useNotificationChannels();
   const publishable = publishableChannels(channels);
+  // The paper's HTML and its outline come from ONE pass over the language on screen (lib/renderMarkdown): what
+  // the outline links to is what is shown — and what is exported is that same body.
+  const shown = renderings[lang];
+  const body = paperState(shown) === "ready" ? shown?.body_markdown ?? "" : null;
+  const paper = useMemo(() => {
+    if (body === null) return null;
+    const headings: Heading[] = [];
+    return { html: renderMarkdown(body, { headings }), headings };
+  }, [body]);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const goTo = (id: string) => {
+    const calm = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    document.getElementById(id)?.scrollIntoView({ behavior: calm ? "auto" : "smooth", block: "start" });
+    navigate({ search: location.search, hash: `#${id}` }, { replace: true, state: location.state });
+  };
+  useEffect(() => {      // a link that names a section opens on it, once the paper is on the page
+    const id = decodeURIComponent(location.hash.slice(1));
+    if (id && paper) document.getElementById(id)?.scrollIntoView({ block: "start" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paper]);
 
   if (isLoading) return <Spinner label={t("common.loading")} />;
   if (error) return <ErrorBanner message={error.message} onRetry={() => refetch()} actionLabel={t("common.retry")} />;
   if (!report) return null;
 
   const exportable = canExport(lang, renderings);
+  const coverage = coverageView(report.coverage);
+  const outline = paper?.headings ?? [];
   const source = (report.source_language ?? "en") as Lang;
   const sessionId = typeof report.report_metadata?.source_session_id === "string" ? report.report_metadata.source_session_id : null;
   const tool = "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium disabled:opacity-50";
@@ -105,8 +130,50 @@ export default function ReportDetail() {
         </div>
       </header>
 
-      <Paper key={lang} report={report} lang={lang} source={source} rendering={renderings[lang]} version={version} t={t}
-             onReadSource={() => setLang(source)} />
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_16rem]">
+        {(coverage || outline.length > 0) && (
+          <aside className="report-chrome space-y-4 lg:sticky lg:top-[calc(var(--topbar-h)+1rem)] lg:order-2 lg:max-h-[calc(100vh-var(--topbar-h)-2rem)] lg:overflow-y-auto">
+            {coverage && (
+              <section aria-labelledby="report-coverage" className="rounded-lg border border-border bg-card p-4 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 id="report-coverage" className="font-medium">{t("reports.coverage.title")}</h2>
+                  <StatusText tone={coverage.tone} className="text-xs">{t(coverage.stateKey)}</StatusText>
+                </div>
+                <dl className="mt-2 space-y-1 text-xs text-muted-foreground">
+                  <div><dt className="inline">{t("reports.coverage.accounts")}: </dt>
+                    <dd className="inline text-foreground [overflow-wrap:anywhere]">{coverage.accounts.join(", ") || t("reports.coverage.none")}</dd></div>
+                  <div><dt className="inline">{t("reports.coverage.regions")}: </dt>
+                    <dd className="inline text-foreground [overflow-wrap:anywhere]">{coverage.regions.join(", ") || t("reports.coverage.none")}</dd></div>
+                  <div>{t("reports.coverage.readAt").replace("{time}", formatFullDate(coverage.readAt))}</div>
+                </dl>
+                {coverage.partial.length > 0 && (
+                  <ul className="mt-2 list-disc space-y-0.5 pl-4 text-xs text-status-warn">
+                    {coverage.partial.map((p) => <li key={p.key}>{t(p.key).replace("{n}", String(p.n))}</li>)}
+                  </ul>
+                )}
+                {coverage.tone === "warn" && <p className="mt-2 text-xs text-status-warn">{t("reports.coverage.partialNote")}</p>}
+                <p className="mt-2 text-xs text-muted-foreground">{t("reports.coverage.by")}</p>
+              </section>
+            )}
+            {outline.length > 0 && (
+              <>
+                <nav aria-label={t("reports.outline")} className="hidden rounded-lg border border-border bg-card p-4 lg:block">
+                  <h2 className="mb-2 text-sm font-medium">{t("reports.outline")}</h2>
+                  <Outline headings={outline} onGo={goTo} />
+                </nav>
+                <details className="rounded-lg border border-border bg-card p-4 lg:hidden">
+                  <summary className="cursor-pointer text-sm font-medium">{t("reports.outline")} · {outline.length}</summary>
+                  <div className="mt-2"><Outline headings={outline} onGo={goTo} /></div>
+                </details>
+              </>
+            )}
+          </aside>
+        )}
+        <div className="min-w-0 lg:order-1">
+          <Paper key={lang} report={report} lang={lang} source={source} rendering={renderings[lang]} version={version} t={t}
+                 html={paper?.html ?? null} onReadSource={() => setLang(source)} />
+        </div>
+      </div>
 
       <p className="report-chrome text-xs text-muted-foreground">{t("reports.note")}</p>
 
@@ -125,9 +192,25 @@ export default function ReportDetail() {
   );
 }
 
-function Paper({ report, lang, source, rendering, version, t, onReadSource }: {
+/** The paper's sections (h2, and h3 indented): each jumps to its heading. */
+function Outline({ headings, onGo }: { headings: Heading[]; onGo: (id: string) => void }) {
+  return (
+    <ol className="space-y-1 text-sm">
+      {headings.map((h) => (
+        <li key={h.id} className={h.level === 3 ? "pl-4" : ""}>
+          <a href={`#${h.id}`} onClick={(e) => { e.preventDefault(); onGo(h.id); }}
+             className="block rounded px-1 py-0.5 text-muted-foreground [overflow-wrap:anywhere] hover:bg-accent hover:text-foreground">
+            {h.text}
+          </a>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function Paper({ report, lang, source, rendering, version, t, html, onReadSource }: {
   report: Report; lang: Lang; source: Lang; rendering: ContentRendering | undefined; version: number;
-  t: (k: string) => string; onReadSource: () => void;
+  t: (k: string) => string; html: string | null; onReadSource: () => void;
 }) {
   const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const state = paperState(rendering);
@@ -138,7 +221,7 @@ function Paper({ report, lang, source, rendering, version, t, onReadSource }: {
         <div className="mb-3 text-[11px] text-muted-foreground">
           AgenticOps · R#{report.id} · v{version} · {t(`reports.lang.${lang}`)}
         </div>
-        <div className="report-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(rendering!.body_markdown ?? "") }} />
+        <div className="report-content" dangerouslySetInnerHTML={{ __html: html ?? renderMarkdown(rendering!.body_markdown ?? "") }} />
       </article>
     );
   }

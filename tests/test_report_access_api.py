@@ -85,7 +85,7 @@ def test_a_report_from_a_workspace_chat_is_workspace(env):
 def test_every_report_route_hides_a_private_report(env):
     rid = _private_report(env)["id"]
     bob = env.as_(BOB)
-    assert rid not in [r["id"] for r in bob.get("/api/reports").json()]
+    assert rid not in [r["id"] for r in bob.get("/api/reports").json()["items"]]
     assert bob.get(f"/api/reports/{rid}").status_code == 404
     assert bob.post(f"/api/reports/{rid}/publish", json={"channel_name": "x", "formats": ["html"], "version": 1,
                     "language": "en"}, headers={"Idempotency-Key": "k" * 20}).status_code == 404
@@ -108,10 +108,10 @@ def test_export_hides_a_private_report(env):
 def test_admin_sees_private_reports(env):
     rid = _private_report(env)["id"]
     assert env.as_(ADMIN).get(f"/api/reports/{rid}").status_code == 200
-    assert rid in [r["id"] for r in env.as_(ADMIN).get("/api/reports").json()]
+    assert rid in [r["id"] for r in env.as_(ADMIN).get("/api/reports").json()["items"]]
 
 
 def test_workspace_reports_are_visible_to_all(env):
     rid = _workspace_report()
     assert env.as_(BOB).get(f"/api/reports/{rid}").json()["visibility"] == "workspace"
-    assert rid in [r["id"] for r in env.as_(BOB).get("/api/reports").json()]
+    assert rid in [r["id"] for r in env.as_(BOB).get("/api/reports").json()["items"]]

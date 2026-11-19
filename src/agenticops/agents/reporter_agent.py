@@ -6,8 +6,10 @@ structured reports. Exposed as a tool for the Main Agent
 """
 
 import logging
+import re
 
 from strands import Agent, tool
+from strands.hooks import AfterToolCallEvent, HookProvider, HookRegistry
 from strands.models.bedrock import BedrockModel
 
 from agenticops.config import settings
@@ -24,6 +26,38 @@ from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.tools.memory_tools import search_agent_memory
 
 logger = logging.getLogger(__name__)
+
+
+class CoverageRecorder(HookProvider):
+    """Counts, on the run's coverage record, the tool results that failed or that the context offloader moved out of
+    the context (services/report_coverage; the cut ones are counted by the tools themselves). It runs AFTER the
+    offloader (order 70), which rewrites the result into a preview that begins «[Offloaded:»."""
+
+    ORDER = 90
+
+    def __init__(self, coverage):
+        self.coverage = coverage
+
+    def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
+        registry.add_callback(AfterToolCallEvent, self._ended, order=self.ORDER)
+
+    def _ended(self, event) -> None:
+        try:
+            result = getattr(event, "result", None) or {}
+            text = "\n".join(block["text"] for block in (result.get("content") or [])
+                             if isinstance(block, dict) and isinstance(block.get("text"), str))
+            with self.coverage._lock:
+                if text.lstrip().startswith("[Offloaded:"):
+                    self.coverage.offloaded += 1
+                elif (getattr(event, "exception", None) is not None or result.get("status") == "error"
+                      or _SAYS_FAILED.match(text) is not None):
+                    self.coverage.failed += 1
+        except Exception:
+            logger.debug("coverage recorder: a result could not be read", exc_info=True)
+
+
+# A tool that answers with an error: «Error: …», «Access error (…)», or the metadata tools' {"error": …}
+_SAYS_FAILED = re.compile(r'^\s*(?:(?:[A-Za-z]+ )?[Ee]rror(?::| \()|\{\s*"error"\s*:)')
 
 REPORTER_SYSTEM_PROMPT = """You are the Reporter Agent for AgenticOps.
 Your job is to generate structured operations reports from health issues,
@@ -128,6 +162,12 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
             **cache_kwargs,   # carries the stream read timeout (model connection settings, ≥ the 300 s it had)
         )
 
+        # What this run reads is recorded by the code (services/report_coverage): the record rides on the run's
+        # context, the tools and the hook below write into it, save_report stores it on the report.
+        from agenticops.run_context import run_context
+        from agenticops.services import report_coverage
+        coverage = report_coverage.begin()
+
         from agenticops.agents.preamble import build_system_prompt
         agent = Agent(
             system_prompt=build_system_prompt(REPORTER_SYSTEM_PROMPT, include_account=False, agent_name="reporter"),
@@ -135,6 +175,7 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
             callback_handler=None,
             conversation_manager=get_agent_conversation_manager("reporter"),
             plugins=get_agent_context_plugins("reporter"),
+            hooks=[CoverageRecorder(coverage)],
             tools=[
                 get_active_account,
                 get_managed_resources,
@@ -155,7 +196,8 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
 
         from agenticops.agents.preamble import invoke_with_retry, infer_parent_agent
         from agenticops.services.agent_log_service import track_agent
-        with track_agent("reporter", "generate_report", f"type={report_type} scope={scope}", parent_agent=infer_parent_agent()) as tracker:
+        with run_context(coverage=coverage), \
+                track_agent("reporter", "generate_report", f"type={report_type} scope={scope}", parent_agent=infer_parent_agent()) as tracker:
             result = invoke_with_retry(agent,
                 f"Generate a {report_type} report. Scope: {scope}. "
                 f"Follow the report generation protocol.",

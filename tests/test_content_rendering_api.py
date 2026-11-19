@@ -216,7 +216,7 @@ def test_list_and_get_carry_language_status(env):
     client, _, cr = env
     a, b = _report(), _report("日报：一切正常，没有发现问题。")
     cr.translate_now(a, 1, "zh")
-    rows = {r["id"]: r["language_status"] for r in client.get("/api/reports").json()}
+    rows = {r["id"]: r["language_status"] for r in client.get("/api/reports").json()["items"]}
     assert rows[a] == {"en": "ready", "zh": "ready"}
     assert rows[b] == {"zh": "ready", "en": "missing"}
     assert client.get(f"/api/reports/{b}").json()["language_status"] == {"zh": "ready", "en": "missing"}

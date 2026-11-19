@@ -1111,6 +1111,9 @@ class Report(Base):
     source_language: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)   # zh | en
     owner_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     visibility: Mapped[str] = mapped_column(String(16), default="workspace", server_default="workspace")
+    # MVP-2.9.0 N21: what the reporter run that wrote this report read — recorded by code (services/report_coverage),
+    # never by the model. NULL = not saved inside a reporter run (the generator, «save as report», every older report)
+    coverage: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
 
 class ContentRendering(Base):
@@ -1765,7 +1768,9 @@ _ADD_COLUMNS_2_7_0: dict[str, dict[str, Optional[str]]] = {
     "chat_messages": {"client_message_id": None, "dispatch_state": None},
     # S6: a report's content identity and visibility; existing rows are workspace, hash / language backfilled
     "reports": {"content_version": "NOT NULL DEFAULT 1", "content_hash": None, "source_language": None,
-                "owner_user_id": None, "visibility": "NOT NULL DEFAULT 'workspace'"},
+                "owner_user_id": None, "visibility": "NOT NULL DEFAULT 'workspace'",
+                # MVP-2.9.0 N21: the reporter run's coverage record (NULL on existing rows = none)
+                "coverage": None},
     # MVP-2.8.0: soft-deleted users (NULL on existing rows = not deleted)
     "users": {"deleted_at": None},
     # MVP-2.9.0 N9: a person's stop request on a run (NULL on existing rows = never stopped)

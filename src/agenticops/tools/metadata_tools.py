@@ -63,9 +63,11 @@ MAX_LIST_RESULT_CHARS = 6000  # lists may need slightly more room
 
 
 def _truncate(text: str, limit: int = MAX_RESULT_CHARS) -> str:
-    """Truncate tool output to *limit* characters."""
+    """Truncate tool output to *limit* characters. A cut is counted on a reporter run's coverage record."""
     if len(text) <= limit:
         return text
+    from agenticops.services import report_coverage
+    report_coverage.note_truncated()
     return text[:limit] + "\n... (output truncated, use get_* with specific ID for full details)"
 
 
@@ -108,6 +110,9 @@ def get_active_account() -> str:
     return get_enabled_accounts()
 
 
+_MANAGED_RESOURCES_CAP = 50     # rows get_managed_resources hands over; it does not say when there were more
+
+
 @tool
 def get_managed_resources(resource_type: str = "", region: str = "") -> str:
     """List resources from the inventory, optionally filtered.
@@ -134,7 +139,16 @@ def get_managed_resources(resource_type: str = "", region: str = "") -> str:
             if region:
                 query = query.filter_by(region=region)
 
-            resources = query.limit(50).all()
+            # one row more than is handed over: the cap is a cut only when something is behind it
+            resources = query.limit(_MANAGED_RESOURCES_CAP + 1).all()
+            from agenticops.services import report_coverage
+            if report_coverage.current() is not None:   # a reporter run: say what this read ranged over
+                report_coverage.note_scope(
+                    [a.name for a in cloud_accounts],
+                    [region] if region else [r for (r,) in query.with_entities(CloudResource.region).distinct()])
+                if len(resources) > _MANAGED_RESOURCES_CAP:
+                    report_coverage.note_truncated()
+            resources = resources[:_MANAGED_RESOURCES_CAP]
             if not resources:
                 filters = []
                 if resource_type:
@@ -572,7 +586,14 @@ def list_health_issues(
         if resource_type:
             query = query.filter(HealthIssue.resource_id.like(f"{resource_type}%"))
 
-        issues = query.limit(limit).all()
+        issues = query.limit(limit + 1).all()     # one more than asked for: is anything behind the limit?
+        from agenticops.services import report_coverage
+        if report_coverage.current() is not None:   # a reporter run: the list ranges over every enabled account
+            report_coverage.note_scope([name for (name,) in session.query(CloudAccount.name)
+                                        .filter(CloudAccount.is_enabled == True)])  # noqa: E712
+            if len(issues) > limit:
+                report_coverage.note_truncated()
+        issues = issues[:limit]
 
         if not issues:
             return "No health issues found matching filters."

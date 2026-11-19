@@ -41,6 +41,9 @@ class RunContext:
     # The claim this thread holds on an issue (services/agent_runs, MVP-2.9.0 N11): rca_agent / sre_agent use it as
     # it is instead of claiming the issue a second time — and refuse when someone else's run is on the issue
     agent_run: Optional[Any] = None
+    # What a reporter run's tools read (services/report_coverage, MVP-2.9.0 N21): begun by reporter_agent, written by
+    # the tools while they run, stored on the report by save_report. None outside a reporter run.
+    coverage: Optional[Any] = None
 
 
 _run_context_var: contextvars.ContextVar[RunContext] = contextvars.ContextVar(

@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
  *  When one changes shape, every caller must change in the same commit: a caller that still reads the answer as an
  *  array shows an empty list, or throws — quietly. This test reads the code for exactly that. Add the path here in
  *  the commit that changes the endpoint. */
-const PAGED = ["/health-issues", "/changes", "/security/findings"];
+const PAGED = ["/health-issues", "/changes", "/security/findings", "/reports"];
 
 const src = resolve(__dirname, "..");
 function walk(dir: string, out: string[] = []): string[] {

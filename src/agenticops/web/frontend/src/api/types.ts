@@ -179,6 +179,26 @@ export interface Report {
   owned_by_me?: boolean;
   /** each language's rendering status (the list and detail carry it) */
   language_status?: Partial<Record<"zh" | "en", RenderingStatus>>;
+  /** MVP-2.9.0 N21: what the reporter run that wrote the report read — recorded by code, never by the model.
+   *  null / absent = the report was not saved inside a reporter run (no card is shown; nothing is guessed). */
+  coverage?: ReportCoverage | null;
+}
+
+export interface ReportCoverage {
+  accounts: string[];
+  regions: string[];
+  completeness: "complete" | "partial";
+  /** how many tool results were cut, moved out of the context by the offloader, or errors */
+  partial: { truncated: number; offloaded: number; failed: number };
+  /** when the run began reading (UTC) */
+  read_at: string;
+}
+
+/** GET /api/reports — `total` = what matches the search and dates, `all_total` = every report the caller may see. */
+export interface ReportPage {
+  items: Report[];
+  total: number;
+  all_total: number;
 }
 
 export type RenderingStatus = "ready" | "pending" | "missing" | "failed" | "stale";

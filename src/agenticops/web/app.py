@@ -2,7 +2,7 @@
 
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Optional, List
 
 from fastapi import FastAPI, Request, Query, HTTPException, Body, BackgroundTasks, UploadFile, File, Depends
@@ -3785,22 +3785,23 @@ async def api_kb_stats():
 @app.get("/api/reports")
 def api_list_reports(
     report_type: Optional[str] = None,
-    limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
-    offset: int = 0,
+    q: Optional[str] = Query(default=None, max_length=200),
+    date_from: Optional[date] = Query(default=None, description="UTC day, included (YYYY-MM-DD)"),
+    date_to: Optional[date] = Query(default=None, description="UTC day, included (YYYY-MM-DD)"),
+    limit: int = Query(default=settings.default_list_limit, ge=1, le=settings.max_list_limit),
+    offset: int = Query(default=0, ge=0),
     actor: Actor = Depends(current_actor),
 ):
-    """List the reports the caller may see (S6: a private report is its creator's and admins')."""
-    from agenticops.services import report_access
+    """The reports the caller may see (S6: a private report is its creator's and admins') as `{items, total,
+    all_total}` — MVP-2.9.0 N21: searched (`q`: title, summary, body, or a number — R#145), dated (whole UTC days)
+    and counted on the server. `total` = what matches, `all_total` = every report the caller may see."""
+    from agenticops.services.content_rendering import language_status
+    from agenticops.services.report_listing import page_reports
     with get_db_session() as session:
-        query = report_access.visible_filter(session.query(Report), actor).order_by(Report.created_at.desc())
-
-        if report_type:
-            query = query.filter_by(report_type=report_type)
-
-        reports = query.offset(offset).limit(limit).all()
-        from agenticops.services.content_rendering import language_status
+        reports, total, all_total = page_reports(session, actor, report_type=report_type, q=q, date_from=date_from,
+                                                 date_to=date_to, limit=limit, offset=offset)
         status = language_status(session, reports)
-        return [_enrich_report(r, actor, status[r.id]) for r in reports]
+        return {"items": [_enrich_report(r, actor, status[r.id]) for r in reports], "total": total, "all_total": all_total}
 
 
 @app.get("/api/reports/{report_id}")

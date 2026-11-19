@@ -175,6 +175,7 @@ input:focus, select:focus, textarea:focus {
 .report-content .md-h1 { @apply text-2xl font-semibold mt-8 mb-4 pb-2 border-b; }
 .report-content .md-h1:first-child { @apply mt-0; }
 .report-content .md-h2 { @apply text-xl font-semibold mt-6 mb-3; }
+.report-content [id] { scroll-margin-top: calc(var(--topbar-h) + 1rem); }  /* an outline link stops below the bar */
 .report-content .md-h3 { @apply text-lg font-semibold mt-5 mb-2; }
 .report-content .md-h4 { @apply text-base font-semibold mt-4 mb-2; }
 .report-content .md-p  { @apply text-sm leading-relaxed mb-3; }

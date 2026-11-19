@@ -81,6 +81,9 @@ def save_report(
     # Save to database (store S3 URI if available, else local)
     db_file_path = s3_uri if s3_uri and presigned_url else uri
 
+    from agenticops.services import report_coverage
+    coverage = report_coverage.current()
+
     session = get_session()
     try:
         report = Report(
@@ -90,6 +93,9 @@ def save_report(
             content_markdown=content_markdown,
             file_path=db_file_path,
             report_metadata=metadata_parsed,
+            # what this reporter run's tools read, as the code recorded it (services/report_coverage); None when the
+            # report is not saved inside a reporter run. Never taken from the model: the tool has no such argument.
+            coverage=coverage.as_dict() if coverage is not None else None,
         )
         session.add(report)
         session.commit()

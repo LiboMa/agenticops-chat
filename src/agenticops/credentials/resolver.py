@@ -192,6 +192,11 @@ def resolve_account_session(account_ref: str | SimpleNamespace, region: str | No
             f"'{getattr(snap, 'name', account_ref)}' (id={getattr(snap, 'id', None)})"
         )
 
+    # A reporter run's coverage: this is the account (and region) an account-addressed tool is acting on. No-op
+    # outside such a run; bookkeeping only — it changes nothing about how the account is resolved.
+    from agenticops.services import report_coverage
+    report_coverage.note_scope([getattr(snap, "name", None)], [region])
+
     provider = snap.provider
     name_key, id_key = session_cache_keys(snap, region)
 

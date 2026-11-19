@@ -194,6 +194,8 @@ class ReportResponse(BaseModel):
     visibility: str = "workspace"
     owned_by_me: bool = False
     language_status: dict = Field(default_factory=dict)   # {zh, en} → rendering status (S6)
+    # MVP-2.9.0 N21: what the reporter run read, recorded by code; None when the report was not saved in such a run
+    coverage: Optional[dict] = None
 
     model_config = ConfigDict(from_attributes=True)
 
