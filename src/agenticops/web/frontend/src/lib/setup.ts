@@ -47,8 +47,8 @@ const STATE: Record<SetupItemId, Record<string, [string, StatusTone]>> = {
 };
 const DONE: Partial<Record<SetupItemId, string>> = { accounts: "connected", model: "verified" };
 const NEXT: Record<SetupItemId, string> = {
-  accounts: "/app/settings?tab=accounts", model: "/app/settings?tab=general",
-  execution: "/app/settings?tab=general", notifications: "/app/settings?tab=messaging",
+  accounts: "/app/settings?tab=accounts", model: "/app/settings#settings-models",
+  execution: "/app/settings#settings-automation", notifications: "/app/settings?tab=messaging",
 };
 
 /** The four items, in order. `can.settings` = this person may open Settings (default: yes). */

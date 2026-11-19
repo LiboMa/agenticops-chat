@@ -15,6 +15,7 @@ import { Card, CardBody } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { useLocale } from "@/i18n/LocaleContext";
+import { useCloseOnEscape } from "@/hooks/useCloseOnEscape";
 import { detectSkillSource, parseSkillNames, type SkillSourceKind } from "@/lib/skillSource";
 import {
   Archive,
@@ -76,6 +77,7 @@ function ImportedBadge({ sourceUri }: { sourceUri: string | null }) {
 
 function CreateSkillDialog({ onClose }: { onClose: () => void }) {
   const { t } = useLocale();
+  useCloseOnEscape(onClose);        // the house rule: a dialog closes on Escape
   const [description, setDescription] = useState("");
   const [generated, setGenerated] = useState<SkillGenerateResponse | null>(null);
   const generateMut = useGenerateSkill();
@@ -114,12 +116,12 @@ function CreateSkillDialog({ onClose }: { onClose: () => void }) {
             <>
               <div>
                 <label className="text-sm font-medium text-foreground block mb-1">
-                  Describe the skill you want to create
+                  {t("skills.describe")}
                 </label>
                 <textarea
                   className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-none"
                   rows={4}
-                  placeholder="e.g. A skill for troubleshooting Redis cluster issues including replication lag, memory pressure, and failover procedures"
+                  placeholder={t("skills.describePh")}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                 />
@@ -138,7 +140,7 @@ function CreateSkillDialog({ onClose }: { onClose: () => void }) {
                 <p className="text-sm text-muted-foreground">{generated.description}</p>
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">Content Preview</label>
+                <label className="text-xs text-muted-foreground block mb-1">{t("skills.preview")}</label>
                 <pre className="bg-secondary border border-border rounded-lg p-3 text-xs text-foreground max-h-60 overflow-y-auto whitespace-pre-wrap">
                   {generated.body_preview}
                 </pre>
@@ -179,7 +181,7 @@ function CreateSkillDialog({ onClose }: { onClose: () => void }) {
               disabled={saveMut.isPending}
               className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50"
             >
-              {saveMut.isPending ? t("skills.saving") : "Save as Draft"}
+              {saveMut.isPending ? t("skills.saving") : t("skills.saveDraft")}
             </button>
           )}
         </div>
@@ -721,6 +723,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function ImprovementQueue() {
+  const { t } = useLocale();
   const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const [showHistory, setShowHistory] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -755,7 +758,7 @@ function ImprovementQueue() {
       <CardBody>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-medium text-foreground">
-            Improvement Queue
+            {t("skills.queue")}
             {(pendingQ.data?.length ?? 0) > 0 && (
               <span className="ml-2 inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-primary-600 rounded-full">
                 {pendingQ.data!.length}
@@ -769,7 +772,7 @@ function ImprovementQueue() {
                 disabled={batchDismiss.isPending}
                 className="px-3 py-1 text-xs font-medium text-red-700 bg-red-100 rounded-lg hover:bg-red-200 disabled:opacity-50 transition-colors"
               >
-                {batchDismiss.isPending ? "Dismissing..." : `Dismiss Selected (${selected.size})`}
+                {batchDismiss.isPending ? t("skills.dismissing") : t("skills.dismissSelected").replace("{n}", String(selected.size))}
               </button>
             )}
             <div className="flex gap-1 bg-secondary rounded-lg p-0.5">
@@ -792,7 +795,7 @@ function ImprovementQueue() {
           <Spinner />
         ) : records.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-3">
-            {showHistory ? "No improvement history yet." : "No pending improvements."}
+            {showHistory ? t("skills.noHistory") : t("skills.noPending")}
           </p>
         ) : (
           <div className="space-y-2">
@@ -847,7 +850,7 @@ export default function Skills() {
   const [showCreate, setShowCreate] = useState(false);
   const [showImport, setShowImport] = useState(false);
 
-  if (isLoading) return <Spinner label="Loading skills..." />;
+  if (isLoading) return <Spinner label={t("skills.loadingAll")} />;
   if (error) return <ErrorBanner message={error.message} />;
 
   const filtered = (skills ?? []).filter((s) => {

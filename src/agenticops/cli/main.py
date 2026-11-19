@@ -34,6 +34,7 @@ from rich.markup import escape
 
 from agenticops import __version__
 from agenticops.config import settings
+from agenticops.services import exec_switches
 from agenticops.models import (
     CloudAccount,
     CloudResource,
@@ -2574,7 +2575,7 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
         if out["status"] == "executing":
             return f"[green]Change C#{cr_id} approved by {actor.key} and queued for execution.[/green]"
         if out["status"] == "approved":
-            why = " (the executor is disabled)" if not settings.executor_enabled else ""
+            why = " (the executor is disabled)" if not exec_switches.effective().executor_enabled else ""
             return (f"[yellow]Change C#{cr_id} approved by {actor.key}, but its run could not be queued{why}. "
                     f"Retry with: /execute C{cr_id}[/yellow]")
         return (f"[yellow]Change C#{cr_id} approved by {actor.key}; another request moved it to "
@@ -2723,8 +2724,8 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
         if plan.status != "approved":
             return f"[yellow]Fix plan status is '{plan.status}', must be 'approved' to execute.[/yellow]"
 
-        if not settings.executor_enabled:
-            return "[red]Executor is disabled. Set AIOPS_EXECUTOR_ENABLED=true to enable.[/red]"
+        if not exec_switches.effective().executor_enabled:
+            return "[red]Executor is disabled. An administrator switches it on in Settings.[/red]"
 
         try:
             authz.check(actor, "plan.execute", subject=plan)

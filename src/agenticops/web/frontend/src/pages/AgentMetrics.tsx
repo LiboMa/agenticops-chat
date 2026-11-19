@@ -163,11 +163,11 @@ function TokenSummary({ range, onOwn }: { range: MetricsQuery; onOwn: (v: Tokens
           <>
             <div className="flex gap-4 mb-4">
               <div className="px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800">
-                <span className="text-xs text-muted-foreground">Total Input</span>
+                <span className="text-xs text-muted-foreground">{t("metrics.tokens.totalInput")}</span>
                 <p className="text-lg font-semibold text-blue-700 dark:text-blue-300">{formatTokens(summaryQ.data.total_input_tokens)}</p>
               </div>
               <div className="px-3 py-2 rounded-lg bg-purple-50 dark:bg-purple-950 border border-purple-200 dark:border-purple-800">
-                <span className="text-xs text-muted-foreground">Total Output</span>
+                <span className="text-xs text-muted-foreground">{t("metrics.tokens.totalOutput")}</span>
                 <p className="text-lg font-semibold text-purple-700 dark:text-purple-300">{formatTokens(summaryQ.data.total_output_tokens)}</p>
               </div>
             </div>
@@ -175,13 +175,13 @@ function TokenSummary({ range, onOwn }: { range: MetricsQuery; onOwn: (v: Tokens
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-muted-foreground uppercase">
-                    <th className="pb-2 pr-4">Agent</th>
-                    <th className="pb-2 pr-4">Calls</th>
-                    <th className="pb-2 pr-4">Input Tokens</th>
-                    <th className="pb-2 pr-4">Output Tokens</th>
-                    <th className="pb-2 pr-4">Cache Read</th>
-                    <th className="pb-2 pr-4">Duration</th>
-                    <th className="pb-2">Errors</th>
+                    <th className="pb-2 pr-4">{t("metrics.col.agent")}</th>
+                    <th className="pb-2 pr-4">{t("metrics.col.calls")}</th>
+                    <th className="pb-2 pr-4">{t("metrics.col.input")}</th>
+                    <th className="pb-2 pr-4">{t("metrics.col.output")}</th>
+                    <th className="pb-2 pr-4">{t("metrics.col.cacheRead")}</th>
+                    <th className="pb-2 pr-4">{t("metrics.col.duration")}</th>
+                    <th className="pb-2">{t("metrics.col.errors")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -253,12 +253,12 @@ function ModelSummary({ range }: { range: MetricsQuery }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted-foreground uppercase">
-                <th className="pb-2 pr-4">Model</th>
-                <th className="pb-2 pr-4">Calls</th>
-                <th className="pb-2 pr-4">Input Tokens</th>
-                <th className="pb-2 pr-4">Output Tokens</th>
-                <th className="pb-2 pr-4">Cache Read</th>
-                <th className="pb-2">Duration</th>
+                <th className="pb-2 pr-4">{t("metrics.col.model")}</th>
+                <th className="pb-2 pr-4">{t("metrics.col.calls")}</th>
+                <th className="pb-2 pr-4">{t("metrics.col.input")}</th>
+                <th className="pb-2 pr-4">{t("metrics.col.output")}</th>
+                <th className="pb-2 pr-4">{t("metrics.col.cacheRead")}</th>
+                <th className="pb-2">{t("metrics.col.duration")}</th>
               </tr>
             </thead>
             <tbody>
@@ -314,7 +314,7 @@ function AgentCallLog({ onSelectTrace }: { onSelectTrace: (traceId: string) => v
           onChange={(e) => setAgentFilter(e.target.value)}
           className="px-3 py-1.5 text-sm border border-border rounded-lg bg-background text-foreground"
         >
-          <option value="">All Agents</option>
+          <option value="">{t("metrics.log.allAgents")}</option>
           {AGENT_NAMES.map((a) => (
             <option key={a} value={a}>{a}</option>
           ))}
@@ -326,20 +326,20 @@ function AgentCallLog({ onSelectTrace }: { onSelectTrace: (traceId: string) => v
         ) : logsQ.error ? (
           <ErrorBanner message={(logsQ.error as Error).message} onRetry={() => logsQ.refetch()} />
         ) : !logsQ.data?.length ? (
-          <p className="text-sm text-muted-foreground py-4 text-center">No agent logs found.</p>
+          <p className="text-sm text-muted-foreground py-4 text-center">{t("metrics.log.none")}</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-muted-foreground uppercase">
-                  <th className="pb-2 pr-4">Time</th>
-                  <th className="pb-2 pr-4">Trace ID</th>
-                  <th className="pb-2 pr-4">Agent</th>
-                  <th className="pb-2 pr-4">Action</th>
-                  <th className="pb-2 pr-4">Input</th>
-                  <th className="pb-2 pr-4">Output</th>
-                  <th className="pb-2 pr-4">Duration</th>
-                  <th className="pb-2">Status</th>
+                  <th className="pb-2 pr-4">{t("metrics.col.time")}</th>
+                  <th className="pb-2 pr-4">{t("metrics.col.trace")}</th>
+                  <th className="pb-2 pr-4">{t("metrics.col.agent")}</th>
+                  <th className="pb-2 pr-4">{t("metrics.col.action")}</th>
+                  <th className="pb-2 pr-4">{t("metrics.col.input")}</th>
+                  <th className="pb-2 pr-4">{t("metrics.col.output")}</th>
+                  <th className="pb-2 pr-4">{t("metrics.col.duration")}</th>
+                  <th className="pb-2">{t("metrics.col.status")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -384,16 +384,17 @@ function AgentCallLog({ onSelectTrace }: { onSelectTrace: (traceId: string) => v
 /* ── Timeline Drawer ────────────────────────────────────────────── */
 
 function TimelineDrawer({ traceId, onClose }: { traceId: string; onClose: () => void }) {
+  const { t } = useLocale();
   const timelineQ = useAgentTimeline(traceId);
 
   return (
     <div className="fixed inset-y-0 right-0 z-40 w-full max-w-lg bg-background border-l border-border shadow-xl flex flex-col">
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <div>
-          <h3 className="text-sm font-semibold text-foreground">Trace Timeline</h3>
+          <h3 className="text-sm font-semibold text-foreground">{t("metrics.trace.title")}</h3>
           <span className="text-xs font-mono text-muted-foreground">{traceId}</span>
         </div>
-        <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-sm">Close</button>
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-sm">{t("common.close")}</button>
       </div>
       <div className="flex-1 overflow-y-auto p-4">
         {timelineQ.isLoading ? (
@@ -404,17 +405,17 @@ function TimelineDrawer({ traceId, onClose }: { traceId: string; onClose: () => 
           <>
             <div className="flex gap-3 mb-4 text-xs">
               <div className="px-2 py-1 rounded bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
-                Input: <strong>{formatTokens(timelineQ.data.totals.input_tokens)}</strong>
+                {t("metrics.trace.input")}<strong>{formatTokens(timelineQ.data.totals.input_tokens)}</strong>
               </div>
               <div className="px-2 py-1 rounded bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300">
-                Output: <strong>{formatTokens(timelineQ.data.totals.output_tokens)}</strong>
+                {t("metrics.trace.output")}<strong>{formatTokens(timelineQ.data.totals.output_tokens)}</strong>
               </div>
               <div className="px-2 py-1 rounded bg-secondary text-muted-foreground">
-                Duration: <strong>{formatDuration(timelineQ.data.totals.duration_ms)}</strong>
+                {t("metrics.trace.duration")}<strong>{formatDuration(timelineQ.data.totals.duration_ms)}</strong>
               </div>
               {timelineQ.data.totals.cost_usd > 0 && (
                 <div className="px-2 py-1 rounded bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-300">
-                  Cost: <strong title={costExact(timelineQ.data.totals.cost_usd)}>{costLabel(timelineQ.data.totals.cost_usd)}</strong>
+                  {t("metrics.trace.cost")}<strong title={costExact(timelineQ.data.totals.cost_usd)}>{costLabel(timelineQ.data.totals.cost_usd)}</strong>
                 </div>
               )}
             </div>
@@ -459,10 +460,10 @@ function TimelineDrawer({ traceId, onClose }: { traceId: string; onClose: () => 
                         <span className="text-xs font-mono text-muted-foreground">{formatDuration(entry.duration_ms)}</span>
                       </div>
                       <div className="flex gap-3 mt-1 text-xs text-muted-foreground">
-                        <span>In: {formatTokens(entry.input_tokens)}</span>
-                        <span>Out: {formatTokens(entry.output_tokens)}</span>
-                        {entry.cache_read_tokens > 0 && <span>Cache: {formatTokens(entry.cache_read_tokens)}</span>}
-                        {entry.tool_calls > 0 && <span>Tools: {entry.tool_calls}</span>}
+                        <span>{t("metrics.trace.in")}{formatTokens(entry.input_tokens)}</span>
+                        <span>{t("metrics.trace.out")}{formatTokens(entry.output_tokens)}</span>
+                        {entry.cache_read_tokens > 0 && <span>{t("metrics.trace.cache")}{formatTokens(entry.cache_read_tokens)}</span>}
+                        {entry.tool_calls > 0 && <span>{t("metrics.trace.tools")}{entry.tool_calls}</span>}
                       </div>
                       {entry.error && (
                         <p className="mt-1 text-xs text-red-600 line-clamp-2">{entry.error}</p>

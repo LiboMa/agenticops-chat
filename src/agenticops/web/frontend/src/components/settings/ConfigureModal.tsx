@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { useLocale } from "@/i18n/LocaleContext";
+import { useCloseOnEscape } from "@/hooks/useCloseOnEscape";
 import { channelFields, appFields, missingRequired, type MessagingSchema, type FieldDescriptor } from "@/lib/messagingFields";
 
 interface Props {
@@ -18,6 +20,8 @@ const inputCls = "w-full px-3 py-2 border border-border rounded-lg text-sm bg-ba
 
 export function ConfigureModal({ mode, schema, initialName, initialType, initialValues, initialEnabled, initialRole, onClose, onSave, saving }: Props) {
   const isApp = mode === "app";
+  const { t } = useLocale();
+  useCloseOnEscape(onClose);        // the house rule: a dialog closes on Escape
   const types = (isApp ? schema?.app_platforms : schema?.channel_types) ?? [];
   const [type, setType] = useState(initialType ?? (isApp ? "feishu" : "slack"));
   const [name, setName] = useState(initialName ?? (isApp ? "default" : ""));
@@ -43,7 +47,7 @@ export function ConfigureModal({ mode, schema, initialName, initialType, initial
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
       <div className="bg-card border border-border rounded-xl shadow-xl w-[380px] max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
-          <h3 className="font-semibold text-foreground text-sm">{isApp ? "Configure Bot App" : "Configure Channel"}</h3>
+          <h3 className="font-semibold text-foreground text-sm">{isApp ? t("messaging.configureApp") : t("messaging.configureChannel")}</h3>
           <button onClick={onClose} className="ml-auto text-muted-foreground hover:text-foreground">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
@@ -69,7 +73,7 @@ export function ConfigureModal({ mode, schema, initialName, initialType, initial
 
           {/* Name */}
           <div>
-            <label className="text-xs font-semibold text-muted-foreground">{isApp ? "App name" : "Channel name"} <span className="text-red-500">*</span></label>
+            <label className="text-xs font-semibold text-muted-foreground">{isApp ? t("messaging.appName") : t("messaging.channelName")} <span className="text-red-500">*</span></label>
             <input className={inputCls} value={name} disabled={!!initialName} onChange={(e) => setName(e.target.value)} placeholder={isApp ? "default" : "e.g. feishu-alert"} />
           </div>
 
@@ -93,7 +97,7 @@ export function ConfigureModal({ mode, schema, initialName, initialType, initial
                   className={`${inputCls} ${f.secret ? "pr-9 font-mono" : ""}`}
                   type={f.secret && !revealed[f.key] ? "password" : f.type === "number" ? "number" : "text"}
                   value={values[f.key] ?? ""}
-                  placeholder={f.secret && initialName ? "•••• (leave blank to keep)" : ""}
+                  placeholder={f.secret && initialName ? t("messaging.keepSecret") : ""}
                   onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
                 />
                 {f.secret && (
@@ -103,7 +107,7 @@ export function ConfigureModal({ mode, schema, initialName, initialType, initial
                   </button>
                 )}
               </div>
-              {f.secret && <p className="text-[10px] text-muted-foreground mt-0.5">Encrypted at rest</p>}
+              {f.secret && <p className="text-[10px] text-muted-foreground mt-0.5">{t("messaging.encrypted")}</p>}
             </div>
           ))}
 
@@ -111,7 +115,7 @@ export function ConfigureModal({ mode, schema, initialName, initialType, initial
         </div>
 
         <div className="flex items-center gap-2 px-4 py-3 border-t border-border">
-          <span className="text-[11px] text-muted-foreground mr-auto">{isApp ? "Inbound bot credentials" : "Outbound routing"}</span>
+          <span className="text-[11px] text-muted-foreground mr-auto">{isApp ? t("messaging.inbound") : t("messaging.outbound")}</span>
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-foreground hover:bg-secondary">Cancel</button>
           <button onClick={handleSave} disabled={saving} className="px-3 py-1.5 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50">
             {saving ? "Saving…" : "Save & enable"}

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from agenticops.config import settings
+from agenticops.services import exec_switches
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +36,8 @@ class ExecutorService:
 
     def start(self):
         """Start the background polling loop."""
-        if not settings.executor_enabled:
-            logger.info("Executor service not started (AIOPS_EXECUTOR_ENABLED=false)")
+        if not exec_switches.effective().executor_enabled:
+            logger.info("Executor service not started (the executor is switched off)")
             return
 
         if self._thread is not None:

@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from agenticops.config import settings
+from agenticops.services import exec_switches
 
 
 def _policy():
@@ -40,12 +41,13 @@ def is_admin(actor) -> bool:
 
 def fix_approve_effect() -> str:
     """pipeline_service.trigger_auto_execute starts the run iff auto_fix_enabled and executor_enabled."""
-    return "approve_and_queue_execution" if settings.auto_fix_enabled and settings.executor_enabled else "approve_only"
+    switches = exec_switches.effective()
+    return "approve_and_queue_execution" if switches.auto_fix_enabled and switches.executor_enabled else "approve_only"
 
 
 def change_approve_effect(actor, cr: Any) -> str:
     """change_service.approve_and_execute queues the run iff the executor is on and the approver may execute it."""
-    queues = settings.executor_enabled and route_allows(actor, "change.execute", cr)[0]
+    queues = exec_switches.effective().executor_enabled and route_allows(actor, "change.execute", cr)[0]
     return "approve_and_queue_execution" if queues else "approve_only"
 
 
@@ -55,7 +57,7 @@ def _action(name: str, allowed: bool, reason_code: Optional[str], effect: str) -
 
 def _execute(actor, permission: str, subject: Any, blocked: Optional[str]) -> dict:
     """The execute routes' order: executor off → authz → anything still in the way (`blocked`)."""
-    if not settings.executor_enabled:
+    if not exec_switches.effective().executor_enabled:
         return _action("execute", False, "executor_disabled", "queue_execution")
     ok, code = route_allows(actor, permission, subject)
     if ok and blocked:

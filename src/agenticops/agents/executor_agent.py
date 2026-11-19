@@ -15,6 +15,7 @@ from strands import Agent, tool
 from strands.models.bedrock import BedrockModel
 
 from agenticops.config import settings
+from agenticops.services import exec_switches
 from agenticops.tools.aws_tools import (
     assume_role,
     describe_ec2,
@@ -67,7 +68,7 @@ EXECUTION PROTOCOL (7 steps — follow in exact order):
    Never proceed with a non-approved plan.
 
 2. GATE
-   The executor is {"ENABLED" if settings.executor_enabled else "DISABLED"}.
+   The executor is {"ENABLED" if exec_switches.effective().executor_enabled else "DISABLED"}.
    If disabled, STOP and report: "Executor is disabled. Set AIOPS_EXECUTOR_ENABLED=true to enable."
 
 3. PRE-CHECK
@@ -201,7 +202,7 @@ def executor_agent(fix_plan_id: int) -> str:
     Returns:
         Execution summary with status, step results, and any errors.
     """
-    if not settings.executor_enabled:
+    if not exec_switches.effective().executor_enabled:
         return (
             "Executor is DISABLED. Cannot execute fix plans. "
             "Set AIOPS_EXECUTOR_ENABLED=true to enable execution."

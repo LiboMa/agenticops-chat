@@ -154,3 +154,17 @@ def _fresh_uncovered_refusals():
     if mod is not None:
         mod._UNCOVERED_REFUSED.clear()
     yield
+
+
+@pytest.fixture(autouse=True)
+def _fresh_exec_switches():
+    """The four high-impact switches are read from the database and remembered for a second (services/exec_switches,
+    MVP-2.9.0 N25). Tests swap databases and reuse paths: what one test stored must not answer the next one's read."""
+    import sys
+
+    mod = sys.modules.get("agenticops.services.exec_switches")
+    if mod is not None:
+        mod.invalidate()
+    yield
+    if mod is not None:
+        mod.invalidate()

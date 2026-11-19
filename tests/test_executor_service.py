@@ -24,18 +24,20 @@ def _cas_params(mock_session):
 
 @pytest.fixture
 def disabled_settings():
-    """Settings with executor_enabled=False."""
-    with patch("agenticops.services.executor_service.settings") as mock_settings:
-        mock_settings.executor_enabled = False
+    """The executor switched off — the value in force (services/exec_switches, MVP-2.9.0 N25), not `settings`."""
+    with patch("agenticops.services.executor_service.settings") as mock_settings, \
+         patch("agenticops.services.executor_service.exec_switches") as switches:
+        switches.effective.return_value.executor_enabled = False
         mock_settings.executor_total_timeout = 300
         yield mock_settings
 
 
 @pytest.fixture
 def enabled_settings():
-    """Settings with executor_enabled=True."""
-    with patch("agenticops.services.executor_service.settings") as mock_settings:
-        mock_settings.executor_enabled = True
+    """The executor switched on (the value in force), with a short timeout."""
+    with patch("agenticops.services.executor_service.settings") as mock_settings, \
+         patch("agenticops.services.executor_service.exec_switches") as switches:
+        switches.effective.return_value.executor_enabled = True
         mock_settings.executor_total_timeout = 5  # short for tests
         yield mock_settings
 

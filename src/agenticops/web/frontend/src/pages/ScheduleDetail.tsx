@@ -10,7 +10,7 @@ import { StatusText, type StatusTone } from "@/components/ui/StatusText";
 import { QueryState } from "@/components/ui/QueryState";
 import { runState, type RunKind } from "@/lib/scheduleRows";
 import { useLocale } from "@/i18n/LocaleContext";
-import { PIPELINE_META } from "./Schedules";
+import { PIPELINE_META, pipelineDesc, pipelineLabel } from "./Schedules";
 import { useReadOnly } from "@/hooks/useBootstrap";
 
 const POLL_MS = 3000;
@@ -50,7 +50,7 @@ export default function ScheduleDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submitted, newestLive]);
 
-  if (schedule.isLoading) return <Spinner label="Loading schedule..." />;
+  if (schedule.isLoading) return <Spinner label={t("schedules.loadingOne")} />;
   if (schedule.error)
     return (
       <ErrorBanner
@@ -81,7 +81,7 @@ export default function ScheduleDetail() {
             d="M15 19l-7-7 7-7"
           />
         </svg>
-        Back to Schedules
+        {t("schedules.back")}
       </Link>
 
       {/* Header card */}
@@ -130,10 +130,10 @@ export default function ScheduleDetail() {
             <div>
               <span className="text-muted-foreground block">Pipeline</span>
               <Badge className={PIPELINE_META[s.pipeline_name]?.badge ?? "bg-blue-100 text-blue-700"}>
-                {PIPELINE_META[s.pipeline_name]?.label ?? s.pipeline_name}
+                {pipelineLabel(s.pipeline_name, t)}
               </Badge>
-              {PIPELINE_META[s.pipeline_name]?.desc && (
-                <p className="text-xs text-muted-foreground mt-1">{PIPELINE_META[s.pipeline_name].desc}</p>
+              {pipelineDesc(s.pipeline_name, t) !== null && (
+                <p className="text-xs text-muted-foreground mt-1">{pipelineDesc(s.pipeline_name, t)}</p>
               )}
             </div>
             <div>
@@ -149,11 +149,11 @@ export default function ScheduleDetail() {
               <span>{formatFullDate(s.created_at)}</span>
             </div>
             <div>
-              <span className="text-muted-foreground block">Last Run</span>
+              <span className="text-muted-foreground block">{t("schedules.lastRun")}</span>
               <span>{s.last_run_at ? formatFullDate(s.last_run_at) : "Never"}</span>
             </div>
             <div>
-              <span className="text-muted-foreground block">Next Run</span>
+              <span className="text-muted-foreground block">{t("schedules.nextRun")}</span>
               <span>{s.next_run_at ? formatFullDate(s.next_run_at) : "-"}</span>
             </div>
           </div>
@@ -175,8 +175,8 @@ export default function ScheduleDetail() {
                         <span className="text-muted-foreground">{(cfg.providers as string) || "all"}</span>
                       </div>
                       <div>
-                        <span className="font-medium text-foreground">Deep Investigation:</span>{" "}
-                        <span className="text-muted-foreground">{cfg.deep ? "Yes" : "No"}</span>
+                        <span className="font-medium text-foreground">{t("schedules.deep")}</span>{" "}
+                        <span className="text-muted-foreground">{cfg.deep ? t("schedules.yes") : t("schedules.no")}</span>
                       </div>
                     </div>
                   );
@@ -217,7 +217,7 @@ export default function ScheduleDetail() {
                       )}
                       {reportType && (
                         <div>
-                          <span className="font-medium text-foreground">Report Type:</span>{" "}
+                          <span className="font-medium text-foreground">{t("schedules.reportType")}</span>{" "}
                           <span className="text-muted-foreground">{reportType}</span>
                         </div>
                       )}
@@ -229,7 +229,7 @@ export default function ScheduleDetail() {
                       )}
                       {reportTemplate && (
                         <div>
-                          <span className="font-medium text-foreground">Report Template:</span>
+                          <span className="font-medium text-foreground">{t("schedules.reportTemplate")}</span>
                           <pre className="mt-1 text-muted-foreground text-xs bg-background rounded p-2 whitespace-pre-wrap">{reportTemplate}</pre>
                         </div>
                       )}
@@ -256,7 +256,7 @@ export default function ScheduleDetail() {
       <Card>
         <CardBody>
           <h2 className="text-xl font-semibold text-foreground mb-4">
-            Execution History
+            {t("schedules.history")}
           </h2>
           <QueryState query={executions} isEmpty={(d) => d.length === 0} emptyText={t("schedules.noRuns")}
                       onRetry={() => void executions.refetch()}>

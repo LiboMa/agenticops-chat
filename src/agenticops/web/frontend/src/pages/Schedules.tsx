@@ -12,6 +12,7 @@ import { StaleNotice } from "@/components/ui/QueryState";
 import { queryView } from "@/lib/queryState";
 import { cronSummary, runState, type RunKind } from "@/lib/scheduleRows";
 import { useLocale } from "@/i18n/LocaleContext";
+import { useCloseOnEscape } from "@/hooks/useCloseOnEscape";
 import {
   useSchedules,
   useCreateSchedule,
@@ -28,33 +29,19 @@ const PIPELINE_OPTIONS = ["FullScan", "Monitoring", "DailyReport", "HealthPatrol
 const REPORT_TYPES = ["", "daily", "incident", "inventory"] as const;
 const SCAN_SCOPES = ["all", "computing", "networking", "databases", "storage", "security", "billing"] as const;
 
-export const PIPELINE_META: Record<string, { label: string; desc: string; badge: string }> = {
-  FullScan: {
-    label: "Full Scan",
-    desc: "Scan all cloud resources and detect anomalies across your infrastructure.",
-    badge: "bg-blue-100 text-blue-700",
-  },
-  Monitoring: {
-    label: "Monitoring",
-    desc: "Continuous monitoring of key metrics, alerts, and service health.",
-    badge: "bg-emerald-100 text-emerald-700",
-  },
-  DailyReport: {
-    label: "Daily Report",
-    desc: "Generate a daily summary of infrastructure health, issues, and trends.",
-    badge: "bg-amber-100 text-amber-700",
-  },
-  HealthPatrol: {
-    label: "Health Patrol",
-    desc: "Proactive health check — pulls alerts from monitoring providers and runs anomaly detection to find issues before they escalate.",
-    badge: "bg-violet-100 text-violet-700",
-  },
-  AgentChain: {
-    label: "Agent Chain",
-    desc: "Custom multi-agent workflow driven by a natural language prompt.",
-    badge: "bg-rose-100 text-rose-700",
-  },
+/** A built-in pipeline's badge colour; its name and description are `schedules.pipeline.<name>.label` / `.desc`
+ *  in the locale files (`pipelineLabel` / `pipelineDesc`). A pipeline that is not listed shows its own name. */
+export const PIPELINE_META: Record<string, { badge: string }> = {
+  FullScan: { badge: "bg-blue-100 text-blue-700" },
+  Monitoring: { badge: "bg-emerald-100 text-emerald-700" },
+  DailyReport: { badge: "bg-amber-100 text-amber-700" },
+  HealthPatrol: { badge: "bg-violet-100 text-violet-700" },
+  AgentChain: { badge: "bg-rose-100 text-rose-700" },
 };
+export const pipelineLabel = (name: string, t: (key: string) => string): string =>
+  name in PIPELINE_META ? t("schedules.pipeline." + name + ".label") : name;
+export const pipelineDesc = (name: string, t: (key: string) => string): string | null =>
+  name in PIPELINE_META ? t("schedules.pipeline." + name + ".desc") : null;
 
 /* ------------------------------------------------------------------ */
 /*  Schedule form modal                                                */
@@ -68,6 +55,8 @@ interface FormModalProps {
 }
 
 function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: FormModalProps & { defaultType?: "recurring" | "one_time" }) {
+  const { t } = useLocale();
+  useCloseOnEscape(onClose);        // the house rule: a dialog closes on Escape
   const isEdit = !!initial;
   const [name, setName] = useState(initial?.name ?? "");
   const [scheduleType, setScheduleType] = useState<"recurring" | "one_time">(initial?.schedule_type ?? defaultType ?? "recurring");
@@ -193,7 +182,7 @@ function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: Fo
           className="flex items-center justify-between px-5 pt-4 pb-3 cursor-move select-none border-b border-border/30"
         >
           <h3 className="text-base font-semibold text-foreground">
-            {isEdit ? "Edit Task" : "New Task"}
+            {isEdit ? t("schedules.editTask") : t("schedules.newTask")}
           </h3>
           {!isEdit && (
             <div className="flex bg-secondary rounded-lg p-0.5">
@@ -234,7 +223,7 @@ function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: Fo
               <label className="block text-xs font-medium text-muted-foreground mb-1">Pipeline</label>
               <select value={pipelineName} onChange={(e) => setPipelineName(e.target.value)} className={inputCls}>
                 {PIPELINE_OPTIONS.map((p) => (
-                  <option key={p} value={p}>{PIPELINE_META[p]?.label ?? p}</option>
+                  <option key={p} value={p}>{pipelineLabel(p, t)}</option>
                 ))}
               </select>
             </div>
@@ -259,7 +248,7 @@ function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: Fo
           {/* HealthPatrol config — compact */}
           {isHealthPatrol && (
             <div className="bg-secondary/50 rounded-lg p-3 space-y-2">
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Patrol Config</p>
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">{t("schedules.patrolConfig")}</p>
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-xs text-muted-foreground mb-0.5">Scope</label>
@@ -274,7 +263,7 @@ function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: Fo
               </div>
               <div className="flex items-center gap-2">
                 <Switch checked={hpDeep} onCheckedChange={setHpDeep} labelledBy="schedule-deep-label" />
-                <span id="schedule-deep-label" className="text-xs text-foreground">Deep investigation</span>
+                <span id="schedule-deep-label" className="text-xs text-foreground">{t("schedules.deepLabel")}</span>
               </div>
             </div>
           )}
@@ -287,7 +276,7 @@ function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: Fo
                 rows={3}
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Describe what the agent should do..."
+                placeholder={t("schedules.promptPh")}
                 className={`${inputCls} resize-none`}
               />
               {/* Notify channels — primary action */}
@@ -336,7 +325,7 @@ function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: Fo
               {/* Secondary options inline */}
               <div className="flex gap-2 items-center">
                 <select value={reportType} onChange={(e) => setReportType(e.target.value)} className="px-2 py-1 border border-border rounded text-xs bg-background text-foreground">
-                  <option value="">No report</option>
+                  <option value="">{t("schedules.noReport")}</option>
                   {REPORT_TYPES.filter(Boolean).map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
                 <div className="flex items-center gap-1">
@@ -387,13 +376,14 @@ function DeleteModal({
   onConfirm: () => void;
   deleting: boolean;
 }) {
+  const { t } = useLocale();
+  useCloseOnEscape(onClose);        // the house rule: a dialog closes on Escape
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="bg-background rounded-lg shadow-lg w-full max-w-sm p-6">
-        <h3 className="text-lg font-semibold text-foreground mb-2">Delete Schedule</h3>
+        <h3 className="text-lg font-semibold text-foreground mb-2">{t("schedules.deleteTitle")}</h3>
         <p className="text-sm text-muted-foreground mb-4">
-          Are you sure you want to delete <strong>{schedule.name}</strong>? This action
-          cannot be undone.
+          {t("schedules.deleteAsk")} <strong>{schedule.name}</strong>{t("schedules.deleteWarn")}
         </p>
         <div className="flex justify-end gap-2">
           <button
@@ -443,7 +433,7 @@ function scheduleColumns(t: (k: string) => string): Column<Schedule>[] {
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-medium text-foreground">{r.name}</span>
-              <Badge className={meta?.badge ?? "bg-blue-100 text-blue-700"}>{meta?.label ?? r.pipeline_name}</Badge>
+              <Badge className={meta?.badge ?? "bg-blue-100 text-blue-700"}>{pipelineLabel(r.pipeline_name, t)}</Badge>
             </div>
             <div className="mt-0.5 text-xs text-muted-foreground">
               {summary}
@@ -645,7 +635,7 @@ export default function Schedules() {
         {totalPages > 1 && (
           <div className="flex items-center justify-between px-4 py-3 border-t border-border">
             <span className="text-xs text-muted-foreground">
-              {filtered.length} total &middot; Page {page + 1}/{totalPages}
+              {t("schedules.pageLine").replace("{n}", String(filtered.length)).replace("{page}", String(page + 1)).replace("{pages}", String(totalPages))}
             </span>
             <div className="flex gap-1">
               <button

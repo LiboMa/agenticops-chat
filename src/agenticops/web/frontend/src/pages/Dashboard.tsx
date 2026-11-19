@@ -265,11 +265,11 @@ export default function Dashboard() {
                     <span>
                       {sched.last_run_at
                         ? formatShortDate(sched.last_run_at)
-                        : "Never run"}
+                        : t("dashboard.neverRun")}
                     </span>
                     {sched.next_run_at && (
                       <span className="text-primary">
-                        Next: {formatShortDate(sched.next_run_at)}
+                        {t("dashboard.nextRun")}{formatShortDate(sched.next_run_at)}
                       </span>
                     )}
                   </div>

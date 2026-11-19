@@ -33,7 +33,7 @@ export function ModelRuntimeCard() {
   return (
     <Card>
       <CardHeader>
-        <h2 className="text-lg font-semibold text-foreground">{t("settings.modelRuntime.title")}</h2>
+        <h3 className="text-lg font-semibold text-foreground">{t("settings.modelRuntime.title")}</h3>
         <span className="text-xs text-muted-foreground">{t("settings.modelRuntime.subtitle")}</span>
       </CardHeader>
       <CardBody>

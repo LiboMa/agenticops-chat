@@ -19,7 +19,7 @@ from sqlalchemy import and_, func, or_
 from agenticops.config import settings
 from agenticops.models import (ChangeRequest, CloudResource, FixExecution, FixPlan, HealthIssue, PipelineEvent, RCAResult,
                                get_db_session)
-from agenticops.services import agent_runs
+from agenticops.services import agent_runs, exec_switches
 from agenticops.services import ui_actions as ua
 from agenticops.services import work_phases as wp
 
@@ -170,6 +170,7 @@ def issue_waits(s, issues, *, now: datetime) -> dict[int, IssueWait]:
         PipelineEvent.event_type.in_(("rca_started", "rca_completed", "status_changed"))).all(),
         "health_issue_id") if diagnosing else {}
     out: dict[int, IssueWait] = {}
+    auto_fix_on = exec_switches.effective().auto_fix_enabled      # the value in force, read once for the page
     for issue in issues:
         plans = plans_by.get(issue.id, [])
         plan = wp.current_fix_plan(plans)
@@ -185,7 +186,7 @@ def issue_waits(s, issues, *, now: datetime) -> dict[int, IssueWait]:
             stopped_at = None
         phase = wp.issue_phase(issue.status, rca=rca, threshold=settings.rca_min_confidence_for_autofix,
                                plan=plan, latest_run=run, auto_run_in_flight=auto,
-                               auto_fix_enabled=bool(settings.auto_fix_enabled), rca_stopped=stopped_at is not None)
+                               auto_fix_enabled=auto_fix_on, rca_stopped=stopped_at is not None)
         if claim is not None and phase.waiting_for in wp.HUMAN:
             # N14: the same for EVERY row a person would get. A plan being redone after «request changes», a
             # diagnosis being run again, a plan being written: the agent is on it now, and what it leaves decides

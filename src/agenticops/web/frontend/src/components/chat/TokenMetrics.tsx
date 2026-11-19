@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useLocale } from "@/i18n/LocaleContext";
 import { useTraceTimeline } from "@/hooks/useTraceTimeline";
 import type { ChatMessage } from "@/api/types";
 
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export function TokenMetrics({ msg, inline }: Props) {
+  const { t } = useLocale();
   const [expanded, setExpanded] = useState(false);
   const tu = msg.token_usage;
   if (!tu) return null;
@@ -35,15 +37,15 @@ export function TokenMetrics({ msg, inline }: Props) {
       {expanded && (
         <div className="mt-1 ml-2 text-xs border-l-2 border-muted pl-2">
           {tu.model && (
-            <div className="text-muted-foreground mb-1">Model: {tu.model}</div>
+            <div className="text-muted-foreground mb-1">{t("tokens.model")}{tu.model}</div>
           )}
           {cacheRead > 0 && (
             <div className="text-muted-foreground">
-              Cache read: {cacheRead.toLocaleString()} ({((cacheRead / (input + cacheRead)) * 100).toFixed(0)}%)
+              {t("tokens.cacheRead")}{cacheRead.toLocaleString()} ({((cacheRead / (input + cacheRead)) * 100).toFixed(0)}%)
             </div>
           )}
 
-          {timelineQ.isLoading && <div className="text-muted-foreground">Loading trace...</div>}
+          {timelineQ.isLoading && <div className="text-muted-foreground">{t("tokens.loadingTrace")}</div>}
           {timelineQ.data && timelineQ.data.calls.length > 1 && (
             <table className="mt-1 w-full text-[11px] tabular-nums">
               <thead>

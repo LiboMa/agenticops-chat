@@ -74,19 +74,19 @@ export function MessagingTab() {
       {restartHint && (
         <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 rounded-lg px-3 py-2 text-xs">
           <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h16.9a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" /></svg>
-          Bot credentials saved — restart the service (<code className="font-mono">aiops service restart</code>) for the IM gateway to pick them up.
-          <button onClick={() => setRestartHint(false)} className="ml-auto text-amber-600">Dismiss</button>
+          {t("messaging.restartHint")} <code className="font-mono">aiops service restart</code>
+          <button onClick={() => setRestartHint(false)} className="ml-auto text-amber-600">{t("messaging.dismiss")}</button>
         </div>
       )}
 
       {/* BOT APPS */}
       <Card>
         <CardHeader>
-          <h2 className="text-base font-semibold text-foreground">Bot Apps</h2>
-          <button onClick={() => setModal({ mode: "app" })} className="px-2.5 py-1 text-xs font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">+ Connect Bot</button>
+          <h2 className="text-base font-semibold text-foreground">{t("messaging.apps")}</h2>
+          <button onClick={() => setModal({ mode: "app" })} className="px-2.5 py-1 text-xs font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">{t("messaging.connectBot")}</button>
         </CardHeader>
         <CardBody>
-          {appsQ.isLoading ? <Spinner /> : appsQ.error ? <ErrorBanner message="Failed to load apps" /> : (
+          {appsQ.isLoading ? <Spinner /> : appsQ.error ? <ErrorBanner message={t("messaging.appsFailed")} /> : (
             <div className="space-y-2">
               {APP_PLATFORMS.flatMap((platform) =>
                 Object.entries(appsQ.data?.[platform] ?? {}).map(([name, cfg]) => (
@@ -100,7 +100,7 @@ export function MessagingTab() {
                   </div>
                 ))
               )}
-              {APP_PLATFORMS.every((p) => !Object.keys(appsQ.data?.[p] ?? {}).length) && <p className="text-sm text-muted-foreground">No bot apps configured.</p>}
+              {APP_PLATFORMS.every((p) => !Object.keys(appsQ.data?.[p] ?? {}).length) && <p className="text-sm text-muted-foreground">{t("messaging.noApps")}</p>}
             </div>
           )}
         </CardBody>
@@ -110,10 +110,10 @@ export function MessagingTab() {
       <Card>
         <CardHeader>
           <h2 className="text-base font-semibold text-foreground">Channels</h2>
-          <button onClick={() => setModal({ mode: "channel" })} className="px-2.5 py-1 text-xs font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">+ Add Channel</button>
+          <button onClick={() => setModal({ mode: "channel" })} className="px-2.5 py-1 text-xs font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">{t("messaging.addChannel")}</button>
         </CardHeader>
         <CardBody>
-          {channelsQ.isLoading ? <Spinner /> : channelsQ.error ? <ErrorBanner message="Failed to load channels" /> : (
+          {channelsQ.isLoading ? <Spinner /> : channelsQ.error ? <ErrorBanner message={t("messaging.channelsFailed")} /> : (
             <div className="space-y-2">
               {(channelsQ.data ?? []).map((ch: ChannelInfo) => (
                 <div key={ch.name} className="flex items-center gap-3 p-2.5 border border-border rounded-lg">
@@ -127,7 +127,7 @@ export function MessagingTab() {
                   <button onClick={() => deleteChannel.mutate(ch.name)} className="text-xs text-red-600 hover:underline">Delete</button>
                 </div>
               ))}
-              {!(channelsQ.data ?? []).length && <p className="text-sm text-muted-foreground">No channels configured.</p>}
+              {!(channelsQ.data ?? []).length && <p className="text-sm text-muted-foreground">{t("messaging.noChannels")}</p>}
             </div>
           )}
         </CardBody>
@@ -135,7 +135,7 @@ export function MessagingTab() {
 
       {/* DELIVERY LOGS */}
       <Card>
-        <CardHeader><h2 className="text-base font-semibold text-foreground">Delivery Logs</h2></CardHeader>
+        <CardHeader><h2 className="text-base font-semibold text-foreground">{t("messaging.logs")}</h2></CardHeader>
         <CardBody>
           <QueryState query={logsQ} isEmpty={(d) => d.length === 0} emptyText={t("messaging.noLogs")} onRetry={() => void logsQ.refetch()}>
             {(logs) => (

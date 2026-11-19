@@ -1,4 +1,5 @@
 import { formatShortDate, parseApiDate } from "@/lib/formatDate";
+import { useLocale } from "@/i18n/LocaleContext";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { cn } from "@/lib/cn";
 import {
@@ -132,6 +133,7 @@ function FieldSelector({ label, value, options, onChange }: FieldSelectorProps) 
 /* ------------------------------------------------------------------ */
 
 export function CronBuilder({ value, onChange }: CronBuilderProps) {
+  const { t } = useLocale();
   const [showCustom, setShowCustom] = useState(false);
   const [fields, setFields] = useState<CronFields>(
     () => parseCronFields(value) ?? { minute: "0", hour: "*", dom: "*", month: "*", dow: "*" },
@@ -268,7 +270,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
             showCustom && "rotate-180",
           )}
         />
-        {showCustom ? "Hide custom editor" : "Custom expression"}
+        {showCustom ? t("cron.hideCustom") : t("cron.custom")}
       </button>
 
       {/* ── Custom field editors ── */}
@@ -321,7 +323,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
                 onClick={() => setShowRaw(!showRaw)}
                 className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
               >
-                {showRaw ? "Hide raw input" : "Or type raw cron expression..."}
+                {showRaw ? t("cron.hideRaw") : t("cron.raw")}
               </button>
               {showRaw && (
                 <div className="flex gap-2 mt-2">

@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from typing import Optional
 
 from agenticops.config import get_agent_model_config, settings
+from agenticops.services import exec_switches
 from agenticops.models import CloudAccount, ReadinessCheck, get_db_session
 
 DETAIL_MAX = 500
@@ -96,10 +97,11 @@ def _execution(actor) -> dict:
     # who approves: an L0 / L1 fix plan is approved without a person when the pipeline and its auto-approval are on
     # (pipeline_service.trigger_auto_approve — the executor switch decides whether it then RUNS, not this), a
     # standard change when its switch is
-    automatic = (settings.auto_fix_enabled and settings.executor_auto_approve_l0_l1) or settings.change_auto_approve_standard
+    switches = exec_switches.effective()        # the values in force (N25), not the yaml's
+    automatic = (switches.auto_fix_enabled and switches.executor_auto_approve_l0_l1) or settings.change_auto_approve_standard
     return {"state": "read_only" if read_only else "partly_automatic" if automatic else "manual",
-            "executor_enabled": bool(settings.executor_enabled), "auto_fix_enabled": bool(settings.auto_fix_enabled),
-            "auto_approve_l0_l1": bool(settings.executor_auto_approve_l0_l1), "rbac_enforce": bool(settings.rbac_enforce),
+            "executor_enabled": switches.executor_enabled, "auto_fix_enabled": switches.auto_fix_enabled,
+            "auto_approve_l0_l1": switches.executor_auto_approve_l0_l1, "rbac_enforce": bool(settings.rbac_enforce),
             "change_auto_approve_standard": bool(settings.change_auto_approve_standard),
             # «may this person approve a plan at all»: asked about no plan in particular (the rules that read a
             # plan need one to be named — an empty one — or they refuse, fail-closed); route_allows answers «no»

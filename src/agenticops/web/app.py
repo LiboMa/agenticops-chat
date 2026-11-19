@@ -711,13 +711,18 @@ def api_get_settings():  # plain def: model presets may list Bedrock models sync
         feishu_ws_active = False
         slack_ws_active = False
 
+    from agenticops.services import exec_switches
+    switches = exec_switches.effective()        # the four high-impact switches: the values in force (N25)
     return {
         "scan_focus": settings.scan_focus,
-        "executor_enabled": settings.executor_enabled,
-        "auto_fix_enabled": settings.auto_fix_enabled,
+        "executor_enabled": switches.executor_enabled,
+        "auto_fix_enabled": switches.auto_fix_enabled,
         "auto_rca_enabled": settings.auto_rca_enabled,
         "notifications_enabled": settings.notifications_enabled,
-        "executor_auto_approve_l0_l1": settings.executor_auto_approve_l0_l1,
+        "executor_auto_approve_l0_l1": switches.executor_auto_approve_l0_l1,
+        "executor_hitl_enabled": switches.executor_hitl_enabled,
+        # which of the four are an administrator's stored values, the yaml defaults, and who last changed them
+        "execution_switches": exec_switches.stored_info(),
         "notifications_consolidated": settings.notifications_consolidated,
         "bedrock_cache_enabled": settings.bedrock_cache_enabled,
         "skills_auto_improve_enabled": settings.skills_auto_improve_enabled,
@@ -753,10 +758,61 @@ def api_get_settings():  # plain def: model presets may list Bedrock models sync
     }
 
 
+# What PATCH /api/settings changes without the audited transactions of the high-impact switches and the security
+# toggles: the low-impact keys. Their change is audited by comparing the value before and after (N25).
+_LOW_IMPACT_SETTINGS = (
+    "auto_rca_enabled", "notifications_enabled", "notifications_consolidated", "bedrock_cache_enabled",
+    "skills_auto_improve_enabled", "skills_post_resolution_review", "skills_improvement_notify",
+    "scan_focus", "galaxy_model_id", "acp_enhanced_enabled", "acp_enhanced_backend",
+    "report_storage", "report_s3_bucket", "report_s3_prefix", "report_s3_region", "report_presigned_url_expiry",
+)
+_AGENT_MODEL_FIELDS = ("model_id", "max_tokens", "window_size")
+
+
+def _low_impact_values(body: dict) -> dict:
+    """The current value of every low-impact setting the request names (an agent's model settings by attribute)."""
+    out = {key: getattr(settings, key, None) for key in _LOW_IMPACT_SETTINGS if key in body}
+    models = body.get("agent_models")
+    for name, cfg in (models.items() if isinstance(models, dict) else ()):
+        for field in (_AGENT_MODEL_FIELDS if isinstance(cfg, dict) else ()):
+            if field in cfg:
+                out[f"agent_{name}_{field}"] = getattr(settings, f"agent_{name}_{field}", None)
+    return out
+
+
+def _audit_low_impact(before: dict, after: dict, actor: Actor) -> None:
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    changed = sorted(key for key in before if before[key] != after.get(key))
+    if not changed:
+        return
+    with get_db_session() as s:
+        for key in changed:
+            AuditService.log(Actions.UPDATE, EntityTypes.SYSTEM, key, entity_name="settings", actor=actor.key,
+                             user_id=actor.user_id, old_values={key: before[key]}, new_values={key: after.get(key)},
+                             session=s)
+
+
 @app.patch("/api/settings")
 async def api_update_settings(request: Request, body: dict = Body(...), current: Actor = Depends(current_actor)):
+    """Update runtime settings (`_apply_settings`) — and leave one audit row per changed value (MVP-2.9.0 N25: «每次
+    设置变更都留审计记录»). The high-impact switches and the security toggles write theirs inside their own
+    transactions; every other key is audited here, from its value before and after — also when a later key of the
+    same request was refused (those keys are applied one by one)."""
+    before = _low_impact_values(body)
+    try:
+        return await _apply_settings(request, body, current)
+    finally:
+        await asyncio.to_thread(_audit_low_impact, before, _low_impact_values(body), current)
+
+
+async def _apply_settings(request: Request, body: dict, current: Actor):
     """Update runtime settings. Agent models + report config persist to settings.yaml;
     boolean toggles and scan_focus are session-level (reset on restart).
+
+    The four high-impact switches (EXEC_KEYS: the executor, auto-fix, L0 / L1 auto-approval, the executor's HITL
+    gate — MVP-2.9.0 N25) are stored in the database (services/exec_switches), so they survive a restart; like the
+    security toggles below they need an admin when api_auth_enabled, write one audit row per changed value in the
+    transaction that stores them, and a request refused by their checks applies nothing.
 
     The security toggles (CHANGE_KEYS: change_auto_approve_standard, rbac_enforce) persist to settings.yaml,
     need an admin when api_auth_enabled, write one audit row per changed value, and are applied last — a
@@ -768,9 +824,10 @@ async def api_update_settings(request: Request, body: dict = Body(...), current:
     from agenticops.audit.service import Actions, AuditService, EntityTypes
     from agenticops.config import AGENT_NAMES, VALID_SCAN_FOCUS, set_scan_focus, save_to_yaml
 
+    from agenticops.services import exec_switches
+
     BOOL_KEYS = {
-        "executor_enabled", "auto_fix_enabled", "auto_rca_enabled",
-        "notifications_enabled", "executor_auto_approve_l0_l1",
+        "auto_rca_enabled", "notifications_enabled",
         "notifications_consolidated", "bedrock_cache_enabled",
         "skills_auto_improve_enabled", "skills_post_resolution_review",
         "skills_improvement_notify",
@@ -785,7 +842,10 @@ async def api_update_settings(request: Request, body: dict = Body(...), current:
     # Change-management security toggles — persisted to settings.yaml (must survive a restart)
     CHANGE_KEYS = {"change_auto_approve_standard", "rbac_enforce"}
 
-    ALL_KEYS = (BOOL_KEYS | REPORT_STR_KEYS | REPORT_INT_KEYS | ACP_KEYS | CHANGE_KEYS
+    # The high-impact switches — stored in the DB (services/exec_switches), never set on the process's settings
+    EXEC_KEYS = set(exec_switches.FIELDS)
+
+    ALL_KEYS = (BOOL_KEYS | REPORT_STR_KEYS | REPORT_INT_KEYS | ACP_KEYS | CHANGE_KEYS | EXEC_KEYS
                 | {"scan_focus", "agent_models", "galaxy_model_id"})
     unknown = set(body.keys()) - ALL_KEYS
     if unknown:
@@ -793,22 +853,18 @@ async def api_update_settings(request: Request, body: dict = Body(...), current:
 
     # Security toggles are validated and authorized BEFORE anything is applied
     change_updates = {k: body[k] for k in CHANGE_KEYS if k in body}
-    for key in sorted(change_updates):
-        if not isinstance(change_updates[key], bool):
+    exec_updates = {k: body[k] for k in EXEC_KEYS if k in body}
+    for key in sorted({**change_updates, **exec_updates}):
+        if not isinstance(body[key], bool):
             raise HTTPException(400, f"{key} must be a boolean")
-    if change_updates and settings.api_auth_enabled:
+    if (change_updates or exec_updates) and settings.api_auth_enabled:
         await require_authenticated_user(request, admin=True)
 
     for key in BOOL_KEYS:
         if key in body:
             if not isinstance(body[key], bool):
                 raise HTTPException(400, f"{key} must be a boolean")
-            was = getattr(settings, key)
             setattr(settings, key, body[key])
-            if key == "executor_enabled" and body[key] and not was:
-                # The queue's poller is started at boot only when the executor is on: switched on at runtime, the
-                # tickets queued from then on waited for the next restart (MVP-2.9.0 N8). start() is idempotent.
-                _executor_service.start()
 
     if "scan_focus" in body:
         val = body["scan_focus"]
@@ -917,6 +973,24 @@ async def api_update_settings(request: Request, body: dict = Body(...), current:
             raise
         for key, new in changed.items():
             setattr(settings, key, new)
+
+    # The high-impact switches: one audit row per changed value and the stored object, in ONE transaction — the
+    # value is in force only once that commits (services/exec_switches reads the database, not the process).
+    in_force = exec_switches.effective()
+    switched = {k: v for k, v in sorted(exec_updates.items()) if getattr(in_force, k) != v}
+    if switched:
+        def _store():
+            with get_db_session() as s:
+                for key, new in switched.items():
+                    AuditService.log(Actions.UPDATE, EntityTypes.SYSTEM, key, entity_name="settings",
+                                     actor=current.key, user_id=current.user_id,
+                                     old_values={key: getattr(in_force, key)}, new_values={key: new}, session=s)
+                exec_switches.save(switched, current.key, session=s)
+        await asyncio.to_thread(_store)
+        if switched.get("executor_enabled"):
+            # The queue's poller is started at boot only when the executor is on: switched on at runtime, the
+            # tickets queued from then on waited for the next restart (MVP-2.9.0 N8). start() is idempotent.
+            _executor_service.start()
 
     return await asyncio.to_thread(api_get_settings)  # it may list Bedrock models
 
@@ -3167,10 +3241,11 @@ async def api_execute_fix_plan(plan_id: int, actor: Actor = Depends(current_acto
                 detail=f"Fix plan status is '{plan.status}', must be 'approved' to execute",
             )
 
-        if not settings.executor_enabled:
+        from agenticops.services import exec_switches
+        if not exec_switches.effective().executor_enabled:
             raise HTTPException(
                 status_code=403,
-                detail="Executor is disabled. Set AIOPS_EXECUTOR_ENABLED=true to enable",
+                detail="Executor is disabled. An administrator switches it on in Settings",
             )
 
         try:
@@ -3459,8 +3534,9 @@ def api_accept_execution(execution_id: int, data: ExecutionAcceptBody, actor: Ac
 @app.get("/api/executor/status")
 async def api_executor_status():
     """Get executor service status."""
+    from agenticops.services import exec_switches
     return {
-        "enabled": settings.executor_enabled,
+        "enabled": exec_switches.effective().executor_enabled,
         "running": _executor_service.is_running,
         "active_executions": _executor_service.active_count,
         "poll_interval": settings.executor_poll_interval,

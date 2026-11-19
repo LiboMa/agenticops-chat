@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useLocale } from "@/i18n/LocaleContext";
+import { useCloseOnEscape } from "@/hooks/useCloseOnEscape";
 import {
   useNotificationChannels,
   useShareContent,
@@ -16,6 +18,8 @@ export default function ShareDialog({
   defaultBody = "",
   onClose,
 }: ShareDialogProps) {
+  const { t } = useLocale();
+  useCloseOnEscape(onClose);        // the house rule: a dialog closes on Escape
   const [subject, setSubject] = useState(defaultSubject);
   const [body, setBody] = useState(defaultBody);
   const [selectedChannels, setSelectedChannels] = useState<string[]>([]);
@@ -55,7 +59,7 @@ export default function ShareDialog({
       <div className="bg-background rounded-xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-          <h2 className="text-lg font-semibold text-foreground">Share Content</h2>
+          <h2 className="text-lg font-semibold text-foreground">{t("share.title")}</h2>
           <button
             onClick={onClose}
             className="text-muted-foreground hover:text-muted-foreground transition-colors"
@@ -82,7 +86,7 @@ export default function ShareDialog({
           {/* Body preview */}
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1">
-              Content ({body.length.toLocaleString()} chars)
+              {t("share.contentChars").replace("{n}", body.length.toLocaleString())}
             </label>
             <textarea
               value={body}
@@ -95,7 +99,7 @@ export default function ShareDialog({
           {/* Channel selection */}
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-2">
-              Channels {selectedChannels.length === 0 && "(all enabled)"}
+              {t("share.channels")} {selectedChannels.length === 0 && t("share.allEnabled")}
             </label>
             <div className="max-h-40 overflow-y-auto space-y-1 border border-border rounded-lg p-2">
               {enabledChannels.map((ch) => (
@@ -114,7 +118,7 @@ export default function ShareDialog({
                 </label>
               ))}
               {enabledChannels.length === 0 && (
-                <p className="text-xs text-muted-foreground px-2 py-1">No enabled channels</p>
+                <p className="text-xs text-muted-foreground px-2 py-1">{t("share.noChannels")}</p>
               )}
             </div>
           </div>
@@ -128,9 +132,9 @@ export default function ShareDialog({
                 onChange={(e) => setUploadToS3(e.target.checked)}
                 className="rounded border-border text-primary-600 focus:ring-primary-500"
               />
-              Upload to S3
+              {t("share.upload")}
               {body.length > 4000 && (
-                <span className="text-xs text-amber-600">(recommended for large content)</span>
+                <span className="text-xs text-amber-600">{t("share.uploadHint")}</span>
               )}
             </label>
             {uploadToS3 && (
@@ -156,7 +160,7 @@ export default function ShareDialog({
               }`}
             >
               <p className={`text-sm font-medium ${result.success ? "text-primary-800" : "text-destructive"}`}>
-                {result.success ? "Shared successfully" : "Share failed"}
+                {result.success ? t("share.ok") : t("share.failed")}
               </p>
               {result.channels_sent.length > 0 && (
                 <p className="text-xs text-primary-700 mt-1">
@@ -175,7 +179,7 @@ export default function ShareDialog({
                   rel="noopener noreferrer"
                   className="block text-xs text-primary-600 hover:text-primary-800 underline mt-1"
                 >
-                  Download link
+                  {t("share.download")}
                 </a>
               )}
             </div>

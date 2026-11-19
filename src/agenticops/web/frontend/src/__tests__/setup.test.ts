@@ -33,8 +33,8 @@ describe("the four items of the setup overview", () => {
   it("in this order, each with its state word and its way on", () => {
     expect(itemViews(ready()).map((v) => [v.id, v.stateKey, v.tone, v.next?.to ?? null])).toEqual([
       ["accounts", "setup.state.connected", "ok", "/app/settings?tab=accounts"],
-      ["model", "setup.state.verified", "ok", "/app/settings?tab=general"],
-      ["execution", "setup.state.manual", "info", "/app/settings?tab=general"],
+      ["model", "setup.state.verified", "ok", "/app/settings#settings-models"],
+      ["execution", "setup.state.manual", "info", "/app/settings#settings-automation"],
       ["notifications", "setup.state.optional", "neutral", "/app/settings?tab=messaging"],
     ]);
   });

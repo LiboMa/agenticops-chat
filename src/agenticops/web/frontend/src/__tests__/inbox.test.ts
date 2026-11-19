@@ -23,7 +23,8 @@ describe("waitLabel — how long it has waited", () => {
     expect(waitLabel("2026-11-09T11:59:40Z", NOW, tEn)).toBe("Just now");
     expect(waitLabel("2026-11-09T11:35:00Z", NOW, tEn)).toBe("Waiting 25 min");
     expect(waitLabel("2026-11-09T09:00:00Z", NOW, tEn)).toBe("Waiting 3 h");
-    expect(waitLabel("2026-11-06T12:00:00Z", NOW, tEn)).toBe("Waiting 3 days");
+    expect(waitLabel("2026-11-06T12:00:00Z", NOW, tEn)).toBe("Waiting 3 d");
+    expect(waitLabel("2026-11-08T12:00:00Z", NOW, tEn)).toBe("Waiting 1 d");       // a unit, like min and h — it read «1 days»
     expect(waitLabel("2026-11-09T11:35:00Z", NOW, tZh)).toBe("已等 25 分钟");
     expect(waitLabel("2026-11-09T09:00:00", NOW, tZh)).toBe("已等 3 小时");   // a naive API time is UTC
   });

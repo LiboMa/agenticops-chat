@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from agenticops.config import settings
+from agenticops.services import exec_switches
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ def trigger_auto_sre(health_issue_id: int, trace_id: Optional[str] = None) -> No
     Called from save_rca_result() when an RCA result is persisted.
     Safe to call from any context (agent tool, API handler, etc.).
     """
-    if not settings.auto_fix_enabled:
+    if not exec_switches.effective().auto_fix_enabled:
         logger.info("Auto-fix pipeline disabled — skipping SRE for issue #%d", health_issue_id)
         return
 
@@ -152,11 +153,11 @@ def trigger_auto_approve(fix_plan_id: int, trace_id: Optional[str] = None) -> No
     record. Legacy behavior (hardcoded L0/L1) is preserved when disabled.
     On auto-approval, chains to trigger_auto_execute().
     """
-    if not settings.auto_fix_enabled:
+    if not exec_switches.effective().auto_fix_enabled:
         logger.info("Auto-fix pipeline disabled — skipping approve for plan #%d", fix_plan_id)
         return
 
-    if not settings.executor_auto_approve_l0_l1:
+    if not exec_switches.effective().executor_auto_approve_l0_l1:
         logger.info("Auto-approve disabled — skipping for plan #%d", fix_plan_id)
         return
 
@@ -381,11 +382,11 @@ def trigger_auto_execute(fix_plan_id: int, trace_id: Optional[str] = None) -> bo
     approve_fix_plan() (manual/human approval path). Returns whether the run was queued (MVP-2.9.0: the approval's
     answer says it, so a page need not believe the «approving runs it / does not» it read a while ago).
     """
-    if not settings.auto_fix_enabled:
+    if not exec_switches.effective().auto_fix_enabled:
         logger.info("Auto-fix pipeline disabled — skipping execute for plan #%d", fix_plan_id)
         return False
 
-    if not settings.executor_enabled:
+    if not exec_switches.effective().executor_enabled:
         logger.info("Executor disabled — skipping auto-execute for plan #%d", fix_plan_id)
         return False
 

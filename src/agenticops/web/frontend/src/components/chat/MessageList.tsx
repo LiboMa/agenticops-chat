@@ -140,7 +140,7 @@ export function MessageList({
            onKeyDown={markUser} onPointerDown={markUser} tabIndex={-1} className="flex-1 overflow-y-auto outline-none">
         <div ref={contentRef} className="mx-auto w-full max-w-[760px] px-4 pb-6 pt-6">
           {isFetchingOlder && (
-            <div className="py-2 text-center text-xs text-muted-foreground">Loading older messages…</div>
+            <div className="py-2 text-center text-xs text-muted-foreground">{t("chat.loadingOlder")}</div>
           )}
 
           <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative", width: "100%" }}>

@@ -29,7 +29,7 @@ export function ConnectorsCard() {
   return (
     <Card>
       <CardHeader>
-        <h2 className="text-lg font-semibold text-foreground">{t("connectors.title")}</h2>
+        <h3 className="text-lg font-semibold text-foreground">{t("connectors.title")}</h3>
         <span className="text-xs text-muted-foreground">{t("connectors.subtitle")}</span>
       </CardHeader>
       <CardBody>

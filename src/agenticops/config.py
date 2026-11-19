@@ -1460,7 +1460,7 @@ def _head_preview_offloader_class():
 def get_executor_interventions():
     """Return the interventions list for the executor agent.
 
-    Gated by settings.executor_hitl_enabled (default False -> []). When enabled,
+    Gated by the executor's HITL switch in force (services/exec_switches; default False -> []). When enabled,
     adds ONE HumanInTheLoop handler as a *second*, SDK-level safety net on top of
     the existing primary gate (get_approved_fix_plan tool check + DB state machine +
     L0/L1 risk tiering). Read-only / verification tools are allow-listed so they run
@@ -1468,7 +1468,8 @@ def get_executor_interventions():
     raise an interrupt. Returns [] when disabled so the executor behaves exactly as
     before. Import is lazy so the SDK symbol is only touched when the gate is on.
     """
-    if not settings.executor_hitl_enabled:
+    from agenticops.services import exec_switches      # imported here: the service imports this module
+    if not exec_switches.effective().executor_hitl_enabled:
         return []
     from strands.vended_interventions.hitl import HumanInTheLoop
     return [

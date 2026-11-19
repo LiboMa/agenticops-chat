@@ -676,7 +676,8 @@ def test_settings_security_toggle_needs_admin_when_auth_on(client, settings_io, 
     finally:
         app.dependency_overrides.pop(deps.current_actor, None)
     assert r.status_code == 200 and settings.auto_rca_enabled is False and settings.rbac_enforce is True
-    assert root.user_id and _settings_audits("entity_id", "actor", "user_id") == [
+    assert root.user_id and sorted(_settings_audits("entity_id", "actor", "user_id")) == [
+        ("auto_rca_enabled", "user:root@example.com", root.user_id),       # MVP-2.9.0 N25: every changed value is audited
         ("rbac_enforce", "user:root@example.com", root.user_id)]
 
 

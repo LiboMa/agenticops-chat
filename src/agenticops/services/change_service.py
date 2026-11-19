@@ -22,6 +22,7 @@ from agenticops.auth import authz
 from agenticops.auth.actor import Actor, agent_actor, webhook_actor
 from agenticops.audit.service import Actions, AuditService, EntityTypes
 from agenticops.config import generate_trace_id, get_trace_id, set_trace_id, settings
+from agenticops.services import exec_switches
 from agenticops.models import (  # noqa: F401  (CHANGE_TERMINAL_STATUSES / transition_plan: later stages)
     CHANGE_TERMINAL_STATUSES, ChangeRequest, CloudAccount, CloudResource, FixExecution, FixPlan,
     InvalidStatusTransition, get_db_session, transition_change, transition_plan,
@@ -1180,7 +1181,7 @@ def request_execution(cr_id: int, *, actor: Actor) -> dict:
     concurrent move off 'approved' can never enqueue a double AWS mutation."""
     _require_enabled()
     from agenticops.models import FixExecution
-    if not settings.executor_enabled:
+    if not exec_switches.effective().executor_enabled:
         raise ChangeStateError("Executor is disabled (executor_enabled=false)")
     with _session() as s:
         cr = _load(s, cr_id)
