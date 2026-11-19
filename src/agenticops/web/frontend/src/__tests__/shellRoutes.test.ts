@@ -56,9 +56,16 @@ describe("nativeTarget — a classic address that NewUI has its own page for", (
     expect(nativeTarget("/app/inbox", "?item=I7&q=x", "")).toBe("/app/new/decide/I7");
     expect(nativeTarget("/app/issues", "?item=%3Cscript%3E", "")).toBe("/app/new/decide");
   });
-  it("the other views of the issue list stay the classic list — only «waiting on me» is the Decide lens", () => {
-    for (const view of ["all", "failed", "long_wait", "resources"]) expect(nativeTarget("/app/issues", `?view=${view}`, "")).toBeNull();
-    expect(nativeTarget("/app/issues", "?view=all&q=ssh&item=I12", "")).toBeNull();
+  it("the list of everything opens the «all items» table, with the filters the table can say (N18)", () => {
+    expect(nativeTarget("/app/issues", "?view=all", "")).toBe("/app/new/items");
+    expect(nativeTarget("/app/issues", "?view=all&q=ssh&item=I12&status=all&sort=severity", "")).toBe("/app/new/items?st=all&q=ssh&sort=severity");
+  });
+  it("the «failed» view is the Decide lens with that filter; «waited long» is the lens itself (it has no such filter)", () => {
+    expect(nativeTarget("/app/issues", "?view=failed", "")).toBe("/app/new/decide?f=failed");
+    expect(nativeTarget("/app/issues", "?view=long_wait", "")).toBe("/app/new/decide");
+  });
+  it("a view NewUI has nothing for stays the classic page's to handle (the old ?view=resources / signals redirects)", () => {
+    for (const view of ["resources", "signals", "whatever"]) expect(nativeTarget("/app/issues", `?view=${view}`, "")).toBeNull();
   });
   it("the map opens World, on the resource the link focused", () => {
     expect(nativeTarget("/app/galaxy", "", "")).toBe("/app/new/world");

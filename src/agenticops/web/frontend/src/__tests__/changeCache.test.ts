@@ -83,3 +83,15 @@ describe("SettingsPatch omits the read-only flags (M6)", () => {
     expect(badPatch).toBeDefined();
   });
 });
+
+// MVP-2.9.0 N18 — the list takes several statuses as one comma list
+describe("changesQuery — what a change list request asks for", () => {
+  it("several statuses go as the comma list the server takes; one status as itself", async () => {
+    const { changesQuery } = await import("@/hooks/useChanges");
+    expect(changesQuery({ statuses: ["planned", "approved"], limit: 50 })).toBe("?limit=50&status=planned%2Capproved");
+    expect(changesQuery({ status: "draft" })).toBe("?status=draft");
+    expect(changesQuery({ statuses: [], status: "draft" })).toBe("?status=draft");
+    expect(changesQuery({ q: "C#3", view: "mine", sort: "oldest", offset: 0 })).toBe("?q=C%233&view=mine&sort=oldest&offset=0");
+    expect(changesQuery({})).toBe("");
+  });
+});

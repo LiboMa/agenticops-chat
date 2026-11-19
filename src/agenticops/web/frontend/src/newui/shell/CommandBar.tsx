@@ -1,11 +1,14 @@
 import { useEffect, useState, type RefObject } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAccountScope } from "@/components/layout/AccountScope";
-import { useCanManageUsers, useCanViewSettings } from "@/hooks/useBootstrap";
+import { useBootstrap, useCanManageUsers, useCanViewSettings } from "@/hooks/useBootstrap";
 import { useSearch } from "@/hooks/useSearch";
+import { draftKey, loadDraft, saveDraft } from "@/lib/chatDrafts";
+import { currentUserId } from "@/lib/home";
 import { readChoice } from "@/lib/shellChoice";
 import { useAllWaiting } from "../hooks/useAllWaiting";
 import { useNfT } from "../i18n";
+import { withAsk } from "../lib/ask";
 import { commandRows, moveRow, searchText } from "../lib/command";
 import type { Lens } from "../lib/keys";
 
@@ -20,6 +23,7 @@ export function CommandBar({ input, lens, tucked = false, onTheme, onHelp }: {
   const location = useLocation();
   const { accountId } = useAccountScope();
   const canSettings = useCanViewSettings(), canUsers = useCanManageUsers();
+  const boot = useBootstrap();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [index, setIndex] = useState(0);
@@ -44,7 +48,17 @@ export function CommandBar({ input, lens, tucked = false, onTheme, onHelp }: {
     close();
     if (row.run === "theme") onTheme();
     else if (row.run === "help") onHelp();
-    else if (row.to) navigate(row.to, row.state ? { state: row.state } : undefined);
+    else if (row.to) {
+      if (row.draft) {
+        // «ask an agent»: the sentence goes into the new conversation's draft (the composer's own key — it reads the
+        // draft when it mounts) and is NOT sent: one Enter here must not start an agent run
+        try {
+          const key = draftKey(boot.data?.deployment_id, currentUserId(), "new");
+          saveDraft(localStorage, key, withAsk(loadDraft(localStorage, key), row.draft));
+        } catch { /* no storage: the conversation opens empty */ }
+      }
+      navigate(row.to, row.state ? { state: row.state } : undefined);
+    }
   };
 
   return (

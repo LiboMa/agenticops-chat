@@ -83,7 +83,8 @@ export function NewShell({ children, hosting = false, tucked = false }: { childr
   // nothing yet while /app is still deciding where home is)
   const crumb = breadcrumbFor(location.pathname);
   const resolving = /^\/app\/?$/.test(location.pathname);
-  const section = !hosting || resolving ? null : classicT(crumb.sectionKey ?? "notFound.title");
+  const ownPage = currentPage(location.pathname) === "items" && !hosting;         // a NewUI page that is no lens
+  const section = ownPage ? t("pages.items") : !hosting || resolving ? null : classicT(crumb.sectionKey ?? "notFound.title");
   useEffect(() => {
     document.title = shellTitle(location.pathname, { lens: lens ? t(`lens.${lens}`) : null, story: t("act.story"), section });
   }, [location.pathname, lens, t, section]);
@@ -199,7 +200,7 @@ export function NewShell({ children, hosting = false, tucked = false }: { childr
     setFontSize(sizes[(sizes.indexOf(fontSize) + 1) % sizes.length]);
   };
   const pages = pagesMenu({ settings: canSettings, users: canUsers });
-  const here = hosting ? currentPage(location.pathname) : null;
+  const here = currentPage(location.pathname);                 // null on a lens
 
   return (
     <ShellContext.Provider value={api}>
@@ -228,11 +229,11 @@ export function NewShell({ children, hosting = false, tucked = false }: { childr
                     {k > 0 && <div className="sep" />}
                     <div className="whoami">{classicT(g.labelKey)}</div>
                     {g.items.map((i) => {
-                      const badge = i.id === "issues" ? null : navBadge(i.id, { status: nav.status, data: nav.data }, readOnly).count;
+                      const badge = i.own ? null : navBadge(i.id, { status: nav.status, data: nav.data }, readOnly).count;
                       return (
                         <Link key={i.id} className="mi" role="menuitem" to={i.to} state={i.state} aria-current={here === i.id ? "page" : undefined}
                               onClick={() => setMenu(null)}>
-                          {classicT(i.labelKey)}{badge ? <small className="num">{badge}</small> : null}
+                          {i.own ? t(i.labelKey) : classicT(i.labelKey)}{badge ? <small className="num">{badge}</small> : null}
                         </Link>
                       );
                     })}

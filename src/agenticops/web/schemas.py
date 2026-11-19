@@ -1120,6 +1120,20 @@ class ChangeRequestResponse(BaseModel):
     needs_review_reason: Optional[str] = None
 
 
+class ChangeRequestListItem(ChangeRequestResponse):
+    """A row of GET /api/changes (MVP-2.9.0 N18): the snapshot, plus who it waits on and since when (the change
+    page's own answer — services/attention.change_waits), its newest plan's version and its account's name."""
+    waiting_on: Optional[str] = None
+    waiting_since: Optional[datetime] = None
+    plan_version: Optional[int] = None
+    account_name: Optional[str] = None
+
+
+class ChangeRequestList(BaseModel):
+    items: List[ChangeRequestListItem]
+    total: int                    # of everything that matches, not of this page
+
+
 class ChangeRequestDetail(ChangeRequestResponse):
     # MVP-2.8.0 S2: who the change waits on (work_phases.change_phase) and since when (its last update)
     waiting_on: Optional[str] = None

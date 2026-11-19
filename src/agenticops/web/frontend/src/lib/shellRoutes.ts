@@ -63,9 +63,13 @@ export function nativeTarget(pathname: string, search: string, _hash: string): s
   if (m) return `/app/new/story/C${m[1]}`;
   const params = new URLSearchParams(search);
   if (path === "/app/inbox" || path === "/app/issues") {
-    const view = params.get("view");
-    // «waiting on me» (the list's default) is the Decide lens; the other views of the list stay the classic list
-    if (path === "/app/issues" && view !== null && view !== "waiting" && view !== "mine") return null;
+    const view = path === "/app/issues" ? params.get("view") : null;
+    // the list of everything is NewUI's «all items» table; «failed» is the Decide lens with that filter, «waited long»
+    // the lens itself (it has no such filter); a view NewUI has nothing for is the classic page's to handle
+    if (view === "all") return itemsAddress(params);
+    if (view === "failed") return "/app/new/decide?f=failed";
+    if (view !== null && view !== "waiting" && view !== "mine" && view !== "long_wait") return null;
+    // «waiting on me» (the list's default) is the Decide lens, with the item the link had open
     const item = params.get("item") ?? "";
     return ITEM.test(item) ? `/app/new/decide/${item}` : "/app/new/decide";
   }
@@ -74,6 +78,21 @@ export function nativeTarget(pathname: string, search: string, _hash: string): s
     return focus ? `/app/new/world?sel=${focus[1]}` : "/app/new/world";
   }
   return null;
+}
+
+/** A classic issue-list address (/app/issues?view=all&status=…&severity=…&q=…&sort=…) as the address of NewUI's
+ *  «all items» table (its own parameters: st / status / sev / q / sort — newui/lib/items reads them, and
+ *  `__tests__/newuiItems.test.ts` checks the two agree). What the table cannot say is dropped. */
+function itemsAddress(p: URLSearchParams): string {
+  const status = p.get("status"), sev = p.get("severity"), sort = p.get("sort"), q = (p.get("q") ?? "").trim().slice(0, 200);
+  const out = new URLSearchParams();
+  if (status === "all" || status === "resolved" || status === "dismissed") out.set("st", "all");
+  if (status === "resolved" || status === "dismissed") out.set("status", status);
+  if (sev && ["critical", "high", "medium", "low"].includes(sev)) out.set("sev", sev);
+  if (q) out.set("q", q);
+  if (sort === "oldest" || sort === "severity") out.set("sort", sort);
+  const s = out.toString();
+  return s ? `/app/new/items?${s}` : "/app/new/items";
 }
 
 export type ClassicSection = "issues" | "changes" | "galaxy";

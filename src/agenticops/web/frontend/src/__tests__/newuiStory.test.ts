@@ -149,6 +149,10 @@ describe("storyOrigin — where «经过» was opened from, and so where its way
     expect(storyOrigin({ from: "decide", back: "/app/new/decide/I12?f=approval" })).toEqual({ from: "decide", back: "/app/new/decide/I12?f=approval" });
     expect(storyOrigin({ from: "live", back: "/app/new/live" })).toEqual({ from: "live", back: "/app/new/live" });
   });
+  it("the «all items» table is a way back too (N18)", () => {
+    expect(storyOrigin({ from: "items", back: "/app/new/items?kind=change&q=x" })).toEqual({ from: "items", back: "/app/new/items?kind=change&q=x" });
+    expect(storyOrigin({ from: "items", back: "/app/new/itemsx" })).toBeNull();
+  });
   it("is nothing for a direct link, and never an address outside NewUI", () => {
     expect(storyOrigin(null)).toBeNull();
     expect(storyOrigin({})).toBeNull();

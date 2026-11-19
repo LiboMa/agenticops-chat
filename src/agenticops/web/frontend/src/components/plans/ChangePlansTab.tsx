@@ -41,14 +41,17 @@ export function ChangePlansTab() {
     limit: LIST_LIMIT,
   });
   const accounts = useAccounts();
+  // MVP-2.9.0 N18: the list answers {items, total}; `total` says how many match when the page was cut
+  const loaded = useMemo(() => changes.data?.items ?? [], [changes.data]);
+  const total = changes.data?.total ?? 0;
 
   // Requester filter is client-side over the loaded page: exact actor keys cannot be typed.
   const requesters = useMemo(() => {
-    const set = new Set((changes.data ?? []).map((c) => c.requested_by));
+    const set = new Set(loaded.map((c) => c.requested_by));
     if (requester) set.add(requester); // keep the selection visible even if it left the current page
     return [...set].sort();
-  }, [changes.data, requester]);
-  const rows = requester ? (changes.data ?? []).filter((c) => c.requested_by === requester) : (changes.data ?? []);
+  }, [loaded, requester]);
+  const rows = requester ? loaded.filter((c) => c.requested_by === requester) : loaded;
 
   const accountNames = useMemo(() => new Map((accounts.data ?? []).map((a) => [a.id, a.name])), [accounts.data]);
   const accountName = (id: number | null) => (id == null ? null : accountNames.get(id) ?? null);
@@ -85,7 +88,7 @@ export function ChangePlansTab() {
             emptyMessage={t("plans.noChanges")}
             t={t}
           />
-          {(changes.data?.length ?? 0) >= LIST_LIMIT && (
+          {total > loaded.length && (
             <p className="text-xs text-muted-foreground">{t("plans.limitNote").replace("{n}", String(LIST_LIMIT))}</p>
           )}
         </>

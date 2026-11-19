@@ -11,7 +11,7 @@ import { MessageList } from "@/components/chat/MessageList";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { DragHandle } from "@/components/chat/DragHandle";
 import { ContextPanel } from "@/components/chat/ContextPanel";
-import { contextRefFromQuery, contextRefQuery, type ContextRef } from "@/lib/contextRef";
+import { contextRefFromQuery, contextRefQuery, type ContextRef, startsFresh } from "@/lib/contextRef";
 import { contextForNewChat, contextLineKey } from "@/lib/chatContext";
 import { STARTERS } from "@/lib/chatMessageStatus";
 import { fillPlaceholders } from "@/lib/placeholders";
@@ -46,6 +46,8 @@ export default function Chat() {
   const { data: sessions } = useChatSessions();
   // «Ask Agent» (MVP-2.7.0 S4): /app/chat?ref=I12 opens a new chat with that record as its context, sends nothing
   const [initialRef] = useState(() => contextRefFromQuery(location.search));
+  // …and so does a link that asks for a new conversation (lib/contextRef.startsFresh; MVP-2.9.0 N19)
+  const [fresh] = useState(() => startsFresh(location.search, location.state));
 
   // Whether we're in "welcome" mode (no active session)
   const [showWelcome, setShowWelcome] = useState(false);
@@ -65,7 +67,7 @@ export default function Chat() {
   useEffect(() => {
     if (urlSessionId || restorationAttempted.current) return;
     restorationAttempted.current = true;
-    if (initialRef) {  // a new conversation about that record: never resume the last session
+    if (initialRef || fresh) {  // a new conversation (about that record, or asked for): never resume the last session
       setShowWelcome(true);
       return;
     }
@@ -227,8 +229,12 @@ export default function Chat() {
       {t("chat.createFailed").replace("{error}", createError)}
     </div>
   ) : null;
+  // MVP-2.9.0 N19: a link that asks for a new conversation may bring a sentence in its draft (NewUI's command bar).
+  // When the welcome composer is already on the page it has read the draft before: such a link mounts it anew, so it
+  // reads the draft again (uploads in flight are kept — their queue lives outside the component).
+  const composerKey = startsFresh("", location.state) ? location.key : "welcome";
   const welcomeComposer = (layout: "dock" | "center") => (
-    <ChatInput onSend={handleWelcomeSend} disabled={creating} streaming={false} sessionId={null} prefill={prefill}
+    <ChatInput key={composerKey} onSend={handleWelcomeSend} disabled={creating} streaming={false} sessionId={null} prefill={prefill}
                dropTargetRef={chatColRef} onDragChange={setDragging} layout={layout} />
   );
 

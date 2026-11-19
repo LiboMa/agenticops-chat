@@ -1,5 +1,6 @@
 import type { SearchResponse, SearchResultItem } from "@/api/types";
 import type { AttentionItem } from "@/lib/attention";
+import { FRESH_CHAT } from "@/lib/contextRef";
 import type { Lens } from "./keys";
 import { storyPath } from "./story";
 
@@ -16,9 +17,11 @@ export interface CommandRow {
   hint?: string;
   /** where it goes (with the router state to go with) … */
   to?: string;
-  state?: { from: Lens; back: string };
+  state?: { from: Lens; back: string } | { fresh: true };
   /** … or what it switches */
   run?: "theme" | "help";
+  /** a sentence to put into the new conversation's draft before going there (N19: «ask an agent») */
+  draft?: string;
 }
 
 export interface CommandCtx {
@@ -52,6 +55,7 @@ function commands({ t, canSettings, canUsers, hosts }: CommandCtx): CommandRow[]
     { id: "go:decide", label: t("cmd.decide"), hint: "1", to: "/app/new/decide" },
     { id: "go:live", label: t("cmd.live"), hint: "2", to: "/app/new/live" },
     { id: "go:world", label: t("cmd.world"), hint: "3", to: "/app/new/world" },
+    { id: "go:items", label: t("cmd.items"), to: "/app/new/items" },
     { id: "do:theme", label: t("cmd.theme"), hint: "T", run: "theme" },
     { id: "do:help", label: t("cmd.keys"), hint: "?", run: "help" },
     // a page the person may not open is not offered: it would only answer «not found»
@@ -98,7 +102,14 @@ export function commandRows(q: string, ctx: CommandCtx, max = COMMAND_MAX): Comm
   const cmds = sign === "@" ? [] : commands(ctx).filter((c) => !text || c.label.toLowerCase().includes(text));
   if (sign === "/" || !text) return cmds.slice(0, max);
   const mine = items(text, ctx);
-  return [...cmds, ...mine, ...found(ctx, new Set(mine.map((m) => m.id.slice(5))))].slice(0, max);
+  const places = [...cmds, ...mine, ...found(ctx, new Set(mine.map((m) => m.id.slice(5))))];
+  // plain text can also be a question: the last row takes it to a new conversation, as a draft (it is not sent).
+  // The row keeps its place when the list is cut — a question must not depend on how much else matched.
+  if (sign === "" && raw.length >= 2) {
+    const ask: CommandRow = { id: "ask", label: `${ctx.t("cmd.ask")}${raw}`, hint: ctx.t("cmd.ask.hint"), to: "/app/chat", state: FRESH_CHAT, draft: raw };
+    return [...places.slice(0, max - 1), ask];
+  }
+  return places.slice(0, max);
 }
 
 /** What is sent to the search for what was typed: nothing for a command, nor for a text too short to mean anything. */

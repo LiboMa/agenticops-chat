@@ -2705,7 +2705,8 @@ def _fix_plan_response(session, plan, actor: Optional[Actor] = None) -> FixPlanR
 
 
 def _like(term: str) -> str:
-    return "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    from agenticops.services.listing import like_pattern
+    return like_pattern(term)
 
 
 def _reject_plan(session, plan, actor: Actor, reason: str) -> None:

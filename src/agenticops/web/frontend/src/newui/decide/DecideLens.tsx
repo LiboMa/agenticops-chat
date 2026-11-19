@@ -12,6 +12,7 @@ import { useMyItem } from "../hooks/useMyItem";
 import { useSnooze } from "../hooks/useSnooze";
 import { useNfT } from "../i18n";
 import { agentOn } from "../lib/activity";
+import { askPath } from "../lib/ask";
 import { briefKind, itemKind } from "../lib/briefKind";
 import { swapGuard } from "../lib/keys";
 import {
@@ -170,6 +171,8 @@ export function DecideLens() {
       if (briefKeys.current?.onKey?.(key, e, repeat)) return true;
       // not while a reason is being written: moving on would drop it (its field has the keys while it is focused)
       if (key === "s" && cur && !readOnly && !document.querySelector(".nf .brief form")) { later(cur.item); return true; }
+      // «Q»: ask the agent about this item — a conversation tied to it
+      if (key === "q" && curId && askPath(curId) && !repeat) { navigate(askPath(curId)!); return true; }
       return false;
     },
     onKeyUp: (key) => briefKeys.current?.onKeyUp?.(key),
@@ -234,7 +237,7 @@ export function DecideLens() {
     body = why === "readOnly" ? (
       <Message big={t("empty.readOnly.big")}>
         <p>{t("empty.readOnly.p")}</p>
-        <p><Link className="btn" to="/app/issues"><span className="t">{t("empty.readOnly.open")}</span></Link></p>
+        <p><Link className="btn" to="/app/new/items"><span className="t">{t("empty.readOnly.open")}</span></Link></p>
       </Message>
     ) : why === "filtered" ? (
       <Message big={t("empty.filtered.big")}>

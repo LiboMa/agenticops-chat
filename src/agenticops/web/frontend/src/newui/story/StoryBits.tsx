@@ -29,9 +29,11 @@ export interface StoryFrame {
   now: number;
   readOnly: boolean;
   /** the lens the page was opened from: its way back */
-  from: "decide" | "live" | "world";
+  from: "decide" | "live" | "world" | "items";
   onBack: () => void;
   onDecide: () => void;
+  /** «ask the agent about this item»: the conversation's address (N19); null when the address is no item */
+  askTo?: string | null;
 }
 
 /** The top of the page: the way back, which item, where it stands and who it waits on — and, when it waits on this
@@ -59,6 +61,7 @@ export function StoryHead({ frame, refText, tone, sev, title, state, wait, stuck
       <div className="meta" style={{ marginTop: 10 }}>
         <span className="ref">{refText}</span>
         {sev && <span className={`sev ${tone}`}>{sev}</span>}
+        {frame.askTo && <Link className="story-link" to={frame.askTo}>{t("act.ask")}<kbd>Q</kbd></Link>}
       </div>
       <h1>{title}</h1>
       <div className="statusline">

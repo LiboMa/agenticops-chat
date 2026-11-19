@@ -47,20 +47,24 @@ export function issueRow(a: HealthIssue, search = ""): WorkItemRow {
            account: a.account_name, time: a.detected_at };
 }
 
-/** A change list row; a closed change's "wait" column says its next step (copy as new) instead. */
-export function changeRow(cr: ChangeRequest, accountName?: string | null): WorkItemRow {
+/** A change list row; a closed change's "wait" column says its next step (copy as new) instead. MVP-2.9.0 N18: the
+ *  list says who each change waits on and since when (the change page's own answer); a row without the field — the
+ *  page's own object, an older server — keeps the page's reading of the status. */
+export function changeRow(cr: ChangeRequest & { waiting_on?: string | null; waiting_since?: string | null; account_name?: string | null },
+                          accountName?: string | null): WorkItemRow {
   const p = changePhases(cr);
+  const waitingFor = cr.waiting_on !== undefined ? cr.waiting_on : p.waitingFor;
   const ext = cr.external_ref ? `${cr.external_ref.system} ${cr.external_ref.ticket_id}` : null;
   const sub = [cr.requested_by, ext].filter(Boolean).join(" · ") || null;
   const type = cr.effective_change_type ?? cr.requested_change_type;
   return { key: `C${cr.id}`, ref: `C#${cr.id}`, href: `/app/changes/${cr.id}`, title: cr.title,
            subtitle: sub, subtitleFull: sub,
            statusKey: `changes.status.${cr.status}`, dots: p.phases,
-           waitKey: p.waitingFor ? `workitem.wait.${p.waitingFor}` : p.primary === "copyAsNew" ? "workitem.primary.copyAsNew" : null,
-           waitSince: null,
+           waitKey: waitingFor ? `workitem.wait.${waitingFor}` : p.primary === "copyAsNew" ? "workitem.primary.copyAsNew" : null,
+           waitSince: waitingFor && PEOPLE.has(waitingFor) ? cr.waiting_since ?? null : null,
            level: cr.risk_level, typeKey: type ? `plans.changeType.${type}` : null, recurrence: 1,
            emphasis: p.terminal ? "closed" : null,
-           account: accountName ?? null, time: cr.updated_at ?? cr.created_at };
+           account: cr.account_name ?? accountName ?? null, time: cr.updated_at ?? cr.created_at };
 }
 
 const planDots = (status: string): PhaseView[] => {

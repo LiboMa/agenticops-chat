@@ -134,3 +134,37 @@ describe("fixPlanRow — the hub's fix-plan list (MVP-2.7.0 S3)", () => {
     expect(r.dots.map((d) => d.state)).toEqual(["failed", "future"]);
   });
 });
+
+describe("changeRow — who it waits on, from the server (MVP-2.9.0 N18)", () => {
+  const cr = (x: Record<string, unknown>) => ({ id: 2, title: "Scale ng-app", status: "planned", review_verdict: "approved_for_planning",
+    requested_by: "user:alice", requested_change_type: "normal", effective_change_type: "normal", risk_level: "L2",
+    created_at: "2026-11-18T08:00:00Z", updated_at: "2026-11-18T09:00:00Z", ...x }) as unknown as ChangeRequest;
+  it("uses waiting_on / waiting_since when the list sends them; a person's wait has its start", () => {
+    const r = changeRow(cr({ waiting_on: "approver", waiting_since: "2026-11-18T09:00:00Z" }));
+    expect(r).toMatchObject({ waitKey: "workitem.wait.approver", waitSince: "2026-11-18T09:00:00Z" });
+  });
+  it("the server's word wins over the page's own reading of the status", () => {
+    // «planned» reads as «waits on the approver» on the page; when the list says otherwise, the list is right
+    expect(changeRow(cr({ status: "planned", waiting_on: "requester", waiting_since: "2026-11-18T09:00:00Z" })))
+      .toMatchObject({ waitKey: "workitem.wait.requester", waitSince: "2026-11-18T09:00:00Z" });
+    expect(changeRow(cr({ status: "planned", waiting_on: "executor", waiting_since: "2026-11-18T09:00:00Z" })))
+      .toMatchObject({ waitKey: "workitem.wait.executor", waitSince: null });
+    expect(changeRow(cr({ status: "planned", waiting_on: null }))).toMatchObject({ waitKey: null, waitSince: null });
+  });
+  it("the system's wait has no clock", () => {
+    const r = changeRow(cr({ status: "under_review", waiting_on: "sre_agent", waiting_since: "2026-11-18T09:00:00Z" }));
+    expect(r).toMatchObject({ waitKey: "workitem.wait.sre_agent", waitSince: null });
+  });
+  it("the server's «nobody» stands — a closed change still says its next step", () => {
+    expect(changeRow(cr({ status: "completed", waiting_on: null }))).toMatchObject({ waitKey: null, waitSince: null });
+    expect(changeRow(cr({ status: "cancelled", waiting_on: null }))).toMatchObject({ waitKey: "workitem.primary.copyAsNew", waitSince: null });
+  });
+  it("a server without the field (the change's own page, an older one) keeps the page's own answer", () => {
+    expect(changeRow(cr({}))).toMatchObject({ waitKey: "workitem.wait.approver", waitSince: null });
+  });
+  it("the row's account is the list's, else the one handed in", () => {
+    expect(changeRow(cr({ account_name: "prod" }), "other").account).toBe("prod");
+    expect(changeRow(cr({ account_name: null }), "other").account).toBe("other");
+    expect(changeRow(cr({})).account).toBeNull();
+  });
+});

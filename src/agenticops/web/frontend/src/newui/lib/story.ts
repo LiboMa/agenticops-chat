@@ -113,15 +113,15 @@ export function pageTitle(pathname: string, lensLabel: string, storyLabel: strin
 /** An item's «经过» page. */
 export const storyPath = (item: string): string => `/app/new/story/${encodeURIComponent(item)}`;
 
-export interface StoryOrigin { from: "decide" | "live" | "world"; back: string }
+export interface StoryOrigin { from: "decide" | "live" | "world" | "items"; back: string }
 
 /** Where the page was opened from (the router's state): the lens, and the address its way back leads to. A direct
  *  link has none — and an address that is not NewUI's own is never a way back. */
 export function storyOrigin(state: unknown): StoryOrigin | null {
   if (!state || typeof state !== "object") return null;
   const { from, back } = state as { from?: unknown; back?: unknown };
-  if (from !== "decide" && from !== "live" && from !== "world") return null;
-  return typeof back === "string" && /^\/app\/new\/(decide|live|world)(\/|\?|$)/.test(back) ? { from, back } : null;
+  if (from !== "decide" && from !== "live" && from !== "world" && from !== "items") return null;
+  return typeof back === "string" && /^\/app\/new\/(decide|live|world|items)(\/|\?|$)/.test(back) ? { from, back } : null;
 }
 
 const WAS_APPROVED: readonly string[] = ["approved", "executing", "executed", "failed"];

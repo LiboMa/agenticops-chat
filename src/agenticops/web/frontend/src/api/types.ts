@@ -1276,6 +1276,16 @@ export interface ChangeStepsDiff {
   unchanged: number;
 }
 
+/** A row of GET /api/changes (MVP-2.9.0 N18): who it waits on and since when (the change page's own answer), its
+ *  newest plan's version, its account's name. */
+export interface ChangeRequestListItem extends ChangeRequest {
+  waiting_on?: string | null;
+  waiting_since?: string | null;
+  plan_version?: number | null;
+  account_name?: string | null;
+}
+export interface ChangeRequestPage { items: ChangeRequestListItem[]; total: number }
+
 export interface ChangeRequestDetail extends ChangeRequest {
   /** MVP-2.8.0 S2: who it waits on and since when */
   waiting_on?: string | null;

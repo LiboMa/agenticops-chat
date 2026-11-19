@@ -1,6 +1,7 @@
 import { Link, Navigate, Route, Routes } from "react-router-dom";
 import { DecideLens } from "./decide/DecideLens";
 import { useNfT } from "./i18n";
+import { ItemsLens } from "./items/ItemsLens";
 import { LiveLens } from "./live/LiveLens";
 import { Message } from "./shell/StateBlock";
 import { StoryLens } from "./story/StoryLens";
@@ -18,6 +19,7 @@ export default function NewLenses() {
       <Route path="live" element={<LiveLens />} />
       <Route path="live/:lane" element={<LiveLens />} />
       <Route path="world" element={<WorldLens />} />
+      <Route path="items" element={<ItemsLens />} />
       <Route path="*" element={<Lost />} />
     </Routes>
   );

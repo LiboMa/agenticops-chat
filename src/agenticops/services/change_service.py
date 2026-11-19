@@ -189,6 +189,63 @@ def list_changes(*, status: Optional[str] = None, account_id: Optional[int] = No
         return [to_dict(c) for c in q.offset(offset).limit(limit).all()]
 
 
+CHANGE_SORTS = ("newest", "oldest")
+
+
+def page_changes(*, statuses: Optional[list[str]] = None, account_id: Optional[int] = None, requested_by: Optional[str] = None,
+                 since: Optional[datetime] = None, q: Optional[str] = None, ids: Optional[list[int]] = None,
+                 sort: str = "newest", limit: int = 50, offset: int = 0) -> dict:
+    """One page of change requests and how many match in all (MVP-2.9.0 N18 — the list half of the 2.8.0 spec's S5).
+    `q`: the title, the account's name, or the number (C#12 / c12 / 12); what was typed is matched literally.
+    `ids`: only these (a view — «waiting on me» — computed by the caller); every other filter still applies.
+    Each row also says who it waits on and since when (services/attention.change_waits, the change page's own
+    answer), the version of its newest implementation plan, and its account's name."""
+    from sqlalchemy import or_
+    from agenticops.models import CloudAccount
+    from agenticops.services.attention import change_waits
+    from agenticops.services.listing import like_pattern, ref_number
+    with _session() as s:
+        query = s.query(ChangeRequest)
+        if statuses:
+            query = query.filter(ChangeRequest.status.in_(statuses))
+        if account_id is not None:
+            query = query.filter(ChangeRequest.account_id == account_id)
+        if requested_by:
+            query = query.filter(ChangeRequest.requested_by == requested_by)
+        if since is not None:
+            query = query.filter(ChangeRequest.created_at >= since)
+        if ids is not None:
+            query = query.filter(ChangeRequest.id.in_(ids))
+        term = (q or "").strip()
+        if term:
+            like = like_pattern(term)
+            named = s.query(CloudAccount.id).filter(CloudAccount.name.ilike(like, escape="\\"))
+            conds = [ChangeRequest.title.ilike(like, escape="\\"), ChangeRequest.account_id.in_(named)]
+            number = ref_number(term, "Cc")
+            if number is not None:
+                conds.append(ChangeRequest.id == number)
+            query = query.filter(or_(*conds))
+        total = query.count()
+        order = ((ChangeRequest.created_at.asc(), ChangeRequest.id.asc()) if sort == "oldest"
+                 else (ChangeRequest.created_at.desc(), ChangeRequest.id.desc()))
+        crs = query.order_by(*order).offset(offset).limit(limit).all()
+        if not crs:
+            return {"items": [], "total": total}
+        waits = change_waits(crs)
+        versions: dict[int, Optional[int]] = {}
+        for plan in (s.query(FixPlan).filter(FixPlan.change_request_id.in_([c.id for c in crs]), FixPlan.plan_kind == "change")
+                     .order_by(FixPlan.created_at.desc(), FixPlan.id.desc())):
+            versions.setdefault(plan.change_request_id, plan.plan_version)      # the newest plan's
+        accounts = {c.account_id for c in crs if c.account_id is not None}
+        names = dict(s.query(CloudAccount.id, CloudAccount.name).filter(CloudAccount.id.in_(accounts))) if accounts else {}
+        items = []
+        for cr in crs:
+            phase, waiting_since = waits[cr.id]
+            items.append({**to_dict(cr), "waiting_on": phase.waiting_for, "waiting_since": waiting_since,
+                          "plan_version": versions.get(cr.id), "account_name": names.get(cr.account_id)})
+        return {"items": items, "total": total}
+
+
 def active_plan_for(session, cr_id: int) -> Optional[FixPlan]:
     """Latest non-terminal change plan for a request (None when there is none)."""
     from agenticops.models import FIXPLAN_TERMINAL_STATUSES

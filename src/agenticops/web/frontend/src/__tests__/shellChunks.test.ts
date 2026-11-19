@@ -21,7 +21,7 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 const ENTRY = ["App.tsx", "main.tsx", "components/layout/ShellSwitch.tsx", "components/layout/NewFrame.tsx", "components/layout/AppShell.tsx",
-               "components/layout/HomeResolver.tsx"];
+               "components/layout/HomeResolver.tsx", "lib/shellChoice.ts", "lib/shellRoutes.ts", "lib/home.ts"];
 
 describe("the entry chunk has nothing of NewUI in it", () => {
   it.each(ENTRY)("%s imports nothing from @/newui statically", (file) => {

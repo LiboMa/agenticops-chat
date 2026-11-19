@@ -8,6 +8,7 @@ import { DecideContext, type BriefKeys, type DecideApi } from "../decide/briefs/
 import { usePeek } from "../decide/widgets/usePeek";
 import { useMyItem } from "../hooks/useMyItem";
 import { useNfT } from "../i18n";
+import { askPath } from "../lib/ask";
 import { storyOrigin } from "../lib/story";
 import { Message } from "../shell/StateBlock";
 import { useLensKeys, useShell } from "../shell/shellContext";
@@ -66,6 +67,7 @@ export function StoryLens() {
     onKey: (key, e, repeat) => {
       if (peek.onKey(key)) return true;
       if (key === "enter" && mine) { if (!repeat) decide(); return true; }
+      if (key === "q" && item && askPath(item) && !repeat) { navigate(askPath(item)!); return true; }
       return pageKeys.current?.onKey?.(key, e, repeat);
     },
     onEscape: () => {
@@ -75,7 +77,8 @@ export function StoryLens() {
     },
   });
 
-  const frame: StoryFrame = { item: item ?? "", mine, now, readOnly, from: origin?.from ?? "decide", onBack: back, onDecide: decide };
+  const frame: StoryFrame = { item: item ?? "", mine, now, readOnly, from: origin?.from ?? "decide", onBack: back, onDecide: decide,
+                              askTo: item ? askPath(item) : null };
   return (
     <DecideContext.Provider value={api}>
       <section className="view" id="story">

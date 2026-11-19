@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import type { AttentionItem } from "@/lib/attention";
 import { useItemRefresh } from "../hooks/useItemData";
 import { useNfT } from "../i18n";
+import { askPath } from "../lib/ask";
 import { toneOf } from "../lib/queue";
 import { storyPath } from "../lib/story";
 import { utcHm } from "../lib/time";
@@ -46,6 +47,8 @@ export function BriefFrame({ item, index, total, accountName, now, ask, actions,
         <Link className="story-link" to={storyPath(item.id)} state={{ from: "decide", back: location.pathname + location.search }}>
           {t("act.story")}<kbd>↵</kbd>
         </Link>
+        {/* N19: a conversation with the agent, tied to this item (a read-only account may ask too) */}
+        {askPath(item.id) && <Link className="story-link" to={askPath(item.id)!}>{t("act.ask")}<kbd>Q</kbd></Link>}
         {later && !readOnly && (
           <button type="button" className="story-link" disabled={later.busy} aria-pressed={later.until !== null} onClick={later.toggle}>
             {t(later.until ? "act.unsnooze" : "act.snooze")}<kbd>S</kbd>

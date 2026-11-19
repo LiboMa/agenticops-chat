@@ -20,13 +20,14 @@ const ids = (list: CommandRow[]) => list.map((r) => r.id);
 
 describe("commandRows — what the command bar offers for what was typed", () => {
   it("with nothing typed: where you can go, and what you can switch", () => {
-    expect(ids(rows(""))).toEqual(["go:decide", "go:live", "go:world", "do:theme", "do:help", "page:chat", "page:reports", "page:resources"]);
+    expect(ids(rows(""))).toEqual(["go:decide", "go:live", "go:world", "go:items", "do:theme", "do:help", "page:chat", "page:reports"]);
     expect(rows("")).toHaveLength(COMMAND_MAX);
   });
 
   it("a lens row goes to that lens; a page row to its page — every page the app has", () => {
     const all = commandRows("/", { ...base, found: undefined }, 99);
     expect(all.find((r) => r.id === "go:world")).toMatchObject({ to: "/app/new/world", hint: "3" });
+    expect(all.find((r) => r.id === "go:items")).toMatchObject({ to: "/app/new/items" });
     expect(all.filter((r) => r.id.startsWith("page:")).map((r) => r.to)).toEqual(
       ["/app/chat", "/app/reports", "/app/resources", "/app/schedules", "/app/skills", "/app/security", "/app/plans", "/app/overview",
        "/app/agent-metrics", "/app/signals", "/app/users", "/app/settings", "/app/account/api-keys"]);
@@ -78,10 +79,10 @@ describe("commandRows — what the command bar offers for what was typed", () =>
   });
 
   it("plain text matches commands and things alike; a number finds the item with that number", () => {
-    expect(ids(rows("scale"))).toEqual(["item:C3"]);
-    expect(ids(rows("12"))).toEqual(["item:I12"]);
-    expect(ids(rows("i#12"))).toEqual(["item:I12"]);
-    expect(ids(rows("cmd.live"))).toEqual(["go:live"]);
+    expect(ids(rows("scale"))).toEqual(["item:C3", "ask"]);
+    expect(ids(rows("12"))).toEqual(["item:I12", "ask"]);
+    expect(ids(rows("i#12"))).toEqual(["item:I12", "ask"]);
+    expect(ids(rows("cmd.live"))).toEqual(["go:live", "ask"]);
   });
 
   it("never lists more than eight rows", () => {
@@ -106,5 +107,27 @@ describe("moveRow — the arrow keys in the list", () => {
     expect(moveRow(3, 0, -1)).toBe(2);
     expect(moveRow(3, 2, 1)).toBe(0);
     expect(moveRow(0, 0, 1)).toBe(0);
+  });
+});
+
+describe("the last row of plain text: ask an agent (N19)", () => {
+  const all = (q: string, f?: SearchResponse) => commandRows(q, { ...base, found: f }, 99);
+  it("plain text of two characters or more ends with «ask an agent», carrying the text as typed", () => {
+    const list = all("Why is the web tier slow?");
+    // …to a NEW conversation: /app/chat alone resumes the last one, where the draft would not be seen
+    expect(list[list.length - 1]).toMatchObject({ id: "ask", to: "/app/chat", state: { fresh: true }, draft: "Why is the web tier slow?" });
+    expect(list[list.length - 1].label).toContain("Why is the web tier slow?");
+  });
+  it("a command, a thing, an empty or one-letter text have no such row", () => {
+    for (const q of ["", " ", "x", "/the", "@ssh", "/", "@"]) expect(ids(all(q))).not.toContain("ask");
+  });
+  it("it keeps its place when the list is cut: the last of the eight", () => {
+    const many = found({ issues: Array.from({ length: 20 }, (_, k) => hit("issue", 100 + k, `ssh ${k}`)) });
+    const list = rows("ssh", many);
+    expect(list).toHaveLength(COMMAND_MAX);
+    expect(list[COMMAND_MAX - 1].id).toBe("ask");
+  });
+  it("it is there even when nothing else matches", () => {
+    expect(ids(rows("nothing matches this at all"))).toEqual(["ask"]);
   });
 });

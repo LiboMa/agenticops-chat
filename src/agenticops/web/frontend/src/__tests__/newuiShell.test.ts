@@ -13,6 +13,8 @@ describe("lensOf — the lens tab an address belongs to", () => {
     expect(lensOf("/app/new/story/I12", "world")).toBe("world");
     expect(lensOf("/app/new/story/I12", undefined)).toBe("decide");
     expect(lensOf("/app/new/story/I12", "elsewhere")).toBe("decide");
+    // a story opened from the «all items» table belongs to no lens tab
+    expect(lensOf("/app/new/story/I12", "items")).toBeNull();
   });
   it("no lens is selected on a hosted page, nor on a NewUI page that is not a lens", () => {
     // until round 3 every other address answered «待决»: its tab showed selected over a classic page

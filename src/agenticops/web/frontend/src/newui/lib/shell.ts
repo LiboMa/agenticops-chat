@@ -7,7 +7,8 @@ import { pageTitle } from "./story";
 export function lensOf(pathname: string, from: unknown): Lens | null {
   const m = /^\/app\/new\/(decide|live|world|story)(\/|$)/.exec(pathname);
   if (!m) return null;
-  if (m[1] === "story") return from === "live" || from === "world" ? from : "decide";
+  // a story opened from the «all items» table is a page of no lens
+  if (m[1] === "story") return from === "items" ? null : from === "live" || from === "world" ? from : "decide";
   return m[1] as Lens;
 }
 

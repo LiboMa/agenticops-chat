@@ -22,3 +22,14 @@ export function contextRefFromQuery(search: string): ContextRef | null {
 }
 
 export const contextRefQuery = (ref: ContextRef) => `?ref=${ref.kind === "issue" ? "I" : "C"}${ref.id}`;
+
+/** The router state of a link that means «a new conversation» (`navigate("/app/chat", { state: FRESH_CHAT })`). */
+export const FRESH_CHAT = { fresh: true } as const;
+
+/** Whether /app/chat opens a NEW conversation instead of resuming the last one: it was opened about a record
+ *  (`?ref=`), or the link says so (MVP-2.9.0 N19 — NewUI's command bar brings a sentence into the new conversation's
+ *  draft; resuming the last conversation would leave that draft where nobody sees it). */
+export function startsFresh(search: string, state: unknown): boolean {
+  if (contextRefFromQuery(search)) return true;
+  return !!state && typeof state === "object" && (state as { fresh?: unknown }).fresh === true;
+}

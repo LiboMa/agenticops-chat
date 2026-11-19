@@ -634,3 +634,32 @@
 .nf .menu .mi[aria-current="page"]{color:var(--amber);font-weight:600}
 .nf .chip-btn.on{color:var(--chalk);border-color:var(--amber)}
 .nf select:disabled{opacity:.6;cursor:not-allowed}
+
+/* ── «所有事项»: the table of every issue and change (N18) ─────────────────── */
+.nf #items{display:flex}
+.nf .ipage{flex:1;min-width:0;max-width:1280px;margin:0 auto;display:flex;flex-direction:column;padding:14px 16px 10px}
+.nf .ihead{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.nf .ihead h1{font-size:var(--fs-xl);margin:0}
+.nf .icount{margin-left:auto;color:var(--dim);font-size:var(--fs-sm)}
+.nf .iseg{display:inline-flex;gap:4px}
+.nf .ifilters{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0 8px}
+.nf .ifilters select{height:30px;padding:0 8px;font-size:var(--fs-sm)}
+.nf .ifilters .isearch{flex:1;min-width:160px;max-width:340px;min-height:32px;padding:4px 10px;font-size:var(--fs-md)}
+.nf .iscroll{flex:1;min-height:0;overflow:auto}
+.nf .itable thead th{position:sticky;top:0;background:var(--solid);z-index:1;white-space:nowrap}
+.nf .itable tbody tr{cursor:pointer}
+.nf .itable tbody tr:hover,.nf .itable tbody tr:focus-within{background:var(--raise)}
+.nf .itable tr.closed td{color:var(--dim)}
+.nf .itable td.num{white-space:nowrap}
+.nf .itable .ititle{min-width:220px;overflow-wrap:anywhere}
+.nf .itable a.ttl{color:inherit;text-decoration:none;font-weight:600}
+.nf .itable a.ttl:hover{text-decoration:underline}
+.nf .itable small{display:block;color:var(--faint);font-size:var(--fs-xs);font-weight:400}
+.nf .itable .quiet{color:var(--faint)}
+.nf .imore{display:flex;align-items:center;gap:12px;margin:12px 0 4px}
+@media (max-width:760px){
+  .nf .ipage{padding:10px 10px 6px}
+  .nf .itable .wide{display:none}                    /* the account and the time: on the item's own page */
+  .nf .itable .ititle{min-width:0}
+  .nf .ifilters .isearch{max-width:none;flex-basis:100%}
+}
