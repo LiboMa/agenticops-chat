@@ -30,7 +30,7 @@ class TestPatchModelId:
         assert r.status_code == 200
         assert r.json()["model_id"] == "global.anthropic.claude-opus-4-8"
         # persisted — list endpoint echoes it too
-        rows = client.get("/api/chat/sessions").json()
+        rows = client.get("/api/chat/sessions").json()["items"]
         mine = [s for s in rows if s["session_id"] == session_id][0]
         assert mine["model_id"] == "global.anthropic.claude-opus-4-8"
 

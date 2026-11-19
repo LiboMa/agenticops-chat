@@ -57,6 +57,8 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
   const filesKey = sessionId ?? "new";
   const key = draftKey(boot.data?.deployment_id, currentUserId(), filesKey);
   const [input, setInput] = useState(() => loadDraft(localStorage, key).text);
+  // the words that were kept from before (MVP-2.9.0 N22): «draft kept» shows while the box still holds exactly them
+  const [keptText, setKeptText] = useState(() => loadDraft(localStorage, key).text);
   // 2026-11-07: attachments upload the moment they are attached; each chat keeps its queue in memory
   const queue = useMemo(() => sessionQueues.get(filesKey, () => new UploadQueue({
     onLimitError: () => { void qc.invalidateQueries({ queryKey: bootstrapKey() }); },
@@ -91,6 +93,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
     loadedKey.current = key;
     const d = loadDraft(localStorage, key);
     setInput(d.text);
+    setKeptText(d.text);
     if (queue.items().length === 0 && d.attachmentIds.length > 0) void queue.restore(d.attachmentIds);
   }, [key, queue]);
 
@@ -289,8 +292,10 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
               </DropdownMenu.Portal>
             </DropdownMenu.Root>
             <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
-              {items.length > 0 && t("chat.attach.counter").replace("{n}", String(items.length)).replace("{max}", String(rules.max))
-                .replace("{used}", humanSize(used)).replace("{total}", humanSize(rules.maxTotalBytes))}
+              {items.length > 0
+                ? t("chat.attach.counter").replace("{n}", String(items.length)).replace("{max}", String(rules.max))
+                    .replace("{used}", humanSize(used)).replace("{total}", humanSize(rules.maxTotalBytes))
+                : keptText.trim() !== "" && input === keptText && t("chat.draftKept")}
             </span>
             <ModelSelector sessionId={sessionId ?? null} disabled={disabled || streaming} />
             {streaming ? (

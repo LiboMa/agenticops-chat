@@ -1,3 +1,5 @@
+import { changesState } from "@/lib/changesEnabled";
+import { ChangesUnavailable } from "@/components/change/ChangesUnavailable";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useChange, useChangeAction, type ChangeActionArgs } from "@/hooks/useChanges";
@@ -100,7 +102,8 @@ export function ChangeDetailView({ crId, embedded = false, back }: {
   const [copy, setCopy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const changesOn = settings.data?.change_management_enabled === true;
+  const changes = changesState(settings);
+  const changesOn = changes === "on";
   const valid = Number.isInteger(crId) && crId > 0;
   // 0 keeps both queries disabled, so a disabled flag or a bad id never fetches (the API would 404).
   const qId = changesOn && valid ? crId : 0;
@@ -128,8 +131,7 @@ export function ChangeDetailView({ crId, embedded = false, back }: {
     </div>
   );
 
-  if (settings.isLoading) return <Spinner label={t("common.loading")} />;
-  if (!changesOn) return <p className="text-sm text-muted-foreground">{t("changes.disabled")}</p>;
+  if (changes !== "on") return <ChangesUnavailable state={changes} onRetry={() => void settings.refetch()} />;
   if (!valid || (q.error instanceof ApiError && q.error.status === 404)) return notFoundNotice;
   if (q.isLoading) return <Spinner label={t("common.loading")} />;
   if (q.error)

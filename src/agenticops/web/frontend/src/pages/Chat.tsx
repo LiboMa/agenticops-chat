@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useParams, useNavigate } from "react-router-dom";
-import { useChatSessions } from "@/hooks/useChatSessions";
 import { useChatSession } from "@/hooks/useChatSession";
 import { useSessionStream } from "@/hooks/useSessionStream";
 import { useChatMessages } from "@/hooks/useChatMessages";
@@ -11,7 +10,9 @@ import { MessageList } from "@/components/chat/MessageList";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { DragHandle } from "@/components/chat/DragHandle";
 import { ContextPanel } from "@/components/chat/ContextPanel";
-import { contextRefFromQuery, contextRefQuery, type ContextRef, startsFresh } from "@/lib/contextRef";
+import { FRESH_CHAT, contextRefFromQuery, contextRefQuery, type ContextRef, startsFresh } from "@/lib/contextRef";
+import { visibilityWord } from "@/lib/sessionVisibility";
+import { useAuth } from "@/hooks/useAuth";
 import { contextForNewChat, contextLineKey } from "@/lib/chatContext";
 import { STARTERS } from "@/lib/chatMessageStatus";
 import { fillPlaceholders } from "@/lib/placeholders";
@@ -43,7 +44,7 @@ export default function Chat() {
   const { sessionId: urlSessionId } = useParams<{ sessionId?: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { data: sessions } = useChatSessions();
+  const { isAuthenticated } = useAuth();
   // «Ask Agent» (MVP-2.7.0 S4): /app/chat?ref=I12 opens a new chat with that record as its context, sends nothing
   const [initialRef] = useState(() => contextRefFromQuery(location.search));
   // …and so does a link that asks for a new conversation (lib/contextRef.startsFresh; MVP-2.9.0 N19)
@@ -107,21 +108,24 @@ export default function Chat() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [selectedId]);
 
-  // When URL gains a sessionId, exit welcome mode
+  // When URL gains a sessionId, exit welcome mode — and when a link asks for a new conversation while the page is
+  // already up (the open conversation was the last one and was deleted, N22), enter it
   useEffect(() => {
     if (urlSessionId) {
       setShowWelcome(false);
+    } else if (startsFresh("", location.state)) {
+      setShowWelcome(true);
     }
-  }, [urlSessionId]);
+  }, [urlSessionId, location.key]);
 
-  // Metadata of the open session: also its name when it is not among the 50 listed (e.g. a shared link)
+  // The open conversation's own record (MVP-2.9.0 N22: the list is paged and has three views — the open
+  // conversation need not be on it: an archived one, an old one, a shared link)
   const { data: sessionDetail } = useChatSession(selectedId);
   const { messages, fetchOlder, hasOlder, isFetchingOlder } = useChatMessages(selectedId);
   const { streaming, streamingContent, toolCalls, tokenMetrics, error, attachmentDeliveries, thinking, sendMessage,
           cancel } = useSessionStream(selectedId);
   const [showSaveReport, setShowSaveReport] = useState(false);
-  const currentSession = sessions?.find((s) => s.session_id === selectedId)
-    ?? (sessionDetail?.session_id === selectedId ? sessionDetail : undefined);
+  const currentSession = sessionDetail?.session_id === selectedId ? sessionDetail : undefined;
 
   // Three-zone layout state
   // 2026-11-07: the chat list is open by default beside the chat (persisted). MVP-2.8.0 S2 rework: the page keeps
@@ -217,6 +221,11 @@ export default function Chat() {
   const handleSelectSession = (id: string) => {
     navigate(`/app/chat/${id}`);
   };
+  // the open conversation was deleted and no other is left: the welcome page, not the last conversation resumed
+  const handleNoSession = () => {
+    localStorage.removeItem(lastSessionKey());
+    navigate("/app/chat", { state: FRESH_CHAT });
+  };
 
   // --- Requirement 1.3 ---
   // Handle first message in welcome state: create session lazily, then send message
@@ -252,6 +261,7 @@ export default function Chat() {
               <Dialog.Title className="sr-only">{t("chat.sessions")}</Dialog.Title>
               <SessionFlyout open={drawerOpen} selectedId={selectedId}
                              onSelect={(id) => { setDrawerOpen(false); handleSelectSession(id); }}
+                             onNone={() => { setDrawerOpen(false); handleNoSession(); }}
                              onClose={() => setDrawerOpen(false)} />
             </Dialog.Content>
           </Dialog.Portal>
@@ -267,6 +277,7 @@ export default function Chat() {
           open={flyoutOpen}
           selectedId={selectedId}
           onSelect={handleSelectSession}
+          onNone={handleNoSession}
           onClose={() => setFlyoutOpen(false)}
         />
       </div>
@@ -390,19 +401,27 @@ export default function Chat() {
                 <h3 className="text-sm font-medium text-foreground truncate">
                   {currentSession?.name ?? "Chat"}
                 </h3>
-                {currentSession?.context?.primary && (
-                  <p className="truncate text-xs text-muted-foreground">
-                    <span className="font-mono">{currentSession.context.primary.ref}</span>
-                    {currentSession.context.primary.title && ` · ${currentSession.context.primary.title}`}
-                    {" · "}
-                    <Link className="text-primary hover:underline"
-                          to={currentSession.context.primary.entity_type === "health_issue"
-                            ? `/app/issues/${currentSession.context.primary.entity_id}`
-                            : `/app/changes/${currentSession.context.primary.entity_id}`}>
-                      {t(currentSession.context.primary.entity_type === "health_issue" ? "chat.viewIssue" : "chat.viewChange")}
-                    </Link>
-                  </p>
-                )}
+                {currentSession && (() => {
+                  // MVP-2.9.0 N22: what it is about · its account · who sees it — and, for a linked one, a way there
+                  const about = currentSession.context?.primary ?? null;
+                  const who = visibilityWord(currentSession, isAuthenticated);
+                  return (
+                    <p className="truncate text-xs text-muted-foreground">
+                      {about ? <><span className="font-mono">{about.ref}</span>{about.title && ` · ${about.title}`}</> : t("chat.independent")}
+                      {currentSession.context?.account_name && ` · ${currentSession.context.account_name}`}
+                      {who && ` · ${t(`chat.visibility.${who}`)}`}
+                      {about && (
+                        <>
+                          {" · "}
+                          <Link className="text-primary hover:underline"
+                                to={about.entity_type === "health_issue" ? `/app/issues/${about.entity_id}` : `/app/changes/${about.entity_id}`}>
+                            {t("chat.openRef").replace("{ref}", about.ref)}
+                          </Link>
+                        </>
+                      )}
+                    </p>
+                  );
+                })()}
               </div>
 
               {/* Save as Report button */}

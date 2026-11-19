@@ -1,3 +1,5 @@
+import { changesState } from "@/lib/changesEnabled";
+import { ChangesUnavailable } from "@/components/change/ChangesUnavailable";
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import * as Tabs from "@radix-ui/react-tabs";
@@ -329,13 +331,14 @@ function IssueBody({ issueId }: { issueId: number }) {
 function ChangeBody({ changeId }: { changeId: number }) {
   const { t } = useLocale();
   const settings = useSettings();
-  const on = settings.data?.change_management_enabled === true;
+  const changes = changesState(settings);
+  const on = changes === "on";
   // 0 keeps both queries disabled while change management is off (the API would 404)
   const change = useChange(on ? changeId : 0);
   const timeline = useChangeTimeline(on ? changeId : 0, change.data?.status);
 
-  if (settings.isLoading || (on && change.isLoading)) return <Spinner label={t("common.loading")} />;
-  if (!on) return <p className="p-4 text-xs text-muted-foreground">{t("changes.disabled")}</p>;
+  if (changes !== "on") return <ChangesUnavailable state={changes} onRetry={() => void settings.refetch()} className="p-4" />;
+  if (change.isLoading) return <Spinner label={t("common.loading")} />;
   if (change.error) return <div className="p-4 text-sm text-destructive">{change.error.message}</div>;
   if (!change.data) return null;
 

@@ -1,3 +1,5 @@
+import { changesState } from "@/lib/changesEnabled";
+import { ChangesUnavailable } from "@/components/change/ChangesUnavailable";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useLocale } from "@/i18n/LocaleContext";
@@ -23,7 +25,8 @@ export default function PlansAndChanges() {
   const settings = useSettings();
   const [showNew, setShowNew] = useState(false);
   const attention = useAttention(useAccountScope().accountId);
-  const changesOn = settings.data?.change_management_enabled === true;
+  const changes = changesState(settings);
+  const changesOn = changes === "on";
   // /api/audit needs an admin when auth is on (rbac audit.read): the tab is not offered to anyone else
   const auditOn = auditTabVisible(boot.data);
   const requested = hubTab(params.get("tab"));
@@ -67,7 +70,7 @@ export default function PlansAndChanges() {
       </div>
       <div role="tabpanel" id={`plans-panel-${tab}`} aria-labelledby={`plans-tab-${tab}`}>
         {tab === "fix" && <FixPlansTab />}
-        {tab === "changes" && (changesOn ? <ChangePlansTab /> : <p className="text-sm text-muted-foreground">{t("changes.disabled")}</p>)}
+        {tab === "changes" && (changes === "on" ? <ChangePlansTab /> : <ChangesUnavailable state={changes} onRetry={() => void settings.refetch()} />)}
         {tab === "audit" && <AuditTab />}
       </div>
       {showNew && <NewChangeDialog onClose={() => setShowNew(false)} onCreated={(id) => { setShowNew(false); navigate(`/app/changes/${id}`); }} />}

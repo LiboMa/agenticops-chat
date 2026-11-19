@@ -140,7 +140,7 @@ class TestPatchMultipleFields:
 
 
 # ---------------------------------------------------------------------------
-# GET sessions — include_archived filtering
+# GET sessions — the archive is a view of its own (MVP-2.9.0 N22; was include_archived)
 # ---------------------------------------------------------------------------
 
 class TestListSessionsArchiveFilter:
@@ -149,21 +149,21 @@ class TestListSessionsArchiveFilter:
     def test_default_excludes_archived(self, client, _seed_sessions):
         resp = client.get("/api/chat/sessions")
         assert resp.status_code == 200
-        session_ids = [s["session_id"] for s in resp.json()]
+        session_ids = [s["session_id"] for s in resp.json()["items"]]
         assert _seed_sessions["archived"] not in session_ids
         assert _seed_sessions["normal"] in session_ids
 
-    def test_include_archived_true(self, client, _seed_sessions):
-        resp = client.get("/api/chat/sessions", params={"include_archived": True})
+    def test_the_archived_view_lists_only_archived(self, client, _seed_sessions):
+        resp = client.get("/api/chat/sessions", params={"view": "archived"})
         assert resp.status_code == 200
-        session_ids = [s["session_id"] for s in resp.json()]
+        session_ids = [s["session_id"] for s in resp.json()["items"]]
         assert _seed_sessions["archived"] in session_ids
-        assert _seed_sessions["normal"] in session_ids
+        assert _seed_sessions["normal"] not in session_ids
 
-    def test_include_archived_false_explicit(self, client, _seed_sessions):
-        resp = client.get("/api/chat/sessions", params={"include_archived": False})
+    def test_the_all_view_explicit(self, client, _seed_sessions):
+        resp = client.get("/api/chat/sessions", params={"view": "all"})
         assert resp.status_code == 200
-        session_ids = [s["session_id"] for s in resp.json()]
+        session_ids = [s["session_id"] for s in resp.json()["items"]]
         assert _seed_sessions["archived"] not in session_ids
 
 
@@ -171,9 +171,8 @@ class TestListSessionsResponseFields:
     """Validates: Requirements 3.1-3.3 — response includes metadata fields."""
 
     def test_response_contains_metadata_fields(self, client, _seed_sessions):
-        resp = client.get("/api/chat/sessions", params={"include_archived": True})
-        assert resp.status_code == 200
-        sessions_by_id = {s["session_id"]: s for s in resp.json()}
+        rows = [r for v in ("all", "archived") for r in client.get("/api/chat/sessions", params={"view": v}).json()["items"]]
+        sessions_by_id = {s["session_id"]: s for s in rows}
 
         normal = sessions_by_id.get(_seed_sessions["normal"])
         assert normal is not None

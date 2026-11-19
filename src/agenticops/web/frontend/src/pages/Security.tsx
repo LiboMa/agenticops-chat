@@ -29,7 +29,7 @@ const SERIES = { light: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"], dark: ["#3
 const INK = "hsl(var(--muted-foreground))";
 const GRID = "hsl(var(--border))";
 const SURFACE = "hsl(var(--card))";
-const FIELD = "h-9 rounded-md border border-border bg-background px-2 text-sm";
+const FIELD = "h-9 rounded-md border border-border bg-background px-2 text-[16px] sm:text-sm";   // 16 px on a phone: iOS zooms into a smaller control
 const noItems = (d: unknown[]) => d.length === 0;
 
 type T = (key: string) => string;
@@ -341,7 +341,7 @@ export default function Security() {
               {REACH_CHOICES.map((r) => <option key={r} value={r}>{t(`security.reach.${r}`)}</option>)}
             </select>
             <input type="search" aria-label={t("security.filter.searchLabel")} placeholder={t("security.filter.search")} maxLength={200}
-                   className={`${FIELD} min-w-0 flex-1 basis-40 text-base sm:text-sm`} value={draft} onChange={(e) => setDraft(e.target.value)}
+                   className={`${FIELD} min-w-0 flex-1 basis-40`} value={draft} onChange={(e) => setDraft(e.target.value)}
                    onBlur={() => { if (draft.trim() !== query.q) filter({ q: draft }); }} />
           </form>
           <QueryState query={findings} isEmpty={(d) => d.items.length === 0}

@@ -3,7 +3,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { chatStream } from "@/lib/chatStream";
 import { optimisticAttachments, type UploadItem } from "@/lib/attachmentUpload";
 import { appendMessageToCache, nextTempId } from "@/hooks/useChatMessages";
-import type { ChatSession, ChatMessage } from "@/api/types";
+import { patchSessionEverywhere } from "@/hooks/useChatSessions";
+import type { ChatMessage } from "@/api/types";
 
 /**
  * React adapter over the chatStream store for a single session. Returns the
@@ -28,8 +29,9 @@ export function useSessionStream(sessionId: string | null) {
           created_at: new Date().toISOString(),
         };
         appendMessageToCache(qc, sid, assistantMsg);
-        // Refresh the session list (name/last_activity/order may change).
+        // Refresh the session list (name/last_activity/order may change) and the conversation's own record.
         qc.invalidateQueries({ queryKey: ["chat-sessions"] });
+        qc.invalidateQueries({ queryKey: ["chat-session", sid] });
         // Reconcile optimistic temp ids -> real server ids by refetching the
         // newest page in the background (keeps markdown-memo/React keys correct).
         qc.invalidateQueries({ queryKey: ["chat-messages", sid] });
@@ -39,10 +41,7 @@ export function useSessionStream(sessionId: string | null) {
         qc.invalidateQueries({ queryKey: ["chat-messages", sid] });
         qc.invalidateQueries({ queryKey: ["chat-sessions"] });
       },
-      onRenamed: (sid, name) => {
-        qc.setQueryData<ChatSession[]>(["chat-sessions"], (old) =>
-          old?.map((s) => (s.session_id === sid ? { ...s, name } : s)));
-      },
+      onRenamed: (sid, name) => patchSessionEverywhere(qc, sid, { name }),
     });
   }, [qc]);
 

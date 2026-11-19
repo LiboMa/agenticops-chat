@@ -61,3 +61,15 @@ describe("chat drafts (MVP-2.7.0 S5)", () => {
     expect(sessionQueues.get("s-a", make)).not.toBe(a);
   });
 });
+
+import { hasDraft } from "@/lib/chatDrafts";
+
+describe("hasDraft — the row's «draft kept» mark (MVP-2.9.0 N22)", () => {
+  const store = (v: unknown) => ({ getItem: () => (v === undefined ? null : JSON.stringify(v)) });
+  it("is true for words or an upload, false for nothing or blanks", () => {
+    expect(hasDraft(store({ text: "half a question", attachmentIds: [] }), "k")).toBe(true);
+    expect(hasDraft(store({ text: "", attachmentIds: ["a1"] }), "k")).toBe(true);
+    expect(hasDraft(store({ text: "   ", attachmentIds: [] }), "k")).toBe(false);
+    expect(hasDraft(store(undefined), "k")).toBe(false);
+  });
+});

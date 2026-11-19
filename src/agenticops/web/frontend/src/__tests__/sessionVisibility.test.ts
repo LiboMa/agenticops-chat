@@ -29,3 +29,15 @@ describe("session visibility", () => {
     expect(canManage({ can_manage: false })).toBe(false);
   });
 });
+
+import { visibilityWord } from "@/lib/sessionVisibility";
+
+describe("the word a row says about who sees it (MVP-2.9.0 N22)", () => {
+  it("private (yours), someone else's private, shared — and nothing with sign-in off", () => {
+    expect(visibilityWord({ visibility: "private", owned_by_me: true }, true)).toBe("private");
+    expect(visibilityWord({ visibility: "private", owned_by_me: false }, true)).toBe("othersPrivate");
+    expect(visibilityWord({ visibility: "workspace", owned_by_me: true }, true)).toBe("workspace");
+    expect(visibilityWord({ owned_by_me: false }, true)).toBe("workspace");
+    expect(visibilityWord({ visibility: "private", owned_by_me: true }, false)).toBeNull();
+  });
+});

@@ -893,8 +893,21 @@ class ChatSessionResponse(BaseModel):
     can_manage: bool = True
     # S5: {primary: {entity_type, entity_id, ref, title} | null, account_id, account_name, region, scope_locked}
     context: Optional[dict] = None
+    # MVP-2.9.0 N22 (the list only): generating | failed | tool_failed | None, and whether the issue / change the
+    # conversation is about waits on the caller (services/chat_session_listing)
+    activity: Optional[str] = None
+    waiting_on_you: bool = False
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ChatSessionList(BaseModel):
+    """GET /api/chat/sessions — one page of one view; `total` = what matches the search, `all_total` = everything
+    in the view; `next_cursor` is null on the last page."""
+    items: List[ChatSessionResponse]
+    total: int
+    all_total: int
+    next_cursor: Optional[str] = None
 
 
 class ChatSessionDetail(ChatSessionResponse):

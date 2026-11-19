@@ -1,13 +1,33 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
-import type { ChatSession } from "@/api/types";
+import { patchSessionPages, sessionsRequest, type SessionListData, type SessionView } from "@/lib/sessionList";
+import type { ChatSession, ChatSessionPage } from "@/api/types";
 
-export function useChatSessions() {
-  return useQuery({
-    queryKey: ["chat-sessions"],
-    queryFn: () => apiFetch<ChatSession[]>("/chat/sessions"),
+/** One view of the conversation list — all / starred / archived — searched, ordered and cut by the server
+ *  (MVP-2.9.0 N22), a page at a time. Every view and search is its own query under ["chat-sessions", "list", …],
+ *  so `invalidateQueries({ queryKey: ["chat-sessions"] })` refreshes them all. */
+export function useChatSessionList(view: SessionView, q: string) {
+  return useInfiniteQuery({
+    queryKey: ["chat-sessions", "list", view, q.trim()],
+    queryFn: ({ pageParam }) => apiFetch<ChatSessionPage>(sessionsRequest(view, q, pageParam)),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor,
     staleTime: 10_000,
+    placeholderData: keepPreviousData,
   });
+}
+
+/** A conversation changed: the lists and its own record are read again. */
+export function refreshSession(qc: QueryClient, sessionId?: string | null) {
+  qc.invalidateQueries({ queryKey: ["chat-sessions"] });
+  if (sessionId) qc.invalidateQueries({ queryKey: ["chat-session", sessionId] });
+}
+
+/** …and a change that is already known (the server's new title) shows at once in every loaded list and on the
+ *  conversation's own record. */
+export function patchSessionEverywhere(qc: QueryClient, sessionId: string, patch: Partial<ChatSession>) {
+  qc.setQueriesData<SessionListData>({ queryKey: ["chat-sessions", "list"] }, (old) => patchSessionPages(old, sessionId, patch));
+  qc.setQueryData<ChatSession>(["chat-session", sessionId], (old) => (old ? { ...old, ...patch } : old));
 }
 
 export function useCreateChatSession() {
@@ -27,7 +47,10 @@ export function useDeleteChatSession() {
   return useMutation({
     mutationFn: (sessionId: string) =>
       apiFetch<void>(`/chat/sessions/${sessionId}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["chat-sessions"] }),
+    onSuccess: (_data, sessionId) => {
+      qc.invalidateQueries({ queryKey: ["chat-sessions"] });
+      qc.removeQueries({ queryKey: ["chat-session", sessionId] });
+    },
   });
 }
 
@@ -39,7 +62,7 @@ export function useRenameChatSession() {
         method: "PATCH",
         body: JSON.stringify({ name }),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["chat-sessions"] }),
+    onSuccess: (_data, vars) => refreshSession(qc, vars.sessionId),
   });
 }
 

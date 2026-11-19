@@ -1,7 +1,8 @@
 import { useState } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { useSettings } from "@/hooks/useSettings";
-import { useChatSessions, useUpdateChatSession } from "@/hooks/useChatSessions";
+import { useUpdateChatSession } from "@/hooks/useChatSessions";
+import { useChatSession } from "@/hooks/useChatSession";
 import { useLocale } from "@/i18n/LocaleContext";
 
 /** Effort levels; "" = Auto (follow the agent's configured thinking budget).
@@ -26,11 +27,11 @@ export function ModelSelector({ sessionId, disabled }: { sessionId: string | nul
   const { t } = useLocale();
   const [open, setOpen] = useState(false);
   const settingsQ = useSettings();
-  const sessionsQ = useChatSessions();
+  const sessionQ = useChatSession(sessionId);      // the conversation's own record (the list is paged: it may not be on it)
   const update = useUpdateChatSession();
 
   if (!sessionId) return null;
-  const session = sessionsQ.data?.find((s) => s.session_id === sessionId);
+  const session = sessionQ.data?.session_id === sessionId ? sessionQ.data : undefined;
   const locked = session?.can_manage === false;  // a session shared with you: its owner picks the model
   const presets = settingsQ.data?.model_presets ?? [];
   const globalMain = settingsQ.data?.agent_models?.["main"]?.model_id ?? "";

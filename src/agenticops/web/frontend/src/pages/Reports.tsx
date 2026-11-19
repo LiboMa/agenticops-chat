@@ -87,7 +87,7 @@ export default function Reports() {
   const counts = last ? countsView(query, last.total, last.all_total) : null;
   const remaining = last ? last.total - loaded.length : 0;
   const filtered = isFiltered(query);
-  const field = "h-9 rounded-lg border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500";
+  const field = "h-9 rounded-lg border border-border bg-background px-3 text-[16px] sm:text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500";
 
   return (
     <div className="space-y-6">
@@ -107,7 +107,7 @@ export default function Reports() {
                 maxLength={200}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                className={`${field} min-w-0 flex-1 basis-56 text-base sm:w-64 sm:flex-none sm:text-sm`}
+                className={`${field} min-w-0 flex-1 basis-56 sm:w-64 sm:flex-none`}
               />
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                 {t("reports.from")}

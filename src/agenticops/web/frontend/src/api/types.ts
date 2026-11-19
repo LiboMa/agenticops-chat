@@ -838,6 +838,20 @@ export interface ChatSession {
   can_manage?: boolean;
   /** MVP-2.7.0 S5: what the chat is about and the account it is bound to (services/chat_context) */
   context?: ChatContextView | null;
+  /** MVP-2.9.0 N22 (the list only): a send is running / the last send did not finish / a tool of the last reply
+   *  failed; null = nothing of the kind */
+  activity?: "generating" | "failed" | "tool_failed" | null;
+  /** the issue / change the conversation is about waits on you (the to-do list's own answer) */
+  waiting_on_you?: boolean;
+}
+
+/** GET /api/chat/sessions — one page of one view. `total` = what matches the search, `all_total` = everything in
+ *  this view; `next_cursor` is null on the last page. */
+export interface ChatSessionPage {
+  items: ChatSession[];
+  total: number;
+  all_total: number;
+  next_cursor: string | null;
 }
 
 /** A chat's context as the server resolved it; locked at the first sent message. */

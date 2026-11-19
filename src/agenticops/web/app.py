@@ -4494,33 +4494,32 @@ def api_create_chat_session(payload: ChatSessionCreate, actor: Actor = Depends(c
         return _chat_session_response(row, 0, actor, context=chat_context.context_views(db, [row])[row.id])
 
 
-@app.get("/api/chat/sessions", response_model=List[ChatSessionResponse])
-async def api_list_chat_sessions(
-    limit: int = Query(default=50, le=100),
-    include_archived: bool = Query(default=False),
+@app.get("/api/chat/sessions", response_model=ChatSessionList)
+def api_list_chat_sessions(
+    view: str = Query(default="all", description="all (not archived) | starred | archived"),
+    q: Optional[str] = Query(default=None, max_length=200),
+    cursor: Optional[str] = Query(default=None, pattern=r"^[0-9]{1,9}$", description="next_cursor of the page before"),
+    limit: int = Query(default=50, ge=1, le=100),
     actor: Actor = Depends(current_actor),
 ):
-    from agenticops.services import chat_access
+    """The conversations the caller may see, as `{items, total, all_total, next_cursor}` (MVP-2.9.0 N22): the view, the search
+    (name, the linked issue / change, the account) and the order — pinned first, then last activity — are applied
+    BEFORE the cut; each row says its `activity` and whether what it is about is `waiting_on_you`."""
+    from agenticops.services.chat_context import context_views
+    from agenticops.services.chat_session_listing import page_sessions
     with get_db_session() as db:
-        query = chat_access.visible_filter(db.query(ChatSession), actor)
-        if not include_archived:
-            query = query.filter(ChatSession.archived == False)
-        rows = (
-            query
-            .order_by(ChatSession.last_activity_at.desc())
-            .limit(limit)
-            .all()
-        )
-        # One grouped count for the page, not one COUNT per session
-        counts = dict(
-            db.query(ChatMessage.session_id, func.count(ChatMessage.id))
-            .filter(ChatMessage.session_id.in_([r.id for r in rows]))
-            .group_by(ChatMessage.session_id)
-            .all()
-        ) if rows else {}
-        from agenticops.services.chat_context import context_views
+        try:
+            page = page_sessions(db, actor, view=view, q=q, limit=limit, offset=int(cursor or 0), live=_chat_dispatch_live)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        rows = page["rows"]
         views = context_views(db, rows)
-        return [_chat_session_response(r, counts.get(r.id, 0), actor, context=views[r.id]) for r in rows]
+        return ChatSessionList(
+            items=[_chat_session_response(r, page["counts"].get(r.id, 0), actor, context=views[r.id],
+                                          activity=page["activity"][r.id], waiting_on_you=page["waiting"][r.id])
+                   for r in rows],
+            total=page["total"], all_total=page["all_total"],
+            next_cursor=None if page["next_offset"] is None else str(page["next_offset"]))
 
 
 @app.get("/api/chat/sessions/{session_id}", response_model=ChatSessionDetail)
