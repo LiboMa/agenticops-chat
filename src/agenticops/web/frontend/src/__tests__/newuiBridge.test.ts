@@ -197,6 +197,9 @@ describe("the frame's measurements", () => {
   });
   it("printing a page does not print the frame", () => {
     const print = /@media print\s*\{([\s\S]*?)\n\}/.exec(noComments(bridge));
-    expect(print?.[1]).toMatch(/html\.nf-on \.nf\s*\{[^}]*display\s*:\s*none/);
+    expect(print?.[1]).toMatch(/html\.nf-on \.nf\.hosting\s*\{[^}]*display\s*:\s*none/);
+    // …but a lens IS the frame: hidden whenever the palette is on, «待决», a story or the table printed an empty
+    // sheet (N27, review — before round 3 they printed what the screen showed)
+    expect(print?.[1]).not.toMatch(/html\.nf-on \.nf\s*\{/);
   });
 });

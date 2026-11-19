@@ -320,6 +320,7 @@ export function KBTab() {
             {reviewSops.isLoading ? (
               <Spinner />
             ) : reviewQueue.length > 0 ? (
+              <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border">
@@ -379,6 +380,7 @@ export function KBTab() {
                   ))}
                 </tbody>
               </table>
+              </div>
             ) : (
               <div className="p-8 text-center text-muted-foreground text-sm">
                 {t("kb.noReview")}
@@ -395,6 +397,7 @@ export function KBTab() {
             {activeSops.isLoading ? (
               <Spinner />
             ) : activeSops.data && activeSops.data.sops.length > 0 ? (
+              <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border">
@@ -462,6 +465,7 @@ export function KBTab() {
                   ))}
                 </tbody>
               </table>
+              </div>
             ) : (
               <div className="p-8 text-center text-muted-foreground text-sm">
                 {t("kb.noActive")}
@@ -478,6 +482,7 @@ export function KBTab() {
             {cases.isLoading ? (
               <Spinner />
             ) : cases.data && cases.data.cases.length > 0 ? (
+              <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border">
@@ -534,6 +539,7 @@ export function KBTab() {
                   ))}
                 </tbody>
               </table>
+              </div>
             ) : (
               <div className="p-8 text-center text-muted-foreground text-sm">
                 {t("kb.noCases")}

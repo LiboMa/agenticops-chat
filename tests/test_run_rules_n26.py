@@ -135,7 +135,7 @@ def test_an_aborted_run_that_let_nothing_through_does_not_dispute_the_diagnosis(
 def test_an_aborted_run_that_had_changed_something_still_disputes_it(db):
     issue_id, plan_id, rca_id, ticket = _run(db)
     guard = RunGuard(ticket)
-    guard.applied = 1                                                      # a command that could change something ran
+    guard.applied = guard.tried = 1                                        # a command that could change something ran
     _save(plan_id, ticket, "aborted", error="step 2 could not start")
     assert _disputes(db, issue_id) == 1
     assert db.get(RCAResult, rca_id).critic_verdict == "disputed_by_execution"
@@ -145,7 +145,7 @@ def test_what_the_guard_counted_decides_not_what_the_agent_reports(db):
     """The agent says «aborted, no steps» — but the guard let a write through: something was tried."""
     issue_id, plan_id, _rca, ticket = _run(db)
     guard = RunGuard(ticket)
-    guard.applied = 1
+    guard.applied = guard.tried = 1
     _save(plan_id, ticket, "aborted", steps=())
     assert _disputes(db, issue_id) == 1
     # … and the other way round: step results are reported, the guard let nothing through that could change anything
@@ -270,7 +270,9 @@ def test_a_runs_record_is_not_opened_for_a_closed_issue(db, status):
     issue_id, plan_id, _rca = _plan(db, issue_status=status)
     ticket, why = open_ticket(plan_id, executed_by="agent:auto-pipeline")
     assert ticket is None
-    assert why == f"HealthIssue #{issue_id} is '{status}'; reopen it before running its plan"
+    # N27 (review): the sentence no longer offers reopening as the way to run the plan — a reopened issue starts
+    # again from its diagnosis (tests/test_review_fixes_n27.py)
+    assert why.startswith(f"HealthIssue #{issue_id} is '{status}': its approved plan is not run")
     db.expire_all()
     assert db.get(FixPlan, plan_id).status == "approved"                   # nothing moved, nothing was written
     assert db.get(HealthIssue, issue_id).status == status
@@ -297,7 +299,7 @@ def test_the_run_route_refuses_a_closed_issues_plan(db, status):
     finally:
         app.dependency_overrides.clear()
     assert r.status_code == 409, r.text
-    assert r.json()["detail"] == f"HealthIssue #{issue_id} is '{status}'; reopen it before running its plan"
+    assert r.json()["detail"].startswith(f"HealthIssue #{issue_id} is '{status}': its approved plan is not run")
     db.expire_all()
     assert db.get(FixPlan, plan_id).status == "approved" and db.query(FixExecution).count() == 0
 

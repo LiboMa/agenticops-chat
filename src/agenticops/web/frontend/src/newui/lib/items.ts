@@ -130,3 +130,10 @@ export function itemRows(kind: ItemKind, loaded: (HealthIssue | ChangeRequestLis
   }
   return out;
 }
+
+/** What the search box shows once the address has its text: what was typed, as long as the address says the same
+ *  thing trimmed — the address holds the trimmed text, and writing that back took the space off «ssh », so the next
+ *  word ran on («sshopen»; N27, review). An address that says something else (Back, a link, a cleared filter) wins. */
+export function boxAfterAddress(typed: string, addressQ: string): string {
+  return typed.trim() === addressQ ? typed : addressQ;
+}

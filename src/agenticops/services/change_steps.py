@@ -227,6 +227,14 @@ def tool_command(tool_name: str, command: str) -> str:
     return text
 
 
+def check_commands(pre_checks, post_checks) -> frozenset[str]:
+    """The commands of a plan's declared pre- and post-checks, each as exact_text (MVP-2.9.0 N27). A run that ran
+    nothing but these has not tried the plan — whatever tier the classifier gives them: most real checks
+    (`systemctl is-active …`, `curl -s …/health`) are on no read list."""
+    return frozenset(c for checks in (pre_checks, post_checks) for c in
+                     (exact_text(_raw_command(s)) for s in plan_steps(checks)) if c)
+
+
 def rollback_commands(rollback_plan) -> frozenset[str]:
     """The commands of a plan's rollback steps, each as exact_text — what a stopped run may still run
     (agents/run_guard, MVP-2.9.0 N9). Prose carries no command and adds nothing."""

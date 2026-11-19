@@ -22,7 +22,7 @@ import { useHold } from "../widgets/useHold";
 import { errorText, useBriefKeys, useDecide, useDecision, type BriefProps } from "./briefContext";
 import { DismissForm } from "./shared";
 
-export const REFUSALS = ["read_only", "forbidden", "issue_closed", "run_in_flight", "executor_disabled", "state", "no_hash"];
+export const REFUSALS = ["read_only", "forbidden", "issue_closed", "issue_moved", "run_in_flight", "executor_disabled", "state", "no_hash"];
 /** Why the server does not allow an action, in words. */
 export const refusal = (why: string | null, t: (k: string, v?: Record<string, string | null>) => string): string =>
   t(REFUSALS.includes(why ?? "") ? `refused.${why}` : "refused.other", { code: why });

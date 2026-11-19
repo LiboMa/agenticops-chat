@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import os
 import re
+import shlex
 from pathlib import Path
 
 # ── Shell Command Classification ─────────────────────────────────────
@@ -184,12 +185,16 @@ def classify_kubectl_command(cmd: str) -> str:
     Returns:
         Security tier: 'blocked', 'write', 'readonly', or 'unknown'.
     """
-    cmd_stripped = cmd.strip()
-    cmd_lower = cmd_stripped.lower()
-
-    # Strip leading 'kubectl' if present
-    if cmd_lower.startswith("kubectl "):
-        cmd_lower = cmd_lower[len("kubectl "):]
+    # Judged as it will run (MVP-2.9.0 N27, review): run_kubectl hands the line to shlex, so `'dump'`, `du\\mp` and
+    # two spaces between the words are the same command — the spelling used to decide. A line that cannot be
+    # split (an unbalanced quote) is not run by the tool, and nothing vouches for it.
+    try:
+        words = [word.lower() for word in shlex.split(cmd.strip())]
+    except ValueError:
+        return "unknown"
+    if words[:1] == ["kubectl"]:
+        words = words[1:]
+    cmd_lower = " ".join(words)
 
     # Check blocked patterns first
     for pattern in KUBECTL_BLOCKED_PATTERNS:
@@ -198,7 +203,8 @@ def classify_kubectl_command(cmd: str) -> str:
 
     # `cluster-info dump --output-directory=…` writes the dump into a directory on the host AgenticOps runs on:
     # not a read (MVP-2.9.0 N26). Without the option the dump is the command's answer, and it stays one.
-    if cmd_lower.startswith("cluster-info dump") and any(t.split("=", 1)[0] == "--output-directory" for t in cmd_lower.split()):
+    positional = [word for word in words if not word.startswith("-")]
+    if positional[:1] == ["cluster-info"] and "dump" in positional and any(w.split("=", 1)[0] == "--output-directory" for w in words):
         return "write"
 
     # Check readonly subcommands

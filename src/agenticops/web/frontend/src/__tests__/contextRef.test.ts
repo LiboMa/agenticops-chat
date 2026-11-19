@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { contextRefFromPath, contextRefFromQuery, contextRefQuery, refLabel } from "@/lib/contextRef";
+import { FRESH_CHAT, chatLanding, contextRefFromPath, contextRefFromQuery, contextRefQuery, refLabel } from "@/lib/contextRef";
 
 describe("contextRefFromPath", () => {
   it("an issue or a change route opens the context panel", () => {
@@ -54,5 +54,28 @@ describe("startsFresh — /app/chat opens a NEW conversation instead of resuming
     for (const state of [null, undefined, {}, { fresh: false }, { fresh: "yes" }, "fresh", 1]) expect(startsFresh("", state)).toBe(false);
     expect(startsFresh("?ref=nope", null)).toBe(false);
     expect(startsFresh("?q=x", null)).toBe(false);
+  });
+});
+
+describe("chatLanding — what /app/chat does when no conversation is in the address (MVP-2.9.0 N27, review)", () => {
+  const at = (o: Partial<Parameters<typeof chatLanding>[0]> = {}) =>
+    chatLanding({ sessionInAddress: false, attempted: false, freshAtMount: false, search: "", state: null, ...o });
+
+  it("resumes the last conversation when nothing asks for a new one", () => {
+    expect(at()).toBe("resume");
+  });
+  it("a new conversation when the link that led HERE asks for one — also when the page was first opened on a conversation", () => {
+    // the page mounted at /app/chat/<id> (a reload, Back): «ask an agent» from the command bar then sent the person
+    // back to that conversation, and the sentence sat in a draft nobody saw
+    expect(at({ state: FRESH_CHAT })).toBe("welcome");
+    expect(at({ search: "?ref=I12" })).toBe("welcome");
+  });
+  it("a new conversation when the page was opened for one", () => {
+    expect(at({ freshAtMount: true })).toBe("welcome");
+  });
+  it("nothing to do while a conversation is in the address, or once the page has already looked", () => {
+    expect(at({ sessionInAddress: true, state: FRESH_CHAT })).toBe("stay");
+    expect(at({ attempted: true })).toBe("stay");
+    expect(at({ attempted: true, state: FRESH_CHAT })).toBe("stay");       // the page's own effect shows the welcome page then
   });
 });

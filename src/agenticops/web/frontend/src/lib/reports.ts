@@ -56,8 +56,8 @@ export function countsView(q: ReportsQuery, total: number, allTotal: number): { 
 }
 
 export interface CoverageView {
-  tone: "ok" | "warn";
-  stateKey: "reports.coverage.complete" | "reports.coverage.partial";
+  tone: "ok" | "warn" | "none";
+  stateKey: "reports.coverage.complete" | "reports.coverage.partial" | "reports.coverage.unrecorded";
   accounts: string[];
   regions: string[];
   readAt: string;
@@ -69,11 +69,15 @@ const GAPS = ["truncated", "offloaded", "failed"] as const;
 
 /** What the coverage card says — from the record alone (the sentences are the page's templates, so the two
  *  languages cannot differ). null = no card: the report has no record, or one this page cannot read. The counts
- *  decide «partial», whatever the record calls itself. */
+ *  decide «partial», whatever the record calls itself; an empty scope is never «complete». */
 export function coverageView(c: ReportCoverage | null | undefined): CoverageView | null {
   if (!c || !Array.isArray(c.accounts) || !Array.isArray(c.regions) || !c.partial || typeof c.partial !== "object") return null;
   const partial = GAPS.map((k) => ({ key: `reports.coverage.${k}`, n: Number(c.partial[k]) || 0 })).filter((p) => p.n > 0);
   const gaps = partial.length > 0 || c.completeness === "partial";
-  return { tone: gaps ? "warn" : "ok", stateKey: gaps ? "reports.coverage.partial" : "reports.coverage.complete",
+  // A run whose tools named no account and no region (it read an issue or a diagnosis by id) has nothing to call
+  // complete (N27, review) — whatever the record calls itself: older ones say «complete».
+  const scope = c.accounts.length > 0 || c.regions.length > 0;
+  return { tone: gaps ? "warn" : scope ? "ok" : "none",
+           stateKey: gaps ? "reports.coverage.partial" : scope ? "reports.coverage.complete" : "reports.coverage.unrecorded",
            accounts: c.accounts, regions: c.regions, readAt: c.read_at, partial };
 }

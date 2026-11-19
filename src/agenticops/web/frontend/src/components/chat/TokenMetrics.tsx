@@ -47,6 +47,7 @@ export function TokenMetrics({ msg, inline }: Props) {
 
           {timelineQ.isLoading && <div className="text-muted-foreground">{t("tokens.loadingTrace")}</div>}
           {timelineQ.data && timelineQ.data.calls.length > 1 && (
+            <div className="overflow-x-auto">
             <table className="mt-1 w-full text-[11px] tabular-nums">
               <thead>
                 <tr className="text-muted-foreground">
@@ -71,6 +72,7 @@ export function TokenMetrics({ msg, inline }: Props) {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}

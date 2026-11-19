@@ -5,7 +5,6 @@ import { useBootstrap, useCanManageUsers, useCanViewSettings } from "@/hooks/use
 import { useSearch } from "@/hooks/useSearch";
 import { draftKey, loadDraft, saveDraft } from "@/lib/chatDrafts";
 import { currentUserId } from "@/lib/home";
-import { readChoice } from "@/lib/shellChoice";
 import { useAllWaiting } from "../hooks/useAllWaiting";
 import { useNfT } from "../i18n";
 import { withAsk } from "../lib/ask";
@@ -36,10 +35,13 @@ export function CommandBar({ input, lens, tucked = false, onTheme, onHelp }: {
   const search = useSearch(asked);
   const waiting = useAllWaiting(accountId, open);
   const here = /^\/app\/new\/(decide|live|world)(\/|$)/.test(location.pathname) ? location.pathname + location.search : undefined;
-  const rows = commandRows(q, { t, waiting: waiting.data?.items ?? [], found: asked && asked === searchText(q) ? search.data : undefined, lens, here, canSettings, canUsers,
-                             hosts: readChoice() === "new" });
-  const at = Math.min(index, Math.max(0, rows.length - 1));
   const seeking = !!searchText(q) && (asked !== searchText(q) || search.isFetching);
+  // a page opened from here stays under this frame, whatever is stored (lib/shellChoice.shellFor, N27)
+  const rows = commandRows(q, { t, waiting: waiting.data?.items ?? [], found: asked && asked === searchText(q) ? search.data : undefined, lens, here, canSettings, canUsers,
+                             hosts: true, seeking });
+  const at = Math.min(index, Math.max(0, rows.length - 1));
+  // «searching…» / «nothing found» is said whenever nothing was found — also above the «ask an agent» row
+  const nothingFound = rows.every((r) => r.id === "ask");
 
   const close = () => { setOpen(false); setQ(""); setIndex(0); input.current?.blur(); };
   const run = (k: number) => {
@@ -65,13 +67,14 @@ export function CommandBar({ input, lens, tucked = false, onTheme, onHelp }: {
     <>
       {open && (rows.length > 0 || !!q.trim()) && (
         <div className="sugg" id="nf-sugg" role="listbox" aria-label={t("cmd.label")}>
+          {nothingFound && !!searchText(q) && <p className="sugg-note">{t(seeking ? "cmd.seeking" : "cmd.none")}</p>}
           {rows.map((r, k) => (
             <button key={r.id} id={`nf-sugg-${k}`} type="button" role="option" aria-selected={k === at}
                     onMouseDown={(e) => e.preventDefault()} onClick={() => run(k)} onMouseEnter={() => setIndex(k)}>
               <span>{r.label}</span>{r.hint && <small>{r.hint}</small>}
             </button>
           ))}
-          {rows.length === 0 && <p className="sugg-note">{t(seeking ? "cmd.seeking" : "cmd.none")}</p>}
+          {rows.length === 0 && !searchText(q) && <p className="sugg-note">{t("cmd.none")}</p>}
         </div>
       )}
       <div className="barwrap">

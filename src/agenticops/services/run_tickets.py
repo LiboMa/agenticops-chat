@@ -31,7 +31,7 @@ def open_ticket(fix_plan_id: int, *, executed_by: str) -> tuple[Optional[int], s
     (change_service.request_execution), and executor_agent's own gate has already refused any other.
     """
     from agenticops.models import FixExecution, FixPlan, InvalidStatusTransition, get_db_session, transition_plan
-    from agenticops.services.issue_state import advance_issue, closed_issue_refusal
+    from agenticops.services.issue_state import advance_issue, run_refusal
 
     with get_db_session() as session:
         plan = session.query(FixPlan).filter_by(id=fix_plan_id).first()
@@ -46,9 +46,9 @@ def open_ticket(fix_plan_id: int, *, executed_by: str) -> tuple[Optional[int], s
             return None, f"a run of FixPlan #{fix_plan_id} is already in progress (Execution #{live[0]})"
         if plan.status != "approved":
             return None, f"FixPlan #{fix_plan_id} is '{plan.status}', not approved"
-        closed = closed_issue_refusal(session, plan.health_issue_id, "running")     # N26: as it could not be approved
-        if closed:
-            return None, closed
+        cannot = run_refusal(session, plan.health_issue_id)     # N26 / N27: only while the issue waits for this run
+        if cannot:
+            return None, cannot
         try:
             transition_plan(plan, "executing")
         except InvalidStatusTransition as e:          # another executor, or a withdraw, moved it first
@@ -61,6 +61,20 @@ def open_ticket(fix_plan_id: int, *, executed_by: str) -> tuple[Optional[int], s
         session.add(ticket)
         session.flush()
         return ticket.id, ""
+
+
+def claim_refusal(fix_plan_id: int) -> Optional[str]:
+    """Why a queued ticket of this fix plan is not run now that it is claimed (issue_state.run_refusal, claimed):
+    its issue was closed — or moved — while the ticket waited. The command line's ticket can wait without limit
+    (no web process polling), so «a window of seconds» was not true (MVP-2.9.0 N27, review). None for a change
+    plan and for an issue that still waits."""
+    from agenticops.models import FixPlan, get_db_session
+    from agenticops.services.issue_state import run_refusal
+    with get_db_session() as session:
+        plan = session.query(FixPlan).filter_by(id=fix_plan_id).first()
+        if plan is None or (plan.plan_kind or "fix") == "change":
+            return None
+        return run_refusal(session, plan.health_issue_id, claimed=True)
 
 
 def close_ticket(execution_id: int, ticket_status: str, message: str, *, by: Optional[str] = None) -> bool:
@@ -204,6 +218,18 @@ def close_orphans() -> tuple[list[int], list]:
         timer.start()
         timers.append(timer)
     return closed, timers
+
+
+def check_commands_of(execution_id: int) -> frozenset:
+    """The declared check commands of the plan this record runs (change_steps.check_commands) — empty when there
+    is no such record or plan. They are part of the approved content, so they do not change during the run."""
+    from agenticops.models import FixExecution, FixPlan, get_db_session
+    from agenticops.services.change_steps import check_commands
+    with get_db_session() as session:
+        row = (session.query(FixPlan.pre_checks, FixPlan.post_checks)
+               .join(FixExecution, FixExecution.fix_plan_id == FixPlan.id)
+               .filter(FixExecution.id == execution_id).first())
+    return check_commands(row[0], row[1]) if row else frozenset()
 
 
 def ticket_state(execution_id: int) -> Optional[dict]:

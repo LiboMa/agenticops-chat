@@ -31,7 +31,7 @@ router = APIRouter()
 def api_search(
     q: str = Query(..., min_length=1),
     types: str = Query(default="issues,fix_plans,reports,resources,change_requests"),
-    limit: int = Query(default=5, le=10),
+    limit: int = Query(default=5, ge=1, le=10),      # SQLite reads LIMIT -1 as «no limit»
     actor: Actor = Depends(current_actor),
 ):
     """Global search across issues, fix/change plans, reports, resources and change requests."""

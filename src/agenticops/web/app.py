@@ -859,6 +859,11 @@ async def _apply_settings(request: Request, body: dict, current: Actor):
             raise HTTPException(400, f"{key} must be a boolean")
     if (change_updates or exec_updates) and settings.api_auth_enabled:
         await require_authenticated_user(request, admin=True)
+    # a switch this process's environment holds at its strict value cannot be changed here (review, N27)
+    held = exec_switches.held(exec_updates)
+    if held:
+        return JSONResponse(status_code=409, content={
+            "detail": exec_switches.held_message(held), "code": "held_by_environment", "fields": held})
 
     for key in BOOL_KEYS:
         if key in body:
@@ -3255,12 +3260,12 @@ async def api_execute_fix_plan(plan_id: int, actor: Actor = Depends(current_acto
         except authz.AuthzDenied as e:
             raise HTTPException(status_code=403, detail=authz.http_detail(e))
 
-        # A plan approved while its issue was open does not run once the issue is resolved or dismissed (N26):
-        # the same rule as approving — reopen the issue first
-        from agenticops.services.issue_state import closed_issue_refusal
-        closed = closed_issue_refusal(session, plan.health_issue_id, "running")
-        if closed:
-            raise HTTPException(status_code=409, detail=closed)
+        # A plan runs only while its issue waits for that run (N26: not once it is resolved or dismissed; N27: nor
+        # once it moved anywhere else — it could not follow the run)
+        from agenticops.services.issue_state import run_refusal
+        cannot = run_refusal(session, plan.health_issue_id)
+        if cannot:
+            raise HTTPException(status_code=409, detail=cannot)
 
         # An approval's auto-run writes no row until it ends and leaves the plan 'approved': a second executor
         # must not run the same plan alongside it (2026-10-05 final review C1)

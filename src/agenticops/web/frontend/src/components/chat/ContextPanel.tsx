@@ -165,10 +165,10 @@ function IssueBody({ issueId }: { issueId: number }) {
     setActionMsg(null);
     try {
       await apiFetch<unknown>(`/issues/${issueId}/rca`, { method: "POST" });
-      setActionMsg("RCA triggered. Results may take a minute.");
+      setActionMsg(t("context.rca.triggered"));
       setTimeout(() => rca.refetch(), 10000);
     } catch (e: any) {
-      setActionMsg(`RCA failed: ${e.message}`);
+      setActionMsg(t("context.rca.failed").replace("{msg}", e.message));
     } finally {
       setRcaLoading(false);
     }
@@ -179,10 +179,10 @@ function IssueBody({ issueId }: { issueId: number }) {
     setActionMsg(null);
     try {
       await apiFetch<unknown>(`/issues/${issueId}/generate-fix-plan`, { method: "POST" });
-      setActionMsg("Fix plan generation triggered.");
+      setActionMsg(t("context.plan.triggered"));
       setTimeout(() => fixPlans.refetch(), 10000);
     } catch (e: any) {
-      setActionMsg(`Fix plan failed: ${e.message}`);
+      setActionMsg(t("context.plan.failed").replace("{msg}", e.message));
     } finally {
       setFixPlanLoading(false);
     }

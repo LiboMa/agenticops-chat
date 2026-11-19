@@ -33,8 +33,20 @@ export function highKeys(s: { change_management_enabled?: boolean }): HighKey[] 
 
 export type Staged = Partial<Record<HighKey, boolean>>;
 
-/** A click on a switch: the value is staged — or un-staged when it is what is saved already. */
-export function stage(saved: Record<HighKey, boolean>, staged: Staged, key: HighKey, value: boolean): Staged {
+/** What the server says about the stored switches (`GET /api/settings` → `execution_switches`). `locked` = the
+ *  switches this process's ENVIRONMENT holds at their strict value (MVP-2.9.0 N27): in force whatever is stored. */
+export interface SwitchInfo { overridden: string[]; locked?: Record<string, boolean> }
+
+/** The variable that holds a switch, as it is written (`AIOPS_EXECUTOR_ENABLED=false`) — null when nothing does. */
+export function heldVar(key: HighKey, info: SwitchInfo | undefined): string | null {
+  const value = info?.locked?.[key];
+  return typeof value === "boolean" ? `AIOPS_${key.toUpperCase()}=${value}` : null;
+}
+
+/** A click on a switch: the value is staged — or un-staged when it is what is saved already. A switch the
+ *  environment holds cannot be staged: the server would refuse it. */
+export function stage(saved: Record<HighKey, boolean>, staged: Staged, key: HighKey, value: boolean, info?: SwitchInfo): Staged {
+  if (heldVar(key, info) !== null) return staged;
   const next = { ...staged };
   if (saved[key] === value) delete next[key]; else next[key] = value;
   return next;
@@ -53,10 +65,12 @@ export function pending(saved: Record<HighKey, boolean>, staged: Staged, keys: H
     .map((key) => ({ key, from: saved[key], to: staged[key] as boolean }));
 }
 
-/** Where the value in force comes from: `stored` = an administrator's value in the database; `default` = the
- *  settings file's (or the environment's) value, nothing stored; `file` = the two toggles saved in the settings file. */
-export function sourceOf(key: HighKey, info: { overridden: string[] } | undefined): "stored" | "default" | "file" {
+/** Where the value in force comes from: `environment` = this process's environment holds it (whatever is stored);
+ *  `stored` = an administrator's value in the database; `default` = the settings file's (or the environment's)
+ *  value, nothing stored; `file` = the two toggles saved in the settings file. */
+export function sourceOf(key: HighKey, info: SwitchInfo | undefined): "environment" | "stored" | "default" | "file" {
   if (!STORED.has(key)) return "file";
+  if (heldVar(key, info) !== null) return "environment";
   return info?.overridden.includes(key) ? "stored" : "default";
 }
 
@@ -74,4 +88,11 @@ export function canEditHigh(boot: { auth_enabled?: boolean; user?: { is_admin?: 
 export function modelAvailability(modelId: string, presets: { value: string }[] | undefined): "listed" | "unlisted" | "unknown" {
   if (!modelId || !presets || presets.length === 0) return "unknown";
   return presets.some((p) => p.value === modelId) ? "listed" : "unlisted";
+}
+
+/** The tab Settings shows (MVP-2.9.0 N27). The audit log is read by an administrator when sign-in is on
+ *  (`lib/plans.auditTabVisible`, the hub's own rule): anyone else who follows a link to it gets the first tab —
+ *  never a tab whose every request is refused. */
+export function shownTab<T extends string>(requested: T, auditOn: boolean): T | "general" {
+  return requested === "audit" && !auditOn ? "general" : requested;
 }

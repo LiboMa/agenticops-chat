@@ -87,7 +87,9 @@ export function nativeTarget(pathname: string, search: string, _hash: string): s
 function itemsAddress(p: URLSearchParams): string {
   const status = p.get("status"), sev = p.get("severity"), sort = p.get("sort"), q = (p.get("q") ?? "").trim().slice(0, 200);
   const out = new URLSearchParams();
-  if (status === "all" || status === "resolved" || status === "dismissed") out.set("st", "all");
+  // the classic list's default — no status in its address, which it never writes out — is EVERY status; only
+  // «active» is the open ones (N27, review: it landed on «open», and a resolved match was shown there, not here)
+  if (status !== "active") out.set("st", "all");
   if (status === "resolved" || status === "dismissed") out.set("status", status);
   if (sev && ["critical", "high", "medium", "low"].includes(sev)) out.set("sev", sev);
   if (q) out.set("q", q);

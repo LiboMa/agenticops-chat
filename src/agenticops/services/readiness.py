@@ -8,6 +8,8 @@ or Main is given another model, the old check no longer counts and the item read
 """
 from __future__ import annotations
 
+import re
+
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Optional
@@ -61,10 +63,28 @@ def record_check(session, kind: str, subject: str, ok: bool, detail: str, checke
     return row
 
 
+_REFUSED_CALL = re.compile(r"An error occurred \(([^)]+)\) when calling the (\S+) operation")
+
+
+def kept_reason(result: dict) -> str:
+    """What is kept — and shown to every signed-in account on the setup overview — of a failed account test: the
+    test's own `reason` (an error code and operation), else those two read out of a refused call's sentence. The
+    sentence itself names the calling principal, the role and both account numbers (MVP-2.9.0 N27, review; the
+    model check keeps code + operation for the same reason). Any other text is kept as it is (masked and cut)."""
+    if result.get("reason"):
+        return str(result["reason"])
+    text = str(result.get("error") or "failed")
+    refused = _REFUSED_CALL.search(text)
+    return f"{refused.group(1)} ({refused.group(2)})" if refused else text
+
+
 def record_account_test(session, account, result: dict, checked_by: str) -> None:
-    """What `POST /api/accounts/{id}/test` found, kept (it used to answer and forget)."""
+    """What `POST /api/accounts/{id}/test` found, kept (it used to answer and forget). A test that gave no verdict
+    — there is none for this provider — records nothing: the account stays «configured · not verified»."""
+    if result.get("untested"):
+        return
     record_check(session, "account", account_subject(account), bool(result.get("success")),
-                 "" if result.get("success") else str(result.get("error") or "failed"), checked_by)
+                 "" if result.get("success") else kept_reason(result), checked_by)
 
 
 def _accounts(session) -> dict:

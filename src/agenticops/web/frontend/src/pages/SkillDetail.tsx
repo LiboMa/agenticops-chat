@@ -231,7 +231,7 @@ export default function SkillDetail() {
       { name: decodedName, content: editContent },
       {
         onSuccess: () => {
-          setActionMsg("Saved successfully");
+          setActionMsg(t("skills.detail.saved"));
           setTab("view");
           setEditContent(null);
           refetch();
@@ -251,7 +251,7 @@ export default function SkillDetail() {
     setActionMsg("");
     promoteMut.mutate(decodedName, {
       onSuccess: () => {
-        setActionMsg("Promoted to published");
+        setActionMsg(t("skills.detail.promoted"));
         refetch();
       },
     });

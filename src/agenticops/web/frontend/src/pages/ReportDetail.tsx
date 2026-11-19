@@ -137,7 +137,7 @@ export default function ReportDetail() {
               <section aria-labelledby="report-coverage" className="rounded-lg border border-border bg-card p-4 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 id="report-coverage" className="font-medium">{t("reports.coverage.title")}</h2>
-                  <StatusText tone={coverage.tone} className="text-xs">{t(coverage.stateKey)}</StatusText>
+                  <StatusText tone={coverage.tone === "none" ? "neutral" : coverage.tone} className="text-xs">{t(coverage.stateKey)}</StatusText>
                 </div>
                 <dl className="mt-2 space-y-1 text-xs text-muted-foreground">
                   <div><dt className="inline">{t("reports.coverage.accounts")}: </dt>

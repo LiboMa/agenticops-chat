@@ -629,7 +629,7 @@ export default function Schedules() {
           data={paginated}
           rowKey={(r) => r.id}
           onRowClick={(r) => navigate(`/app/schedules/${r.id}`)}
-          emptyMessage={search ? "No matching tasks." : tab === "one_shot" ? "No one-shot tasks yet." : "No schedules configured."}
+          emptyMessage={t(search ? "schedules.empty.search" : tab === "one_shot" ? "schedules.empty.oneShot" : "schedules.empty.none")}
         />
         {/* Pagination */}
         {totalPages > 1 && (

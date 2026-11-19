@@ -57,7 +57,9 @@ describe("nativeTarget — a classic address that NewUI has its own page for", (
     expect(nativeTarget("/app/issues", "?item=%3Cscript%3E", "")).toBe("/app/new/decide");
   });
   it("the list of everything opens the «all items» table, with the filters the table can say (N18)", () => {
-    expect(nativeTarget("/app/issues", "?view=all", "")).toBe("/app/new/items");
+    // the classic «all» list with no status in its address is EVERY status (N27, review): so is the table it opens
+    expect(nativeTarget("/app/issues", "?view=all", "")).toBe("/app/new/items?st=all");
+    expect(nativeTarget("/app/issues", "?view=all&status=active", "")).toBe("/app/new/items");
     expect(nativeTarget("/app/issues", "?view=all&q=ssh&item=I12&status=all&sort=severity", "")).toBe("/app/new/items?st=all&q=ssh&sort=severity");
   });
   it("the «failed» view is the Decide lens with that filter; «waited long» is the lens itself (it has no such filter)", () => {

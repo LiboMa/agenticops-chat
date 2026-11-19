@@ -110,7 +110,9 @@ def _collection(snap: SecuritySnapshot) -> tuple[Optional[str], list[dict]]:
 def security_summary(account_id: Optional[int] = None) -> dict:
     """One row per account that has a snapshot — its newest. `open_findings` counts THAT account's open findings
     (it equals `security_findings(account_id=…)["total"]`); the ones no account holds are `unassigned_open_findings`.
-    A snapshot of an account nobody could read has `overall_score: null` and `collection: "failed"`."""
+    A snapshot of an account nobody could read has `overall_score: null` and `collection: "failed"`.
+    `reachable_paths` is null — not 0 — when the security groups were not read and none was seen; `exposure_read`
+    false with a number means «at least that many»."""
     with get_db_session() as session:
         accounts = _Accounts(session)
         open_by = dict(session.query(HealthIssue.account_id, func.count(HealthIssue.id))
@@ -122,6 +124,11 @@ def security_summary(account_id: Optional[int] = None) -> dict:
             if account_id is not None and pk != account_id:
                 continue
             status, errors = _collection(snap)
+            # Whether the security groups — what a reachable path is made of — were read (N27, review): «0
+            # reachable paths» said of an account whose groups were not read is a false all-clear. None on a
+            # snapshot from before collection was recorded.
+            exposure_read = None if status is None else not any(e["source"] == "network" for e in errors)
+            reachable = sum(1 for p in (snap.exposure_paths or []) if p.get("reachability") == "reachable")
             rows.append({
                 "account_id": pk,
                 "account_name": snap.account_id,
@@ -129,7 +136,8 @@ def security_summary(account_id: Optional[int] = None) -> dict:
                 "overall_score": snap.overall_score,
                 "category_scores": snap.category_scores or {},
                 "created_at": _iso(snap.created_at),
-                "reachable_paths": sum(1 for p in (snap.exposure_paths or []) if p.get("reachability") == "reachable"),
+                "reachable_paths": None if exposure_read is False and reachable == 0 else reachable,
+                "exposure_read": exposure_read,
                 "open_findings": open_by.get(pk, 0) if pk is not None else 0,
                 "collection": status,
                 "collection_errors": errors,

@@ -39,6 +39,10 @@ export interface CommandCtx {
   canUsers: boolean;
   /** the person chose the new interface: a page opens under NewUI's frame. false = it opens in the classic one */
   hosts: boolean;
+  /** the search for what was typed is still out (not asked yet, or not back): «ask an agent» is not offered
+   *  until it has answered — it would be the only row, selected, and Enter on a reference typed fast opened a
+   *  chat instead of the item (MVP-2.9.0 N27, review) */
+  seeking?: boolean;
 }
 
 /** The pages NewUI has no page of its own for: every classic section (the issue list, the changes and the map have
@@ -105,7 +109,7 @@ export function commandRows(q: string, ctx: CommandCtx, max = COMMAND_MAX): Comm
   const places = [...cmds, ...mine, ...found(ctx, new Set(mine.map((m) => m.id.slice(5))))];
   // plain text can also be a question: the last row takes it to a new conversation, as a draft (it is not sent).
   // The row keeps its place when the list is cut — a question must not depend on how much else matched.
-  if (sign === "" && raw.length >= 2) {
+  if (sign === "" && raw.length >= 2 && !ctx.seeking) {
     const ask: CommandRow = { id: "ask", label: `${ctx.t("cmd.ask")}${raw}`, hint: ctx.t("cmd.ask.hint"), to: "/app/chat", state: FRESH_CHAT, draft: raw };
     return [...places.slice(0, max - 1), ask];
   }

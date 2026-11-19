@@ -18,10 +18,10 @@ def client(tmp_path):
     models_mod._engine = None
 
 
-def _plan(status="pending_approval", risk="L1", **fields) -> int:
+def _plan(status="pending_approval", risk="L1", issue_status="fix_planned", **fields) -> int:
     s = get_session()
     try:
-        issue = HealthIssue(title="t", description="d", severity="low", source="test", status="fix_planned", resource_id="r")
+        issue = HealthIssue(title="t", description="d", severity="low", source="test", status=issue_status, resource_id="r")
         s.add(issue); s.flush()
         rca = RCAResult(health_issue_id=issue.id, root_cause="x", confidence=0.9)
         s.add(rca); s.flush()
@@ -223,7 +223,7 @@ def test_put_status_rejected_is_a_deprecated_alias(client):
 def test_execute_records_actor(client):
     from unittest.mock import patch
     from agenticops.config import settings
-    pid = _plan(status="approved")
+    pid = _plan(status="approved", issue_status="fix_approved")    # where an approval leaves its issue (N27: a run starts only there)
     with patch.object(settings, "executor_enabled", True):
         r = client.post(f"/api/fix-plans/{pid}/execute", json={})
     assert r.status_code == 202

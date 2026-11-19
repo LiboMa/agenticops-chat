@@ -131,3 +131,19 @@ describe("the last row of plain text: ask an agent (N19)", () => {
     expect(ids(rows("nothing matches this at all"))).toEqual(["ask"]);
   });
 });
+
+describe("«ask an agent» is offered once the search has answered (MVP-2.9.0 N27, review)", () => {
+  const all = (q: string, seeking: boolean, f?: SearchResponse) => commandRows(q, { ...base, found: f, seeking }, 99);
+  it("while the search for what was typed is still out, Enter must not open a chat: a reference typed fast is an item", () => {
+    expect(ids(all("I77", true))).toEqual([]);                       // nothing yet: the list says «searching»
+    expect(ids(all("why is prod slow", true))).not.toContain("ask");
+  });
+  it("what is already known is still offered meanwhile (commands, what waits on the person)", () => {
+    expect(ids(all("ssh", true))).toEqual(["item:I12"]);
+    expect(ids(all("I12", true))).toEqual(["item:I12"]);
+  });
+  it("once it has answered, the row is there — after what was found, or alone when nothing was", () => {
+    expect(ids(all("I77", false, found({ issues: [hit("issue", 77, "disk full")] })))).toEqual(["found:issue:77", "ask"]);
+    expect(ids(all("why is prod slow", false, found()))).toEqual(["ask"]);
+  });
+});

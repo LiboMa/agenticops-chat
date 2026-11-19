@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChangeRequestListItem, HealthIssue } from "@/api/types";
 import { nativeTarget } from "@/lib/shellRoutes";
-import { PAGE, changesRequest, issuesRequest, itemRows, itemsQuery, itemsSearch, nextOffset } from "@/newui/lib/items";
+import { PAGE, boxAfterAddress, changesRequest, issuesRequest, itemRows, itemsQuery, itemsSearch, nextOffset } from "@/newui/lib/items";
 
 const read = (search: string) => itemsQuery(new URLSearchParams(search));
 
@@ -105,13 +105,28 @@ describe("a classic issue-list address lands in the table as the same choice", (
     return read(to!.split("?")[1] ? `?${to!.split("?")[1]}` : "");
   };
   it("the list of everything keeps its filters", () => {
-    expect(land("?view=all")).toEqual(read(""));
+    // the classic list with no status in its address lists EVERY status (its default, which it never writes
+    // out) — N27, review: this had landed on «open only», so a resolved match was shown there and not here
+    expect(land("?view=all")).toEqual({ ...read(""), group: "all" });
+    expect(land("?view=all&q=ssh")).toEqual({ ...read(""), group: "all", q: "ssh" });
     expect(land("?view=all&status=active")).toEqual(read(""));
     expect(land("?view=all&status=all&q=ssh&severity=high&sort=severity")).toEqual({ kind: "issue", group: "all", status: null, severity: "high", q: "ssh", sort: "severity" });
     expect(land("?view=all&status=resolved")).toEqual({ ...read(""), group: "all", status: "resolved" });
     expect(land("?view=all&status=dismissed&sort=oldest")).toEqual({ ...read(""), group: "all", status: "dismissed", sort: "oldest" });
   });
   it("what the table cannot say is dropped (a comma list of severities, the security scope, an unknown value)", () => {
-    expect(land("?view=all&severity=critical,high&scope=security&status=whatever")).toEqual(read(""));
+    expect(land("?view=all&severity=critical,high&scope=security&status=whatever")).toEqual({ ...read(""), group: "all" });
+  });
+});
+
+describe("the search box keeps what was typed (MVP-2.9.0 N27, review)", () => {
+  it("the address holds the trimmed text; writing that back took the space off «ssh » and the next word ran on", () => {
+    expect(boxAfterAddress("ssh ", "ssh")).toBe("ssh ");
+    expect(boxAfterAddress("  ssh open ", "ssh open")).toBe("  ssh open ");
+  });
+  it("an address that says something else is what the box shows (Back, a link, a cleared filter)", () => {
+    expect(boxAfterAddress("ssh ", "disk")).toBe("disk");
+    expect(boxAfterAddress("ssh", "")).toBe("");
+    expect(boxAfterAddress("", "disk")).toBe("disk");
   });
 });

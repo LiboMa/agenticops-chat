@@ -789,7 +789,8 @@ class Settings(BaseSettings):
     # Executor settings (L4 Auto Operation)
     executor_enabled: bool = Field(
         default=True,
-        description="Enable fix execution (AIOPS_EXECUTOR_ENABLED=true to enable)",
+        description="Fix execution — the DEFAULT; the value in force is services/exec_switches.effective() "
+                    "(an administrator's stored switch; AIOPS_EXECUTOR_ENABLED=false holds it off)",
     )
     executor_smart_model: bool = Field(
         default=True,

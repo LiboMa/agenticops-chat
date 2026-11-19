@@ -5,7 +5,7 @@ import { useLocale } from "@/i18n/LocaleContext";
 import { waitedText } from "../decide/Queue";
 import { useAllItems } from "../hooks/useAllItems";
 import { useNfT } from "../i18n";
-import { SEVERITY_CHOICES, itemsQuery, itemsSearch, sortsOf, statusesOf, type ItemGroup, type ItemKind, type ItemRow, type ItemSort, type ItemsQuery } from "../lib/items";
+import { boxAfterAddress, SEVERITY_CHOICES, itemsQuery, itemsSearch, sortsOf, statusesOf, type ItemGroup, type ItemKind, type ItemRow, type ItemSort, type ItemsQuery } from "../lib/items";
 import { storyPath } from "../lib/story";
 import { utcHm, utcStamp } from "../lib/time";
 import { useLensKeys } from "../shell/shellContext";
@@ -44,7 +44,7 @@ export function ItemsLens() {
 
   // the search is sent a moment after the typing stops; the address stays the one source of the choice
   const [typed, setTyped] = useState(q.q);
-  useEffect(() => { setTyped(q.q); }, [q.q]);
+  useEffect(() => { setTyped((now) => boxAfterAddress(now, q.q)); }, [q.q]);
   useEffect(() => {
     if (typed.trim() === q.q) return;
     const id = window.setTimeout(() => set({ q: typed.trim() }), 300);

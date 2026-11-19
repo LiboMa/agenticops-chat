@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { cn } from "@/lib/cn";
+import { useLocale } from "@/i18n/LocaleContext";
 
 export interface Column<T> {
   key: string;
@@ -23,8 +24,9 @@ function DataTableInner<T>({
   data,
   rowKey,
   onRowClick,
-  emptyMessage = "No data available.",
+  emptyMessage,
 }: DataTableProps<T>) {
+  const { t } = useLocale();
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
@@ -56,7 +58,7 @@ function DataTableInner<T>({
   if (data.length === 0) {
     return (
       <div className="py-12 text-center text-muted-foreground text-sm">
-        {emptyMessage}
+        {emptyMessage ?? t("common.noDataAvailable")}
       </div>
     );
   }

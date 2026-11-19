@@ -682,20 +682,21 @@ function SkillCard({ skill, onClick }: { skill: Skill; onClick: () => void }) {
 
 /* -- Improvement Queue -------------------------------------------- */
 
-function triggerLabel(trigger: string, source: string): string {
+function triggerLabel(trigger: string, source: string, t: (key: string) => string): string {
   const issueMatch = source.match(/issue:(\d+)/);
   const agentMatch = source.match(/agent:(\w+)/);
   switch (trigger) {
     case "post_resolution":
-      return issueMatch ? `After resolving Issue #${issueMatch[1]}` : "Post-resolution";
+      return issueMatch ? t("skills.trigger.afterIssue").replace("{id}", issueMatch[1]) : t("skills.trigger.postResolution");
     case "agent_detected":
-      return agentMatch ? `Agent: ${agentMatch[1]}` : "Agent-detected";
+      return agentMatch ? t("skills.trigger.agent").replace("{name}", agentMatch[1]) : t("skills.trigger.agentDetected");
     default:
-      return "Manual";
+      return t("skills.trigger.manual");
   }
 }
 
 function TriggerBadge({ trigger, source }: { trigger: string; source: string }) {
+  const { t } = useLocale();
   const colors: Record<string, string> = {
     manual: "bg-blue-100 text-blue-700",
     post_resolution: "bg-purple-100 text-purple-700",
@@ -704,7 +705,7 @@ function TriggerBadge({ trigger, source }: { trigger: string; source: string }) 
   };
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${colors[trigger] ?? "bg-secondary text-muted-foreground"}`}>
-      {triggerLabel(trigger, source)}
+      {triggerLabel(trigger, source, t)}
     </span>
   );
 }

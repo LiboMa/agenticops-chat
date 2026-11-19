@@ -90,8 +90,11 @@ def plan_actions(plan: Any, actor, *, issue_status: Optional[str], run_in_flight
             ok, code = False, "issue_closed"
         out.append(_action("request_changes", ok, code, "reject_and_request_plan"))
     if plan.status == "approved":
-        # a closed issue's plan does not run (N26: the route's and open_ticket's 409) — said before a run in flight
+        # a plan runs only while its issue waits for that run (issue_state.run_refusal: the route's and
+        # open_ticket's 409) — a closed issue (N26), or one that moved anywhere else (N27) — said before a run in
+        # flight. An issue status the caller did not look up is not refused on a guess.
         blocked = ("issue_closed" if issue_status in ("resolved", "dismissed")
+                   else "issue_moved" if issue_status is not None and issue_status != "fix_approved"
                    else "run_in_flight" if run_in_flight else None)
         out.append(_execute(actor, "plan.execute", plan, blocked))
     return out

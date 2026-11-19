@@ -2,9 +2,8 @@
 auto-approval, the executor's human-in-the-loop gate — are kept in the database (`runtime_settings`), not in the
 process: switching the executor off survives a restart, only an administrator changes them, every change is one audit
 row, and EVERY reader asks `services/exec_switches` — never the process's `settings` attribute."""
-import io
+import ast
 import pathlib
-import tokenize
 from types import SimpleNamespace
 
 import pytest
@@ -75,11 +74,13 @@ def test_a_stored_value_wins_and_survives_a_restart(env):
     assert env.settings.executor_enabled is True                                # the yaml value itself was never touched
 
 
-def test_a_stored_value_that_is_no_switch_is_dropped(env):
+def test_a_stored_value_that_is_no_switch_is_never_on(env):
     env.store.put(env.switches.KEY, {"executor_enabled": "yes", "auto_fix_enabled": True, "made_up": True}, "x")
     env.switches.invalidate()
     assert _values(env) == (False, True, False, False)                          # re-validated at every read
-    assert env.switches.overridden() == ["auto_fix_enabled"]
+    # N27 (review): something IS stored for the executor, and it reads as off — whatever the file's default says
+    # (tests/test_review_fixes_n27.py); a name that is no switch is dropped
+    assert env.switches.overridden() == ["auto_fix_enabled", "executor_enabled"]
 
 
 def test_when_the_store_cannot_be_read_automation_is_off(env):
@@ -249,11 +250,28 @@ def test_the_pipeline_does_not_approve_by_itself_once_switched_off(env):
 # ── nobody reads the process's attribute ──────────────────────────────────────────────────────────────────────
 
 def _code_reads(path: pathlib.Path) -> list[str]:
-    """`settings.<switch>` in CODE (comments and string literals are not code; an f-string's expressions are)."""
-    names = [(tok.type, tok.string, tok.start[0]) for tok in tokenize.generate_tokens(io.StringIO(path.read_text(encoding="utf-8")).readline)
-             if tok.type in (tokenize.NAME, tokenize.OP)]
-    return [f"{path}:{line}" for (t1, s1, line), (_t2, s2, _), (_t3, s3, _) in zip(names, names[1:], names[2:])
-            if s1 == "settings" and s2 == "." and s3 in FIELDS]
+    """Where CODE reaches one of the four switches on the settings object — `settings.<switch>`, the same through a
+    name the object was imported under (`from agenticops.config import settings as _s`), through the module
+    (`config.settings.<switch>`), or by `getattr(<it>, "<switch>")`. Comments and string literals are not code; an
+    f-string's expressions are. Read from the syntax tree, which is the same on every supported Python — a token
+    scan was not: before 3.12 an f-string is one string token (N27, review)."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    names = {"settings"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("config"):
+            names |= {alias.asname or alias.name for alias in node.names if alias.name == "settings"}
+
+    def is_settings(node: ast.AST) -> bool:
+        return (isinstance(node, ast.Name) and node.id in names) or (isinstance(node, ast.Attribute) and node.attr == "settings")
+
+    hits = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and node.attr in FIELDS and is_settings(node.value):
+            hits.add(node.lineno)
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "getattr" and len(node.args) >= 2
+              and is_settings(node.args[0]) and isinstance(node.args[1], ast.Constant) and node.args[1].value in FIELDS):
+            hits.add(node.lineno)
+    return [f"{path}:{line}" for line in sorted(hits)]
 
 
 def test_no_code_reads_the_four_switches_past_the_one_reader():
@@ -267,6 +285,34 @@ def test_the_scan_sees_a_read_inside_an_f_string(tmp_path):
     sample = tmp_path / "sample.py"
     sample.write_text('x = f"The executor is {settings.executor_enabled}"\n# settings.auto_fix_enabled in a comment\ny = "settings.executor_hitl_enabled"\n', encoding="utf-8")
     assert _code_reads(sample) == [f"{sample}:1"]
+
+
+def test_the_scan_follows_the_names_the_settings_object_goes_by(tmp_path):
+    """N27 (review): `_s.executor_enabled` after `from agenticops.config import settings as _s` passed the scan —
+    and so did `getattr(settings, "auto_fix_enabled")` and `config.settings.executor_enabled`."""
+    sample = tmp_path / "aliases.py"
+    sample.write_text(
+        "from agenticops.config import settings as _s\n"
+        "from agenticops import config\n"
+        "import agenticops.config as cfg\n"
+        "a = _s.executor_enabled\n"
+        "b = config.settings.auto_fix_enabled\n"
+        "c = cfg.settings.executor_hitl_enabled\n"
+        "d = getattr(_s, 'executor_auto_approve_l0_l1')\n"
+        "e = getattr(config.settings, \"executor_enabled\", False)\n"
+        "f = _s.scan_focus\n"                                    # another setting: not a switch
+        "g = switches.executor_enabled\n"                        # the value in force, from the one reader
+        "h = other.executor_enabled\n",                          # not the settings object
+        encoding="utf-8")
+    assert _code_reads(sample) == [f"{sample}:{line}" for line in (4, 5, 6, 7, 8)]
+
+
+def test_the_scan_does_not_depend_on_how_this_python_splits_an_f_string():
+    """The scan used `tokenize`, which hands an f-string over as ONE string token before Python 3.12 — the read
+    inside it was invisible there and the test above failed on 3.11, the oldest version this project supports.
+    It reads the syntax tree now, where an f-string's expressions are nodes on every version."""
+    import inspect
+    assert "tokenize" not in inspect.getsource(_code_reads) and "ast." in inspect.getsource(_code_reads)
 
 
 # ── every other change of PATCH /api/settings leaves an audit row too (S8: «还没有的就补上») ────────────────────────

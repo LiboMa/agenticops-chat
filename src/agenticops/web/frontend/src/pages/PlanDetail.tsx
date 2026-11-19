@@ -75,6 +75,7 @@ export default function PlanDetail() {
           <FixPlanStatusBadge status={plan.status} />
           <span className="rounded bg-secondary px-1.5 py-0.5">{t(m.runKey)}</span>
         </div>
+        {m.noRun && <p role="status" className="text-sm text-status-warn">{t(`plans.noRun.${m.noRun}`)}</p>}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h1 className="min-w-0 basis-full text-xl font-semibold text-foreground [overflow-wrap:anywhere] sm:flex-1 sm:basis-auto sm:text-2xl">{plan.title}</h1>
           <div className="flex gap-2">

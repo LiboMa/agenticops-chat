@@ -143,9 +143,11 @@ def get_managed_resources(resource_type: str = "", region: str = "") -> str:
             resources = query.limit(_MANAGED_RESOURCES_CAP + 1).all()
             from agenticops.services import report_coverage
             if report_coverage.current() is not None:   # a reporter run: say what this read ranged over
+                # the regions of the rows that matched — never the `region` argument itself: that is the
+                # model's text, and a filter that found nothing read no region (N27, review)
                 report_coverage.note_scope(
                     [a.name for a in cloud_accounts],
-                    [region] if region else [r for (r,) in query.with_entities(CloudResource.region).distinct()])
+                    [r for (r,) in query.with_entities(CloudResource.region).distinct()])
                 if len(resources) > _MANAGED_RESOURCES_CAP:
                     report_coverage.note_truncated()
             resources = resources[:_MANAGED_RESOURCES_CAP]
@@ -1929,13 +1931,14 @@ def mark_fix_executed(health_issue_id: Optional[int], execution_id: int) -> str:
 def nothing_tried(status: Optional[str], steps: list, execution_id: Optional[int]) -> bool:
     """An ABORTED run that tried nothing (MVP-2.9.0 N26): its failure says nothing about the diagnosis, so it is
     not disputed. What was tried is the code's own knowledge where there is any — the run's guard counts the
-    commands it let through that could have changed something (agents/run_guard.applied_of); where no guard watched
-    the run in this process, the run's own step results decide: none reported."""
+    commands it let through that could have changed something and were not the plan's own declared checks
+    (agents/run_guard.tried_of; N27: a failed pre-check no read list knows is still only a check); where no guard
+    watched the run in this process, the run's own step results decide: none reported."""
     if status != "aborted":
         return False
-    from agenticops.agents.run_guard import applied_of
-    applied = applied_of(execution_id)
-    return applied == 0 if applied is not None else not steps
+    from agenticops.agents.run_guard import tried_of
+    tried = tried_of(execution_id)
+    return tried == 0 if tried is not None else not steps
 
 
 def dispute_rca(session, health_issue_id: int, execution_id: int, reason: str = "") -> Optional[RCAResult]:

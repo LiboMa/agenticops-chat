@@ -172,6 +172,9 @@ input:focus, select:focus, textarea:focus {
 ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.5); }
 
 /* ── Report Markdown ── */
+/* a word longer than its line — a bare web address — wraps instead of widening the page (break-word, not
+   anywhere: a table keeps its columns and scrolls inside .md-table-wrap) */
+.report-content { overflow-wrap: break-word; }
 .report-content .md-h1 { @apply text-2xl font-semibold mt-8 mb-4 pb-2 border-b; }
 .report-content .md-h1:first-child { @apply mt-0; }
 .report-content .md-h2 { @apply text-xl font-semibold mt-6 mb-3; }

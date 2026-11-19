@@ -225,7 +225,8 @@ def db(tmp_path, monkeypatch):
 def _approved_fix_plan(db, risk_level):
     from agenticops.models import FixPlan, HealthIssue, RCAResult
     from agenticops.services.plan_content import stamp_approval
-    issue = HealthIssue(title="t", description="d", severity="low", source="test", status="fix_planned",
+    # where an approval leaves its issue: a run starts only there (MVP-2.9.0 N27)
+    issue = HealthIssue(title="t", description="d", severity="low", source="test", status="fix_approved",
                         resource_id="r")
     db.add(issue); db.flush()
     rca = RCAResult(health_issue_id=issue.id, root_cause="x", confidence=0.9)

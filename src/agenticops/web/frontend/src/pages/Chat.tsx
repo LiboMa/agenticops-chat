@@ -10,7 +10,7 @@ import { MessageList } from "@/components/chat/MessageList";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { DragHandle } from "@/components/chat/DragHandle";
 import { ContextPanel } from "@/components/chat/ContextPanel";
-import { FRESH_CHAT, contextRefFromQuery, contextRefQuery, type ContextRef, startsFresh } from "@/lib/contextRef";
+import { FRESH_CHAT, chatLanding, contextRefFromQuery, contextRefQuery, startsFresh, type ContextRef } from "@/lib/contextRef";
 import { visibilityWord } from "@/lib/sessionVisibility";
 import { useAuth } from "@/hooks/useAuth";
 import { contextForNewChat, contextLineKey } from "@/lib/chatContext";
@@ -66,9 +66,12 @@ export default function Chat() {
   // When no URL sessionId: check localStorage for last session, validate it, navigate or show welcome.
   // When URL sessionId present: just use it (page refresh case, Req 1.7).
   useEffect(() => {
-    if (urlSessionId || restorationAttempted.current) return;
+    // a new conversation (about a record, or asked for by the link that led here NOW): never resume the last one
+    const landing = chatLanding({ sessionInAddress: !!urlSessionId, attempted: restorationAttempted.current,
+                                  freshAtMount: !!initialRef || fresh, search: location.search, state: location.state });
+    if (landing === "stay") return;
     restorationAttempted.current = true;
-    if (initialRef || fresh) {  // a new conversation (about that record, or asked for): never resume the last session
+    if (landing === "welcome") {
       setShowWelcome(true);
       return;
     }

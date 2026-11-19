@@ -51,6 +51,15 @@ from agenticops.tools.memory_tools import search_agent_memory
 
 logger = logging.getLogger(__name__)
 
+# What the executor answers while it is switched off. The switch in force is services/exec_switches.effective():
+# an administrator's stored value over the file's default — setting the environment variable to true does nothing
+# against a stored «off», so the answer no longer suggests it (MVP-2.9.0 N27, review).
+EXECUTOR_DISABLED_MESSAGE = (
+    "Executor is DISABLED. Cannot execute fix plans. An administrator switches it on in Settings (Automation); "
+    "a process started with AIOPS_EXECUTOR_ENABLED=false keeps it off until that is changed and the service restarted."
+)
+
+
 def _build_executor_prompt() -> str:
     """Build the executor system prompt at agent-construction time.
 
@@ -69,7 +78,7 @@ EXECUTION PROTOCOL (7 steps — follow in exact order):
 
 2. GATE
    The executor is {"ENABLED" if exec_switches.effective().executor_enabled else "DISABLED"}.
-   If disabled, STOP and report: "Executor is disabled. Set AIOPS_EXECUTOR_ENABLED=true to enable."
+   If disabled, STOP and report: "{EXECUTOR_DISABLED_MESSAGE}"
 
 3. PRE-CHECK
    For each item in the plan's pre_checks list:
@@ -203,10 +212,7 @@ def executor_agent(fix_plan_id: int) -> str:
         Execution summary with status, step results, and any errors.
     """
     if not exec_switches.effective().executor_enabled:
-        return (
-            "Executor is DISABLED. Cannot execute fix plans. "
-            "Set AIOPS_EXECUTOR_ENABLED=true to enable execution."
-        )
+        return EXECUTOR_DISABLED_MESSAGE
     refused = _api_key_refusal(fix_plan_id)
     if refused:
         return f"REJECTED: {refused}"
@@ -236,6 +242,12 @@ def executor_agent(fix_plan_id: int) -> str:
             if opened is None and why:
                 return f"REJECTED: {why}"
             execution_id = opened
+        elif execution_id and not get_run_context().change_request_id:
+            # a queued ticket, claimed now: its issue may have been closed while it waited (N27, review)
+            why = run_tickets.claim_refusal(fix_plan_id)
+            if why:
+                run_tickets.close_ticket(execution_id, "failed", why)
+                return f"REJECTED: {why}"
         if opened and (settings.executor_total_timeout or 0) > 0:
             import threading
             watchdog = threading.Timer(settings.executor_total_timeout, run_tickets.close_ticket, args=(

@@ -154,3 +154,23 @@ export function pageInfo(total: number, page: number): { from: number; to: numbe
   if (total === 0) return { from: 0, to: 0, page: 1, pages: 1 };
   return { from: (at - 1) * FINDINGS_PAGE + 1, to: Math.min(total, at * FINDINGS_PAGE), page: at, pages };
 }
+
+/** What a page says about an account's reachable paths (MVP-2.9.0 N27, review). `unread` = its security groups
+ *  were not read and none was seen — that is not «0»; `atLeast` = some were seen before the read failed; `count` =
+ *  the groups were read (or the snapshot is from before this was recorded): the number, zero included. */
+export function exposureView(a: { reachable_paths: number | null; exposure_read?: boolean | null }):
+  { kind: "count" | "atLeast" | "unread"; n: number | null } {
+  if (a.exposure_read === false) return a.reachable_paths === null ? { kind: "unread", n: null } : { kind: "atLeast", n: a.reachable_paths };
+  return { kind: "count", n: a.reachable_paths ?? 0 };
+}
+
+/** The sentence under an empty list of exposure paths: «none» only when every account shown was read. */
+export function pathsEmptyKey(accounts: { exposure_read?: boolean | null }[] | undefined): "security.noPaths" | "security.noPaths.unread" {
+  return (accounts ?? []).some((a) => a.exposure_read === false) ? "security.noPaths.unread" : "security.noPaths";
+}
+
+/** The page to show when the address names one past the end (the scope narrowed, findings closed, a shared link):
+ *  the last one — an empty answer with a total above zero is not «no findings». */
+export function pageToShow(page: number, total: number, size: number = FINDINGS_PAGE): number {
+  return Math.min(Math.max(1, page), Math.max(1, Math.ceil(total / size)));
+}

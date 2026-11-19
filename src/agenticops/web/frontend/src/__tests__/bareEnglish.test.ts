@@ -24,7 +24,9 @@ function pages(dir: string, out: string[] = []): string[] {
 const CHECKED = pages(src).sort();
 
 /** The names under which text is handed on — as an attribute (`label="…"`) or as an object's property (`{ label: "…" }`). */
-const TEXT_PROPS = new Set(["label", "description", "desc", "placeholder", "title", "aria-label", "alt", "emptyText", "header", "actionLabel", "message", "error"]);
+const TEXT_PROPS = new Set(["label", "description", "desc", "placeholder", "title", "aria-label", "alt", "emptyText", "emptyMessage", "header", "actionLabel", "message", "error"]);
+/** A state setter that holds a sentence the page then shows: `setActionMsg("Saved")`, `setError("…")` (N27, review). */
+const SAYS = /^set(?:[A-Z]\w*)?(Msg|Message|Error|Notice)$/;
 /** Two words in a row, one of them an ordinary word (two lowercase letters or more): «Scan Focus», «Expected a JSON
  *  object», «IAM roles» — not `L0 / L1`, not `OPENAI_API_KEY`, not one word. */
 const WORD = "[A-Za-z]*[a-z]{2,}[A-Za-z]*";
@@ -51,6 +53,10 @@ export function bareEnglish(file: string, code: string): string[] {
       }
       if (ts.isJsxAttribute(p)) return TEXT_PROPS.has(p.name.getText(sf));
       if (ts.isPropertyAssignment(p)) return TEXT_PROPS.has(p.name.getText(sf).replace(/["']/g, ""));
+      // the default of a text-bearing prop (`emptyMessage = "No data available."`), and what a message setter is given
+      if (ts.isBindingElement(p)) return TEXT_PROPS.has((p.propertyName ?? p.name).getText(sf));
+      if (ts.isParameter(p)) return TEXT_PROPS.has(p.name.getText(sf));
+      if (ts.isCallExpression(p)) return SAYS.test(p.expression.getText(sf)) && p.arguments.some((a) => a.pos <= node.pos && node.end <= a.end);
       // only what chooses or joins text is looked through; anything else — a call's argument (t("…"), cn("…"),
       // replace("…")) first of all — is not text
       if (!(ts.isConditionalExpression(p) || ts.isBinaryExpression(p) || ts.isParenthesizedExpression(p) || ts.isTemplateExpression(p) || ts.isTemplateSpan(p))) return false;
@@ -95,6 +101,17 @@ describe("the scanner", () => {
     expect(scan(`const a = <X label="Auto RCA" />;`)).toEqual(["Auto RCA"]);
     expect(scan(`const a = <p>{ok ? "All categories" : name}</p>;`)).toEqual(["All categories"]);
     expect(scan(`const a = <X title={busy ? "Reset to tier default" : undefined} />;`)).toEqual(["Reset to tier default"]);
+  });
+  it("reads the default of a text prop and what a message setter is given (N27, review: eight sentences passed)", () => {
+    expect(scan(`function T({ rows, emptyMessage = "No data available." }: P) { return null; }`)).toEqual(["No data available."]);
+    expect(scan(`function T({ message: text = "No data available." }: P) { return null; }`)).toEqual(["No data available."]);
+    expect(scan(`const a = <DataTable emptyMessage={q ? "No matching tasks." : "No schedules configured."} />;`)).toEqual(["No matching tasks.", "No schedules configured."]);
+    expect(scan(`function f() { setActionMsg("Saved successfully"); }`)).toEqual(["Saved successfully"]);
+    expect(scan("function f(e: Error) { setActionMsg(`Fix plan failed: ${e.message}`); }")).toEqual(["Fix plan failed: {}"]);
+    expect(scan(`function f() { setError(ok ? null : "Could not save it"); }`)).toEqual(["Could not save it"]);
+    // not text: another call's argument, a setter of something else, a default of a prop that is no text
+    expect(scan(`function f() { setTab("view all"); track("Saved successfully"); }`)).toEqual([]);
+    expect(scan(`function T({ variant = "primary button" }: P) { return null; }`)).toEqual([]);
   });
   it("reads a string with a variable in it, and an object's text properties", () => {
     expect(scan("const a = <p>{`Dismiss Selected (${n})`}</p>;")).toEqual(["Dismiss Selected ({})"]);

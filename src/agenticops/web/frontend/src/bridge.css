@@ -148,8 +148,8 @@ html.nf-on.nf-nobar .cl-host { padding-bottom: 1.5rem; }
 /* …and there the command bar is out of sight until it is called (Cmd/Ctrl+K puts the focus in it) */
 html.nf-on.nf-nobar .nf .barwrap:not(:focus-within) { opacity: 0; pointer-events: none; }
 
-/* ── print: a page prints its paper, never the frame ─────────────────────── */
+/* ── print: a hosted page prints its paper, never the frame — a lens is the frame, and prints as it always did ── */
 @media print {
-  html.nf-on .nf { display: none !important; }
+  html.nf-on .nf.hosting { display: none !important; }
   html.nf-on .cl-host { margin: 0 !important; padding: 0 !important; }
 }

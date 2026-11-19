@@ -12,7 +12,7 @@ export interface AppSettings {
   executor_hitl_enabled: boolean;
   /** MVP-2.9.0 N25: which of the four stored switches are an administrator's values, the settings file's
    *  defaults, and who last changed them (read-only) */
-  execution_switches?: { overridden: string[]; defaults: Record<string, boolean>; updated_by: string | null; updated_at: string | null };
+  execution_switches?: { overridden: string[]; defaults: Record<string, boolean>; locked?: Record<string, boolean>; updated_by: string | null; updated_at: string | null };
   notifications_consolidated: boolean;
   bedrock_cache_enabled: boolean;
   skills_auto_improve_enabled: boolean;

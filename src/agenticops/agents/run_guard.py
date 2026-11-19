@@ -131,16 +131,26 @@ _GUARDS: "weakref.WeakValueDictionary[int, RunGuard]" = weakref.WeakValueDiction
 
 
 def applied_of(execution_id: Optional[int]) -> Optional[int]:
-    """How many commands that could have changed something the run with this record was let through — 0 = it tried
-    nothing. None = not known: no guard watched such a run in this process."""
+    """How many commands that could have changed something the run with this record was let through — the
+    cautious count a stop decides on (anything not provably a read). None = not known: no guard watched such a
+    run in this process."""
     guard = _GUARDS.get(execution_id) if execution_id else None
     return None if guard is None else guard.applied
+
+
+def tried_of(execution_id: Optional[int]) -> Optional[int]:
+    """How many of those were not word for word one of the plan's own declared checks — 0 = the run did not try
+    the plan (MVP-2.9.0 N27: a failed pre-check that no read list knows is still only a check). None = not known."""
+    guard = _GUARDS.get(execution_id) if execution_id else None
+    return None if guard is None else guard.tried
 
 
 class RunGuard(HookProvider):
     def __init__(self, execution_id: int):
         self.execution_id = execution_id
         self.applied = 0                 # commands let through that could have changed something
+        self.tried = 0                   # … of which were not the plan's own declared checks (pre / post)
+        self._checks: Optional[frozenset] = None     # those checks' commands, read once (approved content)
         _GUARDS[execution_id] = self
         self.recorded = False            # the run closed its own record
         self._seen: Optional[dict] = None        # the last state that was closed or stopped (neither is ever undone)
@@ -192,8 +202,28 @@ class RunGuard(HookProvider):
         try:
             if may_change_something(name, tool_input):
                 self.applied += 1
+                if not self._is_declared_check(name, tool_input):
+                    self.tried += 1
         except Exception:
             self.applied += 1            # not known to be a read: it counts
+            self.tried += 1
+
+    def _is_declared_check(self, tool_name: str, tool_input: dict) -> bool:
+        """Whether the call's command is, word for word, one of this plan's declared pre- or post-checks — as the
+        tool runs it, or as the call wrote it. When the plan's checks cannot be read, nothing is one."""
+        if self._checks is None:
+            try:
+                from agenticops.services import run_tickets
+                self._checks = run_tickets.check_commands_of(self.execution_id)
+            except Exception:
+                logger.warning("run guard could not read the checks of Execution #%s; every command counts as a try",
+                               self.execution_id, exc_info=True)
+                self._checks = frozenset()
+        if not self._checks:
+            return False
+        from agenticops.services.change_steps import exact_text
+        return (_command(tool_name, tool_input) in self._checks
+                or exact_text((tool_input or {}).get("command") or "") in self._checks)
 
     def _after_tool(self, event: AfterToolCallEvent) -> None:
         """A record that was running when one of the two closing tools was called and is closed when it returns was

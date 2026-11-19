@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canManageUsers, canViewSettings, isReadOnly, navItemVisible, viewerActions } from "@/lib/permissions";
+import { canManageUsers, canViewSettings, isReadOnly, navItemVisible, settingsGate, viewerActions } from "@/lib/permissions";
 
 describe("isReadOnly", () => {
   it("is a signed-in viewer only", () => {
@@ -52,5 +52,24 @@ describe("viewerActions", () => {
     const menu = ["runRca", "markResolved", "dismiss", "askAgent", "reject", "copyAsNew"].map((key) => ({ key }));
     expect(viewerActions(menu)).toEqual([{ key: "askAgent" }]);
     expect(viewerActions([])).toEqual([]);
+  });
+});
+
+describe("settingsGate (MVP-2.9.0 N27)", () => {
+  const viewer = { auth_enabled: true, user: { read_only: true } };
+  it("draws nothing while the sign-in details are on their way (a viewer saw Settings, and two refused requests, before «not found»)", () => {
+    expect(settingsGate({ data: undefined, isLoading: true })).toBe("wait");
+  });
+  it("then opens for a writer and for a viewer who may view Settings, and is «not found» for any other viewer", () => {
+    expect(settingsGate({ data: { auth_enabled: true, user: { read_only: false } }, isLoading: false })).toBe("open");
+    expect(settingsGate({ data: { auth_enabled: true, user: { read_only: true, can_view_settings: true } }, isLoading: false })).toBe("open");
+    expect(settingsGate({ data: viewer, isLoading: false })).toBe("notFound");
+  });
+  it("stays open when no details will come (sign-in off: the request is never made) or they could not be read", () => {
+    expect(settingsGate({ data: undefined, isLoading: false })).toBe("open");
+  });
+  it("a refresh in the background does not blank the page", () => {
+    expect(settingsGate({ data: viewer, isLoading: false })).toBe("notFound");
+    expect(settingsGate({ data: { auth_enabled: true, user: { read_only: false } }, isLoading: false })).toBe("open");
   });
 });

@@ -1857,14 +1857,20 @@ def _backfill_security_issue_accounts_2_9_0(engine) -> None:
                         AlertEvent.health_issue_id.in_(empty[at:at + 500])).distinct():
                     if (account or "").strip():
                         stated.setdefault(issue_id, set()).add(account.strip())
+            from agenticops.services.plan_content import restamp_issue_plans
             filled = 0
             for issue_id, names in stated.items():
                 pks = {account_pk(session, name) for name in names}
                 if len(pks) != 1 or None in pks:
                     continue
-                filled += session.query(HealthIssue).filter(
+                moved = session.query(HealthIssue).filter(
                     HealthIssue.id == issue_id, HealthIssue.account_id.is_(None)).update(
                     {"account_id": pks.pop()}, synchronize_session=False)
+                filled += moved
+                if moved:
+                    # the account is plan content: its live plans' hashes follow it, as re-anchoring does
+                    # (N27, review — left behind, the next approval read «changed since it was loaded»)
+                    restamp_issue_plans(session, issue_id)
             session.commit()
         logger.info("MVP-2.9.0 security account backfill: %d filled, %d left without an account "
                     "(no Signal row states one managed account)", filled, len(empty) - filled)

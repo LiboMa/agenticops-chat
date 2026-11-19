@@ -3,8 +3,11 @@
 A report's `coverage` says which accounts and regions the run's tools ranged over, whether every result reached the
 model whole, and when the run began reading:
 
-    {accounts: [name], regions: [region], completeness: "complete" | "partial",
+    {accounts: [name], regions: [region], completeness: "complete" | "partial" | "none",
      partial: {truncated, offloaded, failed}, read_at: ISO}
+
+`none` = the run's tools named no account and no region (it only read an issue or a diagnosis by id): there is
+nothing to call complete (MVP-2.9.0 N27, review).
 
 None of it comes from the model. `reporter_agent` begins a record and puts it on the run's RunContext (`coverage`);
 the data tools (tools/metadata_tools), the credential resolver (credentials/resolver.resolve_account_session — the one
@@ -38,8 +41,9 @@ class Coverage:
         with self._lock:
             partial = {"truncated": self.truncated, "offloaded": self.offloaded, "failed": self.failed}
             at = self.read_at if self.read_at.tzinfo else self.read_at.replace(tzinfo=timezone.utc)
+            scope = bool(self.accounts or self.regions)
             return {"accounts": sorted(self.accounts), "regions": sorted(self.regions),
-                    "completeness": "partial" if any(partial.values()) else "complete",
+                    "completeness": "partial" if any(partial.values()) else "complete" if scope else "none",
                     "partial": partial,
                     "read_at": at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")}
 

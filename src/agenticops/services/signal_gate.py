@@ -245,11 +245,31 @@ def _jaccard(a: str, b: str) -> float:
     return len(sa & sb) / len(sa | sb)
 
 
+def _signal_account_pk(session, sig: SignalInput):
+    """The cloud_accounts row the signal names, or None when it names none (or none that is managed)."""
+    if not (sig.account_id or "").strip():
+        return None
+    try:
+        from agenticops.services import identity_resolver
+        return identity_resolver.account_pk(session, sig.account_id)
+    except Exception:
+        return None
+
+
+def _another_accounts(issue, signal_pk) -> bool:
+    """Whether `issue` is known to be of another account than the signal's (MVP-2.9.0 N27, review): both are known
+    and they differ. The same resource id and type in two accounts — «account» without a trail, the root user,
+    a user name both have, a workload name in two clusters — are two problems. Where either is unknown, nobody
+    can tell, and the rules stay what they were."""
+    return signal_pk is not None and issue.account_id is not None and issue.account_id != signal_pk
+
+
 def _gray_zone_candidates(session, sig: SignalInput, now: datetime) -> list:
     """Open issues that make this signal ambiguous (L2 triggers, spec §2.4). A dismissed issue is not one:
-    the L2 judge must not fold a new problem into a false positive."""
+    the L2 judge must not fold a new problem into a false positive. Nor is an issue of another account."""
     from agenticops.models import HealthIssue
 
+    signal_pk = _signal_account_pk(session, sig)
     window_start = now - timedelta(minutes=settings.noise_flap_window_minutes)
     active = (
         session.query(HealthIssue)
@@ -261,6 +281,8 @@ def _gray_zone_candidates(session, sig: SignalInput, now: datetime) -> list:
     candidates: dict[int, object] = {}
     resource = (sig.resource_id or "").strip()
     for issue in active:
+        if _another_accounts(issue, signal_pk):
+            continue
         # ① same resource, different wording/type
         if resource and resource.lower() != "unknown" and issue.resource_id == resource:
             candidates[issue.id] = issue
@@ -619,14 +641,14 @@ def process_signal(sig: SignalInput) -> GateDecision:
             # ⑥ same resource AND same issue_type → merge (gate-on tightens legacy resource merge)
             resource = (sig.resource_id or "").strip()
             if gate_on and settings.resource_dedup_enabled and resource and resource.lower() != "unknown":
-                match = (
+                signal_pk = _signal_account_pk(session, sig)
+                match = next((issue for issue in (
                     session.query(HealthIssue)
                     .filter(HealthIssue.resource_id == resource,
                             HealthIssue.issue_type == (sig.issue_type or "other"),
                             HealthIssue.status.in_(RESOURCE_DEDUP_STATUSES))
                     .order_by(HealthIssue.detected_at.desc())
-                    .first()
-                )
+                ) if not _another_accounts(issue, signal_pk)), None)   # never another account's issue (N27)
                 if match is not None:
                     merge_into_issue(session, match, sig.source, sig.title, sig.description,
                                      sig.severity, fingerprint, sig.metric_data, sig.related_changes)

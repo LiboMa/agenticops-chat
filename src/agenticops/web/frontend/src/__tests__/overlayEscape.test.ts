@@ -18,7 +18,10 @@ function files(dir: string, out: string[] = []): string[] {
   }
   return out;
 }
-const WITH_OVERLAY = files(src).sort().filter((file) => readFileSync(join(src, file), "utf8").includes("fixed inset-0"));
+/** A full-screen overlay, or a panel that covers the right side from top to bottom (N27, review: the house rule
+ *  names side panels, the scan looked only at full-screen ones — the agent-metrics timeline drawer was missed). */
+const OVERLAY = /fixed inset-0|fixed inset-y-0 right-0/;
+const WITH_OVERLAY = files(src).sort().filter((file) => OVERLAY.test(readFileSync(join(src, file), "utf8")));
 
 const COMPONENT = /^(?:export default |export )?function ([A-Z]\w*)\(/;
 const CLOSES = /Dialog\.(Root|Overlay|Content)|<ModalFrame|useCloseOnEscape\(|"Escape"/;
@@ -28,8 +31,8 @@ export function overlaysWithoutEscape(file: string, code: string): string[] {
   const starts = lines.flatMap((line, at) => { const m = COMPONENT.exec(line); return m ? [{ at, name: m[1] }] : []; });
   const out: string[] = [];
   lines.forEach((line, at) => {
-    if (!line.includes("fixed inset-0")) return;
-    if (lines.slice(Math.max(0, at - 2), at).some((above) => above.includes("fixed inset-0"))) return;      // its backdrop
+    if (!OVERLAY.test(line)) return;
+    if (lines.slice(Math.max(0, at - 2), at).some((above) => OVERLAY.test(above))) return;      // its backdrop
     const owner = [...starts].reverse().find((s) => s.at <= at);
     const end = starts.find((s) => s.at > at)?.at ?? lines.length;
     if (!CLOSES.test(lines.slice(owner?.at ?? 0, end).join("\n"))) out.push(file + ":" + (at + 1) + " " + (owner?.name ?? "?"));
@@ -55,6 +58,13 @@ describe("the scan", () => {
   it("one component's handler does not cover the next component in the file", () => {
     expect(scan(...component("First", "  useCloseOnEscape(onClose);"), ...component("Second"))).toEqual(["Second"]);
     expect(scan(...component("First"), ...component("Second", "  useCloseOnEscape(onClose);"))).toEqual(["First"]);
+  });
+  it("a panel down the right side is an overlay too", () => {
+    const drawer = '    <div className="fixed inset-y-0 right-0 z-40 w-full max-w-lg bg-background">';
+    expect(scan("function Drawer({ onClose }: Props) {", "  return (", drawer, "    </div>", "  );", "}")).toEqual(["Drawer"]);
+    expect(scan("function Drawer({ onClose }: Props) {", "  useCloseOnEscape(onClose);", "  return (", drawer, "    </div>", "  );", "}")).toEqual([]);
+    // the sidebar is not one: it stands on the left for good
+    expect(scan("function Sidebar() {", "  return (", '    <aside className="fixed inset-y-0 left-0 z-30 w-[200px]">', "    </aside>", "  );", "}")).toEqual([]);
   });
   it("a backdrop inside an overlay is not a second overlay", () => {
     expect(scan("function Panel() {", "  return (", '    <div className="fixed inset-0 z-50 flex">', '      <div className="fixed inset-0 bg-black/30" onClick={onClose} />', "    </div>", "  );", "}")).toEqual(["Panel"]);

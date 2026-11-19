@@ -51,7 +51,9 @@ def _change_plan(db, plan_status, cr_status, *, account_id=None):
 
 def _fix_plan(db, status):
     """A plain fix plan, the same row shape as tests/test_fix_plan_hardening_api.py::_plan."""
-    issue = HealthIssue(title="t", description="d", severity="low", source="test", status="fix_planned", resource_id="r")
+    # an approval leaves its issue at fix_approved — and a run starts only there (MVP-2.9.0 N27)
+    issue = HealthIssue(title="t", description="d", severity="low", source="test", resource_id="r",
+                        status="fix_approved" if status == "approved" else "fix_planned")
     db.add(issue); db.flush()
     rca = RCAResult(health_issue_id=issue.id, root_cause="x", confidence=0.9)
     db.add(rca); db.flush()

@@ -9,7 +9,8 @@ import { queryClient } from "@/queryClient";
 import { Spinner } from "@/components/ui/Spinner";
 import { getAuthToken } from "@/api/client";
 import { hubRedirect } from "@/lib/plans";
-import { useCanManageUsers, useCanViewSettings } from "@/hooks/useBootstrap";
+import { useBootstrap, useCanManageUsers } from "@/hooks/useBootstrap";
+import { settingsGate } from "@/lib/permissions";
 
 const Login = lazy(() => import("@/pages/Login"));
 const Setup = lazy(() => import("@/pages/Setup"));
@@ -42,7 +43,8 @@ const NewLenses = lazy(() => import("@/newui/NewLenses"));
 
 /** Settings is all configuration: a viewer whose account may not view it gets the not-found page. */
 function SettingsGate({ children }: { children: React.ReactNode }) {
-  return useCanViewSettings() ? <>{children}</> : <NotFound />;
+  const gate = settingsGate(useBootstrap());
+  return gate === "open" ? <>{children}</> : gate === "wait" ? null : <NotFound />;
 }
 
 /** MVP-2.8.0 S2 rework: user management is an admin's (lib/permissions.canManageUsers); anyone else gets the 404

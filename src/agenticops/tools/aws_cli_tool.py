@@ -240,9 +240,20 @@ _AWS_FLAG_OPTIONS = frozenset({
 })
 
 
+def _as_run(command: str) -> list[str] | None:
+    """The words of `command` as the tool hands them to the CLI — split the way the tool splits it (shlex), in
+    lower case: `get-object''`, `get-ob\\ject` and "get-object" all run get-object, and a classifier that read the
+    spelling called them reads (MVP-2.9.0 N27, review). None when the line cannot be split (an unbalanced quote):
+    the tool refuses to run it."""
+    try:
+        return [word.lower() for word in shlex.split(command)]
+    except ValueError:
+        return None
+
+
 def _aws_service_operation(command: str) -> tuple[str, str]:
     """The service and the operation of `aws [options] <service> [options] <operation> …` — '' where there is none."""
-    tokens = command.lower().split()
+    tokens = _as_run(command)
     if not tokens or tokens[0] != "aws":
         return "", ""
     positional, i = [], 1
@@ -280,10 +291,16 @@ def _is_write_verb(operation: str) -> bool:
 
 def _classify_command(command: str) -> str:
     """Classify a command as 'blocked', 'write', 'readonly', or 'unknown'."""
-    cmd_lower = command.lower().strip()
-
     blocked = blocked_pattern_match(command)
     if blocked:
+        return "blocked"
+
+    # judged as it will run: the words the tool hands the CLI, single-spaced (see _as_run)
+    words = _as_run(command)
+    if words is None:
+        return "unknown"
+    cmd_lower = " ".join(words)
+    if blocked_pattern_match(cmd_lower):
         return "blocked"
 
     for prefix in WRITE_PREFIXES:

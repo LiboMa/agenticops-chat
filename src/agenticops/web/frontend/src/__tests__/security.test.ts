@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   FINDINGS_PAGE, cardView, findingsQuery, findingsRequest, findingsSearch, pageInfo, radarAccount, radarRows,
   scoreTier, trendChart, trendDays,
+  exposureView, pathsEmptyKey, pageToShow,
 } from "@/lib/security";
 import type { SecurityAccountScore, SecurityTrend } from "@/api/types";
 
@@ -117,5 +118,38 @@ describe("the findings list's filters live in the address", () => {
     expect(pageInfo(45, 1)).toEqual({ from: 1, to: 20, page: 1, pages: 3 });
     expect(pageInfo(45, 3)).toEqual({ from: 41, to: 45, page: 3, pages: 3 });
     expect(pageInfo(45, 9)).toEqual({ from: 41, to: 45, page: 3, pages: 3 });      // a page past the end is the last one
+  });
+});
+
+describe("reachable paths of an account whose security groups were not read (MVP-2.9.0 N27, review)", () => {
+  it("is not «0»: nothing was seen and nothing can be said", () => {
+    expect(exposureView({ reachable_paths: null, exposure_read: false })).toEqual({ kind: "unread", n: null });
+  });
+  it("what was seen before the read failed is «at least»", () => {
+    expect(exposureView({ reachable_paths: 2, exposure_read: false })).toEqual({ kind: "atLeast", n: 2 });
+  });
+  it("a read account says its number, zero included; so does a snapshot from before this was recorded", () => {
+    expect(exposureView({ reachable_paths: 0, exposure_read: true })).toEqual({ kind: "count", n: 0 });
+    expect(exposureView({ reachable_paths: 3, exposure_read: true })).toEqual({ kind: "count", n: 3 });
+    expect(exposureView({ reachable_paths: 0, exposure_read: null })).toEqual({ kind: "count", n: 0 });
+    expect(exposureView({ reachable_paths: 0 })).toEqual({ kind: "count", n: 0 });
+  });
+  it("an empty list of paths says «none» only when every account shown was read", () => {
+    expect(pathsEmptyKey([{ exposure_read: true }, { exposure_read: null }])).toBe("security.noPaths");
+    expect(pathsEmptyKey([{ exposure_read: true }, { exposure_read: false }])).toBe("security.noPaths.unread");
+    expect(pathsEmptyKey(undefined)).toBe("security.noPaths");
+  });
+});
+
+describe("a page past the end of the findings (MVP-2.9.0 N27, review)", () => {
+  it("is the last page: «no findings» is not said under a card that counts 59", () => {
+    expect(pageToShow(5, 59, 20)).toBe(3);
+    expect(pageToShow(4, 60, 20)).toBe(3);
+    expect(pageToShow(2, 20, 20)).toBe(1);
+  });
+  it("a page that exists is itself, and an empty list is page 1", () => {
+    expect(pageToShow(3, 59, 20)).toBe(3);
+    expect(pageToShow(1, 59, 20)).toBe(1);
+    expect(pageToShow(7, 0, 20)).toBe(1);
   });
 });

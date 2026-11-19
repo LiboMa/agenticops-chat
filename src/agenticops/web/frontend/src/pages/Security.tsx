@@ -12,8 +12,8 @@ import { reachView } from "@/lib/reachability";
 import { moduleStatus, type QueryLike } from "@/lib/queryState";
 import { formatShortDate, utcDayKey } from "@/lib/formatDate";
 import {
-  REACH_CHOICES, SEVERITY_CHOICES, TIER_TONE, TREND_RANGES, cardView, findingsQuery, findingsSearch, pageInfo,
-  radarAccount, radarRows, trendChart, trendDays, type FindingsQuery, type TrendChart,
+  REACH_CHOICES, SEVERITY_CHOICES, TIER_TONE, TREND_RANGES, cardView, exposureView, findingsQuery, findingsSearch, pageInfo,
+  pageToShow, pathsEmptyKey, radarAccount, radarRows, trendChart, trendDays, type FindingsQuery, type TrendChart,
 } from "@/lib/security";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useTheme } from "@/hooks/useTheme";
@@ -59,6 +59,7 @@ function Errors({ errors, t }: { errors: { source: string; error: string }[]; t:
 
 function AccountCard({ a, t }: { a: SecurityAccountScore; t: T }) {
   const view = cardView(a);
+  const exposure = exposureView(a);       // not «0 reachable paths» where the security groups were not read
   return (
     <Card>
       <CardBody>
@@ -85,7 +86,7 @@ function AccountCard({ a, t }: { a: SecurityAccountScore; t: T }) {
         )}
         <Errors errors={view.errors} t={t} />
         <div className="mt-2 text-xs text-muted-foreground">
-          {fill(t("security.cardCounts"), { reachable: a.reachable_paths, open: a.open_findings })}
+          {fill(t(exposure.kind === "count" ? "security.cardCounts" : `security.cardCounts.${exposure.kind}`), { reachable: exposure.n ?? "", open: a.open_findings })}
         </div>
         <div className="mt-0.5 text-xs text-muted-foreground">{fill(t("security.scoredAt"), { time: formatShortDate(a.created_at) })}</div>
       </CardBody>
@@ -184,6 +185,14 @@ export default function Security() {
     setParams(next, { replace: true });
   };
   const filtered = Boolean(query.severity || query.reach || query.q || query.status !== "open");
+  // A page past the end — the scope narrowed, findings closed, a shared link — is the last page: an empty answer
+  // with a total above zero is not «no findings» (N27, review). Only on a fresh answer for THIS query.
+  const total = findings.isPlaceholderData ? undefined : findings.data?.total;
+  useEffect(() => {
+    if (total === undefined) return;
+    const page = pageToShow(query.page, total);
+    if (page !== query.page) setParams(findingsSearch(params, { ...query, page }), { replace: true });
+  }, [total, query.page]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const reach = (r: unknown) => {
     const v = reachView(r);
@@ -344,7 +353,7 @@ export default function Security() {
                    className={`${FIELD} min-w-0 flex-1 basis-40`} value={draft} onChange={(e) => setDraft(e.target.value)}
                    onBlur={() => { if (draft.trim() !== query.q) filter({ q: draft }); }} />
           </form>
-          <QueryState query={findings} isEmpty={(d) => d.items.length === 0}
+          <QueryState query={findings} isEmpty={(d) => d.total === 0}
                       emptyText={filtered ? t("security.noFindings.filtered") : t("security.noFindings")} onRetry={() => void findings.refetch()}>
             {(data) => {
               const info = pageInfo(data.total, query.page);
@@ -403,7 +412,7 @@ export default function Security() {
           <ModuleState query={paths} t={t} />
         </CardHeader>
         <CardBody>
-          <QueryState query={paths} isEmpty={noItems} emptyText={t("security.noPaths")} onRetry={() => void paths.refetch()}>
+          <QueryState query={paths} isEmpty={noItems} emptyText={t(pathsEmptyKey(summary.data?.accounts))} onRetry={() => void paths.refetch()}>
             {(data) => data.map((p, i) => (
               <div key={i} className="flex flex-wrap items-center gap-2 py-1.5 text-sm font-mono border-b border-border/50 last:border-0">
                 {reach(p.reachability)}

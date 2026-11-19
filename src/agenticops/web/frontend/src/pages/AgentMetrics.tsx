@@ -12,6 +12,7 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Badge } from "@/components/ui/Badge";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useAgentLogs, useAgentTimeline, useAgentLogSummary } from "@/hooks/useAgentLogs";
+import { useCloseOnEscape } from "@/hooks/useCloseOnEscape";
 import { useCostSummary } from "@/hooks/useCostSummary";
 import { useRcaLocationStats } from "@/hooks/useRcaLocationStats";
 import { ANCHOR_STATUSES, LOCATION_STATUSES, ratePct } from "@/lib/locationStats";
@@ -386,6 +387,7 @@ function AgentCallLog({ onSelectTrace }: { onSelectTrace: (traceId: string) => v
 function TimelineDrawer({ traceId, onClose }: { traceId: string; onClose: () => void }) {
   const { t } = useLocale();
   const timelineQ = useAgentTimeline(traceId);
+  useCloseOnEscape(onClose);        // a side panel closes on Escape, as every dialog does (house rule)
 
   return (
     <div className="fixed inset-y-0 right-0 z-40 w-full max-w-lg bg-background border-l border-border shadow-xl flex flex-col">

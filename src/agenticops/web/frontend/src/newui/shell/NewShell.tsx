@@ -12,7 +12,7 @@ import { scopeSelect } from "@/lib/accountScope";
 import { navBadge } from "@/lib/navCounts";
 import { breadcrumbFor } from "@/lib/navGroups";
 import { savePreferences } from "@/lib/preferences";
-import { setChoice } from "@/lib/shellChoice";
+import { TO_CLASSIC, setChoice } from "@/lib/shellChoice";
 import { useActivity } from "../hooks/useActivity";
 import { useWaitingCounts } from "../hooks/useDecideQueue";
 import { useNfT } from "../i18n";
@@ -194,7 +194,7 @@ export function NewShell({ children, hosting = false, tucked = false }: { childr
   }), [notify, singleKeys, setRootFlag, pending.defer, pending.waiting?.item]);
   const nfTheme = theme === "dark" ? "night" : "day";
   // «back to the classic interface» is a choice the browser keeps (lib/shellChoice), as «the new interface» is on the other side
-  const toClassic = () => { setChoice("classic"); navigate("/app"); };
+  const toClassic = () => { setChoice("classic"); navigate("/app", { state: TO_CLASSIC }); };
   const nextFont = () => {
     const sizes = Object.keys(FONT_SIZES) as FontSize[];
     setFontSize(sizes[(sizes.indexOf(fontSize) + 1) % sizes.length]);

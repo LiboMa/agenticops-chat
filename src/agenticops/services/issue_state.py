@@ -102,3 +102,30 @@ def closed_issue_refusal(session, issue_id: Optional[int], doing: str = "approvi
     if issue is not None and issue.status in ("resolved", "dismissed"):
         return f"HealthIssue #{issue_id} is '{issue.status}'; reopen it before {doing} its plan"
     return None
+
+
+def run_refusal(session, issue_id: Optional[int], *, claimed: bool = False) -> Optional[str]:
+    """Why a fix plan of this issue may not start a run — None = it may (or it is a change plan: no issue).
+
+    A run moves its issue `fix_approved → fix_executing`, and its result moves it on from there. An issue that is
+    anywhere else cannot follow the run: a passed run would not resolve it, an acceptance would be refused, a
+    failed run would not give it back. So a plan runs only while its issue waits for exactly that (MVP-2.9.0 N27,
+    review). N26 refused a closed issue's plan with «reopen it before running its plan» — but a reopened issue is
+    `open` (it starts again from its diagnosis) and a resolved one cannot be reopened; that sentence is gone.
+
+    `claimed` = a queued ticket being claimed: the issue moved to `fix_executing` when the ticket was queued, so
+    it is still on this run there (or at `fix_approved`, where a path that did not move it left it: the result
+    moves it from either) — a ticket whose issue was closed, or moved elsewhere, while it waited is not run.
+
+    The issue is read as it is NOW (`populate_existing`): a session that already has it in hand — the command
+    line's, across its confirmation prompt, which waits without limit — would otherwise answer from that copy."""
+    issue = session.get(HealthIssue, issue_id, populate_existing=True) if issue_id else None
+    if issue is None:
+        return None
+    if issue.status in (("fix_executing", "fix_approved") if claimed else ("fix_approved",)):
+        return None
+    if issue.status in ("resolved", "dismissed"):
+        return (f"HealthIssue #{issue_id} is '{issue.status}': its approved plan is not run. A dismissed issue that "
+                f"is reopened starts again from its diagnosis.")
+    return (f"HealthIssue #{issue_id} is '{issue.status}', not waiting for this plan's run: the plan was approved "
+            f"for the issue as it stood then. Withdraw the plan and plan again from where the issue is now.")

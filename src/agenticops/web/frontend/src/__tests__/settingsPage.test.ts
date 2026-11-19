@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  HIGH_IMPACT, SECTIONS, canEditHigh, highKeys, modelAvailability, pending, sectionAnchor, sectionOfHash, shown, sourceOf, stage,
+  HIGH_IMPACT, SECTIONS, canEditHigh, highKeys, modelAvailability, heldVar, pending, sectionAnchor, sectionOfHash, shown, shownTab, sourceOf, stage,
   type HighKey,
 } from "@/lib/settingsPage";
 
@@ -82,5 +82,57 @@ describe("a model's availability is read from the list — no model is called", 
     expect(modelAvailability("global.anthropic.claude-opus-5-5", undefined)).toBe("unknown");
     expect(modelAvailability("global.anthropic.claude-opus-5-5", [])).toBe("unknown");
     expect(modelAvailability("", presets)).toBe("unknown");
+  });
+});
+
+describe("shownTab (MVP-2.9.0 N27)", () => {
+  it("the audit log is offered only to who may read it: anyone else who follows a link to it gets the first tab", () => {
+    expect(shownTab("audit", false)).toBe("general");
+    expect(shownTab("audit", true)).toBe("audit");
+  });
+  it("every other tab is the one asked for", () => {
+    for (const tab of ["general", "accounts", "messaging", "kb", "skills", "mcp", "memory"] as const) {
+      expect(shownTab(tab, false)).toBe(tab);
+      expect(shownTab(tab, true)).toBe(tab);
+    }
+  });
+});
+
+describe("a switch the environment holds (MVP-2.9.0 N27, review)", () => {
+  const info = { overridden: ["executor_enabled", "auto_fix_enabled"], locked: { executor_enabled: false, executor_hitl_enabled: true } };
+
+  it("its source is the environment, whatever is stored", () => {
+    expect(sourceOf("executor_enabled", info)).toBe("environment");
+    expect(sourceOf("executor_hitl_enabled", info)).toBe("environment");
+    expect(sourceOf("auto_fix_enabled", info)).toBe("stored");
+    expect(sourceOf("executor_auto_approve_l0_l1", info)).toBe("default");
+    expect(sourceOf("rbac_enforce", info)).toBe("file");
+  });
+  it("names the variable and the value it holds", () => {
+    expect(heldVar("executor_enabled", info)).toBe("AIOPS_EXECUTOR_ENABLED=false");
+    expect(heldVar("executor_hitl_enabled", info)).toBe("AIOPS_EXECUTOR_HITL_ENABLED=true");
+    expect(heldVar("auto_fix_enabled", info)).toBeNull();
+  });
+  it("an answer without the field (an older server) holds nothing", () => {
+    expect(heldVar("executor_enabled", { overridden: [] })).toBeNull();
+    expect(heldVar("executor_enabled", undefined)).toBeNull();
+    expect(sourceOf("executor_enabled", { overridden: ["executor_enabled"] })).toBe("stored");
+  });
+  it("a held switch cannot be staged", () => {
+    const now = saved({ executor_enabled: false });
+    expect(stage(now, {}, "executor_enabled", true, info)).toEqual({});
+    expect(stage(now, { auto_fix_enabled: true }, "executor_enabled", true, info)).toEqual({ auto_fix_enabled: true });
+    expect(stage(now, {}, "auto_fix_enabled", true, info)).toEqual({ auto_fix_enabled: true });
+  });
+});
+
+describe("the confirmation switch says what it does today (MVP-2.9.0 N27, review)", () => {
+  it("in both languages: there is no place to confirm yet, so a run stops there and ends", async () => {
+    const en = (await import("@/locales/en.json")).default as Record<string, string>;
+    const zh = (await import("@/locales/zh.json")).default as Record<string, string>;
+    expect(en["settings.high.executor_hitl_enabled.desc"]).toMatch(/no place to (give|confirm)/i);
+    expect(en["settings.high.executor_hitl_enabled.onMeans"]).toMatch(/ends as failed/i);
+    expect(zh["settings.high.executor_hitl_enabled.desc"]).toContain("还没有");
+    expect(zh["settings.high.executor_hitl_enabled.onMeans"]).toContain("以失败结束");
   });
 });

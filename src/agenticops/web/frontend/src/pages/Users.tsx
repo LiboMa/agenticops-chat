@@ -166,7 +166,7 @@ export default function Users() {
           return (
             <>
               {/* ≥ 768 px a table, below one card per user */}
-              <div className="hidden overflow-hidden rounded-lg border border-border bg-card md:block">
+              <div className="hidden overflow-x-auto rounded-lg border border-border bg-card md:block">
                 <table className="w-full text-sm">
                   <thead className="bg-canvas text-left text-xs text-muted-foreground">
                     <tr>

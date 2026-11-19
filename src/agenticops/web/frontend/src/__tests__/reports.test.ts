@@ -60,6 +60,17 @@ describe("the coverage card says what the record holds", () => {
   it("counts decide, not the word: a record with a gap is partial whatever it calls itself", () => {
     expect(coverageView(cov({ completeness: "complete", partial: { truncated: 0, offloaded: 3, failed: 0 } }))?.stateKey).toBe("reports.coverage.partial");
   });
+  it("a run that named no account and no region is not called complete (MVP-2.9.0 N27, review)", () => {
+    const empty = coverageView(cov({ accounts: [], regions: [] }));
+    expect([empty?.tone, empty?.stateKey]).toEqual(["none", "reports.coverage.unrecorded"]);
+    // whatever the record calls itself — an older record says «complete», a newer one «none»
+    expect(coverageView(cov({ accounts: [], regions: [], completeness: "none" } as Partial<ReportCoverage>))?.stateKey).toBe("reports.coverage.unrecorded");
+    // a gap is still said first: something was read, and cut
+    const cut = coverageView(cov({ accounts: [], regions: [], partial: { truncated: 1, offloaded: 0, failed: 0 } }));
+    expect([cut?.tone, cut?.stateKey]).toEqual(["warn", "reports.coverage.partial"]);
+    // one of the two is enough to have a scope
+    expect(coverageView(cov({ accounts: ["prod"], regions: [] }))?.stateKey).toBe("reports.coverage.complete");
+  });
   it("no card for a report without a record, or with one it cannot read", () => {
     expect(coverageView(null)).toBeNull();
     expect(coverageView(undefined)).toBeNull();

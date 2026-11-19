@@ -51,8 +51,12 @@ describe("the classic branch paints at once", () => {
   const sw = noComments(read("components/layout/ShellSwitch.tsx"));
   it("ShellSwitch imports the classic shell statically and reads the choice synchronously", () => {
     expect(staticImports(sw)).toContain("./AppShell");
-    expect(sw).toMatch(/readChoice\(\)/);
-    expect(sw).not.toMatch(/useEffect|useState|Suspense/);
+    // decided as the route renders — never held in state, never behind a Suspense
+    expect(sw).toMatch(/const shell = shellFor\(pathname, readChoice\(\)/);
+    expect(sw).not.toMatch(/useState|Suspense/);
+    // N27: its one effect only records, after the page is on the screen, which frame drew it (lib/shellChoice.shellFor `was`)
+    expect(sw.match(/useEffect\(/g) ?? []).toHaveLength(1);
+    expect(sw).toMatch(/useEffect\(\(\) => \{ was\.current = shell; \}\)/);
   });
 });
 

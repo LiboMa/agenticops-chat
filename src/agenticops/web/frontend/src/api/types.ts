@@ -194,7 +194,7 @@ export interface Report {
 export interface ReportCoverage {
   accounts: string[];
   regions: string[];
-  completeness: "complete" | "partial";
+  completeness: "complete" | "partial" | "none";
   /** how many tool results were cut, moved out of the context by the offloader, or errors */
   partial: { truncated: number; offloaded: number; failed: number };
   /** when the run began reading (UTC) */
@@ -1240,7 +1240,10 @@ export interface SecurityAccountScore {
   /** a category nobody could read is null */
   category_scores: Record<string, number | null>;
   created_at: string | null;
-  reachable_paths: number;
+  /** null = the security groups were not read and no path was seen: not known, not zero */
+  reachable_paths: number | null;
+  /** false = the security groups were not (all) read: a number is «at least»; null on an older snapshot */
+  exposure_read?: boolean | null;
   /** THIS account's open findings — the total of its findings list */
   open_findings: number;
   /** null on a snapshot written before collection health was recorded */

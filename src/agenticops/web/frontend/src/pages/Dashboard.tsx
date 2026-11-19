@@ -22,7 +22,14 @@ import { useMemo } from "react";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useSecuritySummary } from "@/hooks/useSecurity";
 import { StatusText } from "@/components/ui/StatusText";
-import { TIER_TONE, cardView } from "@/lib/security";
+import { TIER_TONE, cardView, exposureView } from "@/lib/security";
+
+/** An account's reachable exposures on the security card: not «0» where its security groups were not read. */
+function exposureLine(a: { reachable_paths: number | null; exposure_read?: boolean | null }, t: (key: string) => string): string {
+  const v = exposureView(a);
+  if (v.kind === "unread") return t("dashboard.securityReachable.unread");
+  return (v.kind === "atLeast" ? "≥ " : "") + v.n + " " + t("dashboard.securityReachable");
+}
 
 const CLOSED_STATUSES = new Set(["resolved", "dismissed"]);
 const TH = "px-4 py-2.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground";
@@ -117,7 +124,7 @@ export default function Dashboard() {
                       : <span className="text-xl font-light font-mono">{view.score}</span>}
                     {view.tier && <StatusText tone={TIER_TONE[view.tier]} className="text-xs">{t(`security.tier.${view.tier}`)}</StatusText>}
                     {view.state === "partial" && <StatusText tone="warn" className="text-xs">{t("security.partial")}</StatusText>}
-                    <span className="text-sm text-muted-foreground">{a.reachable_paths} {t("dashboard.securityReachable")}</span>
+                    <span className="text-sm text-muted-foreground">{exposureLine(a, t)}</span>
                   </li>
                 );
               })}

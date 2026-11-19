@@ -88,3 +88,20 @@ describe("runHintKey — the run card's promise before a plan exists (final revi
     expect(runHintKey(undefined)).toBe("workitem.future.issue.runNeutral");
   });
 });
+
+describe("an approved plan that will not run because of its issue (MVP-2.9.0 N27, review)", () => {
+  const approved = (code: string | null, ok = false) => plan({ status: "approved",
+    available_actions: [{ action: "execute", allowed: ok, reason_code: code, effect: "queue_execution" }] });
+
+  it("says why instead of only leaving the button out", () => {
+    expect(planDetailModel(approved("issue_closed"), []).noRun).toBe("issue_closed");
+    expect(planDetailModel(approved("issue_moved"), []).noRun).toBe("issue_moved");
+    expect(planDetailModel(approved("issue_closed"), []).actions.execute).toBeNull();
+  });
+  it("says nothing for the other refusals, nor when the run is on offer, nor for a plan the server offers no run for", () => {
+    expect(planDetailModel(approved("forbidden"), []).noRun).toBeNull();
+    expect(planDetailModel(approved("run_in_flight"), []).noRun).toBeNull();
+    expect(planDetailModel(approved(null, true), []).noRun).toBeNull();
+    expect(planDetailModel(plan(), []).noRun).toBeNull();
+  });
+});

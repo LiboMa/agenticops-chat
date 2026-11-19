@@ -33,3 +33,15 @@ export function startsFresh(search: string, state: unknown): boolean {
   if (contextRefFromQuery(search)) return true;
   return !!state && typeof state === "object" && (state as { fresh?: unknown }).fresh === true;
 }
+
+/** What /app/chat does when no conversation is in its address: `resume` the last one, show the `welcome` page of a
+ *  new one, or `stay` as it is (a conversation is in the address, or the page has looked already). Whether a new
+ *  conversation is asked for is read from the link that led HERE, NOW — the page keeps its instance between
+ *  /app/chat/<id> and /app/chat, so a value taken when it first opened was of another address: opened on a
+ *  conversation (a reload, Back), «ask an agent» from the command bar sent the person back into that conversation
+ *  and the sentence sat in a draft nobody saw (MVP-2.9.0 N27, review). */
+export function chatLanding(at: { sessionInAddress: boolean; attempted: boolean; freshAtMount: boolean; search: string; state: unknown }):
+  "stay" | "welcome" | "resume" {
+  if (at.sessionInAddress || at.attempted) return "stay";
+  return at.freshAtMount || startsFresh(at.search, at.state) ? "welcome" : "resume";
+}

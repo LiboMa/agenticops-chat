@@ -33,7 +33,22 @@ export function setChoice(shell: Shell, userId: number | null = currentUserId())
 /** NewUI's own addresses (/app/new and below). */
 export const isNewPath = (pathname: string): boolean => /^\/app\/new(\/|$)/.test(pathname);
 
-/** The shell that draws an address: NewUI's own addresses are always its own; every other one is the person's choice. */
-export function shellFor(pathname: string, choice: Shell): Shell {
-  return isNewPath(pathname) ? "new" : choice;
+/** The router state of «back to the classic interface» (`navigate("/app", { state: TO_CLASSIC })`). */
+export const TO_CLASSIC = { shell: "classic" } as const;
+
+/** Whether a navigation is that way out of NewUI's frame. */
+export function leavesNew(state: unknown): boolean {
+  return !!state && typeof state === "object" && (state as { shell?: unknown }).shell === "classic";
+}
+
+/** The shell that draws an address: NewUI's own addresses are always its own; every other one is the person's
+ *  choice — or the frame they are already in. `was` = the shell that drew the address they come from in this tab:
+ *  someone in NewUI by its address alone (a bookmark from before round 3, a link a colleague sent — nothing is
+ *  stored for them) stays in its frame when they go on to a page. The «pages» menu used to open the classic shell
+ *  under their feet, and a decision inside its undo window was sent as the frame went away (MVP-2.9.0 N27,
+ *  review). «Back to classic» is the way out (`leaving`, lib/shellChoice.leavesNew). */
+export function shellFor(pathname: string, choice: Shell, was: Shell | null = null, leaving = false): Shell {
+  if (isNewPath(pathname)) return "new";
+  if (leaving) return "classic";
+  return choice === "new" || was === "new" ? "new" : "classic";
 }

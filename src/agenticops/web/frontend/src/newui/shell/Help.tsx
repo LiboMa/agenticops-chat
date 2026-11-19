@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useNfT } from "../i18n";
 
 /** The keys that work today, in the order a person meets them. A stage that adds a key adds its row. */
-const ROWS: [string[], string][] = [
+export const HELP_ROWS: [string[], string][] = [
   [["J", "K"], "help.move"],
   [["A"], "help.primary"],
   [["R"], "help.reject"],
@@ -16,7 +16,7 @@ const ROWS: [string[], string][] = [
   [["↵"], "help.story"],
   [["E"], "help.steer"],
   [["A"], "help.live"],
-  [["F", "G", "L", "H", "V"], "help.world"],
+  [["F", "G", "L", "H", "V", "R"], "help.world"],
   [["[", "]", "P", "0"], "help.replay"],
   [["1", "2", "3"], "help.lens"],
   [["/"], "help.cmd"],
@@ -43,7 +43,7 @@ export function Help({ onClose, hosting = false }: { onClose: () => void; hostin
         {/* over a classic page the single keys stand back: the page has its own dialogs and fields */}
         {hosting && <p className="note">{t("help.hosted")}</p>}
         <div className="keys">
-          {ROWS.map(([keys, label]) => (
+          {HELP_ROWS.map(([keys, label]) => (
             <div key={label}>{keys.map((k) => <kbd key={k}>{k}</kbd>)}<span>{t(label)}</span></div>
           ))}
         </div>

@@ -131,3 +131,13 @@ def test_the_route_is_a_plain_function():
     import inspect
     from agenticops.web.routers.search import api_search
     assert not inspect.iscoroutinefunction(api_search)
+
+
+def test_a_limit_below_one_is_refused(client):
+    """MVP-2.9.0 N27 (review): `limit=-1` passed validation, and SQLite reads LIMIT -1 as «no limit» — every match
+    of every group came back in one answer."""
+    for _ in range(12):
+        _issue("alpha everywhere")
+    for bad in (-1, 0):
+        assert client.get("/api/search", params={"q": "alpha", "limit": bad}).status_code == 422
+    assert len(client.get("/api/search", params={"q": "alpha", "limit": 1}).json()["results"]["issues"]) == 1

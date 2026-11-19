@@ -12,7 +12,8 @@ import { buildAccountCredentials, hasStoredSecrets } from "@/lib/accountForm";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useCloseOnEscape } from "@/hooks/useCloseOnEscape";
 import { itemViews, settingsTab } from "@/lib/setup";
-import { SECTIONS, modelAvailability, sectionAnchor, sectionOfHash, type SectionId } from "@/lib/settingsPage";
+import { SECTIONS, modelAvailability, sectionAnchor, sectionOfHash, shownTab, type SectionId } from "@/lib/settingsPage";
+import { auditTabVisible } from "@/lib/plans";
 import { AutomationCard } from "@/components/settings/AutomationCard";
 import { StatusText } from "@/components/ui/StatusText";
 import { useReadiness } from "@/hooks/useSetup";
@@ -50,7 +51,7 @@ import {
 } from "@/hooks/useAgentMemory";
 import type { ScanFocus, AgentModelConfig } from "@/api/types";
 import type { Account, AccountCreate, AccountUpdate, CloudProvider, McpServerConfig, CredentialSourceType } from "@/api/types";
-import { useReadOnly } from "@/hooks/useBootstrap";
+import { useBootstrap, useReadOnly } from "@/hooks/useBootstrap";
 
 /* ── Scan Focus section ─────────────────────────────────────────── */
 
@@ -1266,7 +1267,9 @@ export default function Settings() {
   const { t } = useLocale();
   // the open tab is in the address (`?tab=accounts`): the setup overview links to the tab an item is changed on
   const [params, setParams] = useSearchParams();
-  const tab = settingsTab(params.get("tab"));
+  // the audit log is an administrator's when sign-in is on (/api/audit refuses anyone else): not offered otherwise
+  const auditOn = auditTabVisible(useBootstrap().data);
+  const tab = shownTab(settingsTab(params.get("tab")), auditOn);
   const location = useLocation();
   const navigate = useNavigate();
   const goToSection = (id: SectionId) => {
@@ -1314,7 +1317,7 @@ export default function Settings() {
           <Tabs.Trigger value="general" className={tabTriggerClass}>{t("settings.general")}</Tabs.Trigger>
           <Tabs.Trigger value="accounts" className={tabTriggerClass}>{t("settings.accounts")}</Tabs.Trigger>
           <Tabs.Trigger value="messaging" className={tabTriggerClass}>{t("settings.messaging")}</Tabs.Trigger>
-          <Tabs.Trigger value="audit" className={tabTriggerClass}>{t("settings.audit")}</Tabs.Trigger>
+          {auditOn && <Tabs.Trigger value="audit" className={tabTriggerClass}>{t("settings.audit")}</Tabs.Trigger>}
           <Tabs.Trigger value="kb" className={tabTriggerClass}>{t("settings.kb")}</Tabs.Trigger>
           <Tabs.Trigger value="skills" className={tabTriggerClass}>{t("settings.skills")}</Tabs.Trigger>
           <Tabs.Trigger value="mcp" className={tabTriggerClass}>{t("settings.mcp")}</Tabs.Trigger>
@@ -1333,7 +1336,7 @@ export default function Settings() {
                 </a>
               ))}
             </nav>
-            <Link to="/app/settings?tab=audit&entity=system&hours=720" className="text-sm font-medium text-primary hover:underline">{t("settings.auditLink")}</Link>
+            {auditOn && <Link to="/app/settings?tab=audit&entity=system&hours=720" className="text-sm font-medium text-primary hover:underline">{t("settings.auditLink")}</Link>}
           </div>
           <fieldset disabled={readOnly} className="m-0 min-w-0 space-y-6 border-0 p-0">
       {updateMut.error && <ErrorBanner message={updateMut.error.message} onRetry={() => updateMut.reset()} actionLabel={t("common.close")} />}
@@ -1687,13 +1690,13 @@ export default function Settings() {
                       )}
                     </div>
                     <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{m.summary}</p>
-                    <div className="flex items-center gap-3 mt-1">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
                       <span className="text-xs text-muted-foreground">
                         {t("settings.memory.confidence")}<strong>{m.confidence}</strong>/5
                       </span>
                       <span className="text-xs text-muted-foreground">{t("settings.memory.source")}{m.source}</span>
                       {m.resource_pattern && (
-                        <span className="text-xs text-muted-foreground font-mono">{m.resource_pattern}</span>
+                        <span className="min-w-0 break-all text-xs text-muted-foreground font-mono">{m.resource_pattern}</span>
                       )}
                     </div>
                   </div>

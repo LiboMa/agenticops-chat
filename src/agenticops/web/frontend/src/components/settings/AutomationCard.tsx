@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/Switch";
 import { useBootstrap } from "@/hooks/useBootstrap";
 import { useUpdateSettings, type AppSettings } from "@/hooks/useSettings";
 import { formatShortDate } from "@/lib/formatDate";
-import { HIGH_IMPACT, canEditHigh, highKeys, pending, shown, sourceOf, stage, type HighKey, type Staged } from "@/lib/settingsPage";
+import { HIGH_IMPACT, canEditHigh, heldVar, highKeys, pending, shown, sourceOf, stage, type HighKey, type Staged } from "@/lib/settingsPage";
 
 type T = (key: string) => string;
 const onOff = (t: T, on: boolean) => t(on ? "settings.high.on" : "settings.high.off");
@@ -34,7 +34,7 @@ export function AutomationCard({ s }: { s: AppSettings }) {
   const canEdit = canEditHigh(boot.data);
   const info = s.execution_switches;
 
-  const click = (key: HighKey, value: boolean) => { setSaved(false); update.reset(); setStaged((now) => stage(inForce, now, key, value)); };
+  const click = (key: HighKey, value: boolean) => { setSaved(false); update.reset(); setStaged((now) => stage(inForce, now, key, value, info)); };
   const save = () => update.mutate(Object.fromEntries(changes.map((c) => [c.key, c.to])), {
     onSuccess: () => { setStaged({}); setPreview(false); setSaved(true); },
     // a request that failed part-way may have saved some of it: read what is in force again
@@ -52,6 +52,7 @@ export function AutomationCard({ s }: { s: AppSettings }) {
         <div>
           {keys.map((key) => {
             const source = sourceOf(key, info);
+            const held = heldVar(key, info);                 // this process's environment holds it: not changeable here
             const waiting = staged[key] !== undefined && staged[key] !== inForce[key];
             return (
               <div key={key} className="flex items-start justify-between gap-4 border-b border-border/50 py-3 last:border-b-0">
@@ -65,11 +66,11 @@ export function AutomationCard({ s }: { s: AppSettings }) {
                     <StatusText tone={inForce[key] ? "ok" : "neutral"} className="text-xs">
                       {t("settings.high.inForce")}{onOff(t, inForce[key])}
                     </StatusText>
-                    <span className="text-muted-foreground">{t(`settings.high.source.${source}`)}</span>
+                    <span className={held ? "text-status-warn" : "text-muted-foreground"}>{t(`settings.high.source.${source}`).replace("{var}", held ?? "")}</span>
                     {waiting && <StatusText tone="warn" className="text-xs">{t("settings.high.staged").replace("{value}", onOff(t, staged[key] as boolean))}</StatusText>}
                   </p>
                 </div>
-                <Switch checked={shown(inForce, staged, key)} onCheckedChange={(v) => click(key, v)} disabled={!canEdit || update.isPending}
+                <Switch checked={shown(inForce, staged, key)} onCheckedChange={(v) => click(key, v)} disabled={!canEdit || update.isPending || held !== null}
                         labelledBy={`${id}-${key}-name`} describedBy={`${id}-${key}-desc`} />
               </div>
             );

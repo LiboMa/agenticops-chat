@@ -2732,11 +2732,12 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
         except authz.AuthzDenied as e:
             return f"[red]{e}[/red]"
 
-        # the issue was resolved or dismissed since the approval: its plan does not run (MVP-2.9.0 N26)
-        from agenticops.services.issue_state import closed_issue_refusal
-        closed = closed_issue_refusal(session, plan.health_issue_id, "running")
-        if closed:
-            return f"[yellow]{_safe_text(closed)}[/yellow]"
+        # a plan runs only while its issue waits for that run (MVP-2.9.0 N26 / N27) — said before the prompt, and
+        # looked at again after it: the prompt waits without limit, and the issue may be closed meanwhile
+        from agenticops.services.issue_state import run_refusal
+        cannot = run_refusal(session, plan.health_issue_id)
+        if cannot:
+            return f"[yellow]{_safe_text(cannot)}[/yellow]"
 
         console.print(
             f"[bold]Execute fix plan #{plan_id}?[/bold]\n"
@@ -2746,6 +2747,9 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
         )
         if not Confirm.ask("Confirm execution?"):
             return "[dim]Execution cancelled.[/dim]"
+        cannot = run_refusal(session, plan.health_issue_id)     # read again: the prompt may have waited for long
+        if cannot:
+            return f"[yellow]{_safe_text(cannot)}[/yellow]"
 
         # Create FixExecution record. The plan moves only if it is still 'approved' (compare-and-set, MVP-2.7.0 S3):
         # someone may have withdrawn or queued it while the confirmation prompt waited.

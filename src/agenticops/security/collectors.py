@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import csv
 import io
+import time
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -99,23 +100,61 @@ def _age_days(ts: str) -> float | None:
         return None
 
 
-def collect_iam_findings(account: str, region: str = "us-east-1", health: dict | None = None) -> list[PostureFinding]:
+# IAM builds a credential report when asked (at most once in four hours) and answers «not ready» to a read made in
+# the same breath — about one hourly run in four (MVP-2.9.0 N27, review). It is asked again, a few seconds apart,
+# until it says the report is complete.
+REPORT_ASKS, REPORT_WAIT_SECONDS = 8, 2.5
+_sleep = time.sleep
+
+
+def _home_region(account: str) -> str:
+    """The region the account-wide sources (IAM, S3, CloudTrail) are read through: the account's own first
+    region, so the call stays in the account's PARTITION. They were asked in us-east-1 / the model's region,
+    where a China or GovCloud account's credentials are refused (MVP-2.9.0 N27, review)."""
+    regions = _enabled_regions(account)
+    if regions:
+        return regions[0]
+    from agenticops.config import settings
+    return settings.bedrock_region
+
+
+def _wait_for_credential_report(iam) -> None:
+    """Ask IAM for a credential report until it is complete (bounded). A refused or failing ask is not fatal:
+    the report there is — if any — is still read."""
+    for ask in range(REPORT_ASKS):
+        try:
+            state = iam.generate_credential_report().get("State")
+        except Exception:
+            return
+        if state not in ("STARTED", "INPROGRESS"):
+            return
+        if ask < REPORT_ASKS - 1:
+            _sleep(REPORT_WAIT_SECONDS)
+
+
+def _stale_key_days(row: dict) -> float | None:
+    """The age of the oldest access key IN USE that is past the limit — either of the two a user may have. The
+    second key was never looked at: a user whose key 1 is off and key 2 is 400 days old passed (review)."""
+    ages = [age for n in ("1", "2")
+            if row.get(f"access_key_{n}_active") == "true"
+            and (age := _age_days(row.get(f"access_key_{n}_last_rotated", ""))) is not None and age > STALE_KEY_DAYS]
+    return max(ages) if ages else None
+
+
+def collect_iam_findings(account: str, region: str = "", health: dict | None = None) -> list[PostureFinding]:
     """IAM credential-report checks: no-MFA console users (1.10), stale keys
     (1.3), root access key (1.4). Fail-soft."""
     out: list[PostureFinding] = []
     try:
-        iam = _get_client("iam", region, account)
-        try:
-            iam.generate_credential_report()
-        except Exception:
-            pass  # already generating / exists — get_credential_report still works
+        iam = _get_client("iam", region or _home_region(account), account)
+        _wait_for_credential_report(iam)
         content = iam.get_credential_report().get("Content", b"")
         text = content.decode() if isinstance(content, (bytes, bytearray)) else str(content)
         reader = csv.DictReader(io.StringIO(text))
         for row in reader:
             user = row.get("user", "")
             is_root = user == "<root_account>"
-            if is_root and row.get("access_key_1_active", "false") == "true":
+            if is_root and "true" in (row.get("access_key_1_active"), row.get("access_key_2_active")):
                 out.append(PostureFinding("iam", "cis-1.4", user, "IAMRoot",
                                           "root account has an active access key", "high"))
             if is_root:
@@ -123,8 +162,8 @@ def collect_iam_findings(account: str, region: str = "us-east-1", health: dict |
             if row.get("password_enabled") == "true" and row.get("mfa_active") == "false":
                 out.append(PostureFinding("iam", "cis-1.10", user, "IAMUser",
                                           "console user without MFA", "high"))
-            age = _age_days(row.get("access_key_1_last_rotated", ""))
-            if row.get("access_key_1_active") == "true" and age is not None and age > STALE_KEY_DAYS:
+            age = _stale_key_days(row)
+            if age is not None:
                 out.append(PostureFinding("iam", "cis-1.3", user, "IAMUser",
                                           f"access key not rotated in {int(age)} days"))
     except Exception as e:  # fail-soft
@@ -211,9 +250,12 @@ def collect_network_findings(account: str, health: dict | None = None) -> list[P
                                 "network", control_id, gid, "SecurityGroup",
                                 f"0.0.0.0/0 ingress to port {port}", "high"))
     except Exception as e:
+        # What was read before the failure is kept (N27, review): a group seen open to the world in region 1 is a
+        # violation whatever happened in region 3 — thrown away, the account read «0 reachable paths». The source
+        # is still marked failed: what was NOT read is not known to be clean.
         logger.warning("collect_network_findings failed for %s: %s", account, e)
         _failed(health, "network", _in_region(region, e))
-        return []
+        return out
     _ok(health, "network")
     return out
 
@@ -233,10 +275,9 @@ _NO_PUBLIC_ACCESS_BLOCK = "NoSuchPublicAccessBlockConfiguration"   # the one ans
 def collect_data_findings(account: str, health: dict | None = None) -> list[PostureFinding]:
     """S3 public access (cis-2.1) + unencrypted EBS volumes (cis-enc) — two sources, each fail-soft."""
     out: list[PostureFinding] = []
-    # S3 is global-ish: enumerate once via the default region client.
+    # S3 is global-ish: enumerate once, through a region of the account's own partition.
     try:
-        from agenticops.config import settings
-        s3 = _get_client("s3", settings.bedrock_region, account)
+        s3 = _get_client("s3", _home_region(account), account)
         buckets = s3.list_buckets().get("Buckets", [])
         unread: list[str] = []
         for b in buckets:
@@ -283,8 +324,7 @@ def collect_data_findings(account: str, health: dict | None = None) -> list[Post
 def collect_logging_findings(account: str, health: dict | None = None) -> list[PostureFinding]:
     """CloudTrail: at least one multi-region trail actively logging (cis-3.1). Fail-soft."""
     try:
-        from agenticops.config import settings
-        ct = _get_client("cloudtrail", settings.bedrock_region, account)
+        ct = _get_client("cloudtrail", _home_region(account), account)
         trails = ct.describe_trails().get("trailList", [])
         unread = ""
         for t in trails:
