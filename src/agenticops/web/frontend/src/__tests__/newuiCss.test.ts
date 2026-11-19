@@ -88,3 +88,29 @@ describe("newui.css stays inside .nf", () => {
     expect(bare).toEqual([]);
   });
 });
+
+describe("over a hosted classic page the frame is one click-through layer (round 3)", () => {
+  const bodyOf = (selector: string) => rules.filter((r) => r.selectors.includes(selector)).map((r) => r.body).join(";");
+  it("the layer covers the page without painting over it or taking the pointer", () => {
+    const b = bodyOf(".nf.hosting");
+    expect(b).toMatch(/pointer-events\s*:\s*none/);
+    expect(b).toMatch(/background\s*:\s*none/);
+    // above a classic page's own layers (10–30), below its modals (50 and up)
+    expect(b).toMatch(/z-index\s*:\s*40(?!\d)/);
+  });
+  it.each([".top", ".barwrap", ".sugg", ".toast", ".overlay"])("its own part %s takes the pointer back", (part) => {
+    expect(bodyOf(`.nf.hosting ${part}`)).toMatch(/pointer-events\s*:\s*auto/);
+  });
+  it.each([".top", ".barwrap"])("%s has a ground of its own: a page scrolled under it must not show through", (bar) => {
+    expect(bodyOf(`.nf.hosting ${bar}`)).toMatch(/background(-color)?\s*:\s*var\(--/);
+  });
+  it("the map's canvas is hidden, never taken out of layout: its size is read when a lens comes back", () => {
+    for (const el of ["#sky", "#g3d", "#labels", "#clabels"]) {
+      expect(bodyOf(`.nf.hosting ${el}`), el).toMatch(/visibility\s*:\s*hidden/);
+      expect(bodyOf(`.nf.hosting ${el}`), el).not.toMatch(/display\s*:\s*none/);
+    }
+  });
+  it("nothing in this stylesheet styles the hosted page itself (.cl-host is the bridge's)", () => {
+    expect(rules.flatMap((r) => r.selectors).filter((s) => s.includes("cl-host"))).toEqual([]);
+  });
+});

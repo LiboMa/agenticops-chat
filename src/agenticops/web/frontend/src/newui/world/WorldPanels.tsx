@@ -10,6 +10,7 @@ import type { WNode, WorldGraph } from "../lib/world/graph";
 import { side } from "../lib/world/relations";
 import { expected, hopMarks, type Ask, type Drawn, type Mismatch, type Scene, type View } from "../lib/world/scene";
 import { utcStamp } from "../lib/time";
+import { CLASSIC_EXIT } from "@/lib/shellRoutes";
 
 const num = (v: number) => v.toLocaleString("en-US");
 const TONE: Record<string, string> = { critical: "var(--red)", warning: "var(--amber)", notice: "var(--mint)" };
@@ -117,6 +118,8 @@ export function Check({ sc, view, bad, off, perf, buildId, builtAt, healthAt, as
         : bad.length ? <p className="mis" role="alert">{t("check.bad")}{bad.map((m) => t("check.item", { what: t(`check.${m.what}`), want: num(m.want), got: num(m.got) })).join("；")}</p>
         : <p className="ok"><Prov code />{t("check.ok", { view: t(`view.${view}`), n: num(want.bright), r: want.rings, rb: want.ringsBright, l: num(want.links), named: want.named })}
             {off && off.nodes + off.rings + off.links > 0 ? t("check.culled", { nodes: num(off.nodes), total: num(want.nodes), rings: off.rings, links: num(off.links) }) : ""}{t("check.scope")}</p>}
+      {/* the relation graph is rebuilt on the classic map page (round 3: an exit, so the address is not turned back here) */}
+      <p><Link to="/app/galaxy" state={CLASSIC_EXIT}>{t("check.classicMap")}</Link></p>
     </div>
   );
 }

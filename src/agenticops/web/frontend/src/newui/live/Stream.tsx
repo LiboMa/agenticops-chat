@@ -32,6 +32,7 @@ import { utcStamp } from "../lib/time";
 import { RunList } from "../story/StoryBits";
 import { LANE_CLASS, agentName, laneState } from "./Lanes";
 import { LiveSteps } from "./LiveSteps";
+import { CLASSIC_EXIT } from "@/lib/shellRoutes";
 
 const RECORD_MAX = 8;
 
@@ -257,7 +258,7 @@ export function Stream({ lane, moved, mine, now, stop, steer, onBack, onStory, o
         )}
         {target && mine && <button type="button" className="btn primary" onClick={onDecide}><span className="t">{t("story.goDecide")}</span></button>}
         {target && <button type="button" className="btn" onClick={onStory}><span className="t">{t("live.openStory")}</span><kbd>↵</kbd></button>}
-        {!target && classicRoute && <Link className="btn" to={classicRoute}><span className="t">{t("live.openClassic")}</span></Link>}
+        {!target && classicRoute && <Link className="btn" to={classicRoute} state={CLASSIC_EXIT}><span className="t">{t("live.openClassic")}</span></Link>}
         {stop?.error && <p className="note err wide" role="alert">{stop.error}</p>}
         {steer?.error && <p className="note err wide" role="alert">{steer.error}</p>}
       </div>

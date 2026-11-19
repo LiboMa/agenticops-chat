@@ -5,6 +5,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { useBootstrap } from "@/hooks/useBootstrap";
 import { homeTarget, probeFor } from "@/lib/home";
 import { forgetLastRoute, localLastRoute } from "@/lib/preferences";
+import { readChoice } from "@/lib/shellChoice";
 
 /** The bare /app: a pinned home, else the last allow-listed place (checked first — a deleted or no longer
  *  visible object falls back to its list with a notice that names nothing), else Chat. Waits for the
@@ -26,7 +27,8 @@ export function HomeResolver() {
     (async () => {
       const prefs = boot.data?.preferences ?? null;
       // this browser's last place first (freshest); the server's copy when this is a new device
-      const target = homeTarget(prefs, localLastRoute() ?? prefs?.last_route ?? null);
+      // in the new interface /app lands on «待决» unless chat or reports is pinned (lib/home)
+      const target = homeTarget(prefs, localLastRoute() ?? prefs?.last_route ?? null, readChoice());
       const probe = probeFor(target);
       if (probe) {
         try {

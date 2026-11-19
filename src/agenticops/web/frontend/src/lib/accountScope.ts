@@ -39,6 +39,18 @@ export function scopeMode(pathname: string, wide: boolean): ScopeMode {
   return m[1] === "issues" && wide ? "active" : "locked";
 }
 
+/** What the new frame's account select shows, and whether it can be changed (round 3). On a lens the choice is the
+ *  person's own and free — NewUI's lenses all follow it, though their addresses are none of the classic lists. Over a
+ *  hosted classic page it is that page's rule, exactly what the classic top bar drew: free on a list, disabled on a
+ *  detail page and on a page the scope does not filter, and an open chat shows its own account. */
+export function scopeSelect(o: { lens: boolean; mode: ScopeMode; locked: number | null | undefined; accountId: number | null }):
+  { value: number | null; disabled: boolean; why: "lockedChat" | "notApplied" | "locked" | null } {
+  if (o.lens) return { value: o.accountId, disabled: false, why: null };
+  if (o.locked !== undefined) return { value: o.locked, disabled: true, why: "lockedChat" };
+  if (o.mode === "active") return { value: o.accountId, disabled: false, why: null };
+  return { value: o.accountId, disabled: true, why: o.mode };
+}
+
 /** An old link's own account filter (`?account=` on fix plans, `?account_id=` on changes) → the scope, once; the
  *  parameter leaves the URL either way. null when the link carries none. */
 export function adoptAccountParam(search: string): { accountId: number | null; search: string } | null {

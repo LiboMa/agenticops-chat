@@ -14,28 +14,41 @@ const hit = (entity_type: SearchResultItem["entity_type"], id: number, title: st
 const found = (over: Partial<SearchResponse["results"]> = {}): SearchResponse =>
   ({ query: "x", results: { issues: [], fix_plans: [], reports: [], resources: [], ...over } });
 const waiting = [item("I12", "SSH open to the world"), item("C3", "Scale out the web tier")];
-const rows = (q: string, f?: SearchResponse) => commandRows(q, { t, waiting, found: f, lens: "decide", canSettings: true });
+const base = { t, waiting, lens: "decide" as const, canSettings: true, canUsers: true, hosts: true };
+const rows = (q: string, f?: SearchResponse) => commandRows(q, { ...base, found: f });
 const ids = (list: CommandRow[]) => list.map((r) => r.id);
 
 describe("commandRows — what the command bar offers for what was typed", () => {
   it("with nothing typed: where you can go, and what you can switch", () => {
-    expect(ids(rows(""))).toEqual(["go:decide", "go:live", "go:world", "do:theme", "do:help", "classic:chat", "classic:reports", "classic:resources"]);
+    expect(ids(rows(""))).toEqual(["go:decide", "go:live", "go:world", "do:theme", "do:help", "page:chat", "page:reports", "page:resources"]);
     expect(rows("")).toHaveLength(COMMAND_MAX);
   });
 
-  it("a lens row goes to that lens; a classic row leaves for the classic page and says so", () => {
-    const all = commandRows("/", { t, waiting, found: undefined, lens: "decide", canSettings: true }, 99);
+  it("a lens row goes to that lens; a page row to its page — every page the app has", () => {
+    const all = commandRows("/", { ...base, found: undefined }, 99);
     expect(all.find((r) => r.id === "go:world")).toMatchObject({ to: "/app/new/world", hint: "3" });
-    expect(all.find((r) => r.id === "classic:settings")).toMatchObject({ to: "/app/settings", hint: "cmd.classic" });
-    expect(all.filter((r) => r.id.startsWith("classic:")).map((r) => r.to)).toEqual(
-      ["/app/chat", "/app/reports", "/app/resources", "/app/schedules", "/app/skills", "/app/security", "/app/settings"]);
+    expect(all.filter((r) => r.id.startsWith("page:")).map((r) => r.to)).toEqual(
+      ["/app/chat", "/app/reports", "/app/resources", "/app/schedules", "/app/skills", "/app/security", "/app/plans", "/app/overview",
+       "/app/agent-metrics", "/app/signals", "/app/users", "/app/settings", "/app/account/api-keys"]);
   });
 
-  it("does not offer a page the person may not open: Settings for a read-only account without it", () => {
-    const all = (canSettings: boolean) => ids(commandRows("/", { t, waiting, found: undefined, lens: "decide", canSettings }, 99));
-    expect(all(true)).toContain("classic:settings");
-    expect(all(false)).not.toContain("classic:settings");
-    expect(all(false)).toContain("classic:security");                       // every other row stays
+  it("a page row says «classic» only when the page will open in the classic interface", () => {
+    // the person chose the new interface: the page opens under NewUI's frame, there is nothing to warn of
+    const hosted = commandRows("/", { ...base, found: undefined, hosts: true }, 99).filter((r) => r.id.startsWith("page:"));
+    expect(hosted.length).toBeGreaterThan(10);
+    expect(hosted.every((r) => r.hint === undefined)).toBe(true);
+    // a visit to NewUI from the classic interface: the row leaves NewUI, and says so
+    const leaves = commandRows("/", { ...base, found: undefined, hosts: false }, 99).filter((r) => r.id.startsWith("page:"));
+    expect(leaves).toHaveLength(hosted.length);
+    expect(leaves.every((r) => r.hint === "cmd.classic")).toBe(true);
+  });
+
+  it("does not offer a page the person may not open: Settings and Users", () => {
+    const all = (can: { canSettings: boolean; canUsers: boolean }) => ids(commandRows("/", { ...base, found: undefined, ...can }, 99));
+    expect(all({ canSettings: true, canUsers: true })).toEqual(expect.arrayContaining(["page:settings", "page:users"]));
+    expect(all({ canSettings: false, canUsers: true })).not.toContain("page:settings");
+    expect(all({ canSettings: true, canUsers: false })).not.toContain("page:users");
+    expect(all({ canSettings: false, canUsers: false })).toContain("page:security");          // every other row stays
   });
 
   it("«/» lists commands only, filtered by what follows", () => {

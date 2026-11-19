@@ -18,6 +18,9 @@ export interface KeyContext {
   singleKeys: boolean;
   /** a key went into a field a moment ago: the field may have gone away under the hands, the typing has not */
   typing?: boolean;
+  /** the page under the frame is a classic one (round 3): it has its own dialogs, menus and rows, none of which the
+   *  shell can see — so only the deliberate chord (Cmd/Ctrl+K) and Escape for the shell's own layers count */
+  hosted?: boolean;
 }
 
 export type Lens = "decide" | "live" | "world";
@@ -37,6 +40,7 @@ export function keyIntent(e: KeyEventLike, ctx: KeyContext): KeyIntent | null {
   if (key === "escape") return { type: "escape" };
   if ((e.metaKey || e.ctrlKey) && !e.altKey && key === "k") return { type: "command" };
   if (e.metaKey || e.ctrlKey || e.altKey) return null;
+  if (ctx.hosted) return null;
   if (ctx.inField || ctx.typing || ctx.modal || !ctx.singleKeys) return null;
   if ((key === " " || key === "enter") && ctx.onControl) return null;
   if (key === "/") return { type: "command" };
@@ -61,9 +65,14 @@ export function focusContext(active: Element | null): Pick<KeyContext, "inField"
 
 /** What Escape does, one layer at a time: the keyboard list, the account menu — then, while the person is typing,
  *  it only leaves the field (a page must not close, nor an open resource, under their hands; a field that owns its
- *  Escape — a reason box, the command bar — handles it before it gets here) — and only then is it the lens's. */
-export function escapeStep(s: { help: boolean; menu: boolean; inField: boolean }): "help" | "menu" | "blur" | "lens" {
-  return s.help ? "help" : s.menu ? "menu" : s.inField ? "blur" : "lens";
+ *  Escape — a reason box, the command bar — handles it before it gets here) — and only then is it the lens's.
+ *  Over a hosted classic page it is none of the shell's business once its own layers are closed. */
+export function escapeStep(s: { help: boolean; menu: boolean; inField: boolean; hosted?: boolean }): "help" | "menu" | "blur" | "lens" | "none" {
+  if (s.help) return "help";
+  if (s.menu) return "menu";
+  // over a hosted classic page Escape is the page's: its own dialogs listen for it, and a field there is not the shell's to blur
+  if (s.hosted) return "none";
+  return s.inField ? "blur" : "lens";
 }
 
 /** A reason box can disappear mid-sentence — a colleague decided the item, the 30-second refresh replaced the page —

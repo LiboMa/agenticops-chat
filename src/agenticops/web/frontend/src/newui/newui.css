@@ -615,3 +615,22 @@
   .nf .meta .story-link{min-height:44px;min-width:44px;justify-content:center}
   .nf .scrub .chip-btn{min-height:40px}                            /* the replay's buttons are touched here, not typed */
 }
+
+/* ── over a hosted classic page (round 3) ───────────────────────────────────
+   A classic page under the frame is NOT inside .nf — none of the rules above may reach it (components/layout/NewFrame
+   draws it as a sibling, in the normal flow, with the palette of src/bridge.css). .nf is then one layer over it:
+   transparent, letting the pointer through, its own parts taking it back. As a whole it sits at z-index 40: above a
+   classic page's own layers (10–30), below its dialogs (50 and up) — and inside it NewUI's own order stays as it is. */
+.nf.hosting{z-index:40;background:none;pointer-events:none}
+.nf.hosting .top{pointer-events:auto;background:var(--solid);border-bottom:1px solid var(--line)}
+.nf.hosting .barwrap{pointer-events:auto;background:var(--solid);border-top:1px solid var(--line)}
+.nf.hosting .sugg,.nf.hosting .toast,.nf.hosting .overlay{pointer-events:auto}
+.nf.hosting #sky,.nf.hosting #g3d,.nf.hosting #labels,.nf.hosting #clabels{visibility:hidden}
+.nf.hosting .bar{background:var(--raise);box-shadow:none}
+
+/* the «pages» menu: beside the lens tabs, opening to the right; the page you are on is marked */
+.nf .pageswrap{flex:none}
+.nf .menu.pages{left:0;right:auto;top:34px;max-height:calc(100vh - var(--top) - var(--bar) - 16px);overflow:auto}
+.nf .menu .mi[aria-current="page"]{color:var(--amber);font-weight:600}
+.nf .chip-btn.on{color:var(--chalk);border-color:var(--amber)}
+.nf select:disabled{opacity:.6;cursor:not-allowed}

@@ -59,12 +59,18 @@ const BACKDROP_DELAY_MS = 1500;
 export const HEALTH_POLL_MS = 30_000;
 export const HEALTH_QUERY_KEY = ["galaxy-health"] as const;
 
-export function WorldLayer({ children }: { children: ReactNode }) {
-  // elsewhere than on «全景» the map is only a backdrop: it must not compete with the page's own first requests
+export function WorldLayer({ children, asleep = false }: { children: ReactNode; asleep?: boolean }) {
+  // elsewhere than on «全景» the map is only a backdrop: it must not compete with the page's own first requests.
+  // `asleep` (round 3): the frame is over a hosted classic page — there is no map on it, so nothing is fetched or
+  // polled for one (the graph, its status, the health); what was read before stays, for when a lens comes back
   const [wanted, setWanted] = useState(false);
-  useEffect(() => { const id = window.setTimeout(() => setWanted(true), BACKDROP_DELAY_MS); return () => window.clearTimeout(id); }, []);
-  const q = useQuery({ queryKey: ["galaxy-graph"], queryFn: () => apiFetch<GalaxyGraph>("/galaxy/graph"), staleTime: 60_000, enabled: wanted });
-  const status = useGalaxyStatus();
+  useEffect(() => {
+    if (asleep) return;
+    const id = window.setTimeout(() => setWanted(true), BACKDROP_DELAY_MS);
+    return () => window.clearTimeout(id);
+  }, [asleep]);
+  const q = useQuery({ queryKey: ["galaxy-graph"], queryFn: () => apiFetch<GalaxyGraph>("/galaxy/graph"), staleTime: 60_000, enabled: wanted && !asleep });
+  const status = useGalaxyStatus(!asleep);
   const accounts = useAccounts();
   const { theme } = useTheme();
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -88,7 +94,7 @@ export function WorldLayer({ children }: { children: ReactNode }) {
   const health = useQuery({
     queryKey: [...HEALTH_QUERY_KEY, asOf ?? "now"],
     queryFn: () => apiFetch<GalaxyHealthRead>(`/galaxy/health${asOf !== null ? `?at=${encodeURIComponent(new Date(asOf).toISOString())}` : ""}`),
-    enabled: !!built, refetchInterval: asOf === null ? HEALTH_POLL_MS : false, staleTime: asOf === null ? 5_000 : 5 * 60_000, retry: asOf === null ? 3 : 1,
+    enabled: !!built && !asleep, refetchInterval: asOf === null ? HEALTH_POLL_MS : false, staleTime: asOf === null ? 5_000 : 5 * 60_000, retry: asOf === null ? 3 : 1,
   });
   const [healthRev, setHealthRev] = useState(0);
   const [healthAt, setHealthAt] = useState<string | null>(null);

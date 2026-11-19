@@ -152,3 +152,26 @@ describe("focusContext — where the focus is decides whether a letter is typing
     expect(focusContext(null)).toEqual({ inField: false, onControl: false });
   });
 });
+
+describe("on a hosted classic page the shell's keys stand back", () => {
+  // a classic page has its own dialogs, menus and rows; the shell cannot see them (its `modal` is its own help / menu)
+  const hosted = ctx({ hosted: true });
+  it("only Cmd/Ctrl+K means anything", () => {
+    expect(keyIntent(ev("k", { metaKey: true }), hosted)).toEqual({ type: "command" });
+    expect(keyIntent(ev("K", { ctrlKey: true }), hosted)).toEqual({ type: "command" });
+    for (const k of ["1", "2", "3", "t", "?", "/", "z", "j", "a", "d", "Enter", " ", "ArrowDown", "m", "x", "v"]) expect(keyIntent(ev(k), hosted)).toBeNull();
+  });
+  it("Escape still reaches the shell — for its own keyboard list and account menu only", () => {
+    expect(keyIntent(ev("Escape"), hosted)).toEqual({ type: "escape" });
+    expect(escapeStep({ help: true, menu: false, inField: true, hosted: true })).toBe("help");
+    expect(escapeStep({ help: false, menu: true, inField: false, hosted: true })).toBe("menu");
+  });
+  it("Escape never blurs a classic field, and there is no lens to hand it to", () => {
+    expect(escapeStep({ help: false, menu: false, inField: true, hosted: true })).toBe("none");
+    expect(escapeStep({ help: false, menu: false, inField: false, hosted: true })).toBe("none");
+  });
+  it("on a lens nothing changed", () => {
+    expect(keyIntent(ev("1"), ctx({ hosted: false }))).toEqual({ type: "lens", lens: "decide" });
+    expect(escapeStep({ help: false, menu: false, inField: true, hosted: false })).toBe("blur");
+  });
+});

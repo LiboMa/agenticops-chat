@@ -2,7 +2,7 @@ import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { legacyInboxRedirect } from "@/lib/workitemRoutes";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { AppShell } from "@/components/layout/AppShell";
+import { ShellSwitch } from "@/components/layout/ShellSwitch";
 import { HomeResolver } from "@/components/layout/HomeResolver";
 import { loginPath } from "@/lib/home";
 import { queryClient } from "@/queryClient";
@@ -36,8 +36,8 @@ const Security = lazy(() => import("@/pages/Security"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
 const Users = lazy(() => import("@/pages/Users"));
 const ApiKeys = lazy(() => import("@/pages/ApiKeys"));
-// NewUI (MVP-2.9.0): the new interface, a chunk of its own, outside the classic shell
-const NewApp = lazy(() => import("@/newui/NewApp"));
+// NewUI (MVP-2.9.0): its lenses are a chunk of their own; its shell is another, loaded by components/layout/NewFrame
+const NewLenses = lazy(() => import("@/newui/NewLenses"));
 
 /** Settings is all configuration: a viewer whose account may not view it gets the not-found page. */
 function SettingsGate({ children }: { children: React.ReactNode }) {
@@ -83,8 +83,9 @@ export default function App() {
               </Suspense>
             }
           />
-          <Route path="/app/new/*" element={<RequireAuth><Suspense fallback={<Spinner />}><NewApp /></Suspense></RequireAuth>} />
-          <Route path="/app" element={<RequireAuth><AppShell /></RequireAuth>}>
+          {/* one layout route, two shells (round 3): the classic workspace, or NewUI's frame around the same pages */}
+          <Route path="/app" element={<RequireAuth><ShellSwitch /></RequireAuth>}>
+            <Route path="new/*" element={<Suspense fallback={<Spinner />}><NewLenses /></Suspense>} />
             {/* /app: a pinned home, the last place, or Chat (MVP-2.7.0); the dashboard lives at /app/overview */}
             <Route index element={<HomeResolver />} />
             <Route

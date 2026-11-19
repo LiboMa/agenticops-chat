@@ -13,10 +13,12 @@ import {
   type CollapsibleGroup, type GroupId, type NavOrder,
 } from "@/lib/navGroups";
 import { savePreferences } from "@/lib/preferences";
+import { setChoice as setShell } from "@/lib/shellChoice";
 import type { Home } from "@/lib/home";
 import { ICON_PATHS, SvgIcon } from "./navIcons";
 
 const ORDER_V2 = "aiops-nav-order-v2";
+const NEW_UI = "/app/new/decide";
 
 /** The stored order, migrated once from the v1 one-list sidebar (`aiops-nav-order`) the first time. */
 function initialOrder(): NavOrder {
@@ -88,8 +90,10 @@ export function Sidebar() {
         <img src={`${import.meta.env.BASE_URL}logo-icon.svg`} alt="" className="h-6 w-6 shrink-0" />
         <span className="truncate">AgenticOps</span>
       </Link>
-      {/* MVP-2.9.0: the way into the new interface — fixed, not one of the draggable entries */}
-      <Link to="/app/new" title={t("newui.entryHint")}
+      {/* MVP-2.9.0: the way into the new interface — fixed, not one of the draggable entries. Round 3: it is a
+          choice this browser keeps (lib/shellChoice) — from then on every page opens under NewUI's frame, until
+          «back to the classic interface» there */}
+      <Link to="/app/new/decide" onClick={() => setShell("new")} title={t("newui.entryHint")}
             className="mb-4 flex items-center justify-between gap-2 rounded-[6px] border border-primary/25 bg-selected px-[11px] py-2 text-[12px] font-medium text-primary hover:border-primary/50">
         <span className="truncate">{t("newui.entry")}</span>
         <span aria-hidden="true">→</span>
@@ -267,7 +271,11 @@ export function MobileNav() {
     <select
       aria-label={t("nav.menu")}
       value={current && pathname === current.to ? current.to : ""}
-      onChange={(e) => { if (e.target.value) navigate(e.target.value); }}
+      onChange={(e) => {
+        if (!e.target.value) return;
+        if (e.target.value === NEW_UI) setShell("new");       // the new interface is a choice the browser keeps
+        navigate(e.target.value);
+      }}
       className="min-w-[110px] max-w-[150px] rounded-[5px] border border-border bg-card px-2 py-1.5 text-xs min-[801px]:hidden"
     >
       <option value="" disabled>{current ? t(current.labelKey) : t("nav.menu")}</option>
@@ -279,7 +287,7 @@ export function MobileNav() {
           </optgroup>
         );
       })}
-      <option value="/app/new">{t("newui.entry")}</option>
+      <option value={NEW_UI}>{t("newui.entry")}</option>
     </select>
   );
 }

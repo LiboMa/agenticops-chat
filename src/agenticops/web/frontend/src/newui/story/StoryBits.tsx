@@ -18,6 +18,7 @@ import { failedVm, runStepsVm, stopOf } from "../lib/briefs/run";
 import { waitedParts } from "../lib/queue";
 import { runLine, type SpineState, type WaitKey } from "../lib/story";
 import { utcStamp } from "../lib/time";
+import { CLASSIC_EXIT } from "@/lib/shellRoutes";
 
 /** What the page of one item is given, whichever kind it is. */
 export interface StoryFrame {
@@ -157,7 +158,7 @@ export function FactList({ status, rows, classicTo, now }: { status: string; row
             {r.href ? <Link to={r.href}>{r.value}</Link> : r.kind === "date" ? `${utcStamp(r.value, now)} UTC` : <span className={r.kind === "mono" ? "mono" : undefined}>{r.value}</span>}
           </FactRowView>
         ))}
-        <dt>{t("fact.classic")}</dt><dd><Link to={classicTo}>{t("fact.classic.open")}</Link></dd>
+        <dt>{t("fact.classic")}</dt><dd><Link to={classicTo} state={CLASSIC_EXIT}>{t("fact.classic.open")}</Link></dd>
       </dl>
     </>
   );

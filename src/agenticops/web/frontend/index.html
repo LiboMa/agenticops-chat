@@ -19,6 +19,14 @@
           if (theme === "dark") d.classList.add("dark");
           d.style.fontSize = size === "small" ? "13px" : size === "large" ? "17px" : "15px";
           d.lang = lang === "zh" ? "zh-CN" : "en";
+          // MVP-2.9.0 round 3: the new interface's palette for the pages it hosts (src/bridge.css), before the first
+          // paint too — NewUI's own addresses always, any other /app address when this person chose the new interface
+          // (lib/shellChoice: the same per-user key).
+          var path = location.pathname, who = null;
+          try { who = JSON.parse(localStorage.getItem("aiops_user") || "null"); } catch (e) {}
+          var uid = who && typeof who.user_id === "number" ? who.user_id : "anon";
+          var inApp = /^\/app(\/|$)/.test(path) && !/^\/app\/(login|setup)(\/|$)/.test(path);
+          if (/^\/app\/new(\/|$)/.test(path) || (inApp && localStorage.getItem("aiops-shell:" + uid) === "new")) d.classList.add("nf-on");
         } catch (e) {}
       })();
     </script>

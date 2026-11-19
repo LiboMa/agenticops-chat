@@ -6,6 +6,7 @@ import { FONT_SIZES, useTheme, type FontSize } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { breadcrumbFor } from "@/lib/navGroups";
 import { savePreferences } from "@/lib/preferences";
+import { setChoice } from "@/lib/shellChoice";
 import { HomePrefsDialog, MobileNav } from "./Sidebar";
 import { AccountScopeSelect, useAccountScope } from "./AccountScope";
 import { useAccounts } from "@/hooks/useAccounts";
@@ -145,7 +146,7 @@ function AvatarMenu() {
             <ScopeMenuItems item={item} />
             <DropdownMenu.Separator className="my-1 h-px bg-border" />
             {/* MVP-2.9.0: the new interface lives beside this one */}
-            <DropdownMenu.Item className={item} onSelect={() => navigate("/app/new")}>{t("newui.entry")}</DropdownMenu.Item>
+            <DropdownMenu.Item className={item} onSelect={() => { setChoice("new"); navigate("/app/new/decide"); }}>{t("newui.entry")}</DropdownMenu.Item>
             <DropdownMenu.Item className={item} onSelect={() => setHomeOpen(true)}>{t("home.prefsTitle")}</DropdownMenu.Item>
             {/* MVP-2.8.0: every signed-in person's own API keys — a viewer's too (read-only keys) */}
             {user && <DropdownMenu.Item className={item} onSelect={() => navigate("/app/account/api-keys")}>{t("apiKeys.menu")}</DropdownMenu.Item>}

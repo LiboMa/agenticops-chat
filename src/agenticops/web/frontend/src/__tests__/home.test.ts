@@ -75,3 +75,19 @@ describe("userKey", () => {
     expect(userKey("aiops-last-route", null)).toBe("aiops-last-route:anon");
   });
 });
+
+describe("homeTarget in the new interface — /app lands on what waits on you", () => {
+  it("«待决» unless chat or reports is pinned", () => {
+    expect(homeTarget({ home: "resume" }, "/app/issues/4", "new")).toBe("/app/new/decide");
+    expect(homeTarget({ home: "resume" }, null, "new")).toBe("/app/new/decide");
+    expect(homeTarget(null, null, "new")).toBe("/app/new/decide");
+    expect(homeTarget({ home: "issues" }, "/app/reports/1", "new")).toBe("/app/new/decide");
+    expect(homeTarget({ home: "chat" }, "/app/issues/4", "new")).toBe("/app/chat");
+    expect(homeTarget({ home: "reports" }, null, "new")).toBe("/app/reports");
+  });
+  it("the classic interface is unchanged, also when the shell is named", () => {
+    expect(homeTarget({ home: "resume" }, "/app/issues/4", "classic")).toBe("/app/issues/4");
+    expect(homeTarget({ home: "issues" }, null, "classic")).toBe("/app/issues");
+    expect(homeTarget(null, null, "classic")).toBe("/app/chat");
+  });
+});

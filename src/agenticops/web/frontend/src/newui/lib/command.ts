@@ -4,8 +4,9 @@ import type { Lens } from "./keys";
 import { storyPath } from "./story";
 
 /** The command bar: «/» for commands, «@» for things, or just type. It goes to places — the three lenses, an item
- *  that waits on you, anything the search finds, and the classic pages NewUI has no page of its own for yet. It does
- *  not talk to an agent: chat is not part of NewUI, and the bar says where it is instead of pretending. */
+ *  that waits on you, anything the search finds, and every page of the app (round 3: a person who chose the new
+ *  interface gets the page under NewUI's frame; on a visit from the classic interface the row leaves NewUI and says
+ *  so). It does not talk to an agent. */
 
 export const COMMAND_MAX = 8;
 
@@ -31,15 +32,22 @@ export interface CommandCtx {
   here?: string;
   /** whether this person may open Settings (the classic rule: a read-only account only with `settings_read`) */
   canSettings: boolean;
+  /** … and user management (an admin's) */
+  canUsers: boolean;
+  /** the person chose the new interface: a page opens under NewUI's frame. false = it opens in the classic one */
+  hosts: boolean;
 }
 
-/** The classic pages NewUI links to instead of drawing its own. */
-const CLASSIC: readonly [string, string][] = [
+/** The pages NewUI has no page of its own for: every classic section (the issue list, the changes and the map have
+ *  NewUI's own pages; the «pages» menu of the top bar lists the same, lib/pages). */
+const PAGES: readonly [string, string][] = [
   ["chat", "/app/chat"], ["reports", "/app/reports"], ["resources", "/app/resources"], ["schedules", "/app/schedules"],
-  ["skills", "/app/skills"], ["security", "/app/security"], ["settings", "/app/settings"],
+  ["skills", "/app/skills"], ["security", "/app/security"], ["plans", "/app/plans"], ["overview", "/app/overview"],
+  ["metrics", "/app/agent-metrics"], ["signals", "/app/signals"], ["users", "/app/users"], ["settings", "/app/settings"],
+  ["apiKeys", "/app/account/api-keys"],
 ];
 
-function commands({ t, canSettings }: CommandCtx): CommandRow[] {
+function commands({ t, canSettings, canUsers, hosts }: CommandCtx): CommandRow[] {
   return [
     { id: "go:decide", label: t("cmd.decide"), hint: "1", to: "/app/new/decide" },
     { id: "go:live", label: t("cmd.live"), hint: "2", to: "/app/new/live" },
@@ -47,8 +55,8 @@ function commands({ t, canSettings }: CommandCtx): CommandRow[] {
     { id: "do:theme", label: t("cmd.theme"), hint: "T", run: "theme" },
     { id: "do:help", label: t("cmd.keys"), hint: "?", run: "help" },
     // a page the person may not open is not offered: it would only answer «not found»
-    ...CLASSIC.filter(([k]) => k !== "settings" || canSettings)
-      .map(([k, to]): CommandRow => ({ id: `classic:${k}`, label: t(`cmd.${k}`), hint: t("cmd.classic"), to })),
+    ...PAGES.filter(([k]) => (k !== "settings" || canSettings) && (k !== "users" || canUsers))
+      .map(([k, to]): CommandRow => ({ id: `page:${k}`, label: t(`cmd.${k}`), ...(hosts ? {} : { hint: t("cmd.classic") }), to })),
   ];
 }
 
@@ -66,6 +74,7 @@ function found(ctx: CommandCtx, listed: Set<string>): CommandRow[] {
   const r = ctx.found?.results;
   if (!r) return [];
   const state = { from: ctx.lens, back: ctx.here ?? `/app/new/${ctx.lens}` };
+  const elsewhere = (kind: string) => (ctx.hosts ? kind : `${kind} · ${ctx.t("cmd.classic")}`);
   const row = (x: SearchResultItem): CommandRow | null => {
     const base = { id: `found:${x.entity_type}:${x.id}`, hint: ctx.t(`cmd.kind.${x.entity_type}`) };
     switch (x.entity_type) {
@@ -73,8 +82,9 @@ function found(ctx: CommandCtx, listed: Set<string>): CommandRow[] {
       case "change_request": return listed.has(`C${x.id}`) ? null : { ...base, label: `C#${x.id}　${x.title}`, to: storyPath(`C${x.id}`), state };
       case "change_plan": return x.parent_id ? { ...base, label: x.title, to: storyPath(`C${x.parent_id}`), state } : null;
       case "resource": return { ...base, label: x.title, to: `/app/new/world?sel=${x.id}` };
-      case "fix_plan": return { ...base, label: x.title, to: `/app/plans/${x.id}` };
-      case "report": return { ...base, label: x.title, to: `/app/reports/${x.id}` };
+      // no page of NewUI's own: the classic page — under the frame for a person who chose the new interface, else it says so
+      case "fix_plan": return { ...base, hint: elsewhere(base.hint), label: x.title, to: `/app/plans/${x.id}` };
+      case "report": return { ...base, hint: elsewhere(base.hint), label: x.title, to: `/app/reports/${x.id}` };
       default: return null;
     }
   };

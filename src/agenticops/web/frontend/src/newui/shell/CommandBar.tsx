@@ -1,23 +1,25 @@
 import { useEffect, useState, type RefObject } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAccountScope } from "@/components/layout/AccountScope";
-import { useCanViewSettings } from "@/hooks/useBootstrap";
+import { useCanManageUsers, useCanViewSettings } from "@/hooks/useBootstrap";
 import { useSearch } from "@/hooks/useSearch";
+import { readChoice } from "@/lib/shellChoice";
 import { useAllWaiting } from "../hooks/useAllWaiting";
 import { useNfT } from "../i18n";
 import { commandRows, moveRow, searchText } from "../lib/command";
 import type { Lens } from "../lib/keys";
 
-/** The command bar at the foot of every lens («/», Cmd/Ctrl+K): «/» lists commands, «@» lists things, plain text
- *  both. It goes to places; it does not talk to an agent (chat stays on the classic page, and a row says so). */
-export function CommandBar({ input, lens, onTheme, onHelp }: {
-  input: RefObject<HTMLInputElement>; lens: Lens; onTheme: () => void; onHelp: () => void;
+/** The command bar at the foot of the frame («/», Cmd/Ctrl+K): «/» lists commands, «@» lists things, plain text
+ *  both. It goes to places; it does not talk to an agent. `tucked`: out of sight (bridge.css) over a page whose own
+ *  input takes its place — the focus still reaches it through Cmd/Ctrl+K. */
+export function CommandBar({ input, lens, tucked = false, onTheme, onHelp }: {
+  input: RefObject<HTMLInputElement>; lens: Lens; tucked?: boolean; onTheme: () => void; onHelp: () => void;
 }) {
   const t = useNfT();
   const navigate = useNavigate();
   const location = useLocation();
   const { accountId } = useAccountScope();
-  const canSettings = useCanViewSettings();
+  const canSettings = useCanViewSettings(), canUsers = useCanManageUsers();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [index, setIndex] = useState(0);
@@ -30,7 +32,8 @@ export function CommandBar({ input, lens, onTheme, onHelp }: {
   const search = useSearch(asked);
   const waiting = useAllWaiting(accountId, open);
   const here = /^\/app\/new\/(decide|live|world)(\/|$)/.test(location.pathname) ? location.pathname + location.search : undefined;
-  const rows = commandRows(q, { t, waiting: waiting.data?.items ?? [], found: asked && asked === searchText(q) ? search.data : undefined, lens, here, canSettings });
+  const rows = commandRows(q, { t, waiting: waiting.data?.items ?? [], found: asked && asked === searchText(q) ? search.data : undefined, lens, here, canSettings, canUsers,
+                             hosts: readChoice() === "new" });
   const at = Math.min(index, Math.max(0, rows.length - 1));
   const seeking = !!searchText(q) && (asked !== searchText(q) || search.isFetching);
 
@@ -61,6 +64,7 @@ export function CommandBar({ input, lens, onTheme, onHelp }: {
         <label className="bar">
           <span className="spark" aria-hidden="true" />
           <input ref={input} id="nf-cmd" type="text" role="combobox" autoComplete="off" spellCheck={false} value={q}
+                 tabIndex={tucked ? -1 : undefined}      // out of sight (chat): reached by Cmd/Ctrl+K only, not by Tab
                  aria-label={t("cmd.label")} aria-expanded={open} aria-controls="nf-sugg" aria-autocomplete="list"
                  aria-activedescendant={open && rows.length ? `nf-sugg-${at}` : undefined} placeholder={t("cmd.placeholder")}
                  onChange={(e) => { setQ(e.target.value); setIndex(0); setOpen(true); }}

@@ -5,11 +5,12 @@ import type { GalaxyBuildInfo, GalaxyStatus, GalaxyGraph } from "@/api/types";
 import { buildLanded } from "@/lib/galaxy";
 
 /** Build status; when a build completes (a rebuild, the hourly schedule or a rule-only refresh) the drawn graphs refetch. */
-export function useGalaxyStatus() {
+export function useGalaxyStatus(enabled = true) {
   const qc = useQueryClient();
   const q = useQuery({
     queryKey: ["galaxy-status"],
     queryFn: () => apiFetch<GalaxyStatus>("/galaxy/status"),
+    enabled,                                   // NewUI's map layer is asleep over a hosted classic page
     refetchInterval: (q) =>
       q.state.data?.build?.status === "running" ? 5_000 : 60_000,
   });
