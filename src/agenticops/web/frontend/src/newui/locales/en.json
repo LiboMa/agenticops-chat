@@ -869,5 +869,6 @@
   "shell.font.small": "Small",
   "shell.font.medium": "Medium",
   "shell.font.large": "Large",
-  "check.classicMap": "The classic map (the relation graph is rebuilt there)"
+  "check.classicMap": "The classic map (the relation graph is rebuilt there)",
+  "help.hosted": "You are on a page, not in a lens: only Ctrl / Cmd + K (the command bar) works here; every other key is the page's own."
 }

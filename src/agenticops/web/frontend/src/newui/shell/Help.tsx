@@ -25,7 +25,7 @@ const ROWS: [string[], string][] = [
 ];
 
 /** The keyboard list («?»). A dialog: it takes the focus, keeps it, and gives it back when it closes. */
-export function Help({ onClose }: { onClose: () => void }) {
+export function Help({ onClose, hosting = false }: { onClose: () => void; hosting?: boolean }) {
   const t = useNfT();
   const ok = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -39,6 +39,8 @@ export function Help({ onClose }: { onClose: () => void }) {
            onKeyDown={(e) => { if (e.key === "Tab") { e.preventDefault(); ok.current?.focus(); } }}>
         <h2>{t("help.title")}</h2>
         <p>{t("help.p")}</p>
+        {/* over a classic page the single keys stand back: the page has its own dialogs and fields */}
+        {hosting && <p className="note">{t("help.hosted")}</p>}
         <div className="keys">
           {ROWS.map(([keys, label]) => (
             <div key={label}>{keys.map((k) => <kbd key={k}>{k}</kbd>)}<span>{t(label)}</span></div>

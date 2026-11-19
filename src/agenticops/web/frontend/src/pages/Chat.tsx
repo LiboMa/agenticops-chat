@@ -234,14 +234,15 @@ export default function Chat() {
 
   return (
     <div ref={flyoutContainerRef} className="flex h-[calc(100dvh-var(--topbar-h))] -m-6">
-      {/* The chat list as a drawer (below 768 px, and 801–1279 px where it starts right of the sidebar) */}
+      {/* The chat list as a drawer (below 768 px, and 801–1279 px where it starts right of the sidebar: --side-w, which
+          is 0 under NewUI's frame — there is no sidebar there) */}
       {listAsDrawer && (
         <Dialog.Root open={drawerOpen} onOpenChange={setDrawerOpen}>
           <Dialog.Portal>
             <Dialog.Overlay className="fixed inset-0 z-50 bg-black/30" />
             <Dialog.Content aria-describedby={undefined}
                             onCloseAutoFocus={(e) => returnFocusTo(drawerOpenerRef.current, e)}
-                            className="fixed inset-y-0 left-0 z-50 w-[85vw] max-w-[320px] bg-card shadow-xl outline-none animate-[slideInRight_0.2s_ease-out] min-[801px]:left-[166px] min-[1101px]:left-[200px]">
+                            className="fixed inset-y-0 left-[var(--side-w)] z-50 w-[85vw] max-w-[320px] bg-card shadow-xl outline-none animate-[slideInRight_0.2s_ease-out]">
               <Dialog.Title className="sr-only">{t("chat.sessions")}</Dialog.Title>
               <SessionFlyout open={drawerOpen} selectedId={selectedId}
                              onSelect={(id) => { setDrawerOpen(false); handleSelectSession(id); }}

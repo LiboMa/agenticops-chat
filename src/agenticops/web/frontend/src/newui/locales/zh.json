@@ -869,5 +869,6 @@
   "shell.font.small": "小",
   "shell.font.medium": "中",
   "shell.font.large": "大",
-  "check.classicMap": "旧版星图（在那里重建关系图）"
+  "check.classicMap": "旧版星图（在那里重建关系图）",
+  "help.hosted": "你现在在一个页面上，不在视角里：这里只有 Ctrl / Cmd + K（指令条）生效，其余的键留给页面自己。"
 }

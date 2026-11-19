@@ -108,6 +108,22 @@ html.nf-on.dark [class~="bg-primary-500"].text-white,
 html.nf-on.dark [class~="bg-primary-600"].text-white,
 html.nf-on.dark [class~="bg-primary-700"].text-white { color: hsl(var(--primary-foreground)); }
 
+/* ── day: the classic pages' own status hues ─────────────────────────────── */
+/* Tailwind's green-600 / emerald-500 / amber-500 … are written into the pages as text colours. On NewUI's day
+   surfaces they fall under 3 : 1 (green-600 on the canvas 2.7, amber-500 on white 2.2). The pages stay as they are:
+   under the frame, by day, these classes take NewUI's status colours. Night is left alone — there they sit on the
+   pages' own light chips, where a bright status colour would not read. */
+html.nf-on:not(.dark) .text-green-500,
+html.nf-on:not(.dark) .text-green-600,
+html.nf-on:not(.dark) .text-emerald-500,
+html.nf-on:not(.dark) .text-emerald-600 { color: hsl(var(--status-ok)); }
+html.nf-on:not(.dark) .text-amber-500,
+html.nf-on:not(.dark) .text-amber-600,
+html.nf-on:not(.dark) .text-orange-500,
+html.nf-on:not(.dark) .text-orange-600 { color: hsl(var(--status-warn)); }
+html.nf-on:not(.dark) .text-red-500,
+html.nf-on:not(.dark) .text-red-600 { color: hsl(var(--status-danger)); }
+
 /* ── the frame's measurements ────────────────────────────────────────────── */
 @media (max-width: 760px) {
   html.nf-on { --topbar-h: 108px; }     /* NewUI's top bar is 44px there */

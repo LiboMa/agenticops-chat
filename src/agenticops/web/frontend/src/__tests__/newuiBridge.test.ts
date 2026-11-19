@@ -157,6 +157,25 @@ describe("text stays readable on every surface it can sit on (≥ 4.5 : 1)", () 
   });
 });
 
+describe("day: the classic pages' own status hues read on NewUI's day surfaces", () => {
+  // measured on the preview: text-green-600 on the day canvas is 2.7 : 1 (3.1 on the classic canvas), emerald-500 and
+  // amber-500 on white 2.5 and 2.2. The page files stay as they are; under the frame these classes take NewUI's status
+  // colours (each ≥ 4.5 on every surface, tested above). Night is left alone: there the classes sit on light chips.
+  const inked = (cls: string) => rules(bridge).filter((r) => r.selector.split(",").some((one) => one.trim() === `html.nf-on:not(.dark) .${cls}`));
+  it.each([
+    ["text-green-500", "--status-ok"], ["text-green-600", "--status-ok"], ["text-emerald-500", "--status-ok"], ["text-emerald-600", "--status-ok"],
+    ["text-amber-500", "--status-warn"], ["text-amber-600", "--status-warn"], ["text-orange-500", "--status-warn"], ["text-orange-600", "--status-warn"],
+    ["text-red-500", "--status-danger"], ["text-red-600", "--status-danger"],
+  ])(".%s → %s", (cls, token) => {
+    const hit = inked(cls);
+    expect(hit).toHaveLength(1);
+    expect(hit[0].body).toContain(`hsl(var(${token}))`);
+  });
+  it("no night rule re-inks them", () => {
+    expect(rules(bridge).filter((r) => /^html\.nf-on\.dark\b/.test(r.selector) && /\.text-(green|emerald|amber|orange|red)-/.test(r.selector))).toEqual([]);
+  });
+});
+
 describe("the frame's measurements", () => {
   it("--topbar-h is the top bar plus the command bar, so a page sized to the classic frame clears both", () => {
     expect(day.get("--topbar-h")?.value).toBe("112px");                       // 48 + 64 (newui.css --top / --bar)
@@ -165,6 +184,16 @@ describe("the frame's measurements", () => {
   });
   it("the classic sidebar's width is nothing here", () => {
     expect(day.get("--side-w")?.value).toBe("0px");
+  });
+  it("the chat list's drawer starts where the sidebar ends — through --side-w, the sidebar's width in the classic interface", () => {
+    const chat = read("../pages/Chat.tsx");
+    expect(chat).toContain("left-[var(--side-w)]");
+    expect(chat).not.toMatch(/left-\[(166|200)px\]/);
+    // index.css: nothing below 801px (the sidebar is a menu there), then the widths components/layout/Sidebar.tsx is drawn at
+    expect(root.get("--side-w")?.value).toBe("0px");
+    expect(index).toMatch(/@media \(min-width: 801px\)\s*\{\s*:root\s*\{\s*--side-w:\s*166px;\s*\}\s*\}/);
+    expect(index).toMatch(/@media \(min-width: 1101px\)\s*\{\s*:root\s*\{\s*--side-w:\s*200px;\s*\}\s*\}/);
+    expect(read("../components/layout/Sidebar.tsx")).toMatch(/w-\[200px\][^"]*max-\[1100px\]:w-\[166px\]/);
   });
   it("printing a page does not print the frame", () => {
     const print = /@media print\s*\{([\s\S]*?)\n\}/.exec(noComments(bridge));

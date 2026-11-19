@@ -294,7 +294,7 @@ export function NewShell({ children, hosting = false, tucked = false }: { childr
         {pending.waiting && <PendingToast label={pending.waiting.label} due={pending.waiting.due} onUndo={undo} />}
         {/* a plain line never covers a decision's undo window: it sits above it */}
         {notice && <div className={`toast${pending.waiting ? " above" : ""}`} role="status"><span className="spark" aria-hidden="true" /><span className="msg">{notice}</span></div>}
-        {help && <Help onClose={() => setHelp(false)} />}
+        {help && <Help onClose={() => setHelp(false)} hosting={hosting} />}
         </WorldLayer>
       </div>
     </ShellContext.Provider>

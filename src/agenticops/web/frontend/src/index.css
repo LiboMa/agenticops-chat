@@ -40,6 +40,9 @@
     --primary-hover: 224 76% 48%;
     /* the shell's top bar; full-height pages subtract it */
     --topbar-h: 64px;
+    /* the sidebar's width (components/layout/Sidebar: none below 801px, 166px, then 200px): what a layer that must start
+       beside it — the chat list's drawer — is offset by. NewUI's frame has no sidebar and sets it to 0 (bridge.css) */
+    --side-w: 0px;
     /* MVP-2.8.0: the design's state colours (#167351 / #915B0A / #B42318) — always beside a word, never alone */
     --status-ok: 158 68% 27%;
     --status-warn: 36 87% 30%;
@@ -116,6 +119,12 @@
   }
   @media (max-width: 800px) {
     :root { --topbar-h: 56px; }
+  }
+  @media (min-width: 801px) {
+    :root { --side-w: 166px; }
+  }
+  @media (min-width: 1101px) {
+    :root { --side-w: 200px; }
   }
 }
 
