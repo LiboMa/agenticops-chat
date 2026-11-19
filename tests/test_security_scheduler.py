@@ -1,6 +1,13 @@
 from agenticops.config import settings
 
 
+def _whole():
+    """What the collectors hand the snapshot job (MVP-2.9.0 N20): no findings, every source read."""
+    from agenticops.security.collectors import PostureCollection
+    from agenticops.security.scoring import SOURCES
+    return PostureCollection([], {s: {"ok": True, "error": ""} for s in SOURCES})
+
+
 class TestSecurityConfig:
     def test_security_config_defaults(self):
         assert settings.security_review_enabled is True
@@ -34,7 +41,7 @@ class TestSecurityJobStubs:
         cm.__exit__.return_value = False
         with patch.object(posture_snapshot, "_resolve_security_accounts",
                           return_value=["acct-a", "acct-b"]), \
-             patch.object(posture_snapshot, "collect_posture", return_value=[]) as m_collect, \
+             patch.object(posture_snapshot, "collect_posture_checked", return_value=_whole()) as m_collect, \
              patch.object(posture_snapshot, "score", return_value=result), \
              patch.object(posture_snapshot, "get_db_session", return_value=cm):
             n = posture_snapshot.run_posture_snapshot()
@@ -56,11 +63,11 @@ class TestSecurityJobStubs:
         def collect_side_effect(account):
             if account == "bad":
                 raise RuntimeError("boom")
-            return []
+            return _whole()
 
         with patch.object(posture_snapshot, "_resolve_security_accounts",
                           return_value=["bad", "good"]), \
-             patch.object(posture_snapshot, "collect_posture", side_effect=collect_side_effect), \
+             patch.object(posture_snapshot, "collect_posture_checked", side_effect=collect_side_effect), \
              patch.object(posture_snapshot, "score", return_value=result), \
              patch.object(posture_snapshot, "get_db_session", return_value=cm):
             n = posture_snapshot.run_posture_snapshot()

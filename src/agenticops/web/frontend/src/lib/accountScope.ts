@@ -1,8 +1,8 @@
 /**
  * The top bar's account scope (MVP-2.7.0 S4): one account (or All) that the work lists follow — the Cases queue,
- * the Plans & changes Fix and Changes tabs, Resources and «Needs your attention». Stored per user in this browser.
- * A detail page shows its own record's account, so the scope is locked there; pages it does not filter
- * (overview, security, Galaxy, …) say so. Pure, so node can test it.
+ * the Plans & changes Fix and Changes tabs, Resources, «Needs your attention» and, since MVP-2.9.0 N20, Security
+ * (every module of it). Stored per user in this browser. A detail page shows its own record's account, so the scope
+ * is locked there; pages it does not filter (overview, Galaxy, …) say so. Pure, so node can test it.
  */
 import { userKey } from "@/lib/home";
 
@@ -27,7 +27,7 @@ export function validScope(stored: unknown, accounts: { id: number }[] | undefin
 }
 
 // S5: a new chat (/app/chat) takes the scope as its account; an open chat (/app/chat/:id) shows its own, locked
-const LISTS = new Set(["/app/issues", "/app/plans", "/app/changes", "/app/resources", "/app/chat", "/app/inbox"]);
+const LISTS = new Set(["/app/issues", "/app/plans", "/app/changes", "/app/resources", "/app/chat", "/app/inbox", "/app/security"]);
 
 /** active: the lists, and the Cases split view (its queue stays on screen); locked: a detail page — and a case
  *  opened full screen on a narrow screen; notApplied: everything else. */

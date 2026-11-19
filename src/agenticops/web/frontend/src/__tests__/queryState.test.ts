@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { queryView } from "@/lib/queryState";
+import { moduleStatus, queryView } from "@/lib/queryState";
 
 const isEmpty = (d: unknown) => !Array.isArray(d) || d.length === 0;
 const q = (over: Partial<{ isPending: boolean; isError: boolean; data: unknown; dataUpdatedAt: number }>) => ({
@@ -28,5 +28,16 @@ describe("queryView — four data states (MVP-2.8.0 S1)", () => {
       .toEqual({ kind: "ready", stale: true, asOf: 3000 });
     expect(queryView(q({ isError: true, data: [], dataUpdatedAt: 4000 }), isEmpty))
       .toEqual({ kind: "empty", stale: true, asOf: 4000 });
+  });
+});
+
+describe("moduleStatus — what a module says about its own data in its corner (MVP-2.9.0 N20)", () => {
+  const q = (o: Partial<{ isPending: boolean; isError: boolean; data: unknown; dataUpdatedAt: number }>) =>
+    ({ isPending: false, isError: false, data: undefined, dataUpdatedAt: 0, ...o });
+  it("is loading before anything arrived", () => expect(moduleStatus(q({ isPending: true }))).toBe("loading"));
+  it("is fetched once there is data", () => expect(moduleStatus(q({ data: [], dataUpdatedAt: 5 }))).toBe("fetched"));
+  it("is failed when the request failed — also when older data is still on screen", () => {
+    expect(moduleStatus(q({ isError: true }))).toBe("failed");
+    expect(moduleStatus(q({ isError: true, data: [1], dataUpdatedAt: 5 }))).toBe("failed");
   });
 });

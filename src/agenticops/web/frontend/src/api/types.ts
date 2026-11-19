@@ -1141,29 +1141,55 @@ export interface GalaxyHealthRead {
   as_of?: string | null;
 }
 
-// ── Security review (MVP-2.5.0) ────────────────────────────────
+// ── Security review (MVP-2.5.0; per account since MVP-2.9.0 N20) ──────────────
+// `account_id` is cloud_accounts.id — the top bar's scope — and null when the snapshot's account is no longer
+// managed; `account_name` is always there.
 export interface SecurityAccountScore {
-  account_id: string;
-  overall_score: number;
-  category_scores: Record<string, number>;
+  account_id: number | null;
+  account_name: string;
+  partition: "aws" | "aws-cn" | "aws-us-gov" | null;
+  /** null = no collection source of this account could be read: there is nothing to score */
+  overall_score: number | null;
+  /** a category nobody could read is null */
+  category_scores: Record<string, number | null>;
   created_at: string | null;
   reachable_paths: number;
+  /** THIS account's open findings — the total of its findings list */
   open_findings: number;
+  /** null on a snapshot written before collection health was recorded */
+  collection: "complete" | "partial" | "failed" | null;
+  collection_errors: { source: string; error: string }[];
 }
 
 export interface SecuritySummary {
   accounts: SecurityAccountScore[];
+  /** open findings that no account holds (listed only under «all accounts») */
+  unassigned_open_findings: number;
   generated_at: string;
 }
 
+/** One account's score on one UTC day: that day's last score. A day without one has no point. */
 export interface SecurityTrendPoint {
-  account_id: string;
-  created_at: string | null;
-  overall_score: number;
+  day: string;
+  score: number;
+  partial: boolean;
+}
+
+export interface SecurityTrendAccount {
+  account_id: number | null;
+  account_name: string;
+  points: SecurityTrendPoint[];
+}
+
+export interface SecurityTrend {
+  days: number;
+  accounts: SecurityTrendAccount[];
 }
 
 export interface SecurityFindingItem {
   id: number;
+  /** "I#12" — the issue this finding is */
+  issue_ref: string;
   title: string;
   severity: string;
   status: string;
@@ -1171,13 +1197,24 @@ export interface SecurityFindingItem {
   issue_type: string;
   detected_by: string;
   last_seen: string | null;
-  /** a state word — or, on some findings, an evidence object (render through lib/reachability) */
-  reachability: string | Record<string, unknown> | null;
+  /** a state word (an evidence object on the stored finding is sent as "undetermined"); null when not assessed */
+  reachability: string | null;
+  account_id: number | null;
+  account_name: string | null;
+  /** of the inventory row the issue is anchored to; null when it is not anchored */
+  region: string | null;
+  resource_type: string | null;
+}
+
+export interface SecurityFindingPage {
+  items: SecurityFindingItem[];
+  total: number;
 }
 
 export interface SecurityRecommendationItem {
   id: number;
-  account_id: string;
+  account_id: number | null;
+  account_name: string;
   category: string;
   title: string;
   detail: string;
@@ -1189,7 +1226,8 @@ export interface SecurityRecommendationItem {
 }
 
 export interface AttackPathItem {
-  account_id: string;
+  account_id: number | null;
+  account_name: string;
   resource_id: string;
   port: number | null;
   path: string[];

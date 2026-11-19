@@ -40,7 +40,7 @@ def _grounded(recs: list[dict], resource_ids: set[str]) -> list[dict]:
 
 
 def _build_prompt(account: str, category_scores: dict, findings: list) -> str:
-    low = sorted(c for c, s in category_scores.items() if s < 100.0)
+    low = sorted(c for c, s in category_scores.items() if s is not None and s < 100.0)
     evidence = "\n".join(
         f"- {f.resource_id} — {f.raw_check} ({f.control_id}, {f.category})"
         for f in findings
@@ -86,7 +86,7 @@ def recommend(snapshot_id, account: str, score_result, findings: list) -> int:
     if not settings.security_advisor_enabled:
         return 0
     try:
-        low = [c for c, s in score_result.category_scores.items() if s < 100.0]
+        low = [c for c, s in score_result.category_scores.items() if s is not None and s < 100.0]
         if not low or not findings:
             return 0
         model = settings.security_model_id or settings.bedrock_model_id_cheap

@@ -1503,7 +1503,7 @@ def _sqlite_rebuild_table(engine, table) -> None:
         conn.execute(text(f"ALTER TABLE {tmp_name} RENAME TO {table.name}"))
         for idx in table.indexes:
             idx.create(conn)
-    logger.info("Rebuilt table %s with relaxed NOT NULL constraints (MVP-2.6.0)", table.name)
+    logger.info("Rebuilt table %s with relaxed NOT NULL constraints", table.name)
 
 
 def _pg_migration_statements(insp, dialect, existing_constraints: set[str]) -> list[str]:
@@ -1770,7 +1770,11 @@ _ADD_COLUMNS_2_7_0: dict[str, dict[str, Optional[str]]] = {
     "users": {"deleted_at": None},
     # MVP-2.9.0 N9: a person's stop request on a run (NULL on existing rows = never stopped)
     "fix_executions": {"stop_requested_at": None, "stop_requested_by": None, "stop_note": None},
+    # MVP-2.9.0 N20: which collection sources a snapshot could read (NULL on existing rows = not recorded)
+    "security_snapshots": {"collection_health": None},
 }
+# MVP-2.9.0 N20: a snapshot of an account whose every source failed has no score — the column may be NULL.
+_NULLABLE_2_9_0: dict[str, tuple[str, ...]] = {"security_snapshots": ("overall_score",)}
 _migrated_2_7_0_urls: set[str] = set()
 _migrate_2_7_0_lock = threading.Lock()
 
@@ -1790,7 +1794,25 @@ def _statements_2_7_0(insp, dialect) -> list[str]:
             "uq_chat_message_client_id" not in {i["name"] for i in insp.get_indexes("chat_messages")}:
         stmts.append("CREATE UNIQUE INDEX IF NOT EXISTS uq_chat_message_client_id "
                      "ON chat_messages (session_id, client_message_id)")
+    if dialect.name == "postgresql":    # SQLite cannot drop NOT NULL in place: _relax_not_null_2_9_0 rebuilds
+        for tbl, cols in _NULLABLE_2_9_0.items():
+            if not insp.has_table(tbl):
+                continue
+            live = {c["name"]: c for c in insp.get_columns(tbl)}
+            stmts += [f"ALTER TABLE {tbl} ALTER COLUMN {col} DROP NOT NULL"
+                      for col in cols if col in live and not live[col]["nullable"]]
     return stmts
+
+
+def _relax_not_null_2_9_0(engine) -> None:
+    """SQLite: rebuild a table whose live column is still NOT NULL where the model now allows NULL. Runs after the
+    ADD COLUMN statements, so the copy carries every column; nothing to do once relaxed."""
+    if engine.dialect.name != "sqlite":
+        return
+    insp = inspect(engine)
+    for tbl, cols in _NULLABLE_2_9_0.items():
+        if insp.has_table(tbl) and _sqlite_notnull_columns(engine, tbl) & set(cols):
+            _sqlite_rebuild_table(engine, Base.metadata.tables[tbl])
 
 
 def _run_migrate_2_7_0(engine) -> None:
@@ -1799,8 +1821,50 @@ def _run_migrate_2_7_0(engine) -> None:
         with engine.begin() as conn:
             for stmt in stmts:
                 conn.execute(text(stmt))
+    _relax_not_null_2_9_0(engine)
     _backfill_reports_2_7_0(engine)
     _repair_plan_hashes_2_9_0(engine)
+    _backfill_security_issue_accounts_2_9_0(engine)
+
+
+def _backfill_security_issue_accounts_2_9_0(engine) -> None:
+    """MVP-2.9.0 N20 (2.8.0 S3, the owner's item 8): a security finding with no account takes the account its own
+    Signal rows state — the account the collection job ran with, written on the signal and resolved through the
+    provider layer, not inferred. Only when every row that states an account states the SAME managed account; an
+    issue whose rows are gone (pruned after signal_retention_days), state none, disagree or name an account nobody
+    manages stays empty, and the log says how many. The status is not touched and nothing is written to a timeline.
+    Column-level and fail-soft, like the 2.6.1 backfills; cheap to repeat (it reads only issues still empty)."""
+    try:
+        from agenticops.services.identity_resolver import account_pk
+        from agenticops.services.signal_gate import SECURITY_DETECTORS
+
+        insp = inspect(engine)
+        if not (insp.has_table("health_issues") and insp.has_table("alert_events")):
+            return
+        with Session(engine) as session:
+            empty = [row.id for row in session.query(HealthIssue.id).filter(
+                HealthIssue.detected_by.in_(SECURITY_DETECTORS), HealthIssue.account_id.is_(None))]
+            if not empty:
+                return
+            stated: dict[int, set[str]] = {}
+            for at in range(0, len(empty), 500):
+                for issue_id, account in session.query(AlertEvent.health_issue_id, AlertEvent.account_id).filter(
+                        AlertEvent.health_issue_id.in_(empty[at:at + 500])).distinct():
+                    if (account or "").strip():
+                        stated.setdefault(issue_id, set()).add(account.strip())
+            filled = 0
+            for issue_id, names in stated.items():
+                pks = {account_pk(session, name) for name in names}
+                if len(pks) != 1 or None in pks:
+                    continue
+                filled += session.query(HealthIssue).filter(
+                    HealthIssue.id == issue_id, HealthIssue.account_id.is_(None)).update(
+                    {"account_id": pks.pop()}, synchronize_session=False)
+            session.commit()
+        logger.info("MVP-2.9.0 security account backfill: %d filled, %d left without an account "
+                    "(no Signal row states one managed account)", filled, len(empty) - filled)
+    except Exception as exc:
+        logger.warning("MVP-2.9.0 security account backfill skipped: %s", exc)
 
 
 def _repair_plan_hashes_2_9_0(engine) -> None:
@@ -2434,11 +2498,15 @@ class SecuritySnapshot(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc), index=True
     )
-    overall_score: Mapped[float] = mapped_column(Float, default=0.0)  # 0-100
-    category_scores: Mapped[dict] = mapped_column(JSON, default=dict)
+    # 0-100; NULL = no source of this account could be read, so there is nothing to score (MVP-2.9.0 N20)
+    overall_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    category_scores: Mapped[dict] = mapped_column(JSON, default=dict)   # a category nobody could read is null
     metrics: Mapped[dict] = mapped_column(JSON, default=dict)
     exposure_paths: Mapped[list] = mapped_column(JSON, default=list)
-    cis_results: Mapped[dict] = mapped_column(JSON, default=dict)
+    cis_results: Mapped[dict] = mapped_column(JSON, default=dict)       # control -> pass | fail | undetermined
+    # MVP-2.9.0 N20: {"status": complete|partial|failed, "sources": {source: {"ok", "error"}}} — which collection
+    # sources could be read (security/collectors). NULL on a snapshot written before: its score is shown as it was.
+    collection_health: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
 
 class SecurityRecommendation(Base):

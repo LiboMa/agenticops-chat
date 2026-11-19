@@ -29,3 +29,10 @@ export function queryView<T>(q: QueryLike, isEmpty: (data: T) => boolean): Query
   const kind: QueryKind = isEmpty(q.data as T) ? "empty" : "ready";
   return { kind, stale: hasData && q.isError, asOf };
 }
+
+/** What a module says about its own data in its corner (MVP-2.9.0 N20): «fetched», or «failed» whenever the last
+ *  request failed — also when older data is still on screen under the stale notice. */
+export function moduleStatus(q: QueryLike): "loading" | "failed" | "fetched" {
+  if (q.isError) return "failed";
+  return q.data !== undefined ? "fetched" : "loading";
+}

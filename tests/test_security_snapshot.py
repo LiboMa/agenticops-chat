@@ -3,7 +3,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agenticops.models import Base, SecuritySnapshot, SecurityRecommendation
-from agenticops.security.collectors import PostureFinding
+from agenticops.security.collectors import PostureCollection, PostureFinding
+from agenticops.security.scoring import SOURCES
+
+
+def _whole(findings):
+    """What the collectors hand the job when every source could be read."""
+    return PostureCollection(list(findings), {s: {"ok": True, "error": ""} for s in SOURCES})
 
 
 @pytest.fixture
@@ -71,8 +77,8 @@ class TestRunPostureSnapshot:
 
         monkeypatch.setattr(ps, "get_db_session", _sess)
         monkeypatch.setattr(ps, "_resolve_security_accounts", lambda: ["acct-a", "acct-b"])
-        monkeypatch.setattr(ps, "collect_posture",
-                            lambda a: [PostureFinding("network", "cis-4.1", "sg-1", "SG", "open")])
+        monkeypatch.setattr(ps, "collect_posture_checked",
+                            lambda a: _whole([PostureFinding("network", "cis-4.1", "sg-1", "SG", "open")]))
 
         n = ps.run_posture_snapshot()
         assert n == 2
@@ -104,8 +110,8 @@ class TestRunPostureSnapshot:
         def _collect(a):
             if a == "bad":
                 raise RuntimeError("creds failed")
-            return []
-        monkeypatch.setattr(ps, "collect_posture", _collect)
+            return _whole([])
+        monkeypatch.setattr(ps, "collect_posture_checked", _collect)
 
         n = ps.run_posture_snapshot()
         assert n == 1  # good account still produced a snapshot
@@ -219,7 +225,7 @@ class TestExposureWiring:
         monkeypatch.setattr(ps, "get_db_session", _sess)
         monkeypatch.setattr(ps, "_resolve_security_accounts", lambda: ["acct-a"])
         f = PostureFinding("network", "cis-4.1", "sg-1", "SecurityGroup", "open", "high")
-        monkeypatch.setattr(ps, "collect_posture", lambda a: [f])
+        monkeypatch.setattr(ps, "collect_posture_checked", lambda a: _whole([f]))
         monkeypatch.setattr(ps, "_aggregate_topology", lambda a: ({}, {}, {}, {}))
         monkeypatch.setattr(ps, "_emit_posture_signals", lambda a, ann: 0)
         monkeypatch.setattr(ps, "recommend", lambda *a, **k: 0, raising=False)
@@ -262,7 +268,7 @@ class TestAdvisorWiring:
         monkeypatch.setattr(ps, "get_db_session", _sess)
         monkeypatch.setattr(ps, "_resolve_security_accounts", lambda: ["acct-a"])
         f = PostureFinding("iam", "cis-1.10", "alice", "IAMUser", "no mfa", "high")
-        monkeypatch.setattr(ps, "collect_posture", lambda a: [f])
+        monkeypatch.setattr(ps, "collect_posture_checked", lambda a: _whole([f]))
         monkeypatch.setattr(ps, "_aggregate_topology", lambda a: ({}, {}, {}, {}))
         monkeypatch.setattr(ps, "_emit_posture_signals", lambda a, ann: 0)
         calls = []
@@ -276,3 +282,87 @@ class TestAdvisorWiring:
         assert acct == "acct-a"
         with _sess() as s:
             assert s.query(models.SecuritySnapshot).one().id == sid
+
+
+class TestCollectionHealthOnTheSnapshot:
+    """MVP-2.9.0 N20 (2.8.0 S3): an account nobody could read does not get 100."""
+
+    @staticmethod
+    def _db(monkeypatch):
+        from contextlib import contextmanager
+
+        import agenticops.security.posture_snapshot as ps
+        from agenticops import models
+        engine = create_engine("sqlite:///:memory:")
+        models.Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine)
+
+        @contextmanager
+        def _sess():
+            s = Session()
+            try:
+                yield s
+                s.commit()
+            finally:
+                s.close()
+        monkeypatch.setattr(ps, "get_db_session", _sess)
+        monkeypatch.setattr(ps, "_resolve_security_accounts", lambda: ["acct-a"])
+        monkeypatch.setattr(ps, "_aggregate_topology", lambda a: ({}, {}, {}, {}))
+        monkeypatch.setattr(ps, "_emit_posture_signals", lambda a, ann: 0)
+        monkeypatch.setattr(ps, "recommend", lambda *a, **k: 0, raising=False)
+        return ps, _sess
+
+    def test_an_account_whose_every_call_is_refused_has_no_score(self, monkeypatch):
+        """The whole path, collectors included: before N20 this wrote 100.0 with every control «pass»."""
+        ps, _sess = self._db(monkeypatch)
+
+        def _refused(service, region, account=""):
+            raise RuntimeError("credentials could not be resolved")
+        with _patch("agenticops.security.collectors._get_client", side_effect=_refused), \
+             _patch("agenticops.security.collectors._enabled_regions", return_value=["us-east-1"]):
+            assert ps.run_posture_snapshot() == 1
+        with _sess() as s:
+            snap = s.query(SecuritySnapshot).one()
+            assert snap.overall_score is None
+            assert set(snap.category_scores.values()) == {None}
+            assert set(snap.cis_results.values()) == {"undetermined"}
+            assert snap.collection_health["status"] == "failed"
+            assert set(snap.collection_health["sources"]) == set(SOURCES)
+            assert all(not h["ok"] and "credentials could not be resolved" in h["error"]
+                       for h in snap.collection_health["sources"].values())
+
+    def test_a_partly_read_account_is_scored_and_says_so(self, monkeypatch):
+        ps, _sess = self._db(monkeypatch)
+        health = {s: {"ok": True, "error": ""} for s in SOURCES}
+        health["iam"] = {"ok": False, "error": "AccessDenied (GetCredentialReport)"}
+        monkeypatch.setattr(ps, "collect_posture_checked", lambda a: PostureCollection([], health))
+        ps.run_posture_snapshot()
+        with _sess() as s:
+            snap = s.query(SecuritySnapshot).one()
+            assert snap.overall_score == 62.5 and snap.category_scores["iam"] is None
+            assert snap.collection_health == {"status": "partial", "sources": health}
+
+    def test_a_fully_read_account_says_complete(self, monkeypatch):
+        ps, _sess = self._db(monkeypatch)
+        monkeypatch.setattr(ps, "collect_posture_checked", lambda a: _whole([]))
+        ps.run_posture_snapshot()
+        with _sess() as s:
+            snap = s.query(SecuritySnapshot).one()
+            assert snap.overall_score == 100.0 and snap.collection_health["status"] == "complete"
+
+    def test_a_snapshot_written_before_n20_reads_as_it_did(self, session):
+        session.add(SecuritySnapshot(account_id="a", provider="aws", overall_score=72.5))
+        session.commit()
+        got = session.query(SecuritySnapshot).one()
+        assert got.overall_score == 72.5 and got.collection_health is None
+
+
+class TestAdvisorWithoutAScore:
+    def test_a_category_nobody_could_read_is_not_a_low_score(self, monkeypatch):
+        """`None < 100.0` raised inside recommend(): fail-closed, so a partly read account got no advice at all."""
+        from agenticops.security import advisor
+        from agenticops.security.scoring import score
+        f = PostureFinding("network", "cis-4.1", "sg-1", "SecurityGroup", "open ssh")
+        result = score([f], failed_sources={"iam"})
+        prompt = advisor._build_prompt("acct-a", result.category_scores, [f])
+        assert "Low-scoring categories: network\n" in prompt

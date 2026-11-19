@@ -44,6 +44,9 @@ RESOURCE_DEDUP_STATUSES = ("open", "investigating", "acknowledged", "root_cause_
 # Unresolved problems someone still owns — dismissed suppresses re-alerts but is not open: gray-zone
 # candidates, open counts, node colours and re-anchoring use this one
 OPEN_ISSUE_STATUSES = tuple(s for s in SUPPRESSING_ISSUE_STATUSES if s != "dismissed")
+# The cloud security review's two detectors (security/incremental_poll, security/posture_snapshot): their signals
+# state the account the collection job ran with — resolved through the provider layer, not inferred
+SECURITY_DETECTORS = ("security_poll", "security_posture")
 
 _SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 _MERGED_ALERTS_CAP = 50
@@ -420,6 +423,16 @@ def _promote(session, sig: SignalInput, fingerprint: str, trace_id: Optional[str
         if sig.account_id is not None and str(sig.account_id).strip():
             audit = {"rule": "error", "candidates": [{"account": str(sig.account_id), "reason": "error"}]}
 
+    # MVP-2.9.0 N20: a security finding the resolver gave no account (its ARN names another account, or the
+    # anchoring failed) belongs to the account whose collection job found it. The anchor itself — status, row,
+    # audit — stays what the resolver said; every other detector keeps the anchoring rule.
+    account = anchor.account_id if anchor else None
+    if account is None and sig.detected_by in SECURITY_DETECTORS:
+        try:
+            account = identity_resolver.account_pk(session, sig.account_id)
+        except Exception:
+            logger.warning("signal-gate: the collector's account of %r could not be read", resource, exc_info=True)
+
     issue = HealthIssue(
         resource_id=resource or "unknown",
         provider=sig.provider or "aws",
@@ -441,7 +454,7 @@ def _promote(session, sig: SignalInput, fingerprint: str, trace_id: Optional[str
         first_seen=now,
         last_seen=now,
         trace_id=trace_id,
-        account_id=anchor.account_id if anchor else None,
+        account_id=account,
         resource_ref=anchor.resource_ref if anchor else None,
         anchor_status=anchor.status if anchor else None,
         anchor_candidates=anchor.audit() if anchor else audit,

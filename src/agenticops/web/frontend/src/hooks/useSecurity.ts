@@ -1,51 +1,58 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
+import { findingsRequest, type FindingsQuery } from "@/lib/security";
 import type {
   AttackPathItem,
-  SecurityFindingItem,
+  SecurityFindingPage,
   SecurityRecommendationItem,
   SecuritySummary,
-  SecurityTrendPoint,
+  SecurityTrend,
 } from "@/api/types";
 
-export function useSecuritySummary() {
+// Every module takes the account of the top bar's scope (undefined = all accounts) — MVP-2.9.0 N20.
+const scoped = (path: string, accountId: number | undefined, sep: "?" | "&") =>
+  accountId === undefined ? path : `${path}${sep}account_id=${accountId}`;
+
+export function useSecuritySummary(accountId?: number) {
   return useQuery({
-    queryKey: ["security-summary"],
-    queryFn: () => apiFetch<SecuritySummary>("/security/summary"),
+    queryKey: ["security-summary", accountId ?? null],
+    queryFn: () => apiFetch<SecuritySummary>(scoped("/security/summary", accountId, "?")),
     staleTime: 30_000,
   });
 }
 
-export function useSecurityTrend(days = 30, account?: string) {
-  const qs = account ? `?days=${days}&account=${encodeURIComponent(account)}` : `?days=${days}`;
+export function useSecurityTrend(days = 30, accountId?: number) {
   return useQuery({
-    queryKey: ["security-trend", days, account ?? ""],
-    queryFn: () => apiFetch<SecurityTrendPoint[]>(`/security/trend${qs}`),
+    queryKey: ["security-trend", days, accountId ?? null],
+    queryFn: () => apiFetch<SecurityTrend>(scoped(`/security/trend?days=${days}`, accountId, "&")),
     staleTime: 30_000,
   });
 }
 
-export function useSecurityFindings(limit = 100) {
+/** One page of findings; the previous page stays on screen while the next one loads. */
+export function useSecurityFindings(query: FindingsQuery, accountId?: number) {
+  const path = findingsRequest(query, accountId);
   return useQuery({
-    queryKey: ["security-findings", limit],
-    queryFn: () => apiFetch<SecurityFindingItem[]>(`/security/findings?limit=${limit}`),
+    queryKey: ["security-findings", path],
+    queryFn: () => apiFetch<SecurityFindingPage>(path),
     staleTime: 30_000,
+    placeholderData: keepPreviousData,
   });
 }
 
-export function useSecurityRecommendations(status = "open") {
+export function useSecurityRecommendations(status = "open", accountId?: number) {
   return useQuery({
-    queryKey: ["security-recommendations", status],
+    queryKey: ["security-recommendations", status, accountId ?? null],
     queryFn: () =>
-      apiFetch<SecurityRecommendationItem[]>(`/security/recommendations?status=${status}`),
+      apiFetch<SecurityRecommendationItem[]>(scoped(`/security/recommendations?status=${status}`, accountId, "&")),
     staleTime: 30_000,
   });
 }
 
-export function useAttackPaths() {
+export function useAttackPaths(accountId?: number) {
   return useQuery({
-    queryKey: ["security-attack-paths"],
-    queryFn: () => apiFetch<AttackPathItem[]>("/security/attack-paths"),
+    queryKey: ["security-attack-paths", accountId ?? null],
+    queryFn: () => apiFetch<AttackPathItem[]>(scoped("/security/attack-paths", accountId, "?")),
     staleTime: 30_000,
   });
 }

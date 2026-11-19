@@ -17,6 +17,8 @@ import { useNavigate } from "react-router-dom";
 import { useMemo } from "react";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useSecuritySummary } from "@/hooks/useSecurity";
+import { StatusText } from "@/components/ui/StatusText";
+import { TIER_TONE, cardView } from "@/lib/security";
 
 const SEV_DOT: Record<string, string> = {
   critical: "bg-red-500",
@@ -94,25 +96,33 @@ export default function Dashboard() {
       {/* 3. Interaction stats — compact single row (cost/token consolidated) */}
       <InteractionStats />
 
-      {/* 3.5 Security highlight (MVP-2.5.0) */}
+      {/* 3.5 Security highlight (MVP-2.5.0; one row per account since MVP-2.9.0 N20 — an account nobody could
+          read says «not scored», it is never folded into a lowest score) */}
       {(() => {
         const accounts = security.data?.accounts ?? [];
         if (accounts.length === 0) return null;
-        const minScore = Math.min(...accounts.map((a) => a.overall_score));
-        const reachable = accounts.reduce((n, a) => n + a.reachable_paths, 0);
-        const hot = minScore < 70 || reachable > 0;
         return (
           <button
             onClick={() => navigate("/app/security")}
-            className="w-full text-left bg-card border border-border rounded-lg px-4 py-3 mb-6 flex items-center gap-4 hover:bg-accent/50 transition-colors"
+            className="w-full text-left bg-card border border-border rounded-lg px-4 py-3 mb-6 hover:bg-accent/50 transition-colors"
           >
-            <span className="text-sm text-muted-foreground">{t("dashboard.securityScore")}</span>
-            <span className={`text-2xl font-light font-mono ${hot ? "text-primary" : ""}`}>
-              {minScore.toFixed(1)}
-            </span>
-            <span className="text-sm text-muted-foreground ml-auto">
-              {reachable} {t("dashboard.securityReachable")}
-            </span>
+            <div className="text-sm text-muted-foreground">{t("dashboard.securityScore")}</div>
+            <ul className="mt-1 divide-y divide-border/50">
+              {accounts.map((a) => {
+                const view = cardView(a);
+                return (
+                  <li key={a.account_name} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-1.5">
+                    <span className="min-w-0 flex-1 basis-32 text-sm [overflow-wrap:anywhere]">{a.account_name}</span>
+                    {view.score === null
+                      ? <StatusText tone="danger" className="text-sm">{t("security.unscored")}</StatusText>
+                      : <span className="text-xl font-light font-mono">{view.score}</span>}
+                    {view.tier && <StatusText tone={TIER_TONE[view.tier]} className="text-xs">{t(`security.tier.${view.tier}`)}</StatusText>}
+                    {view.state === "partial" && <StatusText tone="warn" className="text-xs">{t("security.partial")}</StatusText>}
+                    <span className="text-sm text-muted-foreground">{a.reachable_paths} {t("dashboard.securityReachable")}</span>
+                  </li>
+                );
+              })}
+            </ul>
           </button>
         );
       })()}
