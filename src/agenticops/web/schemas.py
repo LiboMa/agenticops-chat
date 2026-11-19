@@ -87,6 +87,10 @@ class ResourceResponse(BaseModel):
     # The list's health column (MVP-2.7.0 S4): open anchored issues + unknown|notice|warning|critical
     open_issues: int = 0
     health: Optional[str] = None
+    # The list only (MVP-2.9.0 N24): why the health reads as it does (services/inventory.health_reason) and when
+    # the row was last observed (= scanned_at)
+    health_reason: Optional[str] = None
+    observed_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 

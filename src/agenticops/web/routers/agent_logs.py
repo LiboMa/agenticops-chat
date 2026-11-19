@@ -116,7 +116,7 @@ async def api_agent_log_timeline(trace_id: str):
 
 
 @router.get("/api/agent-logs/summary")
-async def api_agent_log_summary(hours: int = Query(24, le=720)):
+def api_agent_log_summary(hours: int = Query(24, ge=1, le=2160)):      # up to 90 days: the metrics page's widest range
     """Per-agent token consumption aggregation over a time window."""
     from agenticops.models import AgentLog
 

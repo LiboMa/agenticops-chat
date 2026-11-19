@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import type { PaginatedResources } from "@/api/types";
 
@@ -12,7 +12,8 @@ interface ResourceFilters {
   includeAbsent?: boolean;
 }
 
-export function useResources(filters: ResourceFilters = {}, enabled = true) {
+/** `keepPrevious`: while a new page or filter loads, the rows on screen stay (the page dims them) instead of a spinner. */
+export function useResources(filters: ResourceFilters = {}, enabled = true, keepPrevious = false) {
   const params = new URLSearchParams();
   if (filters.type) params.set("type", filters.type);
   if (filters.region) params.set("region", filters.region);
@@ -28,5 +29,6 @@ export function useResources(filters: ResourceFilters = {}, enabled = true) {
     queryFn: () => apiFetch<PaginatedResources>(`/resources${qs ? `?${qs}` : ""}`),
     staleTime: 60_000,
     enabled,
+    placeholderData: keepPrevious ? keepPreviousData : undefined,
   });
 }

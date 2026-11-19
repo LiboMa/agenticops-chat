@@ -208,6 +208,10 @@ def location_stats(session, days: int) -> dict:
     return {"days": days,
             "top1": round(verdicts["correct"] / judged, 4) if judged else None,
             "judged": judged,
+            # the counts behind the rate (MVP-2.9.0 N24): «2 of 2 judged correct», «2 of 15 RCAs judged» — a rate
+            # alone reads as the accuracy of every RCA
+            "correct": verdicts["correct"],
+            "rcas": sum(location_counts.values()),
             "anchoring_rate": round(anchored_named / named, 4) if named else None,
             "issues_with_resource_id": named,
             "anchor_status_counts": anchor_counts,

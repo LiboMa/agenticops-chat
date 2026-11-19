@@ -24,6 +24,10 @@ export interface Resource {
   // The list only (MVP-2.7.0 S4): open anchored issues and their worst health; no open issue = unknown, never healthy
   open_issues?: number;
   health?: "unknown" | "notice" | "warning" | "critical" | null;
+  // MVP-2.9.0 N24: why the health reads as it does — open_issue | no_open_issue | stale | never_observed | absent —
+  // and when the row was last observed (= scanned_at)
+  health_reason?: string | null;
+  observed_at?: string | null;
 }
 
 export interface PaginatedResources {
@@ -1583,6 +1587,9 @@ export interface RcaLocationStats {
   days: number;
   top1: number | null; // correct / judged; null when nothing is judged
   judged: number;
+  // MVP-2.9.0 N24: the counts behind the rate — judged «correct», and every RCA created in the window
+  correct?: number;
+  rcas?: number;
   anchoring_rate: number | null; // (anchored + account_level) / issues naming a resource_id
   issues_with_resource_id: number;
   anchor_status_counts: Record<AnchorStatus, number>;

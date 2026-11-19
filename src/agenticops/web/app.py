@@ -1734,13 +1734,19 @@ def api_list_resources(
         resources = q_paged.all()
         # Health is the Galaxy definition: open, same-account issues anchored to the row; none = unknown, never healthy
         from agenticops.graph.query_service import health_overlay
+        from agenticops.services.inventory import health_reason
         overlay = health_overlay(session, [r.id for r in resources])
+        # «stale» = not observed for longer than two scan intervals (the resource-scan schedule's cadence)
+        now, stale_after = datetime.now(timezone.utc), timedelta(minutes=2 * settings.resource_scan_interval_minutes)
         items = []
         for r in resources:
             item = ResourceResponse.from_resource(r)
             h = overlay.get(r.id)
             item.open_issues = len(h["issue_ids"]) if h else 0
             item.health = h["health"] if h else "unknown"
+            item.health_reason = health_reason(open_issues=item.open_issues, absent_since=r.absent_since,
+                                               scanned_at=r.scanned_at, now=now, stale_after=stale_after)
+            item.observed_at = r.scanned_at
             items.append(item)
         return {"total": total, "items": items}
 
@@ -5968,7 +5974,7 @@ async def api_rca_feedback(issue_id: int, data: RcaFeedbackRequest, actor: Actor
 
 
 @app.get("/api/rca/location-stats")
-async def api_rca_location_stats(days: int = Query(30, ge=1, le=365)):
+def api_rca_location_stats(days: int = Query(30, ge=1, le=365)):
     """Root-cause location quality over the last `days` days (what each figure counts: services/rca_location)."""
     from agenticops.services.rca_location import location_stats
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { healthKey, lifecycleKey, resourceFilters, resourceHref, resourceParams } from "@/lib/resourceTable";
+import { healthKey, healthView, lifecycleKey, resourceFilters, resourceHref, resourceParams, scanLine } from "@/lib/resourceTable";
 
 const f = (s: string) => resourceFilters(new URLSearchParams(s));
 
@@ -39,5 +39,63 @@ describe("resource rows", () => {
   });
   it("a row links by its integer key only", () => {
     expect(resourceHref(9)).toBe("/app/resources/9");
+  });
+});
+
+// ── MVP-2.9.0 N24 (the 2.8.0 spec's S7): every «unknown» has a reason ─────────────────────────────────────────
+
+const NOW = Date.parse("2026-11-19T12:00:00Z");
+const row = (o: Record<string, unknown> = {}) => ({ health: "unknown", health_reason: "no_open_issue", open_issues: 0, observed_at: "2026-11-19T11:50:00Z", ...o }) as never;
+
+describe("what the health cell says", () => {
+  it("no open issue is «no known issue» — never «healthy», never a bare «unknown»", () => {
+    expect(healthView(row(), NOW)).toEqual({ key: "resources.reason.no_open_issue", tone: "neutral", ago: null, issues: 0 });
+  });
+  it("an open issue says how bad, and how many", () => {
+    expect(healthView(row({ health: "critical", health_reason: "open_issue", open_issues: 2 }), NOW))
+      .toEqual({ key: "resources.health.critical", tone: "danger", ago: null, issues: 2 });
+    expect(healthView(row({ health: "warning", health_reason: "open_issue", open_issues: 1 }), NOW).tone).toBe("warn");
+    expect(healthView(row({ health: "notice", health_reason: "open_issue", open_issues: 1 }), NOW).tone).toBe("info");
+  });
+  it("stale data is recognisable: it says when the row was last observed", () => {
+    expect(healthView(row({ health_reason: "stale", observed_at: "2026-11-17T11:00:00Z" }), NOW))
+      .toEqual({ key: "resources.reason.stale", tone: "warn", ago: { key: "chat.ago.days", n: 2 }, issues: 0 });
+  });
+  it("never observed and gone are their own words", () => {
+    expect(healthView(row({ health_reason: "never_observed", observed_at: null }), NOW))
+      .toEqual({ key: "resources.reason.never_observed", tone: "warn", ago: null, issues: 0 });
+    expect(healthView(row({ health_reason: "absent" }), NOW))
+      .toEqual({ key: "resources.reason.absent", tone: "neutral", ago: null, issues: 0 });
+  });
+  it("a row without a reason (an older server) is read from its health alone", () => {
+    expect(healthView(row({ health_reason: undefined }), NOW).key).toBe("resources.reason.no_open_issue");
+    expect(healthView(row({ health_reason: undefined, health: "warning", open_issues: 3 }), NOW)).toMatchObject({ key: "resources.health.warning", issues: 3 });
+    expect(healthView(row({ health_reason: "something new" }), NOW).key).toBe("resources.reason.no_open_issue");
+  });
+});
+
+describe("«last resource scan»", () => {
+  const sched = (o: Record<string, unknown>) => ({ id: 1, pipeline_name: "ResourceScan", is_enabled: true, last_execution: null, ...o }) as never;
+  const ran = (status: string, started: string, completed: string | null = null) => ({ id: 9, status, started_at: started, completed_at: completed });
+  it("says nothing until the schedules are known", () => {
+    expect(scanLine(undefined)).toBeNull();
+  });
+  it("no resource-scan schedule at all is said as that", () => {
+    expect(scanLine([sched({ pipeline_name: "DailyReport" })])).toEqual({ scheduleId: null });
+  });
+  it("a schedule that never ran", () => {
+    expect(scanLine([sched({ id: 4 })])).toEqual({ scheduleId: 4, run: { kind: "never_run" }, at: null, enabled: true });
+  });
+  it("the newest run among the resource-scan schedules, with its real state and when it ended", () => {
+    const line = scanLine([
+      sched({ id: 4, last_execution: ran("completed", "2026-11-19T08:00:00Z", "2026-11-19T08:03:00Z") }),
+      sched({ id: 7, is_enabled: false, last_execution: ran("failed", "2026-11-19T10:00:00Z", "2026-11-19T10:01:00Z") }),
+      sched({ id: 8, pipeline_name: "K8sDiscovery", last_execution: ran("completed", "2026-11-19T11:00:00Z") }),
+    ]);
+    expect(line).toEqual({ scheduleId: 7, run: { kind: "failed" }, at: "2026-11-19T10:01:00Z", enabled: false });
+  });
+  it("a run in flight has no end yet: its start is the time", () => {
+    expect(scanLine([sched({ id: 4, last_execution: ran("running", "2026-11-19T11:58:00Z") })]))
+      .toEqual({ scheduleId: 4, run: { kind: "running" }, at: "2026-11-19T11:58:00Z", enabled: true });
   });
 });
