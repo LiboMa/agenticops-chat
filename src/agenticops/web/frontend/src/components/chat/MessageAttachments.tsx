@@ -52,14 +52,16 @@ export function MessageAttachments({ attachments }: { attachments: Item[] }) {
             const notice = a.delivery === "notice" || a.delivery === "failed";
             const body = (
               <>
-                <span className="font-semibold text-[10px] text-primary-600">{(extOf(a.filename).slice(1) || "file").toUpperCase().slice(0, 4)}</span>
-                <span className="truncate max-w-[14rem]">{a.filename}</span>
-                <span className="text-primary-400">{humanSize(a.size)}</span>
-                {label && <span className={`rounded px-1 ${notice ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+                <span className="shrink-0 font-semibold text-[10px] text-primary-600">{(extOf(a.filename).slice(1) || "file").toUpperCase().slice(0, 4)}</span>
+                <span className="min-w-0 break-all">{a.filename}</span>
+                <span className="shrink-0 text-primary-400">{humanSize(a.size)}</span>
+                {label && <span className={`shrink-0 rounded px-1 ${notice ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
                   : "bg-primary-100 text-primary-700"}`}>{label}</span>}
               </>
             );
-            const cls = "inline-flex items-center gap-1.5 rounded-lg border border-primary-100 bg-background px-2 py-1 text-xs";
+            // never wider than the message: a long name wraps inside the chip (it was held to a fixed 14rem and cut, and on
+            // a phone the chip was still wider than the screen — the whole conversation scrolled sideways)
+            const cls = "inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-primary-100 bg-background px-2 py-1 text-left text-xs";
             return a.id
               ? <button key={a.id} type="button" onClick={() => void download(a)} title={t("chat.attach.download")}
                         className={`${cls} hover:border-primary-300`}>{body}</button>

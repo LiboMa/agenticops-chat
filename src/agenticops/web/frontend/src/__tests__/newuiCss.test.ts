@@ -8,7 +8,7 @@ const css = readFileSync(resolve(__dirname, "../newui/newui.css"), "utf8").repla
 
 interface Rule { selectors: string[]; body: string }
 
-/** Top-level rules and the rules inside @media; @keyframes are collected by name. */
+/** Top-level rules and the rules inside @media and @container; @keyframes and size containers are collected by name. */
 function parse(text: string, rules: Rule[] = [], keyframes: string[] = []): { rules: Rule[]; keyframes: string[] } {
   let i = 0;
   while (i < text.length) {
@@ -19,7 +19,7 @@ function parse(text: string, rules: Rule[] = [], keyframes: string[] = []): { ru
     while (k < text.length && depth) { if (text[k] === "{") depth++; else if (text[k] === "}") depth--; k++; }
     const inner = text.slice(open + 1, k - 1);
     if (head.startsWith("@keyframes")) keyframes.push(head.split(/\s+/)[1]);
-    else if (head.startsWith("@media")) parse(inner, rules, keyframes);
+    else if (head.startsWith("@media") || head.startsWith("@container")) parse(inner, rules, keyframes);
     else if (head.startsWith("@")) throw new Error(`an at-rule this test does not know: ${head}`);
     else rules.push({ selectors: splitSelectors(head), body: inner });
     i = k;
@@ -71,6 +71,14 @@ describe("newui.css stays inside .nf", () => {
       }
     }
     expect([...used].filter((u) => !keyframes.includes(u))).toEqual([]);
+  });
+
+  it("names every size container nf-…, and asks only the ones it declares (a container's name is the page's, like an animation's)", () => {
+    const declared = [...css.matchAll(/container(?:-name)?\s*:\s*([\w-]+)/g)].map((m) => m[1]);
+    const asked = [...css.matchAll(/@container\s+([\w-]+)\s*\(/g)].map((m) => m[1]);
+    expect(declared.filter((n) => !n.startsWith("nf-"))).toEqual([]);
+    expect(asked.filter((n) => !declared.includes(n))).toEqual([]);
+    expect([...css.matchAll(/@container\s*\(/g)].length).toBe(0);        // an unnamed query asks whatever container is nearest
   });
 
   it("sets no text below 12 px — the design's floor", () => {

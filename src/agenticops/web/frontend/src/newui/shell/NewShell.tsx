@@ -242,7 +242,7 @@ export function NewShell({ children, hosting = false, tucked = false }: { childr
               </div>
             )}
           </div>
-          <Pulse accountId={accountId} />
+          <div className="pulsebox"><Pulse accountId={accountId} /></div>
           <div className="who">
             {scope("scope")}
             <button type="button" className="chip-btn wide" onClick={toClassic} title={t("shell.classic.hint")}>{t("shell.classic")}</button>
@@ -257,6 +257,8 @@ export function NewShell({ children, hosting = false, tucked = false }: { childr
               {menu === "account" && (
                 <div ref={menuBox} className="menu" role="menu" aria-label={t("shell.menu")} onKeyDown={menuKeys}>
                   {user && <div className="whoami">{user.email}</div>}
+                  {/* on a phone the bar has no room for the badge: it is said here */}
+                  {readOnly && <div className="whoami narrow">{t("shell.readOnly")}</div>}
                   {(["zh", "en"] as const).map((l) => (
                     <button key={l} type="button" className="mi" role="menuitemradio" aria-checked={locale === l}
                             onClick={() => pickLocale(l)}>
@@ -264,11 +266,11 @@ export function NewShell({ children, hosting = false, tucked = false }: { childr
                     </button>
                   ))}
                   <div className="sep" />
-                  <button type="button" className="mi narrow" role="menuitem" onClick={toggle}>
+                  <button type="button" className="mi narrow mid" role="menuitem" onClick={toggle}>
                     {t("theme.toggle")}<small>{t(`theme.${nfTheme}`)}</small>
                   </button>
                   {scope("mi narrow scope-m")}
-                  <button type="button" className="mi narrow" role="menuitem" onClick={toClassic}>{t("shell.classic")}</button>
+                  <button type="button" className="mi narrow mid" role="menuitem" onClick={toClassic}>{t("shell.classic")}</button>
                   {/* the size of a hosted page's text (the classic top bar had it; NewUI's own pages are set in px) */}
                   <button type="button" className="mi" role="menuitem" onClick={nextFont}>
                     {t("shell.menu.fontSize")}<small>{t(`shell.font.${fontSize}`)}</small>

@@ -81,7 +81,10 @@ export function ModelSelector({ sessionId, disabled }: { sessionId: string | nul
           side="top"
           align="start"
           sideOffset={8}
-          className="z-50 w-64 max-h-80 overflow-y-auto p-1 rounded-xl bg-card border border-border shadow-lg data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-bottom-2"
+          collisionPadding={12}
+          // every line of the list is shown whole (owner, 2026-11-20: the ids were cut after «…claude-opus-»):
+          // wide enough for an id, never wider or taller than the window leaves
+          className="z-50 w-80 max-w-[calc(100vw-1.5rem)] max-h-[min(20rem,var(--radix-popover-content-available-height))] overflow-y-auto p-1 rounded-xl bg-card border border-border shadow-lg data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-bottom-2"
         >
           {/* Auto (follow global) */}
           <button
@@ -90,10 +93,10 @@ export function ModelSelector({ sessionId, disabled }: { sessionId: string | nul
           >
             {!current ? <CheckIcon /> : <span className="w-3.5 shrink-0" />}
             <span className="min-w-0">
-              <span className={`block text-xs text-foreground truncate ${!current ? "font-medium" : ""}`}>
+              <span className={`block text-xs text-foreground break-words ${!current ? "font-medium" : ""}`}>
                 {t("chat.model.auto")}
               </span>
-              <span className="block text-[10px] text-muted-foreground/60 truncate">
+              <span className="block text-[10px] text-muted-foreground/60 break-words">
                 {t("chat.model.followGlobal")}{globalMain ? ` · ${labelFor(globalMain)}` : ""}
               </span>
             </span>
@@ -107,8 +110,8 @@ export function ModelSelector({ sessionId, disabled }: { sessionId: string | nul
             >
               <CheckIcon />
               <span className="min-w-0">
-                <span className="block text-xs text-foreground font-medium truncate">{shortName(current)}</span>
-                <span className="block font-mono text-[10px] text-muted-foreground/50 truncate">{current}</span>
+                <span className="block text-xs text-foreground font-medium break-words">{shortName(current)}</span>
+                <span className="block font-mono text-[10px] text-muted-foreground/50 break-all">{current}</span>
               </span>
             </button>
           )}
@@ -120,10 +123,10 @@ export function ModelSelector({ sessionId, disabled }: { sessionId: string | nul
             >
               {current === p.value ? <CheckIcon /> : <span className="w-3.5 shrink-0" />}
               <span className="min-w-0">
-                <span className={`block text-xs text-foreground truncate ${current === p.value ? "font-medium" : ""}`}>
+                <span className={`block text-xs text-foreground break-words ${current === p.value ? "font-medium" : ""}`}>
                   {p.label}
                 </span>
-                <span className="block font-mono text-[10px] text-muted-foreground/50 truncate">{p.value}</span>
+                <span className="block font-mono text-[10px] text-muted-foreground/50 break-all">{p.value}</span>
               </span>
             </button>
           ))}
@@ -143,10 +146,10 @@ export function ModelSelector({ sessionId, disabled }: { sessionId: string | nul
               >
                 {active ? <CheckIcon /> : <span className="w-3.5 shrink-0" />}
                 <span className="min-w-0">
-                  <span className={`block text-xs text-foreground truncate ${active ? "font-medium" : ""}`}>
+                  <span className={`block text-xs text-foreground break-words ${active ? "font-medium" : ""}`}>
                     {t(level ? `chat.effort.${level}` : "chat.effort.auto")}
                   </span>
-                  <span className="block text-[10px] text-muted-foreground/60 truncate">
+                  <span className="block text-[10px] text-muted-foreground/60 break-words">
                     {t(level ? `chat.effort.${level}Hint` : "chat.effort.autoHint")}
                   </span>
                 </span>

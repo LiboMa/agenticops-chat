@@ -516,6 +516,30 @@
 /* ── NewUI only (not in the design prototype): what the classic shell gave for free, and what real data needs ───── */
 .nf .top .gap{flex:1}
 .nf .who select.scope{height:30px;max-width:170px;padding:0 8px;border-radius:var(--sp-2);background-color:var(--deck);color:var(--dim);font-size:var(--fs-xs)}
+/* The bar is ONE row that fits the window in any language (owner, 2026-11-20: at 761–859 px «回到旧版» stood on end
+   over the hosted page's own header and the avatar was cut off; in English it began below about 1,050 px). Nothing in
+   it wraps, and every part keeps its width but one: the box of the 24-hour band. That box is a size container — what
+   is in it cannot hold the bar open — and the band is shown only while the box has room for its label (76) and its
+   own smallest width (120). From 960 px down the two text buttons are in the account menu, as on a phone, and the
+   scope is held narrower. (The group on the right stays rigid: one that may shrink is squeezed below what its
+   buttons need, and the avatar ends up past the window.) */
+.nf .top > *{flex:none}
+.nf .top .chip-btn,.nf .top .tabs button,.nf .top .ro{white-space:nowrap}
+.nf .top > .pulsebox{flex:1 1 0;min-width:0;display:flex;container:nf-pulse / inline-size}
+@container nf-pulse (max-width:195px){ .nf .pulsebox .pulse{display:none} }
+@media (max-width:960px){
+  .nf .who .wide{display:none}
+  .nf .menu .narrow.mid{display:flex}
+  .nf .who select.scope{max-width:110px}
+}
+/* on a phone: no band; a read-only account's badge is said in the account menu instead (in English it and the
+   avatar were past a 390 px screen's edge); and the page's name is the one text of the bar that may shorten */
+@media (max-width:760px){
+  .nf .top > .pulsebox{display:none}
+  .nf .who .ro{display:none}
+  .nf .top > .pageswrap{flex:0 1 auto;min-width:0}
+  .nf .pageswrap > .chip-btn{max-width:100%;overflow:hidden;text-overflow:ellipsis}
+}
 .nf a.chip-btn,.nf a.btn{display:inline-flex;align-items:center;text-decoration:none;color:var(--dim)}
 .nf a.btn{color:inherit} .nf a.btn.primary{color:var(--fill-ink)}
 .nf .ro{display:inline-flex;align-items:center;height:30px;padding:0 10px;border:1px solid color-mix(in srgb,var(--amber) 55%,transparent);border-radius:var(--sp-2);color:var(--amber);font-size:var(--fs-xs);white-space:nowrap}
