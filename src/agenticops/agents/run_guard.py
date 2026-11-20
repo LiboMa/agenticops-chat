@@ -22,6 +22,11 @@ process counts):
   goes on: it has to, for the rollback to run. When this run let no command through that could have changed
   anything, there is nothing to roll back and the rollback is refused too (`kubectl rollout undo` on a
   deployment the run never touched would itself be a change).
+  The agent is TOLD of the stop by that refusal — or, when nothing it does next is refused, at its next model
+  call (N27). The first real run inside the lab cluster showed why: a plan that restores what was scaled to zero
+  has a rollback that repeats its own remaining steps (a rollback may never bring the outage back), every one of
+  them is let through, and the agent — never told anyone had stopped it — ran the plan to its end and recorded
+  «succeeded».
 
 A command is judged as its tool would run it: run_kubectl takes the subcommand without the word («get pods»), so
 it is read — for its tier and against the rollback — as `kubectl get pods` (services/change_steps.tool_command).
@@ -155,6 +160,7 @@ class RunGuard(HookProvider):
         self.recorded = False            # the run closed its own record
         self._seen: Optional[dict] = None        # the last state that was closed or stopped (neither is ever undone)
         self._open: set[str] = set()     # calls let through while the record was running
+        self._told = False               # the agent has been told a person stopped this run (a refusal, or the notice)
 
     def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
         registry.add_callback(BeforeToolCallEvent, self._before_tool)
@@ -196,6 +202,8 @@ class RunGuard(HookProvider):
         refusal = self._refusal(state, name, tool_input)
         if refusal:
             event.cancel_tool = refusal
+            if state and state.get("status") == "running" and state.get("stopped_by"):
+                self._told = True        # the refusal's own sentence says who stopped the run and what may still run
             return
         if state and state.get("status") == "running":
             self._open.add(str(use.get("toolUseId") or ""))
@@ -238,6 +246,26 @@ class RunGuard(HookProvider):
             self.recorded = True
 
     def _before_model(self, event: BeforeModelCallEvent) -> None:
-        refusal = self._refusal(self._state())
+        state = self._state()
+        refusal = self._refusal(state)
         if refusal:
             event.cancel = refusal
+            return
+        self._say_stop(event, state)
+
+    def _say_stop(self, event: BeforeModelCallEvent, state: Optional[dict]) -> None:
+        """A person stopped the run and no refusal has told the agent yet — every call since was one a stop lets
+        through (a look, a record, a line of the rollback that is also a step of the plan): say it on this model
+        call, once, after whatever results the call carries. With no user message to put it on, the next call has it."""
+        if self._told or self.recorded or not state or state.get("status") != "running" or not state.get("stopped_by"):
+            return
+        try:
+            messages = event.agent.messages
+            last = messages[-1] if messages else None
+            if not last or last.get("role") != "user" or not isinstance(last.get("content"), list):
+                return
+            sentence = NOTHING_APPLIED if self.applied == 0 else STOPPED
+            last["content"].append({"text": sentence.format(by=state.get("stopped_by"))})
+            self._told = True
+        except Exception:                # the notice is a courtesy to a run that may go on; the refusals still hold
+            logger.warning("run guard could not tell Execution #%s that it was stopped", self.execution_id, exc_info=True)
