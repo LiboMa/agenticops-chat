@@ -66,6 +66,7 @@ from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
 from agenticops.agents.preamble import (
     LOCAL_FILE_INSPECTION_BLOCK,
+    READ_ONLY_RUN_RULE,
     build_system_prompt,
     skills_activation_block,
 )
@@ -139,8 +140,7 @@ MODE A — FIX PLAN PROTOCOL:
      b. For EKS pods: use run_kubectl(cluster_name=CLUSTER, command="get pods/logs/describe ...")
         to inspect Kubernetes resources directly.
      c. Follow the decision trees from the activated skill for systematic diagnosis.
-     d. Read-only commands execute automatically. Write commands (systemctl restart, kill)
-        should be included in the fix plan, NOT executed directly.
+     d. A fix-plan run only reads: __READ_ONLY_RUN_RULE__ — a change is a plan step, never a tool call.
 5.6. __LOCAL_FILE_BLOCK__
 6. GENERATE PLAN: Create a structured fix plan with:
    - Ordered steps with specific AWS CLI/API calls
@@ -257,6 +257,7 @@ TOOL SELECTION — accuracy first:
 # placeholder substitution avoids f-string brace escaping in the long prompt.
 SRE_SYSTEM_PROMPT = SRE_SYSTEM_PROMPT.replace("__SKILLS_BLOCK__", _SRE_SKILLS_BLOCK)
 SRE_SYSTEM_PROMPT = SRE_SYSTEM_PROMPT.replace("__LOCAL_FILE_BLOCK__", LOCAL_FILE_INSPECTION_BLOCK)
+SRE_SYSTEM_PROMPT = SRE_SYSTEM_PROMPT.replace("__READ_ONLY_RUN_RULE__", READ_ONLY_RUN_RULE)
 
 
 def _once(text: str, old: str) -> str:

@@ -73,6 +73,15 @@ def skills_activation_block(extra_routes: list[str], outro: str) -> str:
     )
 
 
+# What a diagnosis and a fix-plan run are told about commands (MVP-2.9.0 N30): what the code does, in the words of
+# no cloud. Each prompt writes its own first and last words around it (__READ_ONLY_RUN_RULE__). Kept short: the
+# plan agent's assembled prompt has a size budget (tests/test_prompt_budget.py), and the refusal a tool answers
+# with says the rest — that require_confirmation changes nothing, and what a host line may hold.
+READ_ONLY_RUN_RULE = """\
+the code refuses any command it does not know to be read-only,
+        confirmed or not"""
+
+
 LOCAL_FILE_INSPECTION_BLOCK = """\
 LOCAL FILE INSPECTION (when you need to read configs, logs, or templates):
      a. First call activate_skill("local-os-operator") to load file operation tools and decision trees.

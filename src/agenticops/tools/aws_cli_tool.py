@@ -134,6 +134,17 @@ READONLY_PREFIXES = [
     "aws athena get-", "aws athena list-",
     # EMR
     "aws emr describe-", "aws emr list-",
+    # MVP-2.9.0 N30 — what the diagnosis and the plan agent really read. Since N30 those two can send only what
+    # this table calls a read; on a copy of the local database they had sent 31 commands it did not know, none a
+    # change. The describe- / list- operations of the services they asked, row by row — never a rule by verb
+    # (`aws --no-p lambda invoke … list-out.json` reads as a «list-» operation to anything that looks for one).
+    "aws kafka describe-", "aws kafka list-",
+    "aws configservice describe-", "aws configservice list-",
+    "aws s3control describe-", "aws s3control list-",
+    "aws osis list-",
+    "aws emr-serverless list-",
+    "aws bedrock-agentcore-control list-",
+    "aws efs describe-",
 ]
 
 WRITE_PREFIXES = [

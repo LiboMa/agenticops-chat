@@ -53,6 +53,7 @@ from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
 from agenticops.agents.preamble import (
     LOCAL_FILE_INSPECTION_BLOCK,
+    READ_ONLY_RUN_RULE,
     build_system_prompt,
     skills_activation_block,
 )
@@ -159,8 +160,9 @@ INVESTIGATION PROTOCOL — follow this order strictly:
      b. For EKS pods: use run_kubectl(cluster_name=CLUSTER, command="get pods/logs/describe ...")
         to inspect Kubernetes resources directly.
      c. Follow the decision trees from the activated skill for systematic diagnosis.
-     d. Read-only commands execute automatically. Write commands (systemctl restart, kill)
-        require confirmation — present them to the user first.
+     d. A diagnosis only reads: __READ_ONLY_RUN_RULE__ — a change goes into your recommendations, never
+        into a tool call. Host lines: plain reads joined by | ; && || — no file redirect, $(…), $VAR,
+        sudo, awk, sed or find.
 
 CONFIDENCE SCORING:
 - 0.9-1.0: Clear evidence from CloudTrail + metrics confirming root cause
@@ -197,6 +199,7 @@ TOOL SELECTION — accuracy first:
 # placeholder substitution avoids f-string brace escaping in the long prompt.
 RCA_SYSTEM_PROMPT = RCA_SYSTEM_PROMPT.replace("__SKILLS_BLOCK__", _RCA_SKILLS_BLOCK)
 RCA_SYSTEM_PROMPT = RCA_SYSTEM_PROMPT.replace("__LOCAL_FILE_BLOCK__", LOCAL_FILE_INSPECTION_BLOCK)
+RCA_SYSTEM_PROMPT = RCA_SYSTEM_PROMPT.replace("__READ_ONLY_RUN_RULE__", READ_ONLY_RUN_RULE)
 
 # MVP-2.6.1: appended only while get_topology_evidence is in the tool list (same gate, rca_topology_context_enabled).
 TOPOLOGY_EVIDENCE_PROMPT = """
