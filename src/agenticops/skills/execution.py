@@ -179,7 +179,7 @@ def run_on_host(
     # ledgered (command_audits), read-only ones are not.
     tier = classify_shell_command(command)
     from agenticops.services.command_audit import (approved_plan_in_context, change_context_refusal,
-                                                    change_required_refusal, record_command)
+                                                    change_required_refusal, read_only_context, record_command)
     if tier == "blocked":
         record_command(tool="run_on_host", tier=tier, command=command, outcome="blocked",
                        account=account, region=region, target=host_id)
@@ -188,6 +188,12 @@ def run_on_host(
             f"'rm -rf /', 'mkfs', 'shutdown', 'reboot', and pipe-to-bash are not allowed. "
             f"Command: {command}"
         )
+    # Where the run may only read, how the line BEGINS is not enough (N30): «cat x && systemctl restart y» begins
+    # like a read. Every command in the line must be one the stricter rule knows — and a query it knows
+    # (systemctl status …) needs no confirmation there.
+    if read_only_context():
+        from agenticops.services.change_steps import read_only_host_tier
+        tier = read_only_host_tier(command, tier)
     # A change review / preflight (change context, no approved plan) is read-only in code, not just prompt.
     refused = change_context_refusal(tool="run_on_host", tier=tier, command=command,
                                      account=account, region=region, target=host_id)

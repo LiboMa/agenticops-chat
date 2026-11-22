@@ -405,7 +405,13 @@ def list_skill_resources(skill_name: str) -> list[str]:
 # ── Dynamic Tool Resolution ──────────────────────────────────────────
 
 
-def resolve_skill_tools(skill_name: str) -> list[Any]:
+def skill_tool_paths(skill_name: str) -> list[str]:
+    """The dotted paths a skill's frontmatter declares under ``tools`` — [] when none, or no such skill."""
+    s = _get_skill_by_name(skill_name)
+    return [str(path) for path in s.tools] if s is not None and s.tools else []
+
+
+def resolve_skill_tools(skill_name: str, only: frozenset[str] | None = None) -> list[Any]:
     """Import and return @tool functions declared in a skill's YAML frontmatter.
 
     Each entry in the ``tools`` field is a dotted path like
@@ -413,18 +419,17 @@ def resolve_skill_tools(skill_name: str) -> list[Any]:
 
     Args:
         skill_name: Name of the skill whose tools to resolve.
+        only: When given, an allow-list of dotted paths — a path that is not on it is skipped, and not even
+            imported (a skill, a draft included, may name any path).
 
     Returns:
         List of @tool decorated function objects, or empty list if skill
         has no tools declared or skill not found.
     """
-    s = _get_skill_by_name(skill_name)
-    if s is None:
-        return []
-    if not s.tools:
-        return []
     resolved = []
-    for dotted_path in s.tools:
+    for dotted_path in skill_tool_paths(skill_name):
+        if only is not None and dotted_path not in only:
+            continue
         try:
             module_path, func_name = dotted_path.rsplit(".", 1)
             module = importlib.import_module(module_path)

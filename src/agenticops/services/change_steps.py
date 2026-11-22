@@ -6,6 +6,7 @@ Steps have the fix_plans.steps shape: an ordered list of {"action": str, "comman
 
 import json
 import re
+import shlex
 from difflib import SequenceMatcher
 from typing import Optional
 
@@ -48,9 +49,11 @@ def _command(step) -> str:
 # anything». Only the entries that cannot write whatever their arguments keep 'readonly' here; the others (find
 # -delete, tee, xargs rm, journalctl --vacuum-size, sort -o, date -s, curl -s -X DELETE, env VAR=1 cmd …) are
 # 'unknown': a person looks. tests/test_plan_step_tiers.py fails when the run-time list gains an entry nobody put
-# on one side.
+# on one side. N30 moved five entries to the other side — each writes with the right option: `file -C` compiles a
+# magic file, `ssh-keygen -l … -R host` / `-H` rewrite known_hosts (those modes are acted on before the listing),
+# `ssh-add -l -x` locks the agent, `openssl s_client -keylogfile F` writes F (and sends what its stdin holds).
 HOST_CANNOT_WRITE = frozenset({
-    "ls", "cat", "head", "tail", "more", "file", "stat", "wc", "locate", "which", "whereis", "readlink",
+    "ls", "cat", "head", "tail", "more", "stat", "wc", "locate", "which", "whereis", "readlink",
     "ps", "top", "htop", "pgrep", "pidof", "lsof",
     "uname", "uptime", "who", "w", "whoami", "id", "groups",
     "free", "vmstat", "iostat", "mpstat", "nproc", "lscpu", "df", "du", "lsblk", "fdisk -l",
@@ -60,8 +63,8 @@ HOST_CANNOT_WRITE = frozenset({
     "docker ps", "docker logs", "docker inspect", "docker images", "docker stats", "docker top", "docker port",
     "docker diff", "docker history", "docker network ls", "docker network inspect", "docker volume ls",
     "docker volume inspect",
-    "ssh-add -l", "ssh-keygen -lf", "ssh-keygen -l", "ssh-keyscan", "sshd -t",
-    "openssl s_client", "printenv",
+    "ssh-keyscan", "sshd -t",
+    "printenv",
 })
 HOST_CAN_WRITE = frozenset({
     "less", "find", "hostname", "date", "timedatectl", "hostnamectl", "sar", "blkid", "mount",
@@ -70,10 +73,14 @@ HOST_CAN_WRITE = frozenset({
     "awk", "sed -n", "sort", "uniq", "tee", "xargs",
     "strace", "ltrace", "tcpdump", "sysctl -a",
     "curl -s", "curl --silent", "wget -q", "env", "set",
+    "file", "ssh-add -l", "ssh-keygen -lf", "ssh-keygen -l", "openssl s_client",
 })
 
-_CONTINUED = re.compile(r"\\\r?\n")                                             # a line continued with a backslash
-_HARMLESS_REDIRECT = re.compile(r"(?:[12]?>{1,2}\s*/dev/null|&>\s*/dev/null|2>&1)")  # sends nothing anywhere that matters
+# A line continued with a backslash: an ODD run of backslashes before the line break. An even run is escaped
+# backslashes and the line ends there — until N30 «ls a\\\\ ⏎ rm -rf y» was joined into one `ls` and called read-only.
+_CONTINUED = re.compile(r"(?<!\\)((?:\\\\)*)\\\r?\n")
+# Sends nothing anywhere that matters — and ends there: until N30 `> /dev/nullx` (a file) was read as `> /dev/null`.
+_HARMLESS_REDIRECT = re.compile(r"(?:[12]?>{1,2}\s*/dev/null|&>\s*/dev/null|2>&1)(?=$|[\s;&|<>)])")
 
 
 def _shell_would_split(text: str) -> bool:
@@ -118,6 +125,309 @@ def _host_entry(lowered: str) -> str:
     return best
 
 
+# ── a host command line in a run that may only read (MVP-2.9.0 N30) ──────────────────────────────────────────
+#
+# skills/security.classify_shell_command reads how the WHOLE LINE begins, and its read-only list holds words that
+# write or run other commands with the right arguments: «cat x && systemctl restart nginx», «ps aux | xargs kill»
+# and «echo … | sed -n 'w /etc/cron.d/x'» are «readonly» to it. In a run that may only read — a diagnosis, a fix-plan
+# run, a change's review, a read-only account (services/command_audit.read_only_context) — run_on_host and the SSH
+# account tool ask host_reads_only() instead: the line is read as a shell would split it, and EVERY simple command in
+# it must be one this rule knows cannot change anything. It is an allow-list: what it does not know is refused, and
+# a refusal costs the agent one sentence (HOST_READS_HINT). Chat and the executor are not asked this rule.
+
+# What cannot write whatever its arguments (the list a plan step's label already uses), and four shell builtins.
+HOST_READS = frozenset(HOST_CANNOT_WRITE | {"echo", "printf", "cd", "true"})
+_HOST_READ_WORDS = frozenset(tuple(entry.split()) for entry in HOST_READS)
+
+HOST_READS_HINT = (
+    " On a host this run takes read commands only, alone or joined by | ; && || — ls, cat, head, tail, grep, ps, df, "
+    "free, netstat, ss, ip … show, journalctl (journalctl -k for the kernel log), systemctl status / is-active / show "
+    "/ list-units, dpkg -l, rpm -q, sort, uniq, echo. A redirect only to /dev/null; no $(…), backticks or $VAR; no "
+    "sudo, awk, sed, find, xargs, tee, curl.")
+
+
+def _long_option_is(word: str, names) -> bool:
+    """`word` is one of these long options — or a shorter spelling getopt takes for one (--rot is --rotate)."""
+    name = word.split("=", 1)[0]
+    return len(name) > 2 and any(full.startswith(name) for full in names)
+
+
+# journalctl: every option that cleans, rotates or writes is a long one
+_JOURNAL_WRITES = ("--vacuum-size", "--vacuum-time", "--vacuum-files", "--rotate", "--flush", "--sync",
+                   "--relinquish-var", "--smart-relinquish-var", "--setup-keys", "--update-catalog", "--cursor-file",
+                   "--image")
+
+
+def _journalctl(args) -> bool:
+    return not any(a.startswith("--") and _long_option_is(a, _JOURNAL_WRITES) for a in args)
+
+
+# systemctl: a query, named before anything that could take the next word as its argument («-p status restart x»
+# restarts x), and never on another host, a container or an image
+_SYSTEMCTL_FLAGS = frozenset({"--no-pager", "--no-legend", "--plain", "--full", "-l", "--all", "-a", "--failed",
+                              "--user", "--system", "-q", "--quiet"})
+_SYSTEMCTL_QUERIES = frozenset({"status", "show", "cat", "is-active", "is-enabled", "is-failed", "is-system-running",
+                                "get-default", "list-units", "list-unit-files", "list-timers", "list-sockets",
+                                "list-dependencies", "list-jobs"})
+_SYSTEMCTL_ELSEWHERE = ("--host", "--machine", "--image")
+
+
+def _systemctl(args) -> bool:
+    i = 0
+    while i < len(args) and (args[i] in _SYSTEMCTL_FLAGS or (args[i].startswith("--") and "=" in args[i])):
+        i += 1
+    if i < len(args) and args[i] not in _SYSTEMCTL_QUERIES:
+        return False                                     # no word at all lists the units
+    for a in args:
+        if a.startswith("--"):
+            if _long_option_is(a, _SYSTEMCTL_ELSEWHERE):
+                return False
+        elif a.startswith("-") and ("H" in a or "M" in a):
+            return False
+    return True
+
+
+# ip: its objects and commands are matched by prefix («ip a a» adds an address, «ip link s» sets a link) — only
+# the exact shapes that show
+_IP_FLAGS = frozenset({"-4", "-6", "-s", "-stats", "-statistics", "-d", "-details", "-o", "-oneline", "-br", "-brief",
+                       "-j", "-json", "-p", "-pretty", "-c", "-color", "-h", "-human", "-r", "-resolve", "-iec", "-N",
+                       "-Numeric"})
+_IP_OBJECTS = frozenset({"a", "addr", "address", "l", "link", "r", "route", "n", "neigh", "neighbor", "neighbour",
+                         "ru", "rule", "maddr", "maddress", "netconf", "ntable", "tunnel", "tuntap", "vrf", "netns",
+                         "mroute", "nexthop"})
+_IP_SHOWS = frozenset({"show", "list", "lst", "ls"})
+
+
+def _ip(args) -> bool:
+    i = 0
+    while i < len(args) and args[i] in _IP_FLAGS:
+        i += 1
+    rest = args[i:]
+    if not rest or rest[0] not in _IP_OBJECTS:
+        return False
+    if len(rest) == 1:
+        return True                                      # the object alone lists it
+    if rest[1] in _IP_SHOWS or (rest[1] == "get" and rest[0] in ("r", "route")):
+        return not any(word.startswith("-") for word in rest[2:])
+    return False
+
+
+def _ss(args) -> bool:                                   # -K closes sockets, -D dumps to a file
+    for a in args:
+        if a.startswith("--"):
+            if _long_option_is(a, ("--kill", "--diag")):
+                return False
+        elif a.startswith("-") and ("K" in a or "D" in a):
+            return False
+    return True
+
+
+_SYSCTL_FLAGS = frozenset({"-a", "-A", "-X", "-n", "-N", "-e", "-b", "--all", "--values", "--names", "--ignore",
+                           "--binary"})
+
+
+def _sysctl(args) -> bool:                               # name=value writes, with -w or without
+    return all(a in _SYSCTL_FLAGS if a.startswith("-") else "=" not in a for a in args)
+
+
+_DPKG_QUERIES = frozenset({"-l", "--list", "-s", "--status", "-L", "--listfiles", "-S", "--search"})
+_DPKG_QUERY_WORDS = _DPKG_QUERIES | {"-W", "--show", "-f", "--showformat", "-p", "--print-avail"}
+
+
+def _dpkg(args) -> bool:                                 # one query; no other option (--status-logger runs a command)
+    return bool(args) and args[0] in _DPKG_QUERIES and not any(a.startswith("-") for a in args[1:])
+
+
+def _dpkg_query(args) -> bool:
+    return all(a in _DPKG_QUERY_WORDS or a.startswith(("--showformat=", "-f=")) for a in args if a.startswith("-"))
+
+
+# rpm: query mode over what is installed (-p reads a package file or a URL), and only options that list —
+# --pipe, --eval, --define and --specfile run commands
+_RPM_QUERY = re.compile(r"-q[ailfcdRsv]*")
+_RPM_WORDS = frozenset({"--last", "--changelog", "--qf", "--queryformat", "--requires", "--provides", "--whatprovides",
+                        "--whatrequires", "--scripts", "--all", "--info", "--list", "--file", "--configfiles",
+                        "--docfiles", "--state"})
+
+
+def _rpm(args) -> bool:
+    return (bool(args) and bool(_RPM_QUERY.fullmatch(args[0]))
+            and all(a in _RPM_WORDS or a.startswith(("--qf=", "--queryformat=")) for a in args[1:] if a.startswith("-")))
+
+
+def _apt_cache(args) -> bool:                            # -o / -c set any configuration value
+    return bool(args) and args[0] in ("policy", "show", "search") and not any(a.startswith("-") for a in args)
+
+
+_APT_LIST_FLAGS = frozenset({"--installed", "--upgradable", "--upgradeable", "--all-versions", "-a"})
+
+
+def _apt(args) -> bool:
+    return bool(args) and args[0] == "list" and all(a in _APT_LIST_FLAGS for a in args[1:] if a.startswith("-"))
+
+
+# sort: flags that order (a key may end the cluster: -nrk 3), a separator — never -o / --output (a file),
+# --compress-program (a command), -T
+_SORT_FLAG = re.compile(r"-(?:[bdfghiMmnRrsuVzc]+|[bdfghiMmnRrsuVzc]*k[0-9.,bdfghiMnRrVz]*|t.?)")
+
+
+def _sort(args) -> bool:
+    return all(_SORT_FLAG.fullmatch(a) for a in args if a.startswith("-"))
+
+
+# uniq: its second operand is an output file — at the end of a pipe only, no operand at all
+_UNIQ_FLAG = re.compile(r"-(?:[cdDiuz]+|[fsw][0-9]+)|--count|--repeated|--unique|--ignore-case")
+
+
+def _uniq(args) -> bool:
+    return all(_UNIQ_FLAG.fullmatch(a) for a in args)
+
+
+# A word whose arguments decide: each guard is handed the words after it and answers «this only reads».
+HOST_GUARDS = {"journalctl": _journalctl, "systemctl": _systemctl, "ip": _ip, "ss": _ss, "sysctl": _sysctl,
+               "dpkg": _dpkg, "dpkg-query": _dpkg_query, "rpm": _rpm, "apt-cache": _apt_cache, "apt": _apt,
+               "sort": _sort, "uniq": _uniq}
+
+
+def host_command_reads(words, *, globs: bool = False, status: bool = False) -> bool:
+    """One simple command, as the words a shell hands it: True when this rule knows it cannot change anything.
+    `globs`: the command was written with an unquoted * ? [ — a file name could then arrive as an option, which
+    matters only where an option can write (the guarded words). `status`: it was written with `$?`."""
+    if not words:
+        return False
+    head = words[0]
+    if status and head not in ("echo", "printf"):
+        return False                                     # `$?` is digits — let through only where it is printed
+    if head == "printf" and words[1:2] and words[1].startswith("-v"):
+        return False                                     # a shell's printf -v assigns a variable
+    if any(tuple(words[:k]) in _HOST_READ_WORDS for k in (1, 2, 3)):
+        return True
+    guard = HOST_GUARDS.get(head)
+    return guard is not None and not globs and guard(list(words[1:]))
+
+
+_TO_NOWHERE = re.compile(r"(?:>>?[ \t]*/dev/null|&>[ \t]*/dev/null)(?=$|[\s;&|<>])")
+_FD_TO_NOWHERE = re.compile(r"(?:[12]>>?[ \t]*/dev/null|2>&1)(?=$|[\s;&|<>])")
+_WORD_BREAK = " \t\n;&|"
+_NEEDS_A_COMMAND = ("|", "&&", "||")
+
+
+def _simple_commands(text: str) -> Optional[list]:
+    """The simple commands a shell would run for `text`, in order, as [(text, globs, status)] — or None when the
+    line holds anything this rule does not read: an expansion or a substitution ($VAR, ${…}, $(…), a backtick — only
+    `$?` is let through, and flagged), a redirect to anything but /dev/null, a redirect with no command (zsh runs
+    `cat` for one), a subshell, a group or a brace expansion, a background job, a comment, an operator with no
+    command beside it, a quote or a backslash left open, a control character. Quoted text is data."""
+    if any((ord(c) < 32 and c not in "\n\t") or c == "\x7f" for c in text):
+        return None
+    out, cur, quote, i, n = [], [], None, 0, len(text)
+    flags = {"globs": False, "status": False, "needs": False, "redirect": False}
+
+    def end(separator) -> bool:
+        piece = "".join(cur).strip()
+        del cur[:]
+        redirect_alone = flags["redirect"] and not piece
+        flags["redirect"] = False
+        if piece:
+            out.append((piece, flags["globs"], flags["status"]))
+            flags.update(globs=False, status=False, needs=separator in _NEEDS_A_COMMAND)
+            return True
+        # nothing between two separators: fine before a line break and at the end, unless a command is still owed —
+        # and unless a redirect stood there alone
+        return not redirect_alone and (separator == "\n" or (separator is None and not flags["needs"]))
+
+    while i < n:
+        c = text[i]
+        if quote == "'":
+            cur.append(c)
+            if c == "'":
+                quote = None
+        elif c == "\\":
+            if i + 1 >= n:
+                return None                              # the shell would wait for the rest
+            if text[i + 1] != "\n":                      # a backslash and a line break: the line goes on
+                cur += (c, text[i + 1])
+            i += 1
+        elif c == "$":
+            following = text[i + 1:i + 2]
+            if following == "?":
+                cur += "$?"
+                flags["status"] = True
+                i += 1
+            elif quote == '"' and following == '"':
+                cur.append(c)                            # "…$": a dollar that ends a quoted string is a dollar
+            else:
+                return None
+        elif c == "`":
+            return None
+        elif quote == '"':
+            cur.append(c)
+            if c == '"':
+                quote = None
+        elif c in "'\"":
+            quote = c
+            cur.append(c)
+        elif c in "(){}":
+            return None
+        elif c == "#" and (i == 0 or text[i - 1] in _WORD_BREAK):
+            return None                                  # a comment (a # inside a word is not one)
+        else:
+            nowhere = _TO_NOWHERE.match(text, i) or (
+                (i == 0 or text[i - 1] in _WORD_BREAK) and _FD_TO_NOWHERE.match(text, i))
+            if nowhere:
+                cur.append(" ")
+                flags["redirect"] = True
+                i = nowhere.end()
+                continue
+            if c in "<>":
+                return None
+            if c == "&":
+                if text[i + 1:i + 2] != "&" or not end("&&"):
+                    return None
+                i += 1
+            elif c == "|":                               # `|&` ends here too: its `&` is refused where it stands
+                double = text[i + 1:i + 2] == "|"
+                if not end("||" if double else "|"):
+                    return None
+                i += double
+            elif c in ";\n":
+                if not end(c):
+                    return None
+            else:
+                if c in "*?[":
+                    flags["globs"] = True
+                cur.append(c)
+        i += 1
+    if quote or not end(None):
+        return None
+    return out
+
+
+def host_reads_only(command: str) -> bool:
+    """True when a shell given `command` would run only commands this rule knows cannot change anything (above).
+    False for everything else — a line that does change something, and a line the rule cannot read."""
+    commands = _simple_commands(command or "")
+    if not commands:
+        return False
+    for text, globs, status in commands:
+        try:
+            words = shlex.split(text)
+        except ValueError:
+            return False
+        if not host_command_reads(words, globs=globs, status=status):
+            return False
+    return True
+
+
+def read_only_host_tier(command: str, tier: str) -> str:
+    """The tier a host tool takes for `command` while its run may only read, given the run-time classifier's `tier`
+    (never called for 'blocked'): 'readonly' only for a line host_reads_only vouches for — a query it knows needs no
+    confirmation there —, 'write' stays 'write', and what merely began like a read becomes 'unknown'."""
+    if host_reads_only(command):
+        return "readonly"
+    return "write" if tier == "write" else "unknown"
+
+
 def command_tier(command: str) -> str:
     """The execution tier ('blocked' | 'write' | 'readonly' | 'unknown') of the tool that would run `command`.
 
@@ -130,7 +440,7 @@ def command_tier(command: str) -> str:
     from agenticops.skills.security import classify_kubectl_command, classify_shell_command
     from agenticops.tools.aws_cli_tool import _classify_command
 
-    text = _CONTINUED.sub(" ", command or "")
+    text = _CONTINUED.sub(r"\1 ", command or "")
     flat = " ".join(text.split())
     written = flat.split(None, 1)[0] if flat else ""
     head = written.lower()
@@ -213,7 +523,7 @@ def exact_text(command: str) -> str:
     joined, spaces and tabs collapsed, blank lines dropped — but a line break KEPT. Two lines are two commands, and
     the same words on one line are another command: «systemctl stop app» / «systemctl start app-old», flattened,
     stops units named `systemctl`, `start` and `app-old` (round-2 review A-M2)."""
-    text = _CONTINUED.sub(" ", command or "")
+    text = _CONTINUED.sub(r"\1 ", command or "")
     return "\n".join(" ".join(line.split()) for line in text.splitlines() if line.strip())
 
 

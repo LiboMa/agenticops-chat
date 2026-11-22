@@ -492,3 +492,152 @@ def test_the_executor_clears_the_flag_for_its_own_run(tmp_path, monkeypatch):
         assert executor_agent(fix_plan_id=plan_id) == "done"
         assert get_run_context().read_only_run == "plan"         # … and the caller's own flag is back afterwards
     assert seen["during"] == (None, False)
+
+
+# ── what a skill may register in such a run ──────────────────────────────────
+
+READ_TOOLS_OF_THE_PUBLISHED_SKILLS = {
+    "agenticops.tools.file_tools.file_stat", "agenticops.tools.file_tools.list_local_directory",
+    "agenticops.tools.file_tools.read_document", "agenticops.tools.file_tools.read_local_file",
+    "agenticops.tools.file_tools.search_local_file", "agenticops.tools.file_tools.tail_local_file",
+    "agenticops.tools.trace_tools.find_error_traces", "agenticops.tools.trace_tools.get_service_dependencies",
+    "agenticops.tools.trace_tools.get_trace_detail", "agenticops.tools.trace_tools.query_traces",
+    "agenticops.tools.web_tools.web_fetch", "agenticops.tools.web_tools.web_search",
+    "agenticops.tools.notification_tools.list_notification_channels",
+}
+WRITE_TOOLS_OF_THE_PUBLISHED_SKILLS = {
+    "agenticops.tools.file_tools.write_local_file", "agenticops.tools.notification_tools.send_to_channel",
+    "agenticops.tools.notification_tools.distribute_report",
+}
+
+
+def test_the_allow_list_is_the_read_tools_the_published_skills_declare():
+    import importlib
+    from agenticops.skills.tools import READ_ONLY_SKILL_TOOLS
+    assert READ_ONLY_SKILL_TOOLS == READ_TOOLS_OF_THE_PUBLISHED_SKILLS
+    assert not READ_ONLY_SKILL_TOOLS & WRITE_TOOLS_OF_THE_PUBLISHED_SKILLS
+    for path in sorted(READ_ONLY_SKILL_TOOLS | WRITE_TOOLS_OF_THE_PUBLISHED_SKILLS):       # each is a real tool
+        module, name = path.rsplit(".", 1)
+        assert getattr(getattr(importlib.import_module(module), name), "tool_name", None) == name, path
+
+
+def test_the_web_tool_on_the_list_only_reads():
+    from agenticops.tools.web_tools import ALLOWED_METHODS
+    assert set(ALLOWED_METHODS) == {"GET", "HEAD"}
+
+
+@pytest.fixture
+def a_skill(tmp_path):
+    """A published skill and a draft, each declaring a read tool, a write tool and a path that is no skill tool at
+    all — what a draft an agent wrote for itself could name."""
+    declared = ("tools:\n  - agenticops.tools.file_tools.read_local_file\n"
+                "  - agenticops.tools.file_tools.write_local_file\n"
+                "  - agenticops.tools.notification_tools.send_to_channel\n"
+                "  - agenticops.skills.execution.run_on_host\n  - os.system\n")
+    for root, name in ((tmp_path, "ops-notes"), (tmp_path / "draft", "my-draft")):
+        folder = root / name
+        folder.mkdir(parents=True)
+        (folder / "SKILL.md").write_text(f"---\nname: {name}\ndescription: test skill\n{declared}---\n\n# Body\n")
+    from agenticops.config import settings
+    from agenticops.skills import loader
+    with patch.object(settings, "skills_enabled", True), patch.object(settings, "skills_dir", tmp_path), \
+            patch.object(settings, "skills_draft_dir", tmp_path / "draft"):
+        loader._invalidate_skills_cache()              # the loader remembers what it found in the real folder
+        try:
+            yield
+        finally:
+            loader._invalidate_skills_cache()
+
+
+class _Registry:
+    def __init__(self):
+        self.registry, self.given = {}, []
+
+    def process_tools(self, tools):
+        for one in tools:
+            self.given.append(one)
+            self.registry[getattr(one, "tool_name", getattr(one, "__name__", str(one)))] = one
+
+
+def _activate(name):
+    from agenticops.skills.tools import activate_skill
+    agent = SimpleNamespace(tool_registry=_Registry())
+    with patch("agenticops.skills.curator.touch_skill_used"):
+        reply = activate_skill(skill_name=name, agent=agent)
+    return reply, sorted(agent.tool_registry.registry)
+
+
+@pytest.mark.parametrize("fields", [{"read_only_run": "diagnosis"}, {"read_only_run": "plan"},
+                                    {"change_request_id": 3}, {"read_only": True}])
+@pytest.mark.parametrize("name", ["ops-notes", "my-draft"])
+def test_a_skill_registers_only_read_tools_where_the_run_may_only_read(ledger, a_skill, fields, name):
+    with run_context(**fields):
+        reply, registered = _activate(name)
+    assert registered == ["read_local_file"]
+    assert "<activated_skill" in reply and "read_local_file" in reply          # the skill's text is still loaded
+    for withheld in ("write_local_file", "send_to_channel", "run_on_host", "system"):
+        assert withheld in reply.split("Not registered")[1], withheld          # … and the reply says what is not there
+
+
+def test_a_path_off_the_list_is_not_even_imported_there(ledger, a_skill):
+    import importlib
+    real = importlib.import_module
+    off_the_list = {"agenticops.tools.notification_tools", "agenticops.skills.execution", "os"}
+
+    def asked_for(fields):
+        asked = []
+
+        def watched(name, *a, **k):
+            asked.append(name)
+            return real(name, *a, **k)
+
+        with run_context(**fields), patch("agenticops.skills.loader.importlib.import_module", side_effect=watched):
+            _activate("my-draft")
+        return set(asked)
+
+    there = asked_for({"read_only_run": "plan"})
+    assert "agenticops.tools.file_tools" in there and not there & off_the_list
+    assert off_the_list <= asked_for({})                 # the control: outside such a run the loader asks for them all
+
+
+def test_outside_such_a_run_a_skill_registers_what_it_declares_as_before(ledger, a_skill):
+    reply, registered = _activate("ops-notes")
+    assert registered == ["read_local_file", "run_on_host", "send_to_channel", "system", "write_local_file"]
+    assert "Not registered" not in reply
+
+
+def test_known_gap_outside_such_a_run_a_draft_may_name_any_path(ledger, a_skill):
+    # chat and the executor are as they were (os.system is handed to the registry) — said in the release note
+    _, registered = _activate("my-draft")
+    assert "system" in registered and "run_on_host" in registered
+
+
+# ── a fix-plan run does not carry the delegated backend ──────────────────────
+
+def test_the_fix_plan_build_carries_no_enhanced_task():
+    from agenticops.config import settings
+    from tests.test_sre_change_review import _built_tool_names
+    with patch.object(settings, "acp_enhanced_enabled", True):
+        assert "enhanced_task" not in _built_tool_names(fix_plan=True)
+        assert "enhanced_task" not in _built_tool_names(change_review=True)
+        assert "enhanced_task" in _built_tool_names()                         # the chat's sre_query keeps it
+    with patch.object(settings, "acp_enhanced_enabled", False):
+        assert "enhanced_task" not in _built_tool_names()
+    assert _built_tool_names(fix_plan=True) == _built_tool_names() - {"enhanced_task"}   # nothing else differs
+
+
+def test_only_a_fix_plan_run_asks_for_that_build(ledger):
+    from agenticops.agents import sre_agent as mod
+    with patch.object(mod, "_create_sre_agent", return_value=MagicMock()) as build, \
+            patch.object(mod, "rejection_feedback", return_value=""), \
+            patch.object(mod, "get_all_cli_tools", return_value=[]), \
+            patch("agenticops.agents.preamble.invoke_with_retry", return_value="done"), \
+            patch("agenticops.services.agent_log_service.track_agent"), \
+            patch("agenticops.services.pipeline_events.plan_written_since", return_value=True), \
+            patch("agenticops.services.change_service.get_change", return_value={"id": 5, "account_id": None}):
+        mod.sre_agent(issue_id=7)
+        assert build.call_args.kwargs.get("fix_plan") is True
+        mod.sre_query(query="list the queues")
+        assert not build.call_args.kwargs.get("fix_plan")
+        mod.sre_agent_review_change(5)
+        assert build.call_args.kwargs == {"cli_tool": None, "change_review": True}

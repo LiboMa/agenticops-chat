@@ -300,11 +300,14 @@ _CHANGE_REVIEW_TOOLS = (
 )
 
 
-def _create_sre_agent(cli_tool=None, cli_tools: list | None = None, *, change_review: bool = False) -> Agent:
+def _create_sre_agent(cli_tool=None, cli_tools: list | None = None, *, change_review: bool = False,
+                      fix_plan: bool = False) -> Agent:
     """Create a reusable SRE Agent instance.
 
     change_review=True builds the Mode C (change review) agent: the only build that carries the change tools
     and the only one whose prompt describes Mode C (SRE_SYSTEM_PROMPT; every other build gets SRE_BASE_PROMPT).
+    fix_plan=True is the build of a fix-plan run (sre_agent, Mode A): a run that only reads (N30), so it does not
+    carry enhanced_task either. The default build (sre_query, the chat's catch-all) is unchanged.
     """
     from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_bedrock_boto_session
 
@@ -370,7 +373,9 @@ def _create_sre_agent(cli_tool=None, cli_tools: list | None = None, *, change_re
     # Optional ACP enhanced backend — delegate complex tasks to Claude Code (default off).
     # Never in the change-review build: enhanced_task runs outside the change gates (its own backend), so a
     # Mode C review/preflight must not carry it (least privilege + the in-code change read-only guard).
-    if settings.acp_enhanced_enabled and not change_review:
+    # Never in the fix-plan build either (N30): the backend is a subprocess with its own tools on this host —
+    # no command it sends passes the check point that keeps a fix-plan run to reads.
+    if settings.acp_enhanced_enabled and not (change_review or fix_plan):
         _tools.append(enhanced_task)
     return Agent(
         system_prompt=build_system_prompt(SRE_SYSTEM_PROMPT if change_review else SRE_BASE_PROMPT,
@@ -443,7 +448,7 @@ def sre_agent(issue_id: int) -> str:
         from agenticops.agents.preamble import invoke_with_retry, infer_parent_agent
         from agenticops.services.agent_log_service import track_agent
         from agenticops.services.pipeline_events import log_agent_failed, plan_written_since
-        agent = _create_sre_agent(cli_tool=cli_tool)
+        agent = _create_sre_agent(cli_tool=cli_tool, fix_plan=True)
         recorder = _record_steps(agent, f"I{issue_id}")
         started_at = datetime.now(timezone.utc)
         from agenticops.run_context import run_context
