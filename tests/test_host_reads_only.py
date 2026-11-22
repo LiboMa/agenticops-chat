@@ -499,3 +499,26 @@ def test_a_real_shell_runs_only_what_the_rule_read_in_lines_made_at_random(shell
     assert len(lines) == wanted, (len(lines), made)               # the generator still finds lines the rule accepts
     found = [(line, why) for line in lines if (why := _diverges(shell, line, stubs, tmp_path))]
     assert not found, (shell, found[:5])
+
+
+# ── what «cannot write» leans on: no terminal ────────────────────────────────
+
+def test_neither_ssh_path_asks_for_a_terminal(monkeypatch):
+    """`more`, `top` and the pager of journalctl / systemctl only read while there is no terminal: given one, a
+    pager takes keys — and a pager's keys run commands. Both paths capture the output and ask ssh for no terminal
+    (the third path, a remote shell script through the cloud's agent, has none to give)."""
+    from agenticops.skills import execution
+
+    def no_terminal(run):
+        argv = run.call_args[0][0]
+        assert argv[0] == "ssh" and not {"-t", "-tt"} & set(argv) and not any("RequestTTY" in a for a in argv), argv
+        assert run.call_args[1]["capture_output"] is True and run.call_args[1]["shell"] is False
+
+    run = Mock(return_value=SimpleNamespace(returncode=0, stdout="ok\n", stderr=""))
+    monkeypatch.setattr("agenticops.skills.execution.subprocess.run", run)
+    execution._execute_ssh("10.0.1.5", "journalctl -u nginx -n 20", user="ops", key_path="/k", bastion="jump.example.com")
+    no_terminal(run)
+
+    tool, run = _ssh_tool(monkeypatch)
+    assert tool("journalctl -u nginx -n 20") == "out\n"
+    no_terminal(run)
