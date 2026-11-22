@@ -18,7 +18,7 @@ import re
 import shlex
 import subprocess
 import time
-from typing import Any
+from typing import Any, Optional
 
 from strands import tool
 
@@ -115,6 +115,23 @@ def _resolve_host_account(host_id: str, account: str, region: str):
     return snap, eff_region, "default account"
 
 
+# What a command may be sent to: an instance id, a host name or an IP address, with an optional `user@` in front
+# (MVP-2.9.0 N30). A host_id that is no instance id used to go to the ssh client as it stood, with nothing in front
+# of it: `-oProxyCommand=<anything>` made ssh run <anything> on the machine AgenticOps runs on — and the call's own
+# command was a read, so nothing asked and nothing was on the ledger. Found by reading the code, not by an incident.
+_SSH_USER = r"[A-Za-z_][A-Za-z0-9_.-]{0,63}"
+_HOST_RE = re.compile(rf"(?:{_SSH_USER}@)?[A-Za-z0-9][A-Za-z0-9._:-]{{0,254}}")
+_SSH_USER_RE = re.compile(_SSH_USER)
+
+
+def _host_refusal(host: str) -> Optional[str]:
+    """Why `host` is not something a command may be sent to — None when it is."""
+    if isinstance(host, str) and _HOST_RE.fullmatch(host):
+        return None
+    return ("Error: host_id must be an instance id, a host name or an IP address (optionally user@host) — letters, "
+            "digits, '.', '-', '_' and ':' only, and not starting with '-'. Nothing was sent anywhere.")
+
+
 @tool
 def run_on_host(
     host_id: str,
@@ -151,6 +168,9 @@ def run_on_host(
     Returns:
         Command output, or error/confirmation message.
     """
+    refused_host = _host_refusal(host_id)
+    if refused_host:                       # before anything else is decided: this «host» is sent nothing
+        return refused_host
     command = command.strip()
     if not command:
         return "Error: Empty command."
@@ -380,6 +400,12 @@ def _execute_ssh(
     """Execute a command via SSH (BatchMode, fail-closed on missing key/host)."""
     from agenticops.providers.ssh import _clean_subprocess_env
 
+    refused_host = _host_refusal(host)     # whoever calls this: a host that begins with a dash is an ssh option
+    if refused_host:
+        return refused_host
+    if user and not _SSH_USER_RE.fullmatch(user):
+        return "Error: the SSH user name is not a user name. Nothing was sent anywhere."
+
     ssh_args = [
         "ssh",
         "-o", "BatchMode=yes",
@@ -392,7 +418,7 @@ def _execute_ssh(
     if bastion:
         ssh_args += ["-J", bastion]
     target = f"{user}@{host}" if user else host
-    ssh_args += [target, command]
+    ssh_args += ["--", target, command]    # «--»: nothing after it is read as an option
 
     try:
         result = subprocess.run(
