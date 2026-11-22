@@ -22,7 +22,7 @@ from typing import Any
 
 from strands import tool
 
-from agenticops.skills.security import classify_shell_command, classify_kubectl_command
+from agenticops.skills.security import classify_kubectl_command, classify_shell_command, kubectl_words
 
 logger = logging.getLogger(__name__)
 
@@ -431,8 +431,13 @@ _SECRET_MATERIAL_RE = re.compile(r"(?<![\w-])secrets?(?![\w-])|--raw\b", re.IGNO
 
 
 def _reveals_secret_material(command: str) -> bool:
-    """kubectl args that name Secrets (`secret`, `secrets`, `secret/x`) or ask for a raw kubeconfig."""
-    return bool(_SECRET_MATERIAL_RE.search(command or ""))
+    """kubectl args that name Secrets (`secret`, `secrets`, `secret/x`) or ask for a raw kubeconfig.
+
+    Read on the words kubectl is handed, not on the spelling (MVP-2.9.0 N29): the tier and the argv come from the
+    shlex words, so `get sec''ret db` was a read that this check — made on the raw text — did not see, and a
+    read-only account got the Secret. A line that cannot be split is not run; it counts as revealing."""
+    words = kubectl_words(command or "")
+    return words is None or bool(_SECRET_MATERIAL_RE.search(" ".join(words)))
 
 
 @tool
