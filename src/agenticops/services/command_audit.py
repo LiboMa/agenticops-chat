@@ -101,7 +101,8 @@ def change_context_refusal(
     *, tool: str, tier: str, command: str, account: str = "", region: str = "", target: str = ""
 ) -> Optional[str]:
     """Refuse (as text) a write command run while the Run Context names a change with no approved plan — or at
-    all while it is a read-only account's turn (RunContext.read_only; reason `read_only_account`).
+    all while it is a read-only account's turn (RunContext.read_only; reason `read_only_account`), or a diagnosis
+    or fix-plan run (RunContext.read_only_run; reason `read_only_run`, MVP-2.9.0 N30).
 
     A change review / preflight runs under change_request_id but no fix plan; the change's plan is only
     approved after review. Until then the run is read-only IN CODE: readonly commands are unaffected
@@ -114,6 +115,10 @@ def change_context_refusal(
     from agenticops.run_context import get_run_context
     if get_run_context().read_only:  # a viewer's chat turn (auth/viewer.py): read-only whatever the tool is told
         return read_only_refusal(tool=tool, tier=tier, command=command, account=account, region=region, target=target)
+    kind = get_run_context().read_only_run
+    if kind:  # a diagnosis / a fix-plan run: before the change guard below — an approved plan does not lift this one
+        return read_only_run_refusal(kind=kind, tool=tool, tier=tier, command=command,
+                                     account=account, region=region, target=target)
     if not get_run_context().change_request_id:
         return None
     if approved_plan_in_context() is not None:
@@ -131,6 +136,28 @@ def read_only_refusal(*, tool: str, tier: str, command: str, account: str = "", 
                    account=account, region=region, target=target)
     return ("This account is read-only: only read-only commands run here, and none that reveals secret material. "
             "Ask an operator to make the change. Command: " + command)
+
+
+# what a read-only run is called, and where what it may not do belongs (RunContext.read_only_run → words)
+_READ_ONLY_RUNS = {
+    "diagnosis": ("a diagnosis run", "name it in your recommendations instead"),
+    "plan": ("a fix-plan run", "write it as a step of the plan instead — it runs once the plan is approved"),
+}
+
+
+def read_only_run_refusal(*, kind: str, tool: str, tier: str, command: str, account: str = "", region: str = "",
+                          target: str = "") -> str:
+    """Refuse (as text, with a `read_only_run` ledger row) a command a diagnosis or a fix-plan run may not send
+    (MVP-2.9.0 N30). These runs read: until N30 their model could answer a tool's «confirm?» itself — nobody is
+    there in a pipeline run — and the account-bound CLI tool asked nothing at all. The sentence goes to the model,
+    so it says what to do next and names no cloud; a kind the table does not know is refused all the same."""
+    record_command(tool=tool, tier=tier, command=command, outcome="refused", reason="read_only_run",
+                   account=account, region=region, target=target)
+    what, instead = _READ_ONLY_RUNS.get(kind, ("a read-only run", "say so in your answer instead"))
+    return (f"This is {what}: it only reads. The code refuses every command it does not recognise as read-only "
+            f"(this one is classified '{tier}'), and require_confirmation changes nothing here — do not send it "
+            f"again. If it would change something, {instead}. If it only reads, send it as one plain read command "
+            f"the tool recognises, or use a read tool. Command: {command}")
 
 
 def change_required_refusal(command: str, pattern: str) -> str:

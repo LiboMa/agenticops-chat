@@ -446,7 +446,11 @@ def sre_agent(issue_id: int) -> str:
         agent = _create_sre_agent(cli_tool=cli_tool)
         recorder = _record_steps(agent, f"I{issue_id}")
         started_at = datetime.now(timezone.utc)
-        with track_agent("sre", "fix_plan", f"issue_id={issue_id}", parent_agent=infer_parent_agent()) as tracker:
+        from agenticops.run_context import run_context
+        # Writing a plan only reads (N30): under this flag every command tool refuses what is not a read — what
+        # would change something is a step of the plan, run after its approval.
+        with run_context(read_only_run="plan"), \
+                track_agent("sre", "fix_plan", f"issue_id={issue_id}", parent_agent=infer_parent_agent()) as tracker:
             result = invoke_with_retry(agent,
                 f"Generate a Fix Plan for HealthIssue #{issue_id}. "
                 f"Follow the fix plan protocol (Mode A). Be specific with resource IDs and CLI commands."

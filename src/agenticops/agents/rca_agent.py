@@ -509,8 +509,9 @@ def rca_agent(issue_id: int) -> str:
                 invoke_kwargs["limits"] = {"turns": settings.rca_max_iterations}
             started_at = datetime.now(timezone.utc)
             from agenticops.run_context import run_context
-            # save_rca_result records the model from here — the agent itself does not know it (E2E obs. 4)
-            with run_context(model_id=model_id), \
+            # save_rca_result records the model from here — the agent itself does not know it (E2E obs. 4).
+            # A diagnosis only reads (N30): under this flag every command tool refuses what is not a read.
+            with run_context(model_id=model_id, read_only_run="diagnosis"), \
                     track_agent("rca", "analyze_issue", f"issue_id={issue_id}", parent_agent=infer_parent_agent()) as tracker:
                 result = invoke_with_retry(agent, prompt, **invoke_kwargs)
                 tracker.set_result(result)

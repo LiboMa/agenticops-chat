@@ -35,6 +35,11 @@ class RunContext:
     bound_account_id: Optional[int] = None     # a change run/review may touch ONLY this account id (resolver fails closed on any other)
     read_only: bool = False                    # a viewer's turn: every CLI tool refuses non-readonly commands (auth/viewer)
     via_api_key: bool = False                  # the request / chat turn came through an API key (no human decisions)
+    # A diagnosis or a fix-plan run (MVP-2.9.0 N30): "diagnosis" | "plan" while rca_agent / sre_agent call their
+    # model. Every command tool refuses what the code does not know to be read-only, whatever the model confirms
+    # (services/command_audit.change_context_refusal). Not `read_only` above: that is an ACCOUNT's flag — it also
+    # hides Secrets and makes the actor a viewer.
+    read_only_run: Optional[str] = None
     # Facts the code knows and the model does not (2.7.0 E2E observations 4 / 5): what its save tool records
     model_id: Optional[str] = None             # the model rca_agent built its agent with → RCAResult.model_id
     run_started_at: Optional[datetime] = None  # when executor_agent began this run → the run's measured duration_ms

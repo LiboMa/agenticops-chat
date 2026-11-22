@@ -390,8 +390,11 @@ def executor_agent(fix_plan_id: int) -> str:
         from agenticops.agents.preamble import invoke_with_retry, infer_parent_agent
         from agenticops.run_context import run_context
         from agenticops.services.agent_log_service import track_agent
-        # save_execution_result measures the run's duration from here — never the agent's own figure (E2E obs. 5)
-        with run_context(run_started_at=datetime.now(timezone.utc), **({"execution_id": opened} if opened else {})), \
+        # save_execution_result measures the run's duration from here — never the agent's own figure (E2E obs. 5).
+        # A run acts on an approved plan: it is never a read-only run (N30), whatever context called it — nothing
+        # calls it from inside a diagnosis or a plan run today (a new thread starts with a fresh context).
+        with run_context(run_started_at=datetime.now(timezone.utc), read_only_run=None,
+                         **({"execution_id": opened} if opened else {})), \
                 track_agent("executor", "execute_fix", f"fix_plan_id={fix_plan_id}", parent_agent=infer_parent_agent(),
                             model_id=model_id) as tracker:   # the smart model for L0/L1 — what the run is priced at
             result = invoke_with_retry(agent,
