@@ -1427,13 +1427,31 @@ def get_agent_context_plugins(agent_name: str) -> list:
     offloader, but from 1.56 any ``context_manager`` makes the SDK discard the passed conversation manager (only a
     UserWarning says so) — every per-agent sliding window would silently stop working. Passing the plugin explicitly
     is the 1.45 behaviour on every version. agent_name is kept for per-agent symmetry; the flag is global today.
+
+    One result is never offloaded, whatever its size: WHOLE_RESULT_TOOLS (MVP-2.9.0 N28).
     """
     if not settings.strands_context_manager_auto:
         return []
     from strands.vended_plugins.context_offloader import InMemoryStorage
     return [_head_preview_offloader_class()(storage=InMemoryStorage(),
                                             max_result_tokens=settings.context_offload_max_result_tokens,
-                                            preview_tokens=settings.context_offload_preview_tokens)]
+                                            preview_tokens=settings.context_offload_preview_tokens,
+                                            should_offload=_offload_unless_whole)]
+
+
+# Tool results that reach the model whole however long they are (MVP-2.9.0 N28). get_approved_fix_plan is what the
+# executor runs and verifies: a result over 6,000 characters used to arrive as its first 3,000 and a reference — and
+# the plan is ONE line of JSON, so the offloader's own search hands back at most its first 6,000, never the rollback
+# that comes last (63 of the 86 plans approved or run on the copy database were that long; seen in the real run of
+# 2026-11-20, where the executor fetched the rest by itself). By tool name, so Main reading the plan gets it whole too.
+WHOLE_RESULT_TOOLS = frozenset({"get_approved_fix_plan"})
+
+
+def _offload_unless_whole(tool_name: str, token_count: int, **kwargs) -> bool:
+    """The offloader's should_offload answer for an oversized result: False = keep it in context as it is.
+
+    It must not raise: the SDK reads an exception here as «offload» (and only logs a warning)."""
+    return not (isinstance(tool_name, str) and tool_name in WHOLE_RESULT_TOOLS)
 
 
 @functools.lru_cache(maxsize=1)

@@ -1515,8 +1515,9 @@ def get_approved_fix_plan(fix_plan_id: int) -> str:
         if drift:
             return _abort_drifted_plan(session, plan, drift)
 
-        # Never truncated: this is what will be executed and verified. The fields the run needs come first, so
-        # an oversized plan offloaded by the SDK's ContextOffloader still shows them in the preview it keeps.
+        # Never truncated: this is what will be executed and verified. Not by this tool, and since MVP-2.9.0 N28 not by
+        # the SDK's ContextOffloader either (config.WHOLE_RESULT_TOOLS) — until then a plan over 6,000 characters
+        # reached the executor as a preview of its first 3,000. The fields the run needs still come first.
         from agenticops.services.verification import annotated_checks
         return json.dumps({
             "id": plan.id,

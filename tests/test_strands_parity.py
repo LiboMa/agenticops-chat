@@ -83,3 +83,23 @@ def test_no_build_passes_a_context_manager():
                  for i, line in enumerate(p.read_text().splitlines(), 1)
                  if re.search(r"(?<!`)\bcontext_manager\s*=", line)]
     assert offenders == []
+
+
+def test_the_approved_plan_is_the_one_result_never_offloaded(monkeypatch):
+    """MVP-2.9.0 N28: the executor acts on what get_approved_fix_plan returns, so it reaches the model whole. The SDK
+    asks the plugin's should_offload callback about every oversized result; ours answers «keep it» for that one."""
+    import agenticops.config as config
+    monkeypatch.setattr(settings, "strands_context_manager_auto", True)
+    assert config.WHOLE_RESULT_TOOLS == frozenset({"get_approved_fix_plan"})
+    for name in AGENT_NAMES:                                # one plugin class for every build: the name decides
+        (plugin,) = get_agent_context_plugins(name)
+        assert plugin._should_offload("get_approved_fix_plan", 50_000) is False
+        assert plugin._should_offload("get_managed_resources", 50_000) is True
+        assert plugin._should_offload("", 50_000) is True
+
+
+def test_the_sdk_still_asks_before_it_offloads():
+    """should_offload is public constructor API, but the plugin keeps it as `_should_offload` and calls it only for
+    oversized results: if a Strands release stops asking, this fails instead of the plan being cut again."""
+    assert "self._should_offload(" in inspect.getsource(ContextOffloader._handle_tool_result)
+    assert "should_offload" in inspect.signature(ContextOffloader.__init__).parameters
