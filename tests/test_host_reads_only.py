@@ -39,7 +39,7 @@ READS = [
     # chains and what changes nothing
     'echo "--- disk ---"; df -h; echo "--- mem ---"; free -m', "cd /var/log && ls -la",
     "ls /nonexistent 2>/dev/null || echo missing", "cat /etc/nginx/nginx.conf 2>&1 | head -50",
-    "df -h > /dev/null 2>&1; echo $?", "df -h >/dev/null; echo \"rc=$?\"", "ls &>/dev/null; echo done",
+    "df -h > /dev/null 2>&1; echo $?", "df -h >/dev/null; echo \"rc=$?\"", "ls >/dev/null 2>&1; echo done",
     "ls 2>/dev/null;", "ls >/dev/null 2>&1\n", "ls 2>/dev/null\n\ndf -h",        # a redirect, then nothing more
     "printf '%s\\n' ok", "df -h\nfree -m", "ls -la \\\n/var/log", "df -h;", "df -h\n\nfree -m\n",
     "ls -la &&\ncat /etc/hosts", "ps aux |\ngrep java",
@@ -99,6 +99,10 @@ REFUSED = [
     'ls >/dev/null"x"', "ls > /dev/null/x", "ls >/dev/null\\ x", "ls 2>/tmp/err", "ls &> /tmp/all",
     "ls >& /tmp/all", "cat < /etc/passwd", "cat <<EOF\nx\nEOF", "cat <<< x", "ls 2>&1x", "ls 3>/tmp/x",
     "ls >/dev/nul", "echo x >/dev/sda", "ls 1>&2", "ls 2>&-",
+    # `&>` is bash's spelling. To dash — /bin/sh on Debian and Ubuntu — «a &>/dev/null b c» is «a &» and then «b c»
+    # with its output thrown away: the second command RUNS (found by the 5,000-line run in real shells)
+    "cat x &>/dev/null systemctl restart nginx", "ls &>/dev/null; echo done", "ls &>/dev/null", "ls &> /dev/null",
+    "cat\t2&>/dev/null", "printf&>/dev/null -l sysctl,", "cd&>/dev/null ,uniq", "ls &>>/dev/null",
     # substitutions and expansions
     "echo $(touch /tmp/x)", "echo `touch /tmp/x`", "ls $HOME", "echo ${HOME}", "echo $'a\\'' ; systemctl restart nginx #'",
     'echo $"x"', "echo $[1+1]", "echo $((1+1))", 'echo "$(id)"', 'echo "`id`"', 'echo "$HOME"', "ls ~/$USER",
@@ -438,9 +442,16 @@ def test_a_redirect_that_only_begins_like_dev_null_is_a_redirect(command):
 
 
 @pytest.mark.parametrize("command", ["ls -la 2>/dev/null", "ls >/dev/null 2>&1", "df -h 2>/dev/null",
-                                     "kubectl get pods -n web 2>/dev/null", "ls &>/dev/null", "ls 2>&1"])
+                                     "kubectl get pods -n web 2>/dev/null", "ls 2>&1", "ls 1>/dev/null"])
 def test_a_redirect_to_nowhere_still_changes_nothing(command):
     assert command_tier(command) == "readonly"
+
+
+@pytest.mark.parametrize("command", ["ls &>/dev/null", "cat /etc/hosts &>/dev/null systemctl restart nginx",
+                                     "df -h &> /dev/null", "kubectl get pods &>/dev/null"])
+def test_the_bash_spelling_of_both_streams_to_nowhere_is_not_one_command_to_every_shell(command):
+    # to dash — /bin/sh on Debian and Ubuntu — «a &>/dev/null b» runs a in the background, then runs b
+    assert command_tier(command) == "unknown"
 
 
 def test_an_escaped_backslash_before_a_line_break_does_not_join_the_lines():
@@ -468,8 +479,8 @@ _FUZZ_WORDS = ["ls", "cat", "sort", "uniq", "echo", "printf", "true", "cd", "gre
 # punctuation the rule reads (most picks) and punctuation it refuses unless quoted (one pick in ten): a refused mark
 # inside quotes is data, and a line that holds one there is exactly what must be read as the shell reads it
 _FUZZ_READ = [" ", " ", " ", ";", "|", "||", "&&", "'", "'", '"', '"', "\\", "\\", "\n", "\t", "2>&1", ">/dev/null",
-              " 2>/dev/null", "&>/dev/null", "$?", "*", "-", "--", ","]
-_FUZZ_SHARP = ["&", ">", ">>", "<", "2>", "&>", "$", "(", ")", "{", "}", "`", "#", "?", "[", "]", "$(", "${"]
+              " 2>/dev/null", " 2>&1", "$?", "*", "-", "--", ","]
+_FUZZ_SHARP = ["&", ">", ">>", "<", "2>", "&>", "&>/dev/null", "$", "(", ")", "{", "}", "`", "#", "?", "[", "]", "$(", "${"]
 
 
 def _fuzz_lines(seed: int, wanted: int, attempts: int = 3_000_000):

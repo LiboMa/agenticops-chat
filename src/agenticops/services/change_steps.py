@@ -80,7 +80,10 @@ HOST_CAN_WRITE = frozenset({
 # backslashes and the line ends there — until N30 «ls a\\\\ ⏎ rm -rf y» was joined into one `ls` and called read-only.
 _CONTINUED = re.compile(r"(?<!\\)((?:\\\\)*)\\\r?\n")
 # Sends nothing anywhere that matters — and ends there: until N30 `> /dev/nullx` (a file) was read as `> /dev/null`.
-_HARMLESS_REDIRECT = re.compile(r"(?:[12]?>{1,2}\s*/dev/null|&>\s*/dev/null|2>&1)(?=$|[\s;&|<>)])")
+# Bash's `&>/dev/null` is NOT here (it was until N30): to dash — /bin/sh on Debian and Ubuntu — «a &>/dev/null b c»
+# is «a &» and then «b c» with its output thrown away, so the second command runs. Found by running 5,000 accepted
+# lines in real shells; `>/dev/null 2>&1` says the same thing to every shell.
+_HARMLESS_REDIRECT = re.compile(r"(?:[12]?>{1,2}\s*/dev/null|2>&1)(?=$|[\s;&|<>)])")
 
 
 def _shell_would_split(text: str) -> bool:
@@ -142,8 +145,8 @@ _HOST_READ_WORDS = frozenset(tuple(entry.split()) for entry in HOST_READS)
 HOST_READS_HINT = (
     " On a host this run takes read commands only, alone or joined by | ; && || — ls, cat, head, tail, grep, ps, df, "
     "free, netstat, ss, ip … show, journalctl (journalctl -k for the kernel log), systemctl status / is-active / show "
-    "/ list-units, dpkg -l, rpm -q, sort, uniq, echo. A redirect only to /dev/null; no $(…), backticks or $VAR; no "
-    "sudo, awk, sed, find, xargs, tee, curl.")
+    "/ list-units, dpkg -l, rpm -q, sort, uniq, echo. A redirect only to /dev/null, written >/dev/null or 2>/dev/null "
+    "(not &>); no $(…), backticks or $VAR; no sudo, awk, sed, find, xargs, tee, curl.")
 
 
 def _long_option_is(word: str, names) -> bool:
@@ -306,7 +309,7 @@ def host_command_reads(words, *, globs: bool = False, status: bool = False) -> b
     return guard is not None and not globs and guard(list(words[1:]))
 
 
-_TO_NOWHERE = re.compile(r"(?:>>?[ \t]*/dev/null|&>[ \t]*/dev/null)(?=$|[\s;&|<>])")
+_TO_NOWHERE = re.compile(r">>?[ \t]*/dev/null(?=$|[\s;&|<>])")     # never bash's `&>` — see _HARMLESS_REDIRECT
 _FD_TO_NOWHERE = re.compile(r"(?:[12]>>?[ \t]*/dev/null|2>&1)(?=$|[\s;&|<>])")
 _WORD_BREAK = " \t\n;&|"
 _NEEDS_A_COMMAND = ("|", "&&", "||")
