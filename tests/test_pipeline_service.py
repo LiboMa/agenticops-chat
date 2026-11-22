@@ -6,10 +6,41 @@ checks, policy evaluation, and chaining behavior.
 """
 
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
+
+from agenticops.services.exec_switches import ExecSwitches
+
+
+@contextmanager
+def switches(**values):
+    """The four execution switches as the code reads them: services/exec_switches.effective() (MVP-2.9.0 N25).
+
+    Until 2026-11-23 this file set them on a patched `pipeline_service.settings`, which the triggers stopped reading
+    in N25: every «disabled» test here disabled nothing and asserted nothing — the tests passed with the check they
+    name deleted from the code — and two of them started a real executor thread, which once overlapped the test
+    after them (a full run counted two threads where it expected one)."""
+    on = {"executor_enabled": True, "auto_fix_enabled": True, "executor_auto_approve_l0_l1": True,
+          "executor_hitl_enabled": False}
+    with patch("agenticops.services.pipeline_service.exec_switches.effective",
+               return_value=ExecSwitches(**{**on, **values})):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def all_switches_on():
+    """No test here depends on what this machine's settings say; a test that wants one off says so."""
+    with switches():
+        yield
+
+
+def spawned(thread_cls, name):
+    """The calls that made the thread called `name`. `threading.Thread` is patched for the whole process: a thread
+    another test left running may start one of its own meanwhile, and that is not this test's business."""
+    return [call for call in thread_cls.call_args_list if call.kwargs.get("name") == name]
 
 
 # ── trigger_auto_sre ──────────────────────────────────────────────────
@@ -18,22 +49,19 @@ import pytest
 class TestTriggerAutoSre:
     """Tests for trigger_auto_sre gating and guard logic."""
 
-    @patch("agenticops.services.pipeline_service.settings")
-    def test_disabled_when_auto_fix_off(self, mock_settings):
-        """Should skip when auto_fix_enabled is False."""
-        mock_settings.auto_fix_enabled = False
+    @patch("agenticops.services.pipeline_service.threading.Thread")
+    def test_disabled_when_auto_fix_off(self, mock_thread_cls):
+        """Should skip when auto_fix_enabled is False: nothing is read, no thread is started."""
         from agenticops.services.pipeline_service import trigger_auto_sre
 
-        # Should not raise, just log and return
-        trigger_auto_sre(health_issue_id=1)
-        # No thread should be spawned — we can't easily assert no thread,
-        # but the function should return without error
+        with switches(auto_fix_enabled=False), patch("agenticops.models.get_db_session") as mock_db:
+            trigger_auto_sre(health_issue_id=1)
+        assert not mock_db.called and spawned(mock_thread_cls, "auto-sre-1") == []
 
     @patch("agenticops.services.pipeline_service.settings")
     @patch("agenticops.services.pipeline_service.threading.Thread")
     def test_spawns_thread_when_enabled(self, mock_thread_cls, mock_settings):
         """Should spawn daemon thread when enabled and no active plan."""
-        mock_settings.auto_fix_enabled = True
         mock_thread = MagicMock()
         mock_thread_cls.return_value = mock_thread
 
@@ -49,14 +77,12 @@ class TestTriggerAutoSre:
                 from agenticops.services.pipeline_service import trigger_auto_sre
                 trigger_auto_sre(health_issue_id=42)
 
-        mock_thread_cls.assert_called_once()
-        mock_thread.start.assert_called_once()
+        (call,) = spawned(mock_thread_cls, "auto-sre-42")
+        assert call.kwargs["daemon"] is True and mock_thread.start.called
 
     @patch("agenticops.services.pipeline_service.settings")
     def test_skips_when_active_plan_exists(self, mock_settings):
         """Should skip SRE if issue already has an active (non-terminal) FixPlan."""
-        mock_settings.auto_fix_enabled = True
-
         with patch("agenticops.models.get_db_session") as mock_db:
             mock_session = MagicMock()
             mock_session.__enter__ = MagicMock(return_value=mock_session)
@@ -71,7 +97,7 @@ class TestTriggerAutoSre:
             with patch("agenticops.services.pipeline_service.threading.Thread") as mock_thread_cls:
                 from agenticops.services.pipeline_service import trigger_auto_sre
                 trigger_auto_sre(health_issue_id=1)
-                mock_thread_cls.assert_not_called()
+                assert spawned(mock_thread_cls, "auto-sre-1") == []
 
 
 # ── trigger_auto_approve ──────────────────────────────────────────────
@@ -80,29 +106,28 @@ class TestTriggerAutoSre:
 class TestTriggerAutoApprove:
     """Tests for trigger_auto_approve gating and approval logic."""
 
-    @patch("agenticops.services.pipeline_service.settings")
-    def test_disabled_when_auto_fix_off(self, mock_settings):
-        """Should skip when auto_fix_enabled is False."""
-        mock_settings.auto_fix_enabled = False
+    @patch("agenticops.services.pipeline_service.trigger_auto_execute")
+    def test_disabled_when_auto_fix_off(self, mock_execute):
+        """Should skip when auto_fix_enabled is False: the plan is not even read."""
         from agenticops.services.pipeline_service import trigger_auto_approve
 
-        trigger_auto_approve(fix_plan_id=1)
+        with switches(auto_fix_enabled=False), patch("agenticops.models.get_db_session") as mock_db:
+            trigger_auto_approve(fix_plan_id=1)
+        assert not mock_db.called and not mock_execute.called
 
-    @patch("agenticops.services.pipeline_service.settings")
-    def test_disabled_when_auto_approve_off(self, mock_settings):
-        """Should skip when executor_auto_approve_l0_l1 is False."""
-        mock_settings.auto_fix_enabled = True
-        mock_settings.executor_auto_approve_l0_l1 = False
+    @patch("agenticops.services.pipeline_service.trigger_auto_execute")
+    def test_disabled_when_auto_approve_off(self, mock_execute):
+        """Should skip when executor_auto_approve_l0_l1 is False: the plan is not even read."""
         from agenticops.services.pipeline_service import trigger_auto_approve
 
-        trigger_auto_approve(fix_plan_id=1)
+        with switches(executor_auto_approve_l0_l1=False), patch("agenticops.models.get_db_session") as mock_db:
+            trigger_auto_approve(fix_plan_id=1)
+        assert not mock_db.called and not mock_execute.called
 
     @patch("agenticops.services.pipeline_service.trigger_auto_execute")
     @patch("agenticops.services.pipeline_service.settings")
     def test_approves_l0_plan(self, mock_settings, mock_execute):
         """Should auto-approve L0 plan and chain to execute."""
-        mock_settings.auto_fix_enabled = True
-        mock_settings.executor_auto_approve_l0_l1 = True
         mock_settings.policy_engine_enabled = False
 
         mock_plan = MagicMock()
@@ -140,8 +165,6 @@ class TestTriggerAutoApprove:
     @patch("agenticops.services.pipeline_service.settings")
     def test_rejects_l2_plan_legacy(self, mock_settings, mock_execute):
         """Should NOT approve L2 plan in legacy mode (policy disabled)."""
-        mock_settings.auto_fix_enabled = True
-        mock_settings.executor_auto_approve_l0_l1 = True
         mock_settings.policy_engine_enabled = False
 
         mock_plan = MagicMock()
@@ -167,8 +190,6 @@ class TestTriggerAutoApprove:
     @patch("agenticops.services.pipeline_service.settings")
     def test_skips_non_draft_plan(self, mock_settings, mock_execute):
         """Should skip plan that's not in draft status."""
-        mock_settings.auto_fix_enabled = True
-        mock_settings.executor_auto_approve_l0_l1 = True
         mock_settings.policy_engine_enabled = False
 
         mock_plan = MagicMock()
@@ -194,41 +215,35 @@ class TestTriggerAutoApprove:
 class TestTriggerAutoExecute:
     """Tests for trigger_auto_execute gating."""
 
-    @patch("agenticops.services.pipeline_service.settings")
-    def test_disabled_when_auto_fix_off(self, mock_settings):
-        """Should skip when auto_fix_enabled is False."""
-        mock_settings.auto_fix_enabled = False
-        from agenticops.services.pipeline_service import trigger_auto_execute
-
-        trigger_auto_execute(fix_plan_id=1)
-
-    @patch("agenticops.services.pipeline_service.settings")
-    def test_disabled_when_executor_off(self, mock_settings):
-        """Should skip when executor_enabled is False."""
-        mock_settings.auto_fix_enabled = True
-        mock_settings.executor_enabled = False
-        from agenticops.services.pipeline_service import trigger_auto_execute
-
-        trigger_auto_execute(fix_plan_id=1)
-
-    @patch("agenticops.services.pipeline_service.settings")
     @patch("agenticops.services.pipeline_service.threading.Thread")
-    def test_spawns_thread_when_enabled(self, mock_thread_cls, mock_settings):
+    def test_disabled_when_auto_fix_off(self, mock_thread_cls):
+        """Should skip when auto_fix_enabled is False: no run is queued, no thread is started."""
+        from agenticops.services.pipeline_service import trigger_auto_execute
+
+        with switches(auto_fix_enabled=False):
+            assert trigger_auto_execute(fix_plan_id=1) is False
+        assert spawned(mock_thread_cls, "auto-execute-1") == []
+
+    @patch("agenticops.services.pipeline_service.threading.Thread")
+    def test_disabled_when_executor_off(self, mock_thread_cls):
+        """Should skip when executor_enabled is False: no run is queued, no thread is started."""
+        from agenticops.services.pipeline_service import trigger_auto_execute
+
+        with switches(executor_enabled=False):
+            assert trigger_auto_execute(fix_plan_id=1) is False
+        assert spawned(mock_thread_cls, "auto-execute-1") == []
+
+    @patch("agenticops.services.pipeline_service.threading.Thread")
+    def test_spawns_thread_when_enabled(self, mock_thread_cls):
         """Should spawn daemon thread when both switches are on."""
-        mock_settings.auto_fix_enabled = True
-        mock_settings.executor_enabled = True
         mock_thread = MagicMock()
         mock_thread_cls.return_value = mock_thread
 
         from agenticops.services.pipeline_service import trigger_auto_execute
-        trigger_auto_execute(fix_plan_id=99)
+        assert trigger_auto_execute(fix_plan_id=99) is True
 
-        mock_thread_cls.assert_called_once()
-        mock_thread.start.assert_called_once()
-        # Verify daemon=True
-        call_kwargs = mock_thread_cls.call_args[1]
-        assert call_kwargs["daemon"] is True
-        assert "auto-execute-99" in call_kwargs["name"]
+        (call,) = spawned(mock_thread_cls, "auto-execute-99")       # this thread, once — whatever else is running
+        assert call.kwargs["daemon"] is True and mock_thread.start.called
 
 
 # ── _restore_trace_id ─────────────────────────────────────────────────
