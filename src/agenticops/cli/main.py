@@ -928,6 +928,54 @@ def delete_schedule(
         raise typer.Exit(1)
 
 
+@delete_app.command("issues")
+def delete_issues(
+    all_issues: bool = typer.Option(False, "--all", help="Required: every issue (there is no partial delete)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Count what would go; change nothing"),
+    yes: bool = typer.Option(False, "--yes", help="Really delete — an online backup is taken first"),
+    reset_poll_cursors: bool = typer.Option(False, "--reset-poll-cursors",
+                                            help="Also forget the security poll's cursors (it backfills 24 hours)"),
+    move_knowledge: bool = typer.Option(False, "--move-knowledge",
+                                        help="Also move what was learned from issues (KB cases and SOPs, issue-derived "
+                                             "agent memory) into the backup folder — not deleted"),
+    memory_dir: Optional[List[Path]] = typer.Option(None, "--memory-dir",
+                                                    help="Another agent-memory root to move entries from (repeatable); "
+                                                         "this code's own is always included"),
+):
+    """Delete EVERY issue and everything that hangs off it (diagnoses, fix plans and their runs, timelines, signals,
+    steps). Change requests, the audit trails, inventory and reports stay. SQLite only; stop the service first."""
+    from agenticops.services import issue_purge
+
+    if not all_issues:
+        console.print("[red]Pass --all: this deletes every issue, there is no partial delete.[/red]")
+        raise typer.Exit(2)
+    init_db()
+    roots = None
+    if move_knowledge:
+        from agenticops.memory.agent_memory import AGENT_MEMORY_DIR
+        roots = [AGENT_MEMORY_DIR] + [p for p in (memory_dir or []) if Path(p).resolve() != AGENT_MEMORY_DIR.resolve()]
+    try:
+        report = issue_purge.purge(yes=yes, dry_run=dry_run, reset_poll_cursors=reset_poll_cursors,
+                                   move_knowledge=move_knowledge, memory_dirs=roots)
+    except issue_purge.PurgeRefused as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+    deleted = dict(report.deleted)
+    table = Table(title="Dry run — nothing changed" if dry_run else "Deleted")
+    table.add_column("table")
+    table.add_column("rows", justify="right")
+    for label, count in report.planned:
+        table.add_row(label, str(deleted.get(label, count)))
+    console.print(table)
+    if dry_run:
+        return
+    console.print(f"Backup: {report.backup}")
+    console.print(f"Chats unbound from an issue: {report.chats_unbound}")
+    if report.knowledge_moved_to:
+        console.print(f"Moved {len(report.moved_files)} knowledge / memory files to {report.knowledge_moved_to} "
+                      "(MANIFEST.tsv lists where each came from)")
+
+
 # ============================================================================
 # UPDATE Commands - Update Resources
 # ============================================================================
