@@ -1502,6 +1502,47 @@ SNS (CloudWatch alarms) cannot set headers: put `?token=<AIOPS_WEBHOOK_SECRET>` 
 
 **Identity hints**: parsers fill only what the source itself carries — `hints` (account / region / cluster / namespace / workload / pod / service), `observed_at` (the source's fault time, UTC) and `alarm_name` — and `alert_processor` hands them to the Signal Gate unchanged. Prometheus' `service` label is not a hint (it is usually the scrape target's Service); CloudWatch K8s hints come only from `ContainerInsights` dimensions, and its region only from `AlarmArn`.
 
+
+---
+
+## Clearing Every Issue — `aiops delete issues --all` (MVP-2.9.0)
+
+For starting the issue list over (the owner's reset of 2026-11-23). It deletes every issue **and everything keyed by an
+issue number**, because SQLite reuses ids: once the table is empty the next issue is I#1 again, and any diagnosis, fix
+plan, run, timeline event, signal, recorded step, «later», chat binding, ITSM link or case record left behind would
+quietly belong to the new I#1.
+
+```bash
+aiops service stop                                    # it refuses while another AgenticOps process holds the lock
+aiops delete issues --all --dry-run                   # rows per table, nothing changed
+aiops delete issues --all --yes --reset-poll-cursors --move-knowledge
+```
+
+| | |
+|---|---|
+| Refused (nothing done) | without `--yes` (a dry run needs none); a database that is not SQLite; another process holding `<data_dir>/.scheduler.lock` |
+| Backup first | an online backup (SQLite backup API — the database runs in WAL mode, the `.db` file alone is not a full copy) to `<data_dir>/backups/pre-delete-issues-<UTC>.db`, checked (integrity, same issue count) before anything is deleted |
+| Deleted, in ONE transaction | `agent_steps` / `attention_snoozes` rows of `I…`; the `itsm_links` of issues and fix plans; fix plans (`plan_kind='fix'`) and their runs; every RCA result; the issues' timeline (notes included); every signal (`alert_events` — old ones would make the first re-detected signals noise); case and SOP records made from an issue; the issues |
+| Kept | change requests with their plans, runs and timeline; `audit_logs` and the command ledger; inventory, graph, security snapshots, reports, accounts, users, schedules, settings. A chat bound to an issue stays, unbound from it — its account binding stays |
+| `--reset-poll-cursors` | the security poll's cursors go: its next run backfills 24 hours (older GuardDuty / CloudTrail findings do not come back) |
+| `--move-knowledge` | moves what was learned from issues into `<backup>-knowledge/` (with `MANIFEST.tsv`), never deletes it: the knowledge base's case and SOP files (their records and vectors leave the database — re-embed after putting them back) and the agent-memory entries written from an issue (`related_issue_id`) or by the detect agent (`detect/auto_*`). `--memory-dir DIR` (repeatable) adds another checkout's `agent-memory` |
+
+There is no Web API, Web UI or agent tool for it — an administrator runs it in a terminal. To re-scan afterwards, hold
+the automatic steps off while it runs (`AIOPS_AUTO_RCA_ENABLED`, `AIOPS_AUTO_FIX_ENABLED`,
+`AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1`, `AIOPS_EXECUTOR_ENABLED`, `AIOPS_NOTIFICATIONS_ENABLED` = `false`) and run, in
+order: `aiops run schedule resource-scan`, `aiops run schedule galaxy-auto-build` (an incremental build WITH the model —
+after a fresh scan most content hashes change, so it is not cheap: $10.15 on the preview with Fable 5.2; the reset itself
+used a rule-only refresh, `galaxy.builder.build_graph("k8s-discovery", llm=False)`, which has no CLI),
+`aiops run schedule security-posture-snapshot`,
+`aiops run detect`, `aiops run schedule security-incremental-poll`. The first poll after a cursor reset pages every
+CloudTrail management event of the last 24 hours at CloudTrail's rate limit (about 2 requests a second per account and
+region) — measured: almost 3 hours in all for an account whose us-east-1 is busy; run one poll per account at a time.
+**Known limit**: CloudTrail's pagination tokens live one hour and the window is paged in one go, so a region that takes longer
+to page fails (`InvalidNextTokenException`), keeps nothing and writes no cursor — the next poll starts the same 24 hours
+again (us-east-1 of one account: 60 minutes from inside AWS and 63 through one network both got through; over 2 hours through a
+slow proxy failed).
+Detection runs read-only in code (N31, as diagnosis and planning since N30).
+
 ---
 
 ## CLI Slash Command Quick Reference
