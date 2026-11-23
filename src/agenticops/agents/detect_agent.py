@@ -388,8 +388,11 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                 )
 
                 from agenticops.agents.preamble import invoke_with_retry, infer_parent_agent
+                from agenticops.run_context import run_context
                 from agenticops.services.agent_log_service import track_agent
-                with track_agent("detect", "check_health", f"scope={scope} deep={deep}", parent_agent=infer_parent_agent()) as tracker:
+                # A detection only reads (MVP-2.9.0 N31); the parallel path sets the same flag in its workers
+                with run_context(read_only_run="detect"), \
+                        track_agent("detect", "check_health", f"scope={scope} deep={deep}", parent_agent=infer_parent_agent()) as tracker:
                     result = invoke_with_retry(agent, f"Check health scope={scope} deep={deep}")
                     tracker.set_result(result)
                 return (str(result) + "\n\n" + _DOWNGRADE_NOTE) if _downgraded else str(result)

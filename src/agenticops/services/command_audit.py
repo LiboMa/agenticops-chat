@@ -167,6 +167,8 @@ def read_only_refusal(*, tool: str, tier: str, command: str, account: str = "", 
 _READ_ONLY_RUNS = {
     "diagnosis": ("a diagnosis run", "name it in your recommendations instead"),
     "plan": ("a fix-plan run", "write it as a step of the plan instead — it runs once the plan is approved"),
+    # N31: a detection writes nothing but the issues it opens
+    "detect": ("a detection run", "describe it in the issue you open instead — a fix is planned and approved later"),
 }
 
 
