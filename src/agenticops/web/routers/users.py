@@ -7,7 +7,7 @@ is turned on (S2 rework review). The web always signs in, so the caller's row is
 (web/deps.require_authenticated_user resolves the Bearer token in both modes). Plain `def` handlers.
 """
 import hashlib
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -15,7 +15,8 @@ from fastapi.responses import JSONResponse
 from agenticops.services import user_admin
 from agenticops.web.deps import require_session_user
 from agenticops.web.schemas import (APIKeyCreate, APIKeyCreatedResponse, APIKeyResponse, APIKeyRotate,
-                                    PasswordResetResponse, UserCreateBody, UserCreatedResponse, UserPatchBody, UserRow)
+                                    PasswordResetRequest, PasswordResetResponse, UserCreateBody, UserCreatedResponse,
+                                    UserPatchBody, UserRow)
 
 router = APIRouter(tags=["users"])
 
@@ -121,8 +122,14 @@ def api_delete_user(user_id: int, caller=Depends(users_admin)):
 
 
 @router.post("/api/users/{user_id}/reset-password", response_model=PasswordResetResponse)
-def api_reset_password(user_id: int, request: Request, caller=Depends(users_admin)):
+def api_reset_password(user_id: int, request: Request, body: Optional[PasswordResetRequest] = None,
+                       caller=Depends(users_admin)):
+    """A new password for a user: the one the admin typed (body `password`, MVP-2.9.0 N34) or a generated one,
+    shown once. A typed one is never sent back."""
+    typed = body.password if body is not None else None
     try:
-        return {"password": user_admin.reset_password(user_id, caller=caller, keep_token_hash=_token_hash(request))}
+        generated = user_admin.reset_password(user_id, caller=caller, keep_token_hash=_token_hash(request),
+                                              password=typed)
     except user_admin.UserAdminError as e:
         return _refused(e)
+    return {"password": generated, "generated": typed is None}

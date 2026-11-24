@@ -148,16 +148,27 @@ def update_user(user_id: int, *, role: Optional[str] = None, settings_view: Opti
         return _row(u)
 
 
-def reset_password(user_id: int, *, caller, keep_token_hash: Optional[str] = None) -> str:
-    from agenticops.auth.service import hash_password
-    password = secrets.token_urlsafe(12)
+def reset_password(user_id: int, *, caller, keep_token_hash: Optional[str] = None,
+                   password: Optional[str] = None) -> Optional[str]:
+    """Set a new password: the one the admin typed (MVP-2.9.0 N34 — checked by auth.service.password_problem; a
+    refusal changes nothing) or, without one, a generated one. Returns the generated password, None for a typed one
+    (the admin knows it; it is never sent back). Either way the user's sessions end (the caller's own browser is kept
+    when they reset themselves) and one audit row says how it was set — never what."""
+    from agenticops.auth.service import PASSWORD_RULE, hash_password, password_problem
+    typed = password is not None
+    if typed:
+        problem = password_problem(password)
+        if problem:
+            raise UserAdminError(422, "weak_password", f"the password does not meet the rule ({PASSWORD_RULE})",
+                                 extra={"reason": problem})
+    new = password if typed else secrets.token_urlsafe(12)
     with get_db_session() as s:
         u = _get(s, user_id)
-        u.password_hash = hash_password(password)
+        u.password_hash = hash_password(new)
         own = caller is not None and getattr(caller, "id", None) == u.id
         _end_sessions(s, u.id, keep_token_hash if own else None)
-        _audit(s, "user.reset_password", u, caller)
-        return password
+        _audit(s, "user.reset_password", u, caller, new={"method": "typed" if typed else "generated"})
+        return None if typed else new
 
 
 # change requests that wait on their requester (attention shows them only to that requester), or may come back to

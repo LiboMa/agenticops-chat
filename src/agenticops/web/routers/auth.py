@@ -89,8 +89,15 @@ async def api_get_current_user(request: Request):
 
 @router.put("/api/users/me/password")
 def api_change_password(request_data: PasswordChangeRequest, user=Depends(_session_user)):
-    """Change the current user's password — from a signed-in session only (an API key never changes it)."""
+    """Change the current user's password — from a signed-in session only (an API key never changes it). The new one
+    must meet the password rule (MVP-2.9.0 N34): 422 `weak_password` otherwise, nothing changed."""
     from agenticops.auth import AuthService
+    from agenticops.auth.service import PASSWORD_RULE, password_problem
+    problem = password_problem(request_data.new_password)
+    if problem:
+        return JSONResponse(status_code=422, content={"detail": {
+            "detail": f"the new password does not meet the rule ({PASSWORD_RULE})", "code": "weak_password",
+            "reason": problem}})
     if not AuthService.update_password(user.id, request_data.old_password, request_data.new_password):
         raise HTTPException(status_code=400, detail="Invalid current password")
     return {"message": "Password changed successfully"}

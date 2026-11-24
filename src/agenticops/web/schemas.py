@@ -1266,5 +1266,12 @@ class UserCreatedResponse(BaseModel):
     password: str                                    # shown once; never stored in clear, never audited
 
 
+class PasswordResetRequest(BaseModel):
+    """An admin's reset (MVP-2.9.0 N34): the password they typed, or nothing for a generated one. The length cap here
+    only keeps a huge body away from the hash; the rule itself is auth.service.password_problem."""
+    password: Optional[str] = Field(None, max_length=1024)
+
+
 class PasswordResetResponse(BaseModel):
-    password: str
+    password: Optional[str] = None      # the generated password, shown once; None when the admin typed it
+    generated: bool = True
