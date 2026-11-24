@@ -1534,14 +1534,11 @@ order: `aiops run schedule resource-scan`, `aiops run schedule galaxy-auto-build
 after a fresh scan most content hashes change, so it is not cheap: $10.15 on the preview with Fable 5.2; the reset itself
 used a rule-only refresh, `galaxy.builder.build_graph("k8s-discovery", llm=False)`, which has no CLI),
 `aiops run schedule security-posture-snapshot`,
-`aiops run detect`, `aiops run schedule security-incremental-poll`. The first poll after a cursor reset pages every
-CloudTrail management event of the last 24 hours at CloudTrail's rate limit (about 2 requests a second per account and
-region) — measured: almost 3 hours in all for an account whose us-east-1 is busy; run one poll per account at a time.
-**Known limit**: CloudTrail's pagination tokens live one hour and the window is paged in one go, so a region that takes longer
-to page fails (`InvalidNextTokenException`), keeps nothing and writes no cursor — the next poll starts the same 24 hours
-again (us-east-1 of one account: 60 minutes from inside AWS and 63 through one network both got through; over 2 hours through a
-slow proxy failed).
-Detection runs read-only in code (N31, as diagnosis and planning since N30).
+`aiops run detect`, `aiops run schedule security-incremental-poll`. The poll queries CloudTrail once per high-risk event name (N33,
+2026-11-24 — before, it paged every management event of the window, and CloudTrail's one-hour pagination tokens made a
+busy region fail and start over); after a cursor reset its time goes into feeding the signals through the Signal Gate
+(about an hour for ~3,600–5,400 signals). Detection runs read-only in code (N31, as diagnosis and planning since N30), each account's worker bound to that account
+(N32: it lists only its account's resources, and the issues it opens carry the account).
 
 ---
 
