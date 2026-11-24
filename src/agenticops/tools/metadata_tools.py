@@ -113,6 +113,24 @@ def get_active_account() -> str:
 _MANAGED_RESOURCES_CAP = 50     # rows get_managed_resources hands over; it does not say when there were more
 
 
+def _bound_resource_list(query, rows: list[dict]) -> str:
+    """A bound run's list (N32): whole rows, as many as fit the list limit, and — when that is not all of them — a
+    last line saying how many there are and of which types, so the model can ask again by type or region."""
+    from sqlalchemy import func
+    total = query.count()
+    shown = rows
+    while shown and len(json.dumps(shown, default=str)) > MAX_LIST_RESULT_CHARS:
+        shown = shown[:-1]
+    text = json.dumps(shown, default=str)
+    if len(shown) == total:
+        return text
+    by_type = (query.with_entities(CloudResource.resource_type, func.count(CloudResource.id))
+               .group_by(CloudResource.resource_type).order_by(func.count(CloudResource.id).desc()).all())
+    types = ", ".join(f"{t} {n}" for t, n in by_type)
+    return (f"{text}\n[showing {len(shown)} of {total} managed resources of this account — by type: {types}; "
+            f"call again with resource_type or region for the rest]")
+
+
 @tool
 def get_managed_resources(resource_type: str = "", region: str = "") -> str:
     """List resources from the inventory, optionally filtered.
@@ -124,11 +142,14 @@ def get_managed_resources(resource_type: str = "", region: str = "") -> str:
     Returns:
         JSON list of resources with id, resource_id, type, name, region, status.
     """
+    from agenticops.run_context import get_run_context
+    # A run bound to one account (a per-account detection, a bound chat) lists only that account's rows (N32)
+    bound = get_run_context().bound_account_id
     session = get_session()
     try:
         cloud_accounts = session.query(CloudAccount).filter(CloudAccount.is_enabled == True).all()  # noqa: E712
         if cloud_accounts:
-            account_ids = [a.id for a in cloud_accounts]
+            account_ids = [a.id for a in cloud_accounts if bound is None or a.id == bound]
             query = session.query(CloudResource).filter(
                 CloudResource.account_id.in_(account_ids),
                 CloudResource.managed == True,  # noqa: E712
@@ -172,6 +193,8 @@ def get_managed_resources(resource_type: str = "", region: str = "") -> str:
                     "status": r.status,
                     "managed": r.managed,
                 })
+            if bound is not None:
+                return _bound_resource_list(query, result)
             return _truncate(json.dumps(result, default=str), MAX_LIST_RESULT_CHARS)
 
         return json.dumps({"error": "No enabled accounts found. Add accounts via CLI or Web UI."})
@@ -387,7 +410,12 @@ def _create_health_issue_impl(
     RCA is not meaningful.
     """
     try:
+        from agenticops.run_context import get_run_context
         from agenticops.services.signal_gate import SignalInput, process_signal
+
+        # A run bound to one account states it (N32): an issue about `root`, an IAM user or anything no inventory
+        # holds still belongs to the account it was found in, and the same finding in two accounts is two issues.
+        bound = get_run_context().bound_account_id
 
         try:
             metric_data_parsed = json.loads(metric_data) if isinstance(metric_data, str) else metric_data
@@ -409,6 +437,7 @@ def _create_health_issue_impl(
             description=description,
             severity=severity,
             resource_id=resource_id or "",
+            account_id=str(bound) if bound is not None else "",
             issue_type=issue_type or "",
             upstream_key=alarm_name or "",
             kind="detection",
