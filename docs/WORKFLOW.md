@@ -1398,6 +1398,14 @@ aiops users disable demo                         # its sessions and API keys sto
 | Any other write (approve, change, run, settings, …) | yes (RBAC rules apply) | 403 `read_only` | 403 `read_only` |
 | Settings page | yes | hidden | read-only |
 
+**Resetting a password** (admins, User management → the reset icon on a row; `POST /api/users/{id}/reset-password`):
+«Generate a random password» shows a new one once (as before); «Set a password» (MVP-2.9.0 N34) takes the one the admin
+types twice and never shows it back (`{"password": null, "generated": false}`). Either way the user's signed-in
+browsers sign out (yours stays when you reset yourself) and one `user.reset_password` audit row records the method —
+never the password. **The password rule** — for a typed reset and for a user's own change (`PUT /api/users/me/password`):
+8–128 characters, not only spaces, no control characters; otherwise 422 `weak_password` and nothing changes. Stored
+passwords are never re-checked. New users still get a generated one-time password.
+
 A viewer's chat has no sub-agents, approvals, changes or configuration; CLI tools refuse write commands and Kubernetes secret
 reads. It still reads everything a reader sees, and its turns spend tokens on the main agent's model.
 
