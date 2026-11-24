@@ -112,7 +112,7 @@ def test_a_location_with_no_candidate_cannot_be_judged(db, status):
 
 def test_stats_with_nothing_to_divide_by(db):
     out = rl.location_stats(db, 30)
-    assert out == {"days": 30, "top1": None, "judged": 0, "anchoring_rate": None, "issues_with_resource_id": 0,
+    assert out == {"days": 30, "top1": None, "judged": 0, "correct": 0, "rcas": 0, "anchoring_rate": None, "issues_with_resource_id": 0,
                    "anchor_status_counts": {"anchored": 0, "account_level": 0, "ambiguous": 0, "unanchored": 0},
                    "location_status_counts": {"valid": 0, "partial": 0, "invalid": 0, "absent": 0}}
 
@@ -134,11 +134,13 @@ def test_stats_count_the_window_only(db):
     _rca(db, old, "valid", "incorrect", created_at=NOW - timedelta(days=40))
     out = rl.location_stats(db, 30)
     assert (out["judged"], out["top1"]) == (4, 0.5)
+    assert (out["correct"], out["rcas"]) == (2, 6)          # «2 of 4 judged correct», «4 of 6 RCAs judged»
     assert out["location_status_counts"] == {"valid": 2, "partial": 2, "invalid": 1, "absent": 1}
     assert out["anchor_status_counts"] == {"anchored": 2, "account_level": 1, "ambiguous": 1, "unanchored": 2}
     assert (out["issues_with_resource_id"], out["anchoring_rate"]) == (5, 0.6)
     wide = rl.location_stats(db, 60)
     assert (wide["judged"], wide["top1"], wide["anchor_status_counts"]["anchored"]) == (5, 0.4, 3)
+    assert (wide["correct"], wide["rcas"]) == (2, 7)
 
 
 def test_stats_endpoint(db):

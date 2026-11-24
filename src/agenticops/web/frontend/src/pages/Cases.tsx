@@ -1,18 +1,27 @@
 import { useLayoutEffect, useRef } from "react";
-import { Navigate, Outlet, useLocation, useMatch, useNavigate, useOutletContext, useParams } from "react-router-dom";
+import { Navigate, Outlet, useLocation, useMatch, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router-dom";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { CaseQueue } from "@/components/cases/CaseQueue";
+import { WaitingView } from "@/components/cases/WaitingView";
+import { Spinner } from "@/components/ui/Spinner";
+import { useBootstrap, useReadOnly } from "@/hooks/useBootstrap";
 import IssueDetail from "@/pages/IssueDetail";
-import { SPLIT_MEDIA, backTarget } from "@/lib/caseQueue";
+import { SPLIT_MEDIA, backTarget, currentView } from "@/lib/caseQueue";
 import { legacyIssuesViewRedirect } from "@/lib/workitemRoutes";
 
 type PaneContext = { paneRef: React.RefObject<HTMLDivElement>; wide: boolean };
 
 /** Cases (MVP-2.7.0 S4): the queue beside the reading pane at ≥ 1280px (the queue never remounts as you select);
- *  below that, the list and a full-screen case, one at a time. */
+ *  below that, the list and a full-screen case, one at a time. MVP-2.8.0: the to-do workbench merged in — the
+ *  default view «在等我» (WaitingView, issues and changes waiting on you) — a viewer, who can act on nothing, lands on
+ *  «全部»; until bootstrap says which, a URL without a view waits (no «在等我» flash for a viewer). */
 export default function Cases() {
+  const { t } = useLocale();
   const location = useLocation();
+  const [params] = useSearchParams();
+  const boot = useBootstrap();
+  const readOnly = useReadOnly();
   const wide = useMediaQuery(SPLIT_MEDIA);
   const match = useMatch("/app/issues/:id");
   const paneRef = useRef<HTMLDivElement>(null);
@@ -20,6 +29,10 @@ export default function Cases() {
   const redirect = legacyIssuesViewRedirect(location.search);
   if (redirect) return <Navigate to={redirect} replace />;
   const selectedId = match?.params.id ? Number(match.params.id) : null;
+  if (selectedId == null) {
+    if (!boot.data && !params.get("view")) return <Spinner label={t("common.loading")} />;
+    if (currentView(params, readOnly) === "waiting") return <WaitingView />;
+  }
 
   if (!wide) {
     return selectedId == null ? <CaseQueue selectedId={null} wide={false} /> : <Outlet context={{ paneRef, wide } satisfies PaneContext} />;

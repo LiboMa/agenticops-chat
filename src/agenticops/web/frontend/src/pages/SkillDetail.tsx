@@ -6,6 +6,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { useLocale } from "@/i18n/LocaleContext";
+import { useCloseOnEscape } from "@/hooks/useCloseOnEscape";
 import {
   useSkill,
   useUpdateSkill,
@@ -15,6 +16,7 @@ import {
   useImproveSkill,
 } from "@/hooks/useSkills";
 import { useReadOnly } from "@/hooks/useBootstrap";
+import { formatFullDate } from "@/lib/formatDate";
 
 /* -- Tab type ----------------------------------------------------- */
 
@@ -31,6 +33,8 @@ function ImproveDialog({
   onClose: () => void;
   onSuccess: () => void;
 }) {
+  const { t } = useLocale();
+  useCloseOnEscape(onClose);        // the house rule: a dialog closes on Escape
   const [improvement, setImprovement] = useState("");
   const improveMut = useImproveSkill();
 
@@ -46,18 +50,18 @@ function ImproveDialog({
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
       <div className="relative bg-background rounded-xl shadow-xl w-full max-w-lg mx-4">
         <div className="px-6 py-4 border-b border-border flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-foreground">Improve Skill</h3>
+          <h3 className="text-lg font-semibold text-foreground">{t("skills.improveTitle")}</h3>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-xl leading-none">&times;</button>
         </div>
         <div className="px-6 py-4 space-y-4">
           <div>
             <label className="text-sm font-medium text-foreground block mb-1">
-              What should be improved?
+              {t("skills.improveAsk")}
             </label>
             <textarea
               className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none resize-none"
               rows={4}
-              placeholder="e.g. Add troubleshooting steps for connection timeout errors, improve the decision tree for memory pressure scenarios"
+              placeholder={t("skills.improvePh")}
               value={improvement}
               onChange={(e) => setImprovement(e.target.value)}
             />
@@ -77,7 +81,7 @@ function ImproveDialog({
             disabled={!improvement.trim() || improveMut.isPending}
             className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-50"
           >
-            {improveMut.isPending ? "Improving..." : "Improve with LLM"}
+            {improveMut.isPending ? t("skills.improving") : t("skills.improveGo")}
           </button>
         </div>
       </div>
@@ -98,12 +102,14 @@ function DeleteConfirmDialog({
   onConfirm: () => void;
   deleting: boolean;
 }) {
+  const { t } = useLocale();
+  useCloseOnEscape(onClose);        // the house rule: a dialog closes on Escape
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="bg-background rounded-lg shadow-lg w-full max-w-sm p-6">
-        <h3 className="text-lg font-semibold text-foreground mb-2">Delete Draft</h3>
+        <h3 className="text-lg font-semibold text-foreground mb-2">{t("skills.deleteDraft")}</h3>
         <p className="text-sm text-muted-foreground mb-4">
-          Are you sure you want to delete <strong>{skillName}</strong>? This action cannot be undone.
+          {t("skills.deleteAsk")} <strong>{skillName}</strong>{t("skills.deleteWarn")}
         </p>
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 text-sm text-foreground border border-border rounded-lg hover:bg-secondary">
@@ -209,7 +215,7 @@ export default function SkillDetail() {
     [reviewMut.data],
   );
 
-  if (isLoading) return <Spinner label="Loading skill..." />;
+  if (isLoading) return <Spinner label={t("skills.loadingOne")} />;
   if (error) return <ErrorBanner message={(error as Error).message} onRetry={() => refetch()} />;
   if (!skill) return null;
 
@@ -225,7 +231,7 @@ export default function SkillDetail() {
       { name: decodedName, content: editContent },
       {
         onSuccess: () => {
-          setActionMsg("Saved successfully");
+          setActionMsg(t("skills.detail.saved"));
           setTab("view");
           setEditContent(null);
           refetch();
@@ -245,7 +251,7 @@ export default function SkillDetail() {
     setActionMsg("");
     promoteMut.mutate(decodedName, {
       onSuccess: () => {
-        setActionMsg("Promoted to published");
+        setActionMsg(t("skills.detail.promoted"));
         refetch();
       },
     });
@@ -274,15 +280,15 @@ export default function SkillDetail() {
         <svg className="h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
         </svg>
-        Back to Skills
+        {t("skills.back")}
       </Link>
 
       {/* Header card */}
       <Card>
         <CardBody>
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <div className="flex items-center gap-3">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-3">
                 <h1 className="text-2xl font-semibold text-foreground">{skill.name}</h1>
                 {skill.is_draft ? (
                   <Badge className="bg-amber-100 text-amber-700">Draft</Badge>
@@ -303,12 +309,12 @@ export default function SkillDetail() {
                     <span className="font-mono"> @{skill.source_ref.slice(0, 12)}</span>
                   )}
                   {skill.imported_at && (
-                    <> · {t("skills.importedAt")} {new Date(skill.imported_at).toLocaleString()}</>
+                    <> · {t("skills.importedAt")} {formatFullDate(skill.imported_at)}</>
                   )}
                 </p>
               )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {!readOnly && (
                 <button
                   onClick={() => setShowImprove(true)}
@@ -363,7 +369,7 @@ export default function SkillDetail() {
               </div>
             )}
             <div>
-              <span className="text-muted-foreground block mb-1">Ref Count</span>
+              <span className="text-muted-foreground block mb-1">{t("skills.refCount")}</span>
               <span>{skill.ref_count}</span>
             </div>
           </div>
@@ -409,7 +415,7 @@ export default function SkillDetail() {
                 dangerouslySetInnerHTML={{ __html: bodyHtml }}
               />
             ) : (
-              <p className="text-sm text-muted-foreground">No content.</p>
+              <p className="text-sm text-muted-foreground">{t("skills.noContent")}</p>
             )}
           </CardBody>
         </Card>
@@ -450,7 +456,7 @@ export default function SkillDetail() {
             <div className="mb-4">
               <Badge className="bg-blue-100 text-blue-700">{reviewMut.data.diff_summary}</Badge>
               {reviewMut.data.is_new && (
-                <Badge className="ml-2 bg-amber-100 text-amber-700">New Skill</Badge>
+                <Badge className="ml-2 bg-amber-100 text-amber-700">{t("skills.newBadge")}</Badge>
               )}
             </div>
             <div className="border border-border rounded-lg overflow-hidden">
@@ -485,7 +491,7 @@ export default function SkillDetail() {
                   disabled={promoteMut.isPending}
                   className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50"
                 >
-                  {promoteMut.isPending ? "Promoting..." : "Promote to Published"}
+                  {promoteMut.isPending ? t("skills.promoting") : t("skills.promoteDraft")}
                 </button>
               </div>
             )}
@@ -500,7 +506,7 @@ export default function SkillDetail() {
             onClick={() => setShowDelete(true)}
             className="px-4 py-2 text-sm font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100"
           >
-            Delete Draft
+            {t("skills.deleteDraft")}
           </button>
         </div>
       )}

@@ -70,3 +70,22 @@ describe("renderMarkdown protected anchors (R3)", () => {
     expect(html).not.toContain("<a");
   });
 });
+
+describe("renderMarkdown code-copy buttons (2026-11-07, chat only)", () => {
+  const md = "text\n```bash\nls -la\n```";
+  it("one copy button per fenced block when asked", () => {
+    expect((renderMarkdown(md, { copyButtons: true }).match(/data-md-copy/g) ?? []).length).toBe(1);
+  });
+  it("unchanged without the option (reports)", () => {
+    expect(renderMarkdown(md)).not.toContain("data-md-copy");
+    expect(renderMarkdown(md)).toBe(renderMarkdown(md, {}));
+  });
+});
+
+describe("renderMarkdown copy label", () => {
+  it("is localized and escaped", () => {
+    const html = renderMarkdown("```\nx\n```", { copyButtons: true, copyLabel: '复制<"' });
+    expect(html).toContain("复制&lt;&quot;");
+    expect(html).not.toContain('复制<"');
+  });
+});

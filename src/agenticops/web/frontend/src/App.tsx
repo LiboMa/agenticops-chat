@@ -1,16 +1,19 @@
 import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { legacyInboxRedirect } from "@/lib/workitemRoutes";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { AppShell } from "@/components/layout/AppShell";
+import { ShellSwitch } from "@/components/layout/ShellSwitch";
 import { HomeResolver } from "@/components/layout/HomeResolver";
 import { loginPath } from "@/lib/home";
 import { queryClient } from "@/queryClient";
 import { Spinner } from "@/components/ui/Spinner";
 import { getAuthToken } from "@/api/client";
 import { hubRedirect } from "@/lib/plans";
-import { useCanViewSettings } from "@/hooks/useBootstrap";
+import { useBootstrap, useCanManageUsers } from "@/hooks/useBootstrap";
+import { settingsGate } from "@/lib/permissions";
 
 const Login = lazy(() => import("@/pages/Login"));
+const Setup = lazy(() => import("@/pages/Setup"));
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Chat = lazy(() => import("@/pages/Chat"));
 const Cases = lazy(() => import("@/pages/Cases"));
@@ -33,10 +36,21 @@ const SkillDetail = lazy(() => import("@/pages/SkillDetail"));
 const Galaxy = lazy(() => import("@/pages/Galaxy"));
 const Security = lazy(() => import("@/pages/Security"));
 const NotFound = lazy(() => import("@/pages/NotFound"));
+const Users = lazy(() => import("@/pages/Users"));
+const ApiKeys = lazy(() => import("@/pages/ApiKeys"));
+// NewUI (MVP-2.9.0): its lenses are a chunk of their own; its shell is another, loaded by components/layout/NewFrame
+const NewLenses = lazy(() => import("@/newui/NewLenses"));
 
 /** Settings is all configuration: a viewer whose account may not view it gets the not-found page. */
 function SettingsGate({ children }: { children: React.ReactNode }) {
-  return useCanViewSettings() ? <>{children}</> : <NotFound />;
+  const gate = settingsGate(useBootstrap());
+  return gate === "open" ? <>{children}</> : gate === "wait" ? null : <NotFound />;
+}
+
+/** MVP-2.8.0 S2 rework: user management is an admin's (lib/permissions.canManageUsers); anyone else gets the 404
+ *  page, as Settings does — the API refuses them anyway. */
+function UsersGate({ children }: { children: React.ReactNode }) {
+  return useCanManageUsers() ? <>{children}</> : <NotFound />;
 }
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -48,6 +62,12 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 
 /** /app/changes and /app/audit are tabs of Plans & changes since MVP-2.7.0 S3; old links keep their query. */
+/** /app/inbox → Issues · 在等我, the search and a valid selected item kept (lib/workitemRoutes.legacyInboxRedirect). */
+function InboxRedirect() {
+  const { search } = useLocation();
+  return <Navigate to={legacyInboxRedirect(search)} replace />;
+}
+
 function HubRedirect({ tab }: { tab: "changes" | "audit" }) {
   const { search } = useLocation();
   return <Navigate to={hubRedirect(tab, search)} replace />;
@@ -66,7 +86,11 @@ export default function App() {
               </Suspense>
             }
           />
-          <Route path="/app" element={<RequireAuth><AppShell /></RequireAuth>}>
+          {/* the setup overview (N23): open before and after signing in, so outside both shells */}
+          <Route path="/app/setup" element={<Suspense fallback={<Spinner />}><Setup /></Suspense>} />
+          {/* one layout route, two shells (round 3): the classic workspace, or NewUI's frame around the same pages */}
+          <Route path="/app" element={<RequireAuth><ShellSwitch /></RequireAuth>}>
+            <Route path="new/*" element={<Suspense fallback={<Spinner />}><NewLenses /></Suspense>} />
             {/* /app: a pinned home, the last place, or Chat (MVP-2.7.0); the dashboard lives at /app/overview */}
             <Route index element={<HomeResolver />} />
             <Route
@@ -93,6 +117,9 @@ export default function App() {
                 </Suspense>
               }
             />
+            {/* The to-do workbench (MVP-2.8.0 S2): the item in ?item=, so the queue never remounts */}
+            {/* MVP-2.8.0: the to-do workbench merged into Issues («在等我»); the old address keeps working */}
+            <Route path="inbox" element={<InboxRedirect />} />
             {/* Cases (MVP-2.7.0 S4): a layout route, so the queue stays mounted while you move between cases */}
             <Route path="issues" element={<Suspense fallback={<Spinner />}><Cases /></Suspense>}>
               <Route index element={<Suspense fallback={<Spinner />}><CasePlaceholder /></Suspense>} />
@@ -147,6 +174,22 @@ export default function App() {
               element={
                 <Suspense fallback={<Spinner />}>
                   <SettingsGate><Settings /></SettingsGate>
+                </Suspense>
+              }
+            />
+            <Route
+              path="account/api-keys"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <ApiKeys />
+                </Suspense>
+              }
+            />
+            <Route
+              path="users"
+              element={
+                <Suspense fallback={<Spinner />}>
+                  <UsersGate><Users /></UsersGate>
                 </Suspense>
               }
             />

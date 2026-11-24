@@ -1,11 +1,18 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { DataTable, type Column } from "@/components/ui/DataTable";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Badge } from "@/components/ui/Badge";
-import { formatShortDate } from "@/lib/formatDate";
+import { Switch } from "@/components/ui/Switch";
+import { formatElapsed, formatShortDate } from "@/lib/formatDate";
+import { StatusText, type StatusTone } from "@/components/ui/StatusText";
+import { StaleNotice } from "@/components/ui/QueryState";
+import { queryView } from "@/lib/queryState";
+import { cronSummary, runState, type RunKind } from "@/lib/scheduleRows";
+import { useLocale } from "@/i18n/LocaleContext";
+import { useCloseOnEscape } from "@/hooks/useCloseOnEscape";
 import {
   useSchedules,
   useCreateSchedule,
@@ -22,33 +29,19 @@ const PIPELINE_OPTIONS = ["FullScan", "Monitoring", "DailyReport", "HealthPatrol
 const REPORT_TYPES = ["", "daily", "incident", "inventory"] as const;
 const SCAN_SCOPES = ["all", "computing", "networking", "databases", "storage", "security", "billing"] as const;
 
-export const PIPELINE_META: Record<string, { label: string; desc: string; badge: string }> = {
-  FullScan: {
-    label: "Full Scan",
-    desc: "Scan all cloud resources and detect anomalies across your infrastructure.",
-    badge: "bg-blue-100 text-blue-700",
-  },
-  Monitoring: {
-    label: "Monitoring",
-    desc: "Continuous monitoring of key metrics, alerts, and service health.",
-    badge: "bg-emerald-100 text-emerald-700",
-  },
-  DailyReport: {
-    label: "Daily Report",
-    desc: "Generate a daily summary of infrastructure health, issues, and trends.",
-    badge: "bg-amber-100 text-amber-700",
-  },
-  HealthPatrol: {
-    label: "Health Patrol",
-    desc: "Proactive health check — pulls alerts from monitoring providers and runs anomaly detection to find issues before they escalate.",
-    badge: "bg-violet-100 text-violet-700",
-  },
-  AgentChain: {
-    label: "Agent Chain",
-    desc: "Custom multi-agent workflow driven by a natural language prompt.",
-    badge: "bg-rose-100 text-rose-700",
-  },
+/** A built-in pipeline's badge colour; its name and description are `schedules.pipeline.<name>.label` / `.desc`
+ *  in the locale files (`pipelineLabel` / `pipelineDesc`). A pipeline that is not listed shows its own name. */
+export const PIPELINE_META: Record<string, { badge: string }> = {
+  FullScan: { badge: "bg-blue-100 text-blue-700" },
+  Monitoring: { badge: "bg-emerald-100 text-emerald-700" },
+  DailyReport: { badge: "bg-amber-100 text-amber-700" },
+  HealthPatrol: { badge: "bg-violet-100 text-violet-700" },
+  AgentChain: { badge: "bg-rose-100 text-rose-700" },
 };
+export const pipelineLabel = (name: string, t: (key: string) => string): string =>
+  name in PIPELINE_META ? t("schedules.pipeline." + name + ".label") : name;
+export const pipelineDesc = (name: string, t: (key: string) => string): string | null =>
+  name in PIPELINE_META ? t("schedules.pipeline." + name + ".desc") : null;
 
 /* ------------------------------------------------------------------ */
 /*  Schedule form modal                                                */
@@ -62,6 +55,8 @@ interface FormModalProps {
 }
 
 function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: FormModalProps & { defaultType?: "recurring" | "one_time" }) {
+  const { t } = useLocale();
+  useCloseOnEscape(onClose);        // the house rule: a dialog closes on Escape
   const isEdit = !!initial;
   const [name, setName] = useState(initial?.name ?? "");
   const [scheduleType, setScheduleType] = useState<"recurring" | "one_time">(initial?.schedule_type ?? defaultType ?? "recurring");
@@ -187,7 +182,7 @@ function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: Fo
           className="flex items-center justify-between px-5 pt-4 pb-3 cursor-move select-none border-b border-border/30"
         >
           <h3 className="text-base font-semibold text-foreground">
-            {isEdit ? "Edit Task" : "New Task"}
+            {isEdit ? t("schedules.editTask") : t("schedules.newTask")}
           </h3>
           {!isEdit && (
             <div className="flex bg-secondary rounded-lg p-0.5">
@@ -228,7 +223,7 @@ function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: Fo
               <label className="block text-xs font-medium text-muted-foreground mb-1">Pipeline</label>
               <select value={pipelineName} onChange={(e) => setPipelineName(e.target.value)} className={inputCls}>
                 {PIPELINE_OPTIONS.map((p) => (
-                  <option key={p} value={p}>{PIPELINE_META[p]?.label ?? p}</option>
+                  <option key={p} value={p}>{pipelineLabel(p, t)}</option>
                 ))}
               </select>
             </div>
@@ -243,21 +238,17 @@ function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: Fo
               <label className="block text-xs font-medium text-muted-foreground mb-1">Account</label>
               <input value={accountName} onChange={(e) => setAccountName(e.target.value)} placeholder="optional" className={inputCls} />
             </div>
-            <label className="flex items-center gap-2 pb-2 cursor-pointer select-none">
-              <div
-                onClick={() => setIsEnabled(!isEnabled)}
-                className={`relative w-9 h-5 rounded-full transition-colors cursor-pointer ${isEnabled ? "bg-primary-500" : "bg-muted-foreground/30"}`}
-              >
-                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${isEnabled ? "translate-x-[18px]" : "translate-x-0.5"}`} />
-              </div>
-              <span className="text-xs text-muted-foreground">{isEnabled ? "On" : "Off"}</span>
-            </label>
+            <div className="flex items-center gap-2 pb-2 select-none">
+              <span id="schedule-enabled-label" className="text-xs font-medium text-muted-foreground">Enabled</span>
+              <Switch checked={isEnabled} onCheckedChange={setIsEnabled} labelledBy="schedule-enabled-label" />
+              <span aria-hidden className="text-xs text-muted-foreground">{isEnabled ? "On" : "Off"}</span>
+            </div>
           </div>
 
           {/* HealthPatrol config — compact */}
           {isHealthPatrol && (
             <div className="bg-secondary/50 rounded-lg p-3 space-y-2">
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">Patrol Config</p>
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">{t("schedules.patrolConfig")}</p>
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-xs text-muted-foreground mb-0.5">Scope</label>
@@ -270,15 +261,10 @@ function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: Fo
                   <input value={hpProviders} onChange={(e) => setHpProviders(e.target.value)} placeholder="all" className={inputCls} />
                 </div>
               </div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <div
-                  onClick={() => setHpDeep(!hpDeep)}
-                  className={`relative w-8 h-4 rounded-full transition-colors cursor-pointer ${hpDeep ? "bg-primary-500" : "bg-muted-foreground/30"}`}
-                >
-                  <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${hpDeep ? "translate-x-[14px]" : "translate-x-0.5"}`} />
-                </div>
-                <span className="text-xs text-foreground">Deep investigation</span>
-              </label>
+              <div className="flex items-center gap-2">
+                <Switch checked={hpDeep} onCheckedChange={setHpDeep} labelledBy="schedule-deep-label" />
+                <span id="schedule-deep-label" className="text-xs text-foreground">{t("schedules.deepLabel")}</span>
+              </div>
             </div>
           )}
 
@@ -290,7 +276,7 @@ function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: Fo
                 rows={3}
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Describe what the agent should do..."
+                placeholder={t("schedules.promptPh")}
                 className={`${inputCls} resize-none`}
               />
               {/* Notify channels — primary action */}
@@ -339,7 +325,7 @@ function ScheduleFormModal({ initial, onClose, onSave, saving, defaultType }: Fo
               {/* Secondary options inline */}
               <div className="flex gap-2 items-center">
                 <select value={reportType} onChange={(e) => setReportType(e.target.value)} className="px-2 py-1 border border-border rounded text-xs bg-background text-foreground">
-                  <option value="">No report</option>
+                  <option value="">{t("schedules.noReport")}</option>
                   {REPORT_TYPES.filter(Boolean).map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
                 <div className="flex items-center gap-1">
@@ -390,13 +376,14 @@ function DeleteModal({
   onConfirm: () => void;
   deleting: boolean;
 }) {
+  const { t } = useLocale();
+  useCloseOnEscape(onClose);        // the house rule: a dialog closes on Escape
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <div className="bg-background rounded-lg shadow-lg w-full max-w-sm p-6">
-        <h3 className="text-lg font-semibold text-foreground mb-2">Delete Schedule</h3>
+        <h3 className="text-lg font-semibold text-foreground mb-2">{t("schedules.deleteTitle")}</h3>
         <p className="text-sm text-muted-foreground mb-4">
-          Are you sure you want to delete <strong>{schedule.name}</strong>? This action
-          cannot be undone.
+          {t("schedules.deleteAsk")} <strong>{schedule.name}</strong>{t("schedules.deleteWarn")}
         </p>
         <div className="flex justify-end gap-2">
           <button
@@ -422,74 +409,112 @@ function DeleteModal({
 /*  Main page                                                          */
 /* ------------------------------------------------------------------ */
 
-const columns: Column<Schedule>[] = [
-  {
-    key: "name",
-    header: "Name",
-    sortable: true,
-    sortValue: (r) => r.name,
-    render: (r) => <span className="font-medium text-foreground">{r.name}</span>,
-  },
-  {
-    key: "pipeline_name",
-    header: "Pipeline",
-    render: (r) => {
-      const meta = PIPELINE_META[r.pipeline_name];
-      return <Badge className={meta?.badge ?? "bg-blue-100 text-blue-700"}>{meta?.label ?? r.pipeline_name}</Badge>;
+const RUN_TONE: Record<RunKind, StatusTone> = {
+  running: "info", retrying: "warn", succeeded: "ok", failed: "danger", never_run: "neutral", other: "neutral",
+};
+const NEXT_KEY: Record<RunKind, string> = {
+  running: "schedules.next.progress", retrying: "schedules.next.progress", succeeded: "schedules.next.result",
+  failed: "schedules.next.error", never_run: "schedules.next.view", other: "schedules.next.view",
+};
+
+/** MVP-2.8.0 S1: the configuration (enabled) and the latest REAL run are two separate columns — a schedule never
+ *  shows "Running" because its switch is on. */
+function scheduleColumns(t: (k: string) => string): Column<Schedule>[] {
+  return [
+    {
+      key: "name",
+      header: t("schedules.col.task"),
+      sortable: true,
+      sortValue: (r) => r.name,
+      render: (r) => {
+        const meta = PIPELINE_META[r.pipeline_name];
+        const summary = cronSummary(r.cron_expression, t);
+        return (
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-foreground">{r.name}</span>
+              <Badge className={meta?.badge ?? "bg-blue-100 text-blue-700"}>{pipelineLabel(r.pipeline_name, t)}</Badge>
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {summary}
+              {summary && r.cron_expression !== "@once" && " · "}
+              {r.cron_expression !== "@once" && <span className="font-mono">{r.cron_expression}</span>}
+            </div>
+          </div>
+        );
+      },
     },
-  },
-  {
-    key: "cron_expression",
-    header: "Type / Cron",
-    render: (r) =>
-      r.cron_expression === "@once" ? (
-        <Badge className={r.is_enabled ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"}>
-          {r.is_enabled ? "Running" : "Completed"}
-        </Badge>
-      ) : (
-        <span className="font-mono text-sm">{r.cron_expression}</span>
+    {
+      key: "is_enabled",
+      header: t("schedules.col.config"),
+      render: (r) => (
+        <StatusText tone={r.is_enabled ? "ok" : "neutral"} className="text-xs">
+          {t(r.is_enabled ? "schedules.enabled" : "schedules.disabled")}
+        </StatusText>
       ),
-  },
-  {
-    key: "is_enabled",
-    header: "Enabled",
-    render: (r) =>
-      r.is_enabled ? (
-        <Badge className="bg-green-100 text-green-700">Enabled</Badge>
-      ) : (
-        <Badge className="bg-secondary text-muted-foreground">Disabled</Badge>
+    },
+    {
+      key: "last_execution",
+      header: t("schedules.col.lastRun"),
+      render: (r) => {
+        const run = runState(r.last_execution);
+        const note = run.kind === "failed" ? r.last_execution?.error_summary
+          : run.kind === "succeeded" ? t("schedules.run.doneNote")
+          : run.kind === "never_run" ? t("schedules.run.neverNote") : null;
+        return (
+          <div className="min-w-0 max-w-xs">
+            <StatusText tone={RUN_TONE[run.kind]} className="text-xs">
+              {run.kind === "other" ? run.raw : t(`schedules.run.${run.kind}`)}
+            </StatusText>
+            {note && <div className="mt-0.5 truncate text-xs text-muted-foreground" title={note}>{note}</div>}
+          </div>
+        );
+      },
+    },
+    {
+      key: "times",
+      header: t("schedules.col.times"),
+      render: (r) => {
+        const e = r.last_execution;
+        const running = e && !e.completed_at;
+        return (
+          <div className="text-xs text-muted-foreground space-y-0.5">
+            {e && running && <div>{t("schedules.time.started").replace("{at}", formatShortDate(e.started_at))}</div>}
+            {e && !running && (
+              <div>
+                {t("schedules.time.finished").replace("{at}", formatShortDate(e.completed_at))}
+                {typeof e.duration_ms === "number" && <> · {t("schedules.time.took").replace("{d}", formatElapsed(e.duration_ms))}</>}
+              </div>
+            )}
+            {r.is_enabled && r.next_run_at && <div>{t("schedules.time.next").replace("{at}", formatShortDate(r.next_run_at))}</div>}
+            {!e && !(r.is_enabled && r.next_run_at) && <div>—</div>}
+          </div>
+        );
+      },
+    },
+    {
+      key: "next_step",
+      header: t("schedules.col.next"),
+      render: (r) => (
+        <Link to={`/app/schedules/${r.id}`} onClick={(ev) => ev.stopPropagation()} className="text-xs font-medium text-primary hover:underline">
+          {t(NEXT_KEY[runState(r.last_execution).kind])}
+        </Link>
       ),
-  },
-  {
-    key: "last_run_at",
-    header: "Last Run",
-    sortable: true,
-    sortValue: (r) => r.last_run_at ?? "",
-    render: (r) => (
-      <span className="text-sm text-muted-foreground">
-        {r.last_run_at ? formatShortDate(r.last_run_at) : "Never"}
-      </span>
-    ),
-  },
-  {
-    key: "next_run_at",
-    header: "Next Run",
-    render: (r) => (
-      <span className="text-sm text-muted-foreground">
-        {r.next_run_at ? formatShortDate(r.next_run_at) : "-"}
-      </span>
-    ),
-  },
-];
+    },
+  ];
+}
 
 type TabFilter = "all" | "recurring" | "one_shot";
 
 const PAGE_SIZE = 10;
 
 export default function Schedules() {
+  const { t } = useLocale();
   const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const navigate = useNavigate();
-  const { data: schedules, isLoading, error } = useSchedules();
+  const schedulesQ = useSchedules();
+  const schedules = schedulesQ.data;
+  const listView = queryView(schedulesQ, () => false);
   const createMut = useCreateSchedule();
   const updateMut = useUpdateSchedule();
   const deleteMut = useDeleteSchedule();
@@ -513,35 +538,40 @@ export default function Schedules() {
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
-  if (isLoading) return <Spinner />;
-  if (error) return <ErrorBanner message={(error as Error).message} />;
+  if (listView.kind === "loading") return <Spinner label={t("common.loading")} />;
+  if (listView.kind === "error") {
+    return <ErrorBanner message={`${t("common.state.failed")} · ${(schedulesQ.error as Error).message}`}
+                        onRetry={() => void schedulesQ.refetch()} actionLabel={t("common.retry")} />;
+  }
 
   return (
     <>
+      {listView.stale && <StaleNotice asOf={listView.asOf} onRetry={() => void schedulesQ.refetch()} />}
       <Card>
-        <CardHeader>
-          <div className="flex items-center gap-4">
-            <h2 className="text-lg font-semibold text-foreground">Schedules</h2>
+        <CardHeader className="flex-wrap gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+            <h2 className="text-lg font-semibold text-foreground">{t("schedules.title")}</h2>
             <div className="flex gap-1 bg-secondary rounded-lg p-0.5">
-              {(["all", "recurring", "one_shot"] as TabFilter[]).map((t) => (
+              {(["all", "recurring", "one_shot"] as TabFilter[]).map((tb) => (
                 <button
-                  key={t}
-                  onClick={() => { setTab(t); setPage(0); }}
+                  key={tb}
+                  onClick={() => { setTab(tb); setPage(0); }}
                   className={`px-3 py-1 text-xs rounded-md transition-colors ${
-                    tab === t
+                    tab === tb
                       ? "bg-background text-foreground shadow-sm font-medium"
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  {t === "all" ? `All (${schedules?.length ?? 0})` : t === "recurring" ? "Recurring" : "One-shot"}
+                  {tb === "all" ? t("schedules.tab.all").replace("{n}", String(schedules?.length ?? 0))
+                    : t(tb === "recurring" ? "schedules.tab.recurring" : "schedules.tab.oneShot")}
                 </button>
               ))}
             </div>
             <input
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(0); }}
-              placeholder="Search..."
-              className="px-3 py-1.5 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary-500 w-40"
+              placeholder={t("schedules.search")}
+              className="px-3 py-1.5 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary-500 w-full sm:w-40"
             />
           </div>
           {!readOnly && (
@@ -552,7 +582,7 @@ export default function Schedules() {
               }}
               className="px-4 py-2 text-sm text-white bg-primary-600 rounded-lg hover:bg-primary-500"
             >
-              New Schedule
+              {t("schedules.new")}
             </button>
           )}
         </CardHeader>
@@ -563,7 +593,7 @@ export default function Schedules() {
               header: "#",
               render: (r) => <span className="text-xs text-muted-foreground font-mono">{page * PAGE_SIZE + paginated.indexOf(r) + 1}</span>,
             },
-            ...columns,
+            ...scheduleColumns(t),
             {
               key: "actions",
               header: "",
@@ -578,7 +608,7 @@ export default function Schedules() {
                       }}
                       className="text-xs text-primary-600 hover:underline"
                     >
-                      Edit
+                      {t("common.edit")}
                     </button>
                   )}
                   {!readOnly && (
@@ -589,7 +619,7 @@ export default function Schedules() {
                       }}
                       className="text-xs text-red-600 hover:underline"
                     >
-                      Delete
+                      {t("common.delete")}
                     </button>
                   )}
                 </div>
@@ -599,13 +629,13 @@ export default function Schedules() {
           data={paginated}
           rowKey={(r) => r.id}
           onRowClick={(r) => navigate(`/app/schedules/${r.id}`)}
-          emptyMessage={search ? "No matching tasks." : tab === "one_shot" ? "No one-shot tasks yet." : "No schedules configured."}
+          emptyMessage={t(search ? "schedules.empty.search" : tab === "one_shot" ? "schedules.empty.oneShot" : "schedules.empty.none")}
         />
         {/* Pagination */}
         {totalPages > 1 && (
           <div className="flex items-center justify-between px-4 py-3 border-t border-border">
             <span className="text-xs text-muted-foreground">
-              {filtered.length} total &middot; Page {page + 1}/{totalPages}
+              {t("schedules.pageLine").replace("{n}", String(filtered.length)).replace("{page}", String(page + 1)).replace("{pages}", String(totalPages))}
             </span>
             <div className="flex gap-1">
               <button

@@ -200,3 +200,45 @@ def test_overview_and_expand_use_four_values(client):
     assert [n["id"] for n in worst["nodes"]] == ["res:2", "res:1"]  # worst first, unknown left out
     every = client.get("/api/galaxy/expand", params={"group": "grp:1:project:demo"}).json()
     assert [n["health"] for n in every["nodes"]] == ["critical", "notice", "unknown"]
+
+
+# ── MVP-2.9.0 (final review): the map's health has its own age ─────────────────────────────────────────────────
+
+def test_graph_says_when_its_build_finished_and_when_health_was_read(client):
+    """The map is one build's relations with today's health over it: each has its own time, and the page must be
+    able to print both — it used to print the wall clock as «health as of now»."""
+    _health_cases()
+    bid = client.post("/api/galaxy/rebuild", params={"full": True}).json()["build_id"]
+    body = client.get("/api/galaxy/graph").json()
+    assert body["build_id"] == bid
+    with get_db_session() as s:
+        finished = s.get(GalaxyBuild, bid).finished_at
+    assert body["built_at"] == finished.replace(tzinfo=None).isoformat(timespec="seconds") + "Z"
+    assert body["health_at"].endswith("Z") and body["health_at"] >= body["built_at"]
+    empty_client_body = {"nodes": [], "edges": [], "build_id": None}
+    assert set(empty_client_body) <= set(body)
+
+
+def test_health_alone_can_be_read_again_without_the_graph(client):
+    """Rings must follow the issues, not wait for the next build: a small read of health and «gone», same definition
+    as the graph's own overlay."""
+    _health_cases()
+    bid = client.post("/api/galaxy/rebuild", params={"full": True}).json()["build_id"]
+    nodes = {n["id"]: n for n in client.get("/api/galaxy/graph").json()["nodes"]}
+    h = client.get("/api/galaxy/health").json()
+    assert h["build_id"] == bid and h["at"].endswith("Z")
+    assert h["health"] == {n: v["health"] for n, v in nodes.items() if v.get("health", "unknown") != "unknown"}
+    assert sorted(h["absent"]) == sorted(n for n, v in nodes.items() if v.get("absent"))
+    assert h["health"] == {"res:1": "notice", "res:2": "critical"} and h["absent"] == ["res:4"]
+
+    # an issue is resolved and a resource disappears: no build in between
+    from datetime import datetime
+    with get_db_session() as s:
+        s.query(HealthIssue).filter_by(resource_id="i-1").update({"status": "resolved"})
+        s.query(CloudResource).filter_by(resource_id="subnet-a").update({"absent_since": datetime(2026, 11, 17)})
+    h2 = client.get("/api/galaxy/health").json()
+    assert h2["build_id"] == bid and h2["health"] == {"res:1": "notice"} and sorted(h2["absent"]) == ["res:3", "res:4"]
+
+
+def test_health_before_any_build_is_empty(client):
+    assert client.get("/api/galaxy/health").json() == {"build_id": None, "health": {}, "absent": [], "at": None}

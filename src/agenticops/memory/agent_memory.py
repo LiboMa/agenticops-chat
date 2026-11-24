@@ -480,9 +480,10 @@ def merge_memories(
     return umbrella_path
 
 
-def update_memory_index(agent_name: str) -> None:
-    """Rebuild the MEMORY.md index for an agent from active memory files."""
-    directory = _agent_dir(agent_name)
+def update_memory_index(agent_name: str, directory: Path | None = None) -> None:
+    """Rebuild the MEMORY.md index for an agent from active memory files — in `directory` when given (another
+    checkout's agent-memory, services/issue_purge), else this code's own."""
+    directory = Path(directory) if directory is not None else _agent_dir(agent_name)
     if not directory.is_dir():
         return
 

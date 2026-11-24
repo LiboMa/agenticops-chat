@@ -128,6 +128,39 @@ def log_event(
             logger.debug("Subscriber notification failed for %s", event_type, exc_info=True)
 
 
+# The event an agent's run on an issue ends with. A failed end is written by the agent itself: rca_agent and
+# sre_agent return «… agent error: …» instead of raising, so no caller can tell from an exception (MVP-2.9.0).
+_AGENT_END = {"rca": ("rca_completed", "rca"), "sre": ("fix_plan_requested", "plan")}
+
+
+def log_agent_failed(health_issue_id: Optional[int], agent: str, reason: str = "agent error",
+                     error: Optional[BaseException] = None) -> None:
+    """Record that `agent`'s run on the issue ended without what it was asked for (best-effort, never raises).
+    `error` adds the exception's class name — never its text, which can hold what the model or a tool said."""
+    event, stage = _AGENT_END[agent]
+    detail = {"reason": reason}
+    if error is not None:
+        detail["error"] = type(error).__name__
+    log_event(health_issue_id, event, stage, "failed", detail=detail, actor=f"agent:{agent}")
+
+
+def plan_written_since(health_issue_id: int, since) -> bool:
+    """Whether a fix plan of the issue was created or rewritten at or after `since` (aware UTC) — what
+    save_fix_plan puts on the timeline. True when it cannot be told: a missing record must not read as a failure."""
+    try:
+        from datetime import timezone
+        from agenticops.models import PipelineEvent, get_db_session
+
+        with get_db_session() as session:
+            times = [e.created_at for e in session.query(PipelineEvent).filter(
+                PipelineEvent.health_issue_id == health_issue_id,
+                PipelineEvent.event_type.in_(("fix_plan_created", "fix_plan_updated")))]
+        return any((t if t.tzinfo else t.replace(tzinfo=timezone.utc)) >= since for t in times if t is not None)
+    except Exception:
+        logger.debug("plan_written_since(%s) failed", health_issue_id, exc_info=True)
+        return True
+
+
 def get_timeline(
     health_issue_id: Optional[int] = None,
     *,

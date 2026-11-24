@@ -7,8 +7,17 @@ export interface AttentionItem {
   id: string; ref: string; reason: AttentionReason | string; reason_detail: string | null; title: string;
   entity: { entity_type: string; entity_id: number; content_version: number | null };
   account_id: number | null; occurred_at: string; route: string; available_actions: UiAction[];
+  /** MVP-2.8.0 S2 — who it waits on (work_phases), severity (issues) / risk level (changes), its resource, region */
+  waiting_on?: string | null; severity?: string | null; risk_level?: string | null;
+  resource?: { ref: number; name: string | null; type: string; resource_id: string } | null; region?: string | null;
+  /** MVP-2.9.0 N14 — until when THIS reader put the item off («later»); it still waits and still counts */
+  snoozed_until?: string | null;
 }
-export interface AttentionPage { items: AttentionItem[]; total: number; next_cursor: string | null; generated_at: string }
+export interface AttentionPage {
+  items: AttentionItem[]; total: number; next_cursor: string | null; generated_at: string;
+  /** items per reason, after the scope and the search, before the reason filter (MVP-2.8.0 S2) */
+  counts?: Record<string, number>;
+}
 
 /** The hub's tab counts: rows whose object is a fix plan (approval, approved-but-not-started) → Fix plans; change rows
  *  → Changes. Counted over the items fetched (≤ 100). */
@@ -21,7 +30,7 @@ export function tabCounts(items: AttentionItem[]): { fix: number; changes: numbe
 
 const REASONS = new Set(["approval_required", "clarification_required", "verification_required", "execution_failed",
   "review_required", "execution_not_started"]);
-const DETAILS = new Set(["run_failed", "plan_rejected", "rca_missing", "rca_gate", "rca_rejected", "rca_confirmed", "rca_ready",
+const DETAILS = new Set(["run_failed", "run_stopped", "plan_rejected", "rca_missing", "rca_gate", "rca_rejected", "rca_stopped", "reopened", "plan_stopped", "rca_confirmed", "rca_ready",
   "acceptance", "resolve", "change_draft"]);
 
 export const countLabel = (n: number): string => (n > 99 ? "99+" : String(n));

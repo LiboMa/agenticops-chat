@@ -8,6 +8,8 @@ export class ApiError extends Error {
     message: string,
     /** the contract's UiError code when the server sent one (MVP-2.7.0 S6) */
     public code?: string,
+    /** the whole UiError object (MVP-2.8.0: a refusal may name what is in the way, e.g. `refs`) */
+    public data?: Record<string, unknown>,
   ) {
     super(message);
     this.name = "ApiError";
@@ -50,6 +52,28 @@ export function formatErrorDetail(detail: unknown): string {
   return JSON.stringify(detail);
 }
 
+/** A refusal's JSON body as the error the pages read. The contract's UiError ({detail, code, …}) keeps its code
+ *  (MVP-2.7.0 S6) wherever the server put it: nested under `detail` (an HTTPException with a dict) or at the top of
+ *  the body (a JSONResponse — MVP-2.9.0: `agent_run_in_flight`, `rca_changed`, `status_moved`). Anything else reads
+ *  as before. */
+export function errorFromBody(status: number, body: unknown, statusText: string): ApiError {
+  const b = (body && typeof body === "object" && !Array.isArray(body) ? body : {}) as Record<string, unknown>;
+  const d = b.detail;
+  if (d && typeof d === "object" && !Array.isArray(d) && typeof (d as { detail?: unknown }).detail === "string") {
+    return new ApiError(status, (d as { detail: string }).detail, (d as { code?: string }).code, d as Record<string, unknown>);
+  }
+  if (typeof d === "string" && typeof b.code === "string") return new ApiError(status, d, b.code, b);
+  return new ApiError(status, formatErrorDetail(d ?? b.error ?? statusText));
+}
+
+let keepaliveUntil = 0;
+
+/** Requests that leave in the next `ms` are marked keep-alive: the page is going away and they must still be sent
+ *  (MVP-2.9.0 N13: a decision that was waiting out its undo window when the tab closed). */
+export function keepaliveFor(ms: number): void {
+  keepaliveUntil = Date.now() + ms;
+}
+
 export async function apiFetch<T>(
   path: string,
   options?: RequestInit,
@@ -66,7 +90,7 @@ export async function apiFetch<T>(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch(url, { ...options, headers });
+  const res = await fetch(url, { ...options, headers, ...(Date.now() < keepaliveUntil ? { keepalive: true } : {}) });
 
   // A wrong password is the login endpoint's own 401: say why, don't treat it as an expired session
   if (res.status === 401 && path.startsWith("/auth/login")) {
@@ -85,12 +109,7 @@ export async function apiFetch<T>(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
-    const d = body.detail;
-    // the contract's UiError ({detail, code}) keeps its code (MVP-2.7.0 S6); anything else reads as before
-    if (d && typeof d === "object" && !Array.isArray(d) && typeof (d as { detail?: unknown }).detail === "string") {
-      throw new ApiError(res.status, (d as { detail: string }).detail, (d as { code?: string }).code);
-    }
-    throw new ApiError(res.status, formatErrorDetail(body.detail ?? body.error ?? res.statusText));
+    throw errorFromBody(res.status, body, res.statusText);
   }
 
   if (res.status === 204) return undefined as T;

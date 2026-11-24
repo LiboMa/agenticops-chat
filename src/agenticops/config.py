@@ -30,6 +30,15 @@ _YAML_CONFIG_PATH = Path(__import__("os").environ.get(
 ))
 
 
+class ModelRuntimeSettings(BaseModel):
+    """Model connection settings (2026-11-08). The values live in settings.yaml `model_runtime:`; these defaults only
+    let the app start without that block. Admins override fields at runtime (DB `runtime_settings`, key
+    `model_runtime`, through `agents/model_runtime` and `/api/settings/model-runtime`)."""
+    stream_read_timeout_seconds: int = Field(
+        default=600, ge=60, le=3600,
+        description="How long a model stream may send nothing before it is cut (the botocore read timeout), seconds")
+
+
 class ChatUploadSettings(BaseModel):
     """Chat attachment limits (2026-11-07). The values live in settings.yaml `chat_upload:`; these defaults only let
     the app start without that block. Admins override fields at runtime (DB `runtime_settings`, key `chat_upload`,
@@ -291,6 +300,11 @@ class Settings(BaseSettings):
     data_dir: Path = Field(
         default=PROJECT_ROOT / "data",
         description="Directory for data storage",
+    )
+    log_dir: Path = Field(
+        default=PROJECT_ROOT / "logs",
+        description="Directory of the service's backend.log / frontend.log (a bootstrap path: AIOPS_LOG_DIR; the "
+                    "test suite points it at a temp dir so it never writes the running service's logs)",
     )
     reports_dir: Path = Field(
         default=PROJECT_ROOT / "data" / "reports",
@@ -748,6 +762,11 @@ class Settings(BaseSettings):
         default=365,
         description="Days of audit_logs + command_audits rows retained; 0 disables pruning (AIOPS_AUDIT_RETENTION_DAYS)",
     )
+    agent_steps_retention_days: int = Field(
+        default=30,
+        description="Days of agent_steps rows retained (what an rca / sre / executor run did, step by step — MVP-2.9.0 "
+        "N10); 0 disables pruning (AIOPS_AGENT_STEPS_RETENTION_DAYS)",
+    )
     command_audit_enabled: bool = Field(
         default=True,
         description="Record every write/unknown/blocked command attempt from run_aws_cli / run_on_host / "
@@ -770,7 +789,8 @@ class Settings(BaseSettings):
     # Executor settings (L4 Auto Operation)
     executor_enabled: bool = Field(
         default=True,
-        description="Enable fix execution (AIOPS_EXECUTOR_ENABLED=true to enable)",
+        description="Fix execution — the DEFAULT; the value in force is services/exec_switches.effective() "
+                    "(an administrator's stored switch; AIOPS_EXECUTOR_ENABLED=false holds it off)",
     )
     executor_smart_model: bool = Field(
         default=True,
@@ -947,6 +967,16 @@ class Settings(BaseSettings):
         description="Days to retain Signal (alert_events) rows before background pruning",
     )
 
+    # Workbench (MVP-2.8.0 S2)
+    attention_long_wait_hours: int = Field(
+        default=24, ge=1,
+        description="A work item waiting on a person longer than this is in the Cases 'waiting long' view",
+    )
+    attention_snooze_minutes: int = Field(
+        default=60, ge=1, le=1440,
+        description="How long «later» keeps a waiting item at the end of its group for the person who snoozed it "
+        "(MVP-2.9.0 N14)",
+    )
     # RCA Quality (MVP-2.2.0)
     rca_min_confidence_for_autofix: float = Field(
         default=0.6,
@@ -1115,6 +1145,7 @@ class Settings(BaseSettings):
 
     # Chat attachments (2026-11-07): limits (runtime-overridable by admins) and where the files live (yaml only)
     chat_upload: ChatUploadSettings = Field(default_factory=ChatUploadSettings)
+    model_runtime: ModelRuntimeSettings = Field(default_factory=ModelRuntimeSettings)
     chat_attachments_dir: str = Field(
         default="",
         description="Directory for chat attachment files; empty = <data_dir>/chat_attachments. Not changeable at runtime",
@@ -1130,6 +1161,7 @@ class Settings(BaseSettings):
             "claude-haiku-5-5":  {"input": 0.10, "output": 0.50, "cache_read": 0.01, "cache_write": 0.125},
             "claude-opus-5":     {"input": 5.0,  "output": 25.0, "cache_read": 0.50, "cache_write": 6.25},
             "claude-sonnet-5":   {"input": 2.0,  "output": 10.0, "cache_read": 0.20, "cache_write": 2.50},
+            "claude-fable-5-2":  {"input": 8.0, "output": 40.0, "cache_read": 0.20, "cache_write": 10.00},
             "claude-fable-5-1":  {"input": 10.0, "output": 50.0, "cache_read": 0.25, "cache_write": 12.50},
             "claude-fable-5":    {"input": 10.0, "output": 50.0, "cache_read": 1.00, "cache_write": 12.50},
             "claude-opus-4-8":   {"input": 5.0,  "output": 25.0, "cache_read": 0.50, "cache_write": 6.25},
@@ -1224,6 +1256,11 @@ MODEL_WINDOW_DEFAULTS: dict[str, dict[str, int]] = {
         "main": 100, "scan": 80, "detect": 80,
         "rca": 200, "sre": 200,
         "executor": 20, "reporter": 80,
+    },
+    "claude-fable-5-2": {
+        "main": 200, "scan": 120, "detect": 120,
+        "rca": FULL_CONTEXT, "sre": FULL_CONTEXT,
+        "executor": 20, "reporter": 120,
     },
     "claude-fable-5-1": {
         "main": 200, "scan": 120, "detect": 120,
@@ -1390,13 +1427,31 @@ def get_agent_context_plugins(agent_name: str) -> list:
     offloader, but from 1.56 any ``context_manager`` makes the SDK discard the passed conversation manager (only a
     UserWarning says so) — every per-agent sliding window would silently stop working. Passing the plugin explicitly
     is the 1.45 behaviour on every version. agent_name is kept for per-agent symmetry; the flag is global today.
+
+    One result is never offloaded, whatever its size: WHOLE_RESULT_TOOLS (MVP-2.9.0 N28).
     """
     if not settings.strands_context_manager_auto:
         return []
     from strands.vended_plugins.context_offloader import InMemoryStorage
     return [_head_preview_offloader_class()(storage=InMemoryStorage(),
                                             max_result_tokens=settings.context_offload_max_result_tokens,
-                                            preview_tokens=settings.context_offload_preview_tokens)]
+                                            preview_tokens=settings.context_offload_preview_tokens,
+                                            should_offload=_offload_unless_whole)]
+
+
+# Tool results that reach the model whole however long they are (MVP-2.9.0 N28). get_approved_fix_plan is what the
+# executor runs and verifies: a result over 6,000 characters used to arrive as its first 3,000 and a reference — and
+# the plan is ONE line of JSON, so the offloader's own search hands back at most its first 6,000, never the rollback
+# that comes last (63 of the 86 plans approved or run on the copy database were that long; seen in the real run of
+# 2026-11-20, where the executor fetched the rest by itself). By tool name, so Main reading the plan gets it whole too.
+WHOLE_RESULT_TOOLS = frozenset({"get_approved_fix_plan"})
+
+
+def _offload_unless_whole(tool_name: str, token_count: int, **kwargs) -> bool:
+    """The offloader's should_offload answer for an oversized result: False = keep it in context as it is.
+
+    It must not raise: the SDK reads an exception here as «offload» (and only logs a warning)."""
+    return not (isinstance(tool_name, str) and tool_name in WHOLE_RESULT_TOOLS)
 
 
 @functools.lru_cache(maxsize=1)
@@ -1424,7 +1479,7 @@ def _head_preview_offloader_class():
 def get_executor_interventions():
     """Return the interventions list for the executor agent.
 
-    Gated by settings.executor_hitl_enabled (default False -> []). When enabled,
+    Gated by the executor's HITL switch in force (services/exec_switches; default False -> []). When enabled,
     adds ONE HumanInTheLoop handler as a *second*, SDK-level safety net on top of
     the existing primary gate (get_approved_fix_plan tool check + DB state machine +
     L0/L1 risk tiering). Read-only / verification tools are allow-listed so they run
@@ -1432,7 +1487,8 @@ def get_executor_interventions():
     raise an interrupt. Returns [] when disabled so the executor behaves exactly as
     before. Import is lazy so the SDK symbol is only touched when the gate is on.
     """
-    if not settings.executor_hitl_enabled:
+    from agenticops.services import exec_switches      # imported here: the service imports this module
+    if not exec_switches.effective().executor_hitl_enabled:
         return []
     from strands.vended_interventions.hitl import HumanInTheLoop
     return [

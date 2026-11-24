@@ -76,7 +76,13 @@ def _check_one_account(acct, cli_tool, session, scope, deep) -> AccountCheckResu
             session=session,
         )
         prompt = f"Check health for account '{acct.name}'. Scope={scope}. Deep={deep}."
-        agent_result = invoke_with_retry(agent, prompt)
+        # A detection only reads (MVP-2.9.0 N31): under this flag every command tool refuses what is not a read —
+        # set here, in the worker, because POST /api/health-check and the scan agent call this checker directly.
+        # And it is bound to its account (N32): credentials, providers and kubeconfigs refuse any other, the
+        # inventory it lists is this account's, the issues it opens state it.
+        from agenticops.run_context import run_context
+        with run_context(read_only_run="detect", bound_account_id=acct.id):
+            agent_result = invoke_with_retry(agent, prompt)
         result.agent_output = str(agent_result)
         result.issues_created = _parse_issue_count(result.agent_output)
 

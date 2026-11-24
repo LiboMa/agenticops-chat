@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AgenticOps · new-UI-face（交互设计原型）</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="proto.css">
+</head>
+<body class="app" data-theme="night">
+<canvas id="sky" aria-hidden="true"></canvas>
+<!-- the 3D view of «全景»: its canvas and the names laid over it. Empty until someone switches to 3D (the engine loads then). -->
+<div id="g3d" hidden></div>
+<div id="clabels" hidden aria-hidden="true"></div>
+<div id="labels" hidden aria-hidden="true"></div>
+
+<header class="top">
+  <div class="tabs" id="lens" role="tablist"></div>
+  <div class="pulse" id="pulse"></div>
+  <div class="who" id="who"></div>
+</header>
+
+<main>
+  <section class="view" id="decide">
+    <aside class="side-q">
+      <div class="rail-title"><span id="qTitle"></span><b id="qCount"></b></div>
+      <div class="pills" id="filters"></div>
+      <div class="queue" id="queue" role="listbox"></div>
+      <p class="hint" id="hint"></p>
+    </aside>
+    <article class="brief card" id="brief" aria-live="polite"></article>
+    <aside class="side-live">
+      <div class="rail-title"><span id="feedTitle"></span></div>
+      <div class="feed" id="feed"></div>
+    </aside>
+  </section>
+
+  <section class="view" id="story" hidden>
+    <article class="story card" id="storyMain"></article>
+    <aside class="facts card" id="storyFacts"></aside>
+  </section>
+
+  <section class="view" id="live" hidden>
+    <aside class="lanes" id="lanes"></aside>
+    <article class="stream card" id="stream" aria-live="polite"></article>
+  </section>
+
+  <section class="view" id="world" hidden>
+    <div class="wleft" id="wleft"><div class="wtools card" id="wtools"></div><div class="wcheck card" id="wcheck"></div><div class="happen card" id="happen"></div></div>
+    <p class="wpast" id="wpast" hidden></p>
+    <p class="wpast whint" id="whint" hidden></p>
+    <aside class="nodecard card" id="nodecard" hidden></aside>
+    <div class="legend" id="legend"></div>
+    <div class="wstate card" id="wstate" hidden></div>
+    <div class="scrub card" id="scrubCard">
+      <div class="row" id="scrubCtl"></div>
+      <div class="ticks" id="scrubTicks" aria-hidden="true"></div>
+      <input type="range" id="scrub" min="0" max="240" value="240">
+    </div>
+  </section>
+</main>
+
+<div class="sugg" id="sugg" hidden role="listbox"></div>
+<div class="sheet" id="sheet" hidden></div>
+<aside class="peek" id="peek" hidden></aside>
+<div class="toast" id="toast" hidden role="status"></div>
+<div id="tip" hidden></div>
+
+<div class="barwrap">
+  <label class="bar"><span class="spark" aria-hidden="true"></span><input id="cmd" type="text" autocomplete="off" spellcheck="false"><kbd>/</kbd></label>
+</div>
+
+<div class="dev"><div class="pop" id="devpop" hidden></div><button id="devbtn" data-do="devToggle"></button></div>
+<div class="overlay" id="help" hidden></div>
+
+<script src="data.js"></script>
+<script src="data-situations.js"></script>
+<script src="data-live.js"></script>
+<script src="i18n.js"></script>
+<script src="proto.js"></script>
+<script src="model-live.js"></script>
+<script src="model-world.js"></script>
+<script src="screens/sky.js"></script>
+<script src="screens/sky3d.js"></script>
+<script src="screens/briefs-core.js"></script>
+<script src="screens/briefs-recovery.js"></script>
+<script src="screens/briefs-change.js"></script>
+<script src="screens/decide.js"></script>
+<script src="screens/story.js"></script>
+<script src="screens/live.js"></script>
+<script src="screens/world.js"></script>
+<script src="screens/command.js"></script>
+<script>NF.start();</script>
+</body>
+</html>

@@ -4,10 +4,15 @@ Mechanically extracted from app.py (no logic change) to shrink app.py and give
 routers a dependency-leaf module to import from (avoids app<->router import cycle).
 """
 
+import logging
 from datetime import datetime
 from typing import Annotated, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+
+from agenticops.credentials.store import REDACTED_VALUE  # an edit that sends it back keeps the stored value
+
+_log = logging.getLogger(__name__)      # private: app.py star-imports this module and has its own `logger`
 
 
 class AccountCreate(BaseModel):
@@ -29,6 +34,9 @@ class AccountUpdate(BaseModel):
     regions: Optional[List[str]] = None
     labels: Optional[dict] = None
     is_enabled: Optional[bool] = None
+    # Merged into the stored credentials (credentials/store.merge_credentials): a secret left out or empty is kept,
+    # so removing the stored secrets takes this flag. Never written onto the account itself.
+    clear_secrets: bool = False
 
 
 REDACTED_KEYS = {"client_secret", "access_key_secret", "secret_key", "service_account_key", "secret_access_key", "access_key_id", "session_token", "_encrypted"}
@@ -53,7 +61,7 @@ class AccountResponse(BaseModel):
     def redact_secrets(self):
         if self.credentials:
             self.credentials = {
-                k: "***REDACTED***" if k in REDACTED_KEYS else v
+                k: REDACTED_VALUE if k in REDACTED_KEYS else v
                 for k, v in self.credentials.items()
             }
         return self
@@ -79,6 +87,10 @@ class ResourceResponse(BaseModel):
     # The list's health column (MVP-2.7.0 S4): open anchored issues + unknown|notice|warning|critical
     open_issues: int = 0
     health: Optional[str] = None
+    # The list only (MVP-2.9.0 N24): why the health reads as it does (services/inventory.health_reason) and when
+    # the row was last observed (= scanned_at)
+    health_reason: Optional[str] = None
+    observed_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -109,6 +121,8 @@ class AnomalyStatusUpdate(BaseModel):
     """Schema for updating anomaly status."""
     status: str = Field(..., pattern="^(open|investigating|acknowledged|root_cause_identified|fix_planned|fix_approved|fix_executing|fix_executed|resolved|dismissed)$")
     note: Optional[str] = None
+    # MVP-2.9.0: the status the page showed; the change is refused (409 `status_moved`) when the issue has left it
+    expected_status: Optional[str] = Field(None, max_length=40)
 
 
 class AnomalyResponse(BaseModel):
@@ -184,6 +198,8 @@ class ReportResponse(BaseModel):
     visibility: str = "workspace"
     owned_by_me: bool = False
     language_status: dict = Field(default_factory=dict)   # {zh, en} → rendering status (S6)
+    # MVP-2.9.0 N21: what the reporter run read, recorded by code; None when the report was not saved in such a run
+    coverage: Optional[dict] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -316,6 +332,15 @@ class HealthIssueResponse(BaseModel):
     observed_at: Optional[datetime] = None
     # What the viewer may do here (MVP-2.7.0 S4: "note"), from ui_actions.route_allows — the detail route fills it
     available_actions: List[dict] = Field(default_factory=list)
+    # MVP-2.8.0 S2: who the issue waits on (work_phases) and since when (services/attention.issue_waits)
+    waiting_on: Optional[str] = None
+    waiting_since: Optional[datetime] = None
+    # MVP-2.9.0 N11: its newest diagnosis ended without a result and no agent is on it — it waits on a person
+    rca_stopped: bool = False
+    # MVP-2.9.0 N26: a person reopened it and nothing has diagnosed it since / its plan run ended without a plan —
+    # nothing will move it by itself, so it waits on a person
+    reopened: bool = False
+    plan_stopped: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -423,6 +448,13 @@ class FixPlanRejectBody(BaseModel):
     reason: str = Field(..., min_length=1, max_length=2000)
 
 
+class FixPlanChangesBody(FixPlanRejectBody):
+    """«Request changes» (MVP-2.9.0 N14): the reason, and the content hash the reviewer was shown — when it is
+    given and the plan is no longer that content, nothing is sent back (409 `plan_changed`). Optional so that a
+    caller that does not read plans (a script) can still send a plan back."""
+    content_hash: Optional[str] = Field(None, max_length=128)
+
+
 class FixPlanResponse(BaseModel):
     """Schema for fix plan response."""
     id: int
@@ -456,6 +488,8 @@ class FixPlanResponse(BaseModel):
     issue_status: Optional[str] = None
     target: Optional[dict] = None   # {resource_id, resource_ref, anchor_status, resource_type, region} of its issue
     available_actions: List[dict] = Field(default_factory=list)   # services/ui_actions.plan_actions
+    # MVP-2.9.0, set by PUT /approve only: whether the approval queued the plan's run (None on every other answer)
+    run_queued: Optional[bool] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -467,6 +501,42 @@ class FixPlanResponse(BaseModel):
         The same function gives the verdict its post-checks, so the page and the verdict count the same ones."""
         from agenticops.services.verification import decode_legacy_json
         return decode_legacy_json(value, dict if info.field_name == "rollback_plan" else list)
+
+    @computed_field
+    @property
+    def step_tiers(self) -> List[str]:
+        """MVP-2.9.0 read context: how the CODE classifies each step's command — write | readonly | blocked |
+        unknown, one per step (services/change_steps.step_tier, the classifier the auto-approval floor uses; a step
+        with no command is unknown). Computed on the way out: never stored, never part of the content hash."""
+        from agenticops.services.change_steps import step_tiers
+        try:
+            return step_tiers(self.steps)
+        except Exception:        # a classifier that raised must not take every plan list and page with it
+            _log.warning("step_tiers failed for fix plan #%s", self.id, exc_info=True)
+            return ["unknown"] * len(self.steps or [])
+
+    @computed_field
+    @property
+    def rollback_outlook(self) -> dict:
+        """MVP-2.9.0 N10 read context: what stopping a run of this plan could roll back, as the rollback is written
+        — {steps, commands, as_written} (services/change_steps.rollback_outlook). After a stop only the plan's own
+        rollback text may run, so «as_written» is how many of its commands a tool can run exactly as they stand.
+        Computed on the way out: never stored, never part of the content hash."""
+        from agenticops.services.change_steps import rollback_outlook
+        try:
+            return rollback_outlook(self.rollback_plan)
+        except Exception:        # must not take the plan pages down; claims nothing can be rolled back
+            _log.warning("rollback_outlook failed for fix plan #%s", self.id, exc_info=True)
+            return {"steps": 0, "commands": 0, "as_written": 0}
+
+    @computed_field
+    @property
+    def rejection_is_feedback(self) -> bool:
+        """MVP-2.9.0 read context: whether `rejection_reason` is something a person wrote about this plan
+        (services/plan_content.rejection_is_feedback) — what a page may quote under `rejected_by`'s name, and what the
+        agent asked for the next plan is given. False for a plan that is not rejected."""
+        from agenticops.services.plan_content import rejection_is_feedback
+        return rejection_is_feedback(self)
 
 
 class FixExecutionResponse(BaseModel):
@@ -489,6 +559,10 @@ class FixExecutionResponse(BaseModel):
     accepted_by: Optional[str] = None
     accepted_at: Optional[datetime] = None
     acceptance_note: Optional[str] = None
+    # MVP-2.9.0 N9: a person asked this run to stop — who, when and what they wrote. NULL = nobody did.
+    stop_requested_at: Optional[datetime] = None
+    stop_requested_by: Optional[str] = None
+    stop_note: Optional[str] = None
     created_at: datetime
     # One row per declared post-check of this run's own plan, then stray results (verification.bind_results):
     # {check_id, check, result_status, results, problem: null|missing|duplicate|undeclared|unbound}
@@ -513,6 +587,8 @@ class ExecutionAcceptBody(BaseModel):
     """A human's verdict on an execution pending acceptance; the identity is the authenticated session."""
     decision: str = Field(..., pattern="^(accepted|rejected)$")
     reason: str = Field(..., min_length=1, max_length=2000)
+    # MVP-2.8.0 S2: the declared checks (pc-n) the person ticked in the acceptance dialog; recorded with it
+    confirmed_checks: Optional[List[Annotated[str, Field(pattern=r"^pc-\d{1,3}$")]]] = Field(None, max_length=50)
 
 
 # ============================================================================
@@ -548,6 +624,16 @@ class ScheduleUpdate(BaseModel):
     config: Optional[dict] = None
 
 
+class ScheduleLastExecution(BaseModel):
+    """A schedule's newest run (MVP-2.8.0 S1) — the real run state, never inferred from is_enabled."""
+    id: int
+    status: str
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    duration_ms: Optional[int] = None
+    error_summary: Optional[str] = None
+
+
 class ScheduleResponse(BaseModel):
     """Schema for schedule response."""
     id: int
@@ -563,6 +649,7 @@ class ScheduleResponse(BaseModel):
     next_run_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
+    last_execution: Optional[ScheduleLastExecution] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -814,8 +901,21 @@ class ChatSessionResponse(BaseModel):
     can_manage: bool = True
     # S5: {primary: {entity_type, entity_id, ref, title} | null, account_id, account_name, region, scope_locked}
     context: Optional[dict] = None
+    # MVP-2.9.0 N22 (the list only): generating | failed | tool_failed | None, and whether the issue / change the
+    # conversation is about waits on the caller (services/chat_session_listing)
+    activity: Optional[str] = None
+    waiting_on_you: bool = False
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ChatSessionList(BaseModel):
+    """GET /api/chat/sessions — one page of one view; `total` = what matches the search, `all_total` = everything
+    in the view; `next_cursor` is null on the last page."""
+    items: List[ChatSessionResponse]
+    total: int
+    all_total: int
+    next_cursor: Optional[str] = None
 
 
 class ChatSessionDetail(ChatSessionResponse):
@@ -899,6 +999,13 @@ class APIKeyCreate(BaseModel):
     expires_days: Optional[int] = None
 
 
+class APIKeyRotate(BaseModel):
+    """«更新密钥» (MVP-2.8.0): the new key's access and expiry, chosen again. Both required — a missing expiry is never
+    read as «never expires»."""
+    permissions: List[str]
+    expires_days: Optional[int] = Field(...)
+
+
 class APIKeyResponse(BaseModel):
     """Schema for API key response."""
     id: int
@@ -918,8 +1025,10 @@ class APIKeyCreatedResponse(BaseModel):
     id: int
     name: str
     key: str  # Full key - only shown once!
+    key_prefix: str = ""
     permissions: List[str]
     expires_at: Optional[datetime]
+    created_at: Optional[datetime] = None
 
 
 class PasswordChangeRequest(BaseModel):
@@ -1034,7 +1143,24 @@ class ChangeRequestResponse(BaseModel):
     needs_review_reason: Optional[str] = None
 
 
+class ChangeRequestListItem(ChangeRequestResponse):
+    """A row of GET /api/changes (MVP-2.9.0 N18): the snapshot, plus who it waits on and since when (the change
+    page's own answer — services/attention.change_waits), its newest plan's version and its account's name."""
+    waiting_on: Optional[str] = None
+    waiting_since: Optional[datetime] = None
+    plan_version: Optional[int] = None
+    account_name: Optional[str] = None
+
+
+class ChangeRequestList(BaseModel):
+    items: List[ChangeRequestListItem]
+    total: int                    # of everything that matches, not of this page
+
+
 class ChangeRequestDetail(ChangeRequestResponse):
+    # MVP-2.8.0 S2: who the change waits on (work_phases.change_phase) and since when (its last update)
+    waiting_on: Optional[str] = None
+    waiting_since: Optional[datetime] = None
     plans: List[FixPlanResponse] = Field(default_factory=list)
     executions: List[FixExecutionResponse] = Field(default_factory=list)
     # The LAST policy_decision pipeline event's decision (None before the review reached the policy engine)
@@ -1059,6 +1185,8 @@ class ChangeClarifyBody(BaseModel):
 class ChangeResolveReviewBody(BaseModel):
     outcome: str = Field(..., pattern="^(completed|failed)$")
     reason: str = Field(..., min_length=1, max_length=2000)
+    # MVP-2.8.0 S2: the declared checks (pc-n) the person ticked in the acceptance dialog; recorded with it
+    confirmed_checks: Optional[List[Annotated[str, Field(pattern=r"^pc-\d{1,3}$")]]] = Field(None, max_length=50)
 
 
 class ChangeTimelineEntry(BaseModel):
@@ -1093,3 +1221,50 @@ class CommandAuditResponse(BaseModel):
     change_request_id: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class HealthIssueListResponse(BaseModel):
+    """GET /api/health-issues (MVP-2.8.0 S2): one page, how many match in all, and the next page's offset
+    (None on the last page) — the spec's {items, total} + next_cursor for a paged list."""
+    items: List[HealthIssueResponse]
+    total: int
+    next_cursor: Optional[str] = None
+
+
+# ── Users (MVP-2.8.0 S2 rework): admins manage web accounts ─────────────────────────────────────────────────
+
+UserRoleName = Literal["admin", "writer", "viewer"]
+
+
+class UserRow(BaseModel):
+    id: int
+    email: str
+    name: Optional[str] = None
+    role: UserRoleName
+    settings_view: bool = False
+    is_active: bool
+    last_login_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    active_api_keys: int = 0                         # MVP-2.8.0: active, unexpired API keys (the list's «API Key N»)
+
+
+class UserCreateBody(BaseModel):
+    email: str = Field(..., max_length=255)          # an empty / blank name is the service's 422 invalid_email
+    name: Optional[str] = Field(None, max_length=100)
+    role: UserRoleName
+    settings_view: bool = False                      # a viewer's «may view Settings read-only»
+
+
+class UserPatchBody(BaseModel):
+    role: Optional[UserRoleName] = None
+    settings_view: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+
+class UserCreatedResponse(BaseModel):
+    user: UserRow
+    password: str                                    # shown once; never stored in clear, never audited
+
+
+class PasswordResetResponse(BaseModel):
+    password: str

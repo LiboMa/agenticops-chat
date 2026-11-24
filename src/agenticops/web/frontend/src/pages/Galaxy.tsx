@@ -120,15 +120,19 @@ export default function Galaxy() {
       .alphaDecay(0.018);
     simRef.current = sim;
 
+    // the element this effect observes: a resize notice queued before unmount fires after the ref is null
+    // (leaving Galaxy threw «reading getBoundingClientRect of null», S2 rework E2E) — read this one, skip it once gone
+    const wrap = wrapRef.current!;
     function resize() {
-      const rect = wrapRef.current!.getBoundingClientRect();
+      if (!wrap.isConnected) return;
+      const rect = wrap.getBoundingClientRect();
       W = rect.width; H = rect.height;
       canvas.width = W * DPR; canvas.height = H * DPR;
       canvas.style.width = W + "px"; canvas.style.height = H + "px";
     }
     resize();
     const ro = new ResizeObserver(resize);
-    ro.observe(wrapRef.current);
+    ro.observe(wrap);
 
     // zoom / pan
     const zoomB: ZoomBehavior<HTMLCanvasElement, unknown> = d3zoom<HTMLCanvasElement, unknown>()

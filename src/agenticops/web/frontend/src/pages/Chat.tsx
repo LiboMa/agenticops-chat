@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useParams, useNavigate } from "react-router-dom";
-import { useChatSessions } from "@/hooks/useChatSessions";
 import { useChatSession } from "@/hooks/useChatSession";
 import { useSessionStream } from "@/hooks/useSessionStream";
 import { useChatMessages } from "@/hooks/useChatMessages";
@@ -11,7 +10,9 @@ import { MessageList } from "@/components/chat/MessageList";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { DragHandle } from "@/components/chat/DragHandle";
 import { ContextPanel } from "@/components/chat/ContextPanel";
-import { contextRefFromQuery, contextRefQuery, type ContextRef } from "@/lib/contextRef";
+import { FRESH_CHAT, chatLanding, contextRefFromQuery, contextRefQuery, startsFresh, type ContextRef } from "@/lib/contextRef";
+import { visibilityWord } from "@/lib/sessionVisibility";
+import { useAuth } from "@/hooks/useAuth";
 import { contextForNewChat, contextLineKey } from "@/lib/chatContext";
 import { STARTERS } from "@/lib/chatMessageStatus";
 import { fillPlaceholders } from "@/lib/placeholders";
@@ -29,6 +30,10 @@ import { ApiError } from "@/api/client";
 import { apiFetch } from "@/api/client";
 import { currentUserId, userKey } from "@/lib/home";
 import { useReadOnly } from "@/hooks/useBootstrap";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { CHAT_LIST_DRAWER_MEDIA } from "@/lib/chatLayout";
+import { returnFocusTo } from "@/lib/focusReturn";
+import * as Dialog from "@radix-ui/react-dialog";
 
 // Per signed-in user: a shared browser must never reopen someone else's last conversation
 const lastSessionKey = () => userKey("aiops-last-session-id", currentUserId());
@@ -39,9 +44,11 @@ export default function Chat() {
   const { sessionId: urlSessionId } = useParams<{ sessionId?: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { data: sessions } = useChatSessions();
+  const { isAuthenticated } = useAuth();
   // «Ask Agent» (MVP-2.7.0 S4): /app/chat?ref=I12 opens a new chat with that record as its context, sends nothing
   const [initialRef] = useState(() => contextRefFromQuery(location.search));
+  // …and so does a link that asks for a new conversation (lib/contextRef.startsFresh; MVP-2.9.0 N19)
+  const [fresh] = useState(() => startsFresh(location.search, location.state));
 
   // Whether we're in "welcome" mode (no active session)
   const [showWelcome, setShowWelcome] = useState(false);
@@ -59,9 +66,12 @@ export default function Chat() {
   // When no URL sessionId: check localStorage for last session, validate it, navigate or show welcome.
   // When URL sessionId present: just use it (page refresh case, Req 1.7).
   useEffect(() => {
-    if (urlSessionId || restorationAttempted.current) return;
+    // a new conversation (about a record, or asked for by the link that led here NOW): never resume the last one
+    const landing = chatLanding({ sessionInAddress: !!urlSessionId, attempted: restorationAttempted.current,
+                                  freshAtMount: !!initialRef || fresh, search: location.search, state: location.state });
+    if (landing === "stay") return;
     restorationAttempted.current = true;
-    if (initialRef) {  // a new conversation about that record: never resume the last session
+    if (landing === "welcome") {
       setShowWelcome(true);
       return;
     }
@@ -101,24 +111,40 @@ export default function Chat() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [selectedId]);
 
-  // When URL gains a sessionId, exit welcome mode
+  // When URL gains a sessionId, exit welcome mode — and when a link asks for a new conversation while the page is
+  // already up (the open conversation was the last one and was deleted, N22), enter it
   useEffect(() => {
     if (urlSessionId) {
       setShowWelcome(false);
+    } else if (startsFresh("", location.state)) {
+      setShowWelcome(true);
     }
-  }, [urlSessionId]);
+  }, [urlSessionId, location.key]);
 
-  // Metadata of the open session: also its name when it is not among the 50 listed (e.g. a shared link)
+  // The open conversation's own record (MVP-2.9.0 N22: the list is paged and has three views — the open
+  // conversation need not be on it: an archived one, an old one, a shared link)
   const { data: sessionDetail } = useChatSession(selectedId);
   const { messages, fetchOlder, hasOlder, isFetchingOlder } = useChatMessages(selectedId);
-  const { streaming, streamingContent, toolCalls, tokenMetrics, error, attachmentDeliveries, sendMessage, cancel } =
-    useSessionStream(selectedId);
+  const { streaming, streamingContent, toolCalls, tokenMetrics, error, attachmentDeliveries, thinking, sendMessage,
+          cancel } = useSessionStream(selectedId);
   const [showSaveReport, setShowSaveReport] = useState(false);
-  const currentSession = sessions?.find((s) => s.session_id === selectedId)
-    ?? (sessionDetail?.session_id === selectedId ? sessionDetail : undefined);
+  const currentSession = sessionDetail?.session_id === selectedId ? sessionDetail : undefined;
 
   // Three-zone layout state
-  const [flyoutOpen, setFlyoutOpen] = useState(false);
+  // 2026-11-07: the chat list is open by default beside the chat (persisted). MVP-2.8.0 S2 rework: the page keeps
+  // the full sidebar, so the list is a drawer over the conversation below 768 px and at 801–1279 px
+  // (lib/chatLayout); `isMobile` (≤ 767 px) still docks the composer and sizes the touch targets
+  const [flyoutOpen, setFlyoutOpen] = usePersistedState("aiops-chat-list-open", true);
+  const isMobile = useMediaQuery("(max-width: 767px)");
+  const listAsDrawer = useMediaQuery(CHAT_LIST_DRAWER_MEDIA);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerOpenerRef = useRef<HTMLElement | null>(null);
+  useEffect(() => { setDrawerOpen(false); }, [listAsDrawer]);   // a resize between modes never reopens it later
+  const toggleList = () => {
+    if (!listAsDrawer) { setFlyoutOpen((prev) => !prev); return; }
+    drawerOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setDrawerOpen(true);
+  };
   const [contextRef, setContextRef] = useState<ContextRef | null>(initialRef);
   // S5: the top bar shows the account this chat is bound to, locked — an open chat's own, or (before the first
   // message) the account of the issue / change it was asked about; a new free chat leaves the scope usable
@@ -131,6 +157,8 @@ export default function Chat() {
   const maxFiles = (useBootstrap().data?.upload_policy ?? FALLBACK_POLICY).max_files;
   const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null);
   const [stopped, setStopped] = useState(false);  // S5: stopping the reply is not cancelling any execution
+  const chatColRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState(false);
   // What the welcome composer will start the chat with (the server confirms it on creation)
   const welcomeCtx: ChatContextView | null = contextRef
     ? { primary: { entity_type: contextRef.kind === "issue" ? "health_issue" : "change_request", entity_id: contextRef.id,
@@ -157,7 +185,7 @@ export default function Chat() {
   const [splitRatio, setSplitRatio] = usePersistedState("aiops-chat-split", 0.55);
 
   // Flyout resizable width (px), persisted
-  const [flyoutWidth, setFlyoutWidth] = usePersistedState("aiops-flyout-width", 220);
+  const [flyoutWidth, setFlyoutWidth] = usePersistedState("aiops-flyout-width", 260);
   const [flyoutDragging, setFlyoutDragging] = useState(false);
   const flyoutDraggingRef = useRef(false);
   const flyoutContainerRef = useRef<HTMLDivElement>(null);
@@ -196,6 +224,11 @@ export default function Chat() {
   const handleSelectSession = (id: string) => {
     navigate(`/app/chat/${id}`);
   };
+  // the open conversation was deleted and no other is left: the welcome page, not the last conversation resumed
+  const handleNoSession = () => {
+    localStorage.removeItem(lastSessionKey());
+    navigate("/app/chat", { state: FRESH_CHAT });
+  };
 
   // --- Requirement 1.3 ---
   // Handle first message in welcome state: create session lazily, then send message
@@ -203,9 +236,42 @@ export default function Chat() {
     sendFirstMessage(content, attachmentIds, items, contextRef ? contextRefQuery(contextRef) : "",
                      contextForNewChat(contextRef, scope.accountId));
 
+  const welcomeError = createError ? (
+    <div role="alert" className="mx-4 mb-2 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+      {t("chat.createFailed").replace("{error}", createError)}
+    </div>
+  ) : null;
+  // MVP-2.9.0 N19: a link that asks for a new conversation may bring a sentence in its draft (NewUI's command bar).
+  // When the welcome composer is already on the page it has read the draft before: such a link mounts it anew, so it
+  // reads the draft again (uploads in flight are kept — their queue lives outside the component).
+  const composerKey = startsFresh("", location.state) ? location.key : "welcome";
+  const welcomeComposer = (layout: "dock" | "center") => (
+    <ChatInput key={composerKey} onSend={handleWelcomeSend} disabled={creating} streaming={false} sessionId={null} prefill={prefill}
+               dropTargetRef={chatColRef} onDragChange={setDragging} layout={layout} />
+  );
+
   return (
-    <div ref={flyoutContainerRef} className="flex h-[calc(100vh-var(--topbar-h))] -m-6">
+    <div ref={flyoutContainerRef} className="flex h-[calc(100dvh-var(--topbar-h))] -m-6">
+      {/* The chat list as a drawer (below 768 px, and 801–1279 px where it starts right of the sidebar: --side-w, which
+          is 0 under NewUI's frame — there is no sidebar there) */}
+      {listAsDrawer && (
+        <Dialog.Root open={drawerOpen} onOpenChange={setDrawerOpen}>
+          <Dialog.Portal>
+            <Dialog.Overlay className="fixed inset-0 z-50 bg-black/30" />
+            <Dialog.Content aria-describedby={undefined}
+                            onCloseAutoFocus={(e) => returnFocusTo(drawerOpenerRef.current, e)}
+                            className="fixed inset-y-0 left-[var(--side-w)] z-50 w-[85vw] max-w-[320px] bg-card shadow-xl outline-none animate-[slideInRight_0.2s_ease-out]">
+              <Dialog.Title className="sr-only">{t("chat.sessions")}</Dialog.Title>
+              <SessionFlyout open={drawerOpen} selectedId={selectedId}
+                             onSelect={(id) => { setDrawerOpen(false); handleSelectSession(id); }}
+                             onNone={() => { setDrawerOpen(false); handleNoSession(); }}
+                             onClose={() => setDrawerOpen(false)} />
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      )}
       {/* Left: Session Flyout (resizable) */}
+      {!listAsDrawer && <>
       <div
         style={{ width: flyoutOpen ? `${flyoutWidth}px` : 0 }}
         className={`flex-shrink-0 overflow-hidden ${flyoutDragging ? "" : "transition-[width] duration-200 ease-in-out"} ${flyoutOpen ? "" : "w-0"}`}
@@ -214,6 +280,7 @@ export default function Chat() {
           open={flyoutOpen}
           selectedId={selectedId}
           onSelect={handleSelectSession}
+          onNone={handleNoSession}
           onClose={() => setFlyoutOpen(false)}
         />
       </div>
@@ -237,20 +304,27 @@ export default function Chat() {
           <div className="w-1 h-1 rounded-full bg-border group-hover:bg-primary/60 transition-colors" />
         </div>
       </div>
+      </>}
 
-      {/* Center: Chat area */}
+      {/* Center: Chat area — the whole column takes dropped files (2026-11-07) */}
       <div
+        ref={chatColRef}
         style={{ flex: contextRef ? `0 0 ${splitRatio * 100}%` : "1 1 auto" }}
-        className="flex flex-col min-w-0"
+        className="relative flex flex-col min-w-0"
       >
+        {dragging && (
+          <div className="pointer-events-none absolute inset-3 z-20 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary/60 bg-primary/5">
+            <span className="rounded-full bg-background px-4 py-1.5 text-sm font-medium text-primary shadow-sm">{t("chat.attach.dropHint")}</span>
+          </div>
+        )}
         {showWelcome && !selectedId ? (
           /* Welcome screen — no session yet (Req 1.1) */
           <>
             <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6">
               {/* Flyout toggle in welcome mode */}
               <button
-                onClick={() => setFlyoutOpen((prev) => !prev)}
-                className="absolute top-4 left-4 w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                onClick={toggleList}
+                className="absolute top-4 left-4 w-7 h-7 max-[767px]:h-[44px] max-[767px]:w-[44px] flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                 title={t("chat.sessions")}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -264,12 +338,20 @@ export default function Chat() {
               </button>
 
               <div className="w-full max-w-[760px] text-center">
-                <h2 className="text-xl font-semibold text-foreground mb-2">
+                <h2 className="mb-2 text-2xl font-semibold tracking-tight text-foreground">
                   {t("chat.welcome")}
                 </h2>
                 <p className="mx-auto text-sm text-muted-foreground max-w-md">
                   {t("chat.welcomeHint")}
                 </p>
+                {/* ≥768px: the composer sits in the middle of the page, under the heading (2026-11-07) */}
+                {!isMobile && (
+                  <div className="mt-6 text-left">
+                    {welcomeError}
+                    <ContextLine ctx={welcomeCtx} t={t} />
+                    {welcomeComposer("center")}
+                  </div>
+                )}
                 {/* Starters fill the composer — they never send */}
                 <div className="mt-5 flex flex-wrap justify-center gap-2">
                   {STARTERS.map((id) => (
@@ -284,20 +366,14 @@ export default function Chat() {
               </div>
             </div>
 
-            {createError && (
-              <div role="alert" className="mx-6 mb-2 px-3 py-2 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
-                {t("chat.createFailed").replace("{error}", createError)}
-              </div>
+            {/* Below 768px the composer docks at the bottom (Req 1.3: the first message creates the session) */}
+            {isMobile && (
+              <>
+                {welcomeError}
+                <ContextLine ctx={welcomeCtx} t={t} />
+                {welcomeComposer("dock")}
+              </>
             )}
-            <ContextLine ctx={welcomeCtx} t={t} />
-            {/* Chat input in welcome mode — triggers lazy session creation (Req 1.3) */}
-            <ChatInput
-              onSend={handleWelcomeSend}
-              disabled={creating}
-              streaming={false}
-              sessionId={null}
-              prefill={prefill}
-            />
           </>
         ) : !selectedId ? (
           <div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -309,8 +385,8 @@ export default function Chat() {
             <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border/60">
               {/* Flyout toggle */}
               <button
-                onClick={() => setFlyoutOpen((prev) => !prev)}
-                className="w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                onClick={toggleList}
+                className="w-7 h-7 max-[767px]:h-[44px] max-[767px]:w-[44px] flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                 title={t("chat.sessions")}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -328,19 +404,27 @@ export default function Chat() {
                 <h3 className="text-sm font-medium text-foreground truncate">
                   {currentSession?.name ?? "Chat"}
                 </h3>
-                {currentSession?.context?.primary && (
-                  <p className="truncate text-xs text-muted-foreground">
-                    <span className="font-mono">{currentSession.context.primary.ref}</span>
-                    {currentSession.context.primary.title && ` · ${currentSession.context.primary.title}`}
-                    {" · "}
-                    <Link className="text-primary hover:underline"
-                          to={currentSession.context.primary.entity_type === "health_issue"
-                            ? `/app/issues/${currentSession.context.primary.entity_id}`
-                            : `/app/changes/${currentSession.context.primary.entity_id}`}>
-                      {t(currentSession.context.primary.entity_type === "health_issue" ? "chat.viewIssue" : "chat.viewChange")}
-                    </Link>
-                  </p>
-                )}
+                {currentSession && (() => {
+                  // MVP-2.9.0 N22: what it is about · its account · who sees it — and, for a linked one, a way there
+                  const about = currentSession.context?.primary ?? null;
+                  const who = visibilityWord(currentSession, isAuthenticated);
+                  return (
+                    <p className="truncate text-xs text-muted-foreground">
+                      {about ? <><span className="font-mono">{about.ref}</span>{about.title && ` · ${about.title}`}</> : t("chat.independent")}
+                      {currentSession.context?.account_name && ` · ${currentSession.context.account_name}`}
+                      {who && ` · ${t(`chat.visibility.${who}`)}`}
+                      {about && (
+                        <>
+                          {" · "}
+                          <Link className="text-primary hover:underline"
+                                to={about.entity_type === "health_issue" ? `/app/issues/${about.entity_id}` : `/app/changes/${about.entity_id}`}>
+                            {t("chat.openRef").replace("{ref}", about.ref)}
+                          </Link>
+                        </>
+                      )}
+                    </p>
+                  );
+                })()}
               </div>
 
               {/* Save as Report button */}
@@ -375,12 +459,17 @@ export default function Chat() {
               onSuggestionPick={(text) => sendMessage(text)}
               onContextRefClick={setContextRef}
               pendingDeliveries={attachmentDeliveries}
+              streamingThinking={thinking}
+              onRegenerate={(text) => { setStopped(false); void sendMessage(text); }}
+              onSaveReport={currentSession ? () => setShowSaveReport(true) : undefined}
+              readOnly={readOnly}
             />
 
             {/* Error banner */}
             {error && (
               <div role="alert" className="mx-6 mb-2 px-3 py-2 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
                 {t(`chat.error.${error.code}`)}
+                {error.detail && <div className="mt-0.5 break-words text-xs">{t("chat.error.reason").replace("{reason}", error.detail)}</div>}
               </div>
             )}
 
@@ -398,6 +487,8 @@ export default function Chat() {
               disabled={streaming}
               streaming={streaming}
               sessionId={selectedId}
+              dropTargetRef={chatColRef}
+              onDragChange={setDragging}
             />
           </>
         )}

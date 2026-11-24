@@ -2,15 +2,16 @@
 overlays live HealthIssue status (by anchored resource_ref, four values). Mounted at /api/galaxy."""
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Response
 
 from agenticops.config import settings
 from agenticops.models import get_db_session, CloudResource
 from agenticops.galaxy.models import GalaxyBuild
 from agenticops.galaxy import builder
-from agenticops.graph.query_service import HEALTH_RANK, health_overlay
+from agenticops.graph.query_service import HEALTH_RANK, health_overlay, health_overlay_at
 
 router = APIRouter(prefix="/api/galaxy", tags=["galaxy"])
 
@@ -25,6 +26,14 @@ def _absent_nodes(s) -> set:
     """Resource node ids the latest scan no longer saw. Read live, so a scan after the build shows."""
     return {f"res:{rid}" for (rid,) in
             s.query(CloudResource.id).filter(CloudResource.absent_since.isnot(None)).all()}
+
+
+def _utc(ts) -> Optional[str]:
+    """A stored time as UTC with its Z (the columns are naive UTC)."""
+    if ts is None:
+        return None
+    ts = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds") + "Z"
 
 
 def _latest_completed(s) -> Optional[GalaxyBuild]:
@@ -190,8 +199,10 @@ async def graph():
         rule_edges = rule.get("edges", [])
         llm_edges = llm.get("edges", [])
         build_id = latest.id
+        built_at = _utc(latest.finished_at)
         health = _health_by_node(s)
         absent = _absent_nodes(s)
+        health_at = _utc(datetime.now(timezone.utc))
 
     nodes = []
     for n in raw_nodes:
@@ -211,4 +222,53 @@ async def graph():
     for e in llm_edges:
         edges.append({"s": e["source"], "t": e["target"], "r": e["relation_type"], "p": "llm",
                       "ev": (e.get("evidence") or "")[:120], "c": e.get("confidence")})
-    return {"nodes": nodes, "edges": edges, "build_id": build_id}
+    # two ages on one map (MVP-2.9.0): the relations are this build's (`built_at`); health and «absent» were read
+    # just now (`health_at`) and can be read again on their own — GET /api/galaxy/health
+    return {"nodes": nodes, "edges": edges, "build_id": build_id, "built_at": built_at, "health_at": health_at}
+
+
+# How far back the map can be read (N15): the top bar's band is «the last 24 hours», and so is the replay.
+REPLAY_HOURS = 24
+
+
+def _past_moment(text: str) -> datetime:
+    """`at` as an aware UTC time within the replay window — 422 when it is no time, lies ahead, or is older."""
+    try:
+        when = datetime.fromisoformat(text.strip().replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(status_code=422, detail="`at` must be an ISO 8601 time, e.g. 2026-11-18T02:30:00Z")
+    # ONE moment, in UTC, whatever offset it was written with (the «absent» cut below drops the zone: an offset left
+    # on it made health and «absent» two moments in one answer)
+    when = (when if when.tzinfo else when.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+    now = datetime.now(timezone.utc)
+    grace = timedelta(seconds=60)             # two clocks and a request in between: the page's «now − 24 h» is older here
+    if when > now + grace:
+        raise HTTPException(status_code=422, detail="`at` lies in the future")
+    if when < now - timedelta(hours=REPLAY_HOURS) - grace:
+        raise HTTPException(status_code=422, detail=f"`at` is older than the last {REPLAY_HOURS} hours")
+    return min(when, now)
+
+
+@router.get("/health")
+def health_now(at: Optional[str] = Query(None, max_length=40)):
+    """Health and «absent» alone, as of now, for the build the graph endpoint serves (MVP-2.9.0): a map that stays
+    open reads this instead of refetching — and re-laying out — the whole graph, so a ring follows its issue and
+    not the next build. The same two definitions as /graph: the worst open issue anchored to the resource (a node
+    not listed is `unknown`), and the rows the latest scan no longer saw.
+
+    `at` (N15) = a moment of the last REPLAY_HOURS instead of now; the answer then carries `as_of`. For that moment:
+    which resources had an open issue (graph/query_service.health_overlay_at) and which a scan had already
+    stopped seeing (`absent_since <= at`). Each issue's severity and anchor are today's, and a resource that was
+    gone then and has returned reads as present — the page says so. The relations stay the build's."""
+    when = _past_moment(at) if at is not None else None
+    with get_db_session() as s:
+        latest = _latest_completed(s)
+        now = _utc(datetime.now(timezone.utc))
+        if latest is None:
+            return {"build_id": None, "health": {}, "absent": [], "at": None, **({"as_of": _utc(when)} if when else {})}
+        if when is None:
+            return {"build_id": latest.id, "health": _health_by_node(s), "absent": sorted(_absent_nodes(s)), "at": now}
+        cut = when.replace(tzinfo=None)
+        gone = s.query(CloudResource.id).filter(CloudResource.absent_since.isnot(None), CloudResource.absent_since <= cut).all()
+        return {"build_id": latest.id, "health": {f"res:{ref}": v["health"] for ref, v in health_overlay_at(s, when).items()},
+                "absent": sorted(f"res:{rid}" for (rid,) in gone), "at": now, "as_of": _utc(when)}

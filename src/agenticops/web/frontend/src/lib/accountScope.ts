@@ -1,8 +1,8 @@
 /**
  * The top bar's account scope (MVP-2.7.0 S4): one account (or All) that the work lists follow — the Cases queue,
- * the Plans & changes Fix and Changes tabs, Resources and «Needs your attention». Stored per user in this browser.
- * A detail page shows its own record's account, so the scope is locked there; pages it does not filter
- * (overview, security, Galaxy, …) say so. Pure, so node can test it.
+ * the Plans & changes Fix and Changes tabs, Resources, «Needs your attention» and, since MVP-2.9.0 N20, Security
+ * (every module of it). Stored per user in this browser. A detail page shows its own record's account, so the scope
+ * is locked there; pages it does not filter (overview, Galaxy, …) say so. Pure, so node can test it.
  */
 import { userKey } from "@/lib/home";
 
@@ -27,7 +27,7 @@ export function validScope(stored: unknown, accounts: { id: number }[] | undefin
 }
 
 // S5: a new chat (/app/chat) takes the scope as its account; an open chat (/app/chat/:id) shows its own, locked
-const LISTS = new Set(["/app/issues", "/app/plans", "/app/changes", "/app/resources", "/app/chat"]);
+const LISTS = new Set(["/app/issues", "/app/plans", "/app/changes", "/app/resources", "/app/chat", "/app/inbox", "/app/security"]);
 
 /** active: the lists, and the Cases split view (its queue stays on screen); locked: a detail page — and a case
  *  opened full screen on a narrow screen; notApplied: everything else. */
@@ -37,6 +37,18 @@ export function scopeMode(pathname: string, wide: boolean): ScopeMode {
   const m = /^\/app\/(issues|plans|changes|resources|chat)\/[^/]+$/.exec(path);
   if (!m) return "notApplied";
   return m[1] === "issues" && wide ? "active" : "locked";
+}
+
+/** What the new frame's account select shows, and whether it can be changed (round 3). On a lens the choice is the
+ *  person's own and free — NewUI's lenses all follow it, though their addresses are none of the classic lists. Over a
+ *  hosted classic page it is that page's rule, exactly what the classic top bar drew: free on a list, disabled on a
+ *  detail page and on a page the scope does not filter, and an open chat shows its own account. */
+export function scopeSelect(o: { lens: boolean; mode: ScopeMode; locked: number | null | undefined; accountId: number | null }):
+  { value: number | null; disabled: boolean; why: "lockedChat" | "notApplied" | "locked" | null } {
+  if (o.lens) return { value: o.accountId, disabled: false, why: null };
+  if (o.locked !== undefined) return { value: o.locked, disabled: true, why: "lockedChat" };
+  if (o.mode === "active") return { value: o.accountId, disabled: false, why: null };
+  return { value: o.accountId, disabled: true, why: o.mode };
 }
 
 /** An old link's own account filter (`?account=` on fix plans, `?account_id=` on changes) → the scope, once; the

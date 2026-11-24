@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useLocale } from "@/i18n/LocaleContext";
+import { useCloseOnEscape } from "@/hooks/useCloseOnEscape";
 import {
   useKBStats,
   useKBSops,
@@ -58,6 +60,8 @@ function SOPDetailPanel({
   onClose: () => void;
 }) {
   const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
+  const { t } = useLocale();
+  useCloseOnEscape(onClose);        // the house rule: a dialog closes on Escape
   const { data: sop, isLoading } = useKBSop(sopId);
   const approveMut = useApproveSop();
   const rejectMut = useRejectSop();
@@ -65,7 +69,7 @@ function SOPDetailPanel({
   const [showApproveForm, setShowApproveForm] = useState(false);
   const [actionError, setActionError] = useState("");
 
-  if (isLoading) return <Spinner label="Loading SOP..." />;
+  if (isLoading) return <Spinner label={t("kb.loadingSop")} />;
   if (!sop) return null;
 
   const canApprove = sop.status === "review" || sop.status === "draft";
@@ -122,18 +126,18 @@ function SOPDetailPanel({
           {/* Metadata */}
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <span className="text-muted-foreground block">Resource Type</span>
+              <span className="text-muted-foreground block">{t("kb.resourceType")}</span>
               <span className="text-foreground">{sop.resource_type || "N/A"}</span>
             </div>
             <div>
-              <span className="text-muted-foreground block">Issue Pattern</span>
+              <span className="text-muted-foreground block">{t("kb.issuePattern")}</span>
               <span className="text-foreground">
                 {sop.issue_pattern || "N/A"}
               </span>
             </div>
             {sop.source_issue_id && (
               <div>
-                <span className="text-muted-foreground block">Source Issue</span>
+                <span className="text-muted-foreground block">{t("kb.sourceIssue")}</span>
                 <span className="text-foreground">I#{sop.source_issue_id}</span>
               </div>
             )}
@@ -145,7 +149,7 @@ function SOPDetailPanel({
             </div>
             {sop.approved_by && (
               <div>
-                <span className="text-muted-foreground block">Approved By</span>
+                <span className="text-muted-foreground block">{t("kb.approvedBy")}</span>
                 <span className="font-medium text-foreground">{sop.approved_by}</span>
               </div>
             )}
@@ -172,7 +176,7 @@ function SOPDetailPanel({
                 <div className="flex items-end gap-2">
                   <div className="flex-1">
                     <label className="text-xs text-muted-foreground mb-1 block">
-                      Your name
+                      {t("kb.yourName")}
                     </label>
                     <input
                       type="text"
@@ -228,6 +232,7 @@ function SOPDetailPanel({
 
 export function KBTab() {
   const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
+  const { t } = useLocale();
   const [tab, setTab] = useState<Tab>("review");
   const [selectedSopId, setSelectedSopId] = useState<number | null>(null);
 
@@ -237,7 +242,7 @@ export function KBTab() {
   const cases = useKBCases();
   const deprecateMut = useDeprecateSop();
 
-  if (stats.isLoading) return <Spinner label="Loading knowledge base..." />;
+  if (stats.isLoading) return <Spinner label={t("kb.loading")} />;
   if (stats.error)
     return (
       <ErrorBanner
@@ -255,29 +260,29 @@ export function KBTab() {
   );
 
   const tabDefs: { key: Tab; label: string; count?: number }[] = [
-    { key: "review", label: "Review Queue", count: (byStatus.review || 0) + (byStatus.draft || 0) },
-    { key: "active", label: "Active SOPs", count: byStatus.active || 0 },
-    { key: "cases", label: "All Cases", count: s.case_count },
+    { key: "review", label: t("kb.reviewQueue"), count: (byStatus.review || 0) + (byStatus.draft || 0) },
+    { key: "active", label: t("kb.activeSops"), count: byStatus.active || 0 },
+    { key: "cases", label: t("kb.allCases"), count: s.case_count },
   ];
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-foreground">Knowledge Base</h1>
+      <h1 className="text-2xl font-semibold text-foreground">{t("kb.title")}</h1>
 
       {/* Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard
-          label="Review Queue"
+          label={t("kb.reviewQueue")}
           value={(byStatus.review || 0) + (byStatus.draft || 0)}
           colorClass="text-amber-600"
         />
         <StatCard
-          label="Active SOPs"
+          label={t("kb.activeSops")}
           value={byStatus.active || 0}
           colorClass="text-emerald-600"
         />
         <StatCard
-          label="Total Cases"
+          label={t("kb.totalCases")}
           value={s.case_count}
           colorClass="text-primary-600"
         />
@@ -290,19 +295,19 @@ export function KBTab() {
 
       {/* Tab Switcher */}
       <div className="flex gap-1 bg-secondary p-1 rounded-lg w-fit">
-        {tabDefs.map((t) => (
+        {tabDefs.map((def) => (
           <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
+            key={def.key}
+            onClick={() => setTab(def.key)}
             className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
-              tab === t.key
+              tab === def.key
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            {t.label}
-            {t.count !== undefined && (
-              <span className="ml-1.5 text-xs text-muted-foreground">({t.count})</span>
+            {def.label}
+            {def.count !== undefined && (
+              <span className="ml-1.5 text-xs text-muted-foreground">({def.count})</span>
             )}
           </button>
         ))}
@@ -315,6 +320,7 @@ export function KBTab() {
             {reviewSops.isLoading ? (
               <Spinner />
             ) : reviewQueue.length > 0 ? (
+              <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border">
@@ -325,10 +331,10 @@ export function KBTab() {
                       Status
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                      Resource Type
+                      {t("kb.resourceType")}
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                      Issue Pattern
+                      {t("kb.issuePattern")}
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Severity
@@ -374,9 +380,10 @@ export function KBTab() {
                   ))}
                 </tbody>
               </table>
+              </div>
             ) : (
               <div className="p-8 text-center text-muted-foreground text-sm">
-                No SOPs pending review. SOPs are generated when health issues are resolved.
+                {t("kb.noReview")}
               </div>
             )}
           </CardBody>
@@ -390,6 +397,7 @@ export function KBTab() {
             {activeSops.isLoading ? (
               <Spinner />
             ) : activeSops.data && activeSops.data.sops.length > 0 ? (
+              <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border">
@@ -397,7 +405,7 @@ export function KBTab() {
                       Filename
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                      Resource Type
+                      {t("kb.resourceType")}
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Severity
@@ -406,7 +414,7 @@ export function KBTab() {
                       Applied
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                      Approved By
+                      {t("kb.approvedBy")}
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Updated
@@ -457,9 +465,10 @@ export function KBTab() {
                   ))}
                 </tbody>
               </table>
+              </div>
             ) : (
               <div className="p-8 text-center text-muted-foreground text-sm">
-                No active SOPs. Approve SOPs from the Review Queue to activate them.
+                {t("kb.noActive")}
               </div>
             )}
           </CardBody>
@@ -473,14 +482,15 @@ export function KBTab() {
             {cases.isLoading ? (
               <Spinner />
             ) : cases.data && cases.data.cases.length > 0 ? (
+              <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border">
                     <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                      Case ID
+                      {t("kb.caseId")}
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                      Resource Type
+                      {t("kb.resourceType")}
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Severity
@@ -529,9 +539,10 @@ export function KBTab() {
                   ))}
                 </tbody>
               </table>
+              </div>
             ) : (
               <div className="p-8 text-center text-muted-foreground text-sm">
-                No cases found. Resolve health issues to populate the knowledge base.
+                {t("kb.noCases")}
               </div>
             )}
           </CardBody>

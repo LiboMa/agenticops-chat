@@ -10,6 +10,9 @@ export default {
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
         canvas: "hsl(var(--canvas))",
+        "status-ok": "hsl(var(--status-ok))",
+        "status-warn": "hsl(var(--status-warn))",
+        "status-danger": "hsl(var(--status-danger))",
         selected: "hsl(var(--selected))",
         "primary-hover": "hsl(var(--primary-hover))",
         card: {

@@ -53,6 +53,7 @@ from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.skills.execution import run_on_host, run_kubectl
 from agenticops.agents.preamble import (
     LOCAL_FILE_INSPECTION_BLOCK,
+    READ_ONLY_RUN_RULE,
     build_system_prompt,
     skills_activation_block,
 )
@@ -159,8 +160,9 @@ INVESTIGATION PROTOCOL — follow this order strictly:
      b. For EKS pods: use run_kubectl(cluster_name=CLUSTER, command="get pods/logs/describe ...")
         to inspect Kubernetes resources directly.
      c. Follow the decision trees from the activated skill for systematic diagnosis.
-     d. Read-only commands execute automatically. Write commands (systemctl restart, kill)
-        require confirmation — present them to the user first.
+     d. A diagnosis only reads: __READ_ONLY_RUN_RULE__ — a change goes into your recommendations, never
+        into a tool call. Host lines: plain reads joined by | ; && || — no file redirect, $(…), $VAR,
+        sudo, awk, sed or find.
 
 CONFIDENCE SCORING:
 - 0.9-1.0: Clear evidence from CloudTrail + metrics confirming root cause
@@ -197,6 +199,7 @@ TOOL SELECTION — accuracy first:
 # placeholder substitution avoids f-string brace escaping in the long prompt.
 RCA_SYSTEM_PROMPT = RCA_SYSTEM_PROMPT.replace("__SKILLS_BLOCK__", _RCA_SKILLS_BLOCK)
 RCA_SYSTEM_PROMPT = RCA_SYSTEM_PROMPT.replace("__LOCAL_FILE_BLOCK__", LOCAL_FILE_INSPECTION_BLOCK)
+RCA_SYSTEM_PROMPT = RCA_SYSTEM_PROMPT.replace("__READ_ONLY_RUN_RULE__", READ_ONLY_RUN_RULE)
 
 # MVP-2.6.1: appended only while get_topology_evidence is in the tool list (same gate, rca_topology_context_enabled).
 TOPOLOGY_EVIDENCE_PROMPT = """
@@ -396,6 +399,14 @@ def rca_agent(issue_id: int) -> str:
     Returns:
         RCA summary with root cause, confidence, recommendations, and fix plan.
     """
+    # One agent run per issue (MVP-2.9.0 N11): a route's or the pipeline's thread arrives with its claim; a run
+    # started from a chat, the CLI or a schedule claims the issue here — and is refused, before any model is built,
+    # while another run is on it.
+    from agenticops.services import agent_runs
+    claim, claimed_here = agent_runs.enter("rca", issue_id)
+    if claim is None:
+        return agent_runs.refusal(issue_id)
+    recorder = None      # the run's step record — and where a person's note reaches it (N10, N12)
     try:
         from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_bedrock_boto_session
         from agenticops.services.notification_service import batch_mode
@@ -431,6 +442,8 @@ def rca_agent(issue_id: int) -> str:
                 **cache_kwargs,
             )
 
+            from agenticops.agents.step_recorder import StepRecorder
+            recorder = StepRecorder("rca", f"I{issue_id}")
             agent = Agent(
                 system_prompt=build_system_prompt(RCA_SYSTEM_PROMPT + topology_evidence_prompt(), include_account=False,
                                                   agent_type="rca", agent_name="rca"),
@@ -438,6 +451,8 @@ def rca_agent(issue_id: int) -> str:
                 callback_handler=None,
                 conversation_manager=get_agent_conversation_manager("rca"),
                 plugins=get_agent_context_plugins("rca"),
+                # what it looks at, step by step, is on record while it works (MVP-2.9.0 N10) — display only
+                hooks=[recorder],
                 tools=[
                     assume_role,
                     get_active_account,
@@ -496,19 +511,33 @@ def rca_agent(issue_id: int) -> str:
             if settings.rca_max_iterations > 0:
                 invoke_kwargs["limits"] = {"turns": settings.rca_max_iterations}
             started_at = datetime.now(timezone.utc)
-            with track_agent("rca", "analyze_issue", f"issue_id={issue_id}", parent_agent=infer_parent_agent()) as tracker:
+            from agenticops.run_context import run_context
+            # save_rca_result records the model from here — the agent itself does not know it (E2E obs. 4).
+            # A diagnosis only reads (N30): under this flag every command tool refuses what is not a read.
+            with run_context(model_id=model_id, read_only_run="diagnosis"), \
+                    track_agent("rca", "analyze_issue", f"issue_id={issue_id}", parent_agent=infer_parent_agent()) as tracker:
                 result = invoke_with_retry(agent, prompt, **invoke_kwargs)
                 tracker.set_result(result)
 
             # Post-RCA quality pipeline: evidence verification → critic →
             # confidence gate → (pass) auto-SRE / (fail) needs_review.
             # save_rca_result is pure persistence since MVP-2.2.0.
+            # A run that was taken over while it worked (it outlived its limit and somebody asked again) still
+            # has its result checked and saved — but it hands the issue on to nobody: no plan run is started from it.
             try:
                 from agenticops.services.rca_quality import run_post_rca_pipeline
-                run_post_rca_pipeline(issue_id, list(agent.messages), started_at)
+                run_post_rca_pipeline(issue_id, list(agent.messages), started_at, hand_on=agent_runs.holds(claim))
             except Exception:
                 logger.exception("post-RCA quality pipeline failed for issue #%d", issue_id)
             return str(result)
     except Exception as e:
         logger.exception("RCA agent failed")
+        # this function does not raise, so its callers cannot see the failure: the timeline says it (MVP-2.9.0)
+        from agenticops.services.pipeline_events import log_agent_failed
+        log_agent_failed(issue_id, "rca", error=e)
         return f"RCA agent error: {e}"
+    finally:
+        if recorder is not None:
+            recorder.close()            # the run is over: it takes no more notes
+        if claimed_here:
+            agent_runs.end(claim)

@@ -44,6 +44,9 @@ RESOURCE_DEDUP_STATUSES = ("open", "investigating", "acknowledged", "root_cause_
 # Unresolved problems someone still owns — dismissed suppresses re-alerts but is not open: gray-zone
 # candidates, open counts, node colours and re-anchoring use this one
 OPEN_ISSUE_STATUSES = tuple(s for s in SUPPRESSING_ISSUE_STATUSES if s != "dismissed")
+# The cloud security review's two detectors (security/incremental_poll, security/posture_snapshot): their signals
+# state the account the collection job ran with — resolved through the provider layer, not inferred
+SECURITY_DETECTORS = ("security_poll", "security_posture")
 
 _SEVERITY_RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 _MERGED_ALERTS_CAP = 50
@@ -156,6 +159,8 @@ class GateDecision:
 
 _gate_lock = threading.Lock()
 _last_prune_date: Optional[date] = None
+_prune_lock = threading.Lock()
+_PRUNE_BATCH = 500   # rows per prune transaction: each holds the write lock only briefly
 
 
 # ── Merge helper (single implementation for all paths) ────────────────
@@ -240,11 +245,31 @@ def _jaccard(a: str, b: str) -> float:
     return len(sa & sb) / len(sa | sb)
 
 
+def _signal_account_pk(session, sig: SignalInput):
+    """The cloud_accounts row the signal names, or None when it names none (or none that is managed)."""
+    if not (sig.account_id or "").strip():
+        return None
+    try:
+        from agenticops.services import identity_resolver
+        return identity_resolver.account_pk(session, sig.account_id)
+    except Exception:
+        return None
+
+
+def _another_accounts(issue, signal_pk) -> bool:
+    """Whether `issue` is known to be of another account than the signal's (MVP-2.9.0 N27, review): both are known
+    and they differ. The same resource id and type in two accounts — «account» without a trail, the root user,
+    a user name both have, a workload name in two clusters — are two problems. Where either is unknown, nobody
+    can tell, and the rules stay what they were."""
+    return signal_pk is not None and issue.account_id is not None and issue.account_id != signal_pk
+
+
 def _gray_zone_candidates(session, sig: SignalInput, now: datetime) -> list:
     """Open issues that make this signal ambiguous (L2 triggers, spec §2.4). A dismissed issue is not one:
-    the L2 judge must not fold a new problem into a false positive."""
+    the L2 judge must not fold a new problem into a false positive. Nor is an issue of another account."""
     from agenticops.models import HealthIssue
 
+    signal_pk = _signal_account_pk(session, sig)
     window_start = now - timedelta(minutes=settings.noise_flap_window_minutes)
     active = (
         session.query(HealthIssue)
@@ -256,6 +281,8 @@ def _gray_zone_candidates(session, sig: SignalInput, now: datetime) -> list:
     candidates: dict[int, object] = {}
     resource = (sig.resource_id or "").strip()
     for issue in active:
+        if _another_accounts(issue, signal_pk):
+            continue
         # ① same resource, different wording/type
         if resource and resource.lower() != "unknown" and issue.resource_id == resource:
             candidates[issue.id] = issue
@@ -344,26 +371,38 @@ def _write_signal(session, sig: SignalInput, fingerprint: str, disposition: str,
     return row.id
 
 
-def _prune_old_signals(session) -> None:
-    """Once per process-day, delete Signal rows past retention."""
+def _prune_old_signals() -> None:
+    """Once per process-day, delete Signal rows past retention — in batches of _PRUNE_BATCH, each its own short
+    transaction, outside the gate's transaction and lock. 2026-11-08 on the dev box: the first signal after a restart
+    deleted 5706 rows in one transaction under _gate_lock, held the database longer than a reader would wait, and a
+    chat turn failed with "database is locked"."""
     global _last_prune_date
-    today = datetime.now(timezone.utc).date()
-    if _last_prune_date == today or settings.signal_retention_days <= 0:
-        return
-    _last_prune_date = today
+    if not _prune_lock.acquire(blocking=False):
+        return                                    # another thread is pruning
     try:
-        from agenticops.models import AlertEvent
+        today = datetime.now(timezone.utc).date()
+        if _last_prune_date == today or settings.signal_retention_days <= 0:
+            return
+        _last_prune_date = today
+        from agenticops.models import AlertEvent, get_db_session
 
         cutoff = datetime.now(timezone.utc) - timedelta(days=settings.signal_retention_days)
-        deleted = (
-            session.query(AlertEvent)
-            .filter(AlertEvent.received_at < cutoff)
-            .delete(synchronize_session=False)
-        )
+        deleted = 0
+        while True:
+            with get_db_session() as session:
+                ids = [row[0] for row in session.query(AlertEvent.id)
+                       .filter(AlertEvent.received_at < cutoff).limit(_PRUNE_BATCH).all()]
+                if ids:
+                    session.query(AlertEvent).filter(AlertEvent.id.in_(ids)).delete(synchronize_session=False)
+            deleted += len(ids)
+            if len(ids) < _PRUNE_BATCH:
+                break
         if deleted:
             logger.info("signal-gate: pruned %d signals older than %dd", deleted, settings.signal_retention_days)
     except Exception:
         logger.debug("signal prune failed", exc_info=True)
+    finally:
+        _prune_lock.release()
 
 
 def _log_gated(issue_id: int, disposition: str, reason: str, signal_id: int) -> None:
@@ -406,6 +445,16 @@ def _promote(session, sig: SignalInput, fingerprint: str, trace_id: Optional[str
         if sig.account_id is not None and str(sig.account_id).strip():
             audit = {"rule": "error", "candidates": [{"account": str(sig.account_id), "reason": "error"}]}
 
+    # MVP-2.9.0 N20: a security finding the resolver gave no account (its ARN names another account, or the
+    # anchoring failed) belongs to the account whose collection job found it. The anchor itself — status, row,
+    # audit — stays what the resolver said; every other detector keeps the anchoring rule.
+    account = anchor.account_id if anchor else None
+    if account is None and sig.detected_by in SECURITY_DETECTORS:
+        try:
+            account = identity_resolver.account_pk(session, sig.account_id)
+        except Exception:
+            logger.warning("signal-gate: the collector's account of %r could not be read", resource, exc_info=True)
+
     issue = HealthIssue(
         resource_id=resource or "unknown",
         provider=sig.provider or "aws",
@@ -427,7 +476,7 @@ def _promote(session, sig: SignalInput, fingerprint: str, trace_id: Optional[str
         first_seen=now,
         last_seen=now,
         trace_id=trace_id,
-        account_id=anchor.account_id if anchor else None,
+        account_id=account,
         resource_ref=anchor.resource_ref if anchor else None,
         anchor_status=anchor.status if anchor else None,
         anchor_candidates=anchor.audit() if anchor else audit,
@@ -470,11 +519,11 @@ def process_signal(sig: SignalInput) -> GateDecision:
     now = datetime.now(timezone.utc)
     evidence: dict = {"fingerprint": fingerprint, "gate_enabled": gate_on}
 
+    _prune_old_signals()   # its own short transactions, before the gate lock (2026-11-08)
+
     with _gate_lock:
         session = get_session()
         try:
-            _prune_old_signals(session)
-
             # ① exclude patterns (regex on title) → noise
             for compiled in _compiled_exclude_patterns():
                 if compiled.search(sig.title or ""):
@@ -592,14 +641,14 @@ def process_signal(sig: SignalInput) -> GateDecision:
             # ⑥ same resource AND same issue_type → merge (gate-on tightens legacy resource merge)
             resource = (sig.resource_id or "").strip()
             if gate_on and settings.resource_dedup_enabled and resource and resource.lower() != "unknown":
-                match = (
+                signal_pk = _signal_account_pk(session, sig)
+                match = next((issue for issue in (
                     session.query(HealthIssue)
                     .filter(HealthIssue.resource_id == resource,
                             HealthIssue.issue_type == (sig.issue_type or "other"),
                             HealthIssue.status.in_(RESOURCE_DEDUP_STATUSES))
                     .order_by(HealthIssue.detected_at.desc())
-                    .first()
-                )
+                ) if not _another_accounts(issue, signal_pk)), None)   # never another account's issue (N27)
                 if match is not None:
                     merge_into_issue(session, match, sig.source, sig.title, sig.description,
                                      sig.severity, fingerprint, sig.metric_data, sig.related_changes)

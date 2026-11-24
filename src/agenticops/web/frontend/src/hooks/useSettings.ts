@@ -9,6 +9,10 @@ export interface AppSettings {
   auto_rca_enabled: boolean;
   notifications_enabled: boolean;
   executor_auto_approve_l0_l1: boolean;
+  executor_hitl_enabled: boolean;
+  /** MVP-2.9.0 N25: which of the four stored switches are an administrator's values, the settings file's
+   *  defaults, and who last changed them (read-only) */
+  execution_switches?: { overridden: string[]; defaults: Record<string, boolean>; locked?: Record<string, boolean>; updated_by: string | null; updated_at: string | null };
   notifications_consolidated: boolean;
   bedrock_cache_enabled: boolean;
   skills_auto_improve_enabled: boolean;
@@ -44,7 +48,7 @@ type AgentModelPatch = { model_id?: string; max_tokens?: number; window_size?: n
 // change_management_enabled, policy_graph_impact_enforce, rca_min_confidence_for_autofix, executor_total_timeout and
 // acp_available_backends are read-only: PATCH /api/settings rejects them as unknown keys (400), so they are
 // dropped from the patch shape (they stay readable on AppSettings).
-type SettingsPatch = Partial<Omit<AppSettings, "agent_models" | "change_management_enabled"
+type SettingsPatch = Partial<Omit<AppSettings, "agent_models" | "change_management_enabled" | "execution_switches"
   | "policy_graph_impact_enforce" | "rca_min_confidence_for_autofix" | "executor_total_timeout" | "acp_available_backends">>
   & { agent_models?: Record<string, AgentModelPatch> };
 

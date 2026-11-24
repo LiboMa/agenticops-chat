@@ -1,12 +1,18 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
-import type { Report, ReportFromSessionRequest } from "@/api/types";
+import { nextOffset, reportsRequest, type ReportsQuery } from "@/lib/reports";
+import type { Report, ReportFromSessionRequest, ReportPage } from "@/api/types";
 
-export function useReports() {
-  return useQuery({
-    queryKey: ["reports"],
-    queryFn: () => apiFetch<Report[]>("/reports"),
+/** The reports list, searched / dated / counted by the server (MVP-2.9.0 N21), one page at a time. The previous
+ *  query's rows stay on screen while the next one loads. */
+export function useReportsList(query: ReportsQuery) {
+  return useInfiniteQuery({
+    queryKey: ["reports", "list", query.q.trim(), query.from, query.to],
+    queryFn: ({ pageParam }) => apiFetch<ReportPage>(reportsRequest(query, pageParam)),
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) => nextOffset(pages.reduce((n, p) => n + p.items.length, 0), last.total, last.items.length),
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
   });
 }
 

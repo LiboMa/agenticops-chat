@@ -26,6 +26,7 @@ export function AppShell() {
   return (
     <AccountScopeProvider>
     <div className="min-h-screen bg-canvas text-foreground">
+      {/* MVP-2.8.0 S2 rework: every page, Chat included, has the full sidebar (Chat's 56 px icon rail is gone) */}
       <Sidebar />
       <div className="min-[801px]:pl-[166px] min-[1101px]:pl-[200px]">
         <TopBar onSearch={() => setPaletteOpen(true)} />

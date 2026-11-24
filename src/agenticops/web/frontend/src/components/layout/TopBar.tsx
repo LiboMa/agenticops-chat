@@ -1,22 +1,23 @@
 import { useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useLocale } from "@/i18n/LocaleContext";
 import { FONT_SIZES, useTheme, type FontSize } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { breadcrumbFor } from "@/lib/navGroups";
 import { savePreferences } from "@/lib/preferences";
+import { setChoice } from "@/lib/shellChoice";
 import { HomePrefsDialog, MobileNav } from "./Sidebar";
-import { AttentionDialog } from "./AttentionDialog";
 import { AccountScopeSelect, useAccountScope } from "./AccountScope";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useBootstrap, useReadOnly } from "@/hooks/useBootstrap";
-import { useAttention } from "@/hooks/useAttention";
+import { useNavCounts } from "@/hooks/useNavCounts";
+import { topBarCount } from "@/lib/navCounts";
 import { countLabel } from "@/lib/attention";
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
-function initials(name: string | null | undefined, email: string | null | undefined): string {
+export function initials(name: string | null | undefined, email: string | null | undefined): string {
   const src = (name || email || "?").trim();
   const words = src.split(/[\s@._-]+/).filter(Boolean);
   return ((words[0]?.[0] ?? "?") + (words[1]?.[0] ?? "")).toUpperCase();
@@ -26,13 +27,13 @@ function initials(name: string | null | undefined, email: string | null | undefi
  *  switch and the avatar menu (account, theme, font size, home, sign out — on phones too). */
 export function TopBar({ onSearch }: { onSearch: () => void }) {
   const { t, locale, setLocale } = useLocale();
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const crumb = breadcrumbFor(pathname);
   const boot = useBootstrap();
   const readOnly = useReadOnly();
-  const scope = useAccountScope();
-  const attention = useAttention(scope.accountId);
-  const [attentionOpen, setAttentionOpen] = useState(false);
+  // the same number as the sidebar's «问题» (MVP-2.8.0: one request, nav-counts); nothing when it could not be counted
+  const nav = useNavCounts();
+  const waiting = topBarCount({ status: nav.status, data: nav.data });
   const resolving = pathname === "/app" || pathname === "/app/";  // the home resolver is deciding: say nothing yet
   const section = resolving ? "" : crumb.sectionKey ? t(crumb.sectionKey) : t("notFound.title");
 
@@ -60,14 +61,14 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
 
       <div className="flex shrink-0 items-center gap-3 max-[1100px]:gap-2">
         {boot.data?.features.attention && (
-          <button type="button" onClick={() => setAttentionOpen(true)}
-                  aria-label={attention.data ? `${t("attention.title")} ${attention.data.total}` : t("attention.title")}
-                  className="flex items-center gap-2 rounded-[5px] border border-primary/20 bg-card px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-selected max-[600px]:px-2">
+          <Link to="/app/issues?view=waiting" aria-current={pathname === "/app/issues" && search.includes("view=waiting") ? "page" : undefined}
+                aria-label={waiting !== null ? `${t("attention.title")} ${waiting}` : t("attention.title")}
+                className="flex items-center gap-2 rounded-[5px] border border-primary/20 bg-card px-2.5 py-1.5 text-xs font-medium text-primary hover:bg-selected max-[600px]:px-2">
             <span className="max-[1100px]:hidden">{t("attention.title")}</span>
             <b className="min-w-[20px] rounded-[4px] bg-selected px-1.5 text-center text-[11px] font-semibold">
-              {attention.isLoading ? "…" : countLabel(attention.data?.total ?? 0)}
+              {nav.isLoading ? "…" : waiting !== null ? countLabel(waiting) : ""}
             </b>
-          </button>
+          </Link>
         )}
         {readOnly && (
           <span title={t("readOnly.hint")}
@@ -96,7 +97,6 @@ export function TopBar({ onSearch }: { onSearch: () => void }) {
         </div>
 
         <AvatarMenu />
-        <AttentionDialog open={attentionOpen} onOpenChange={setAttentionOpen} />
       </div>
     </header>
   );
@@ -145,7 +145,13 @@ function AvatarMenu() {
             </DropdownMenu.RadioGroup>
             <ScopeMenuItems item={item} />
             <DropdownMenu.Separator className="my-1 h-px bg-border" />
+            {/* MVP-2.9.0: the new interface lives beside this one */}
+            <DropdownMenu.Item className={item} onSelect={() => { setChoice("new"); navigate("/app/new/decide"); }}>{t("newui.entry")}</DropdownMenu.Item>
             <DropdownMenu.Item className={item} onSelect={() => setHomeOpen(true)}>{t("home.prefsTitle")}</DropdownMenu.Item>
+            {/* MVP-2.8.0: every signed-in person's own API keys — a viewer's too (read-only keys) */}
+            {user && <DropdownMenu.Item className={item} onSelect={() => navigate("/app/account/api-keys")}>{t("apiKeys.menu")}</DropdownMenu.Item>}
+            {/* N23: how far this installation is set up */}
+            <DropdownMenu.Item className={item} onSelect={() => navigate("/app/setup")}>{t("setup.entry")}</DropdownMenu.Item>
             <DropdownMenu.Separator className="my-1 h-px bg-border" />
             <DropdownMenu.Item className={item} onSelect={async () => { await logout(); navigate("/app/login", { replace: true }); }}>
               {t("topbar.signOut")}

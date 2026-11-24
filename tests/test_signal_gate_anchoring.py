@@ -231,3 +231,47 @@ def test_reanchor_after_a_failed_anchor_stays_inside_the_stated_account(session,
     session.commit()
     assert _anchor_state(session, issue_id) == (ir.UNANCHORED, None, None)  # …but never another account's
     assert _issue(session, issue_id).anchor_candidates["rule"] == "unknown_account"
+
+
+# ── MVP-2.9.0 N20 (2.8.0 S3): a security finding nobody could place takes its collector's account ─────────────
+
+OTHER_ARN = "arn:aws:ec2:us-east-1:999999999999:instance/i-zzz"      # names an account that is not GLOBAL's
+
+
+def _security(**kw):
+    defaults = dict(source="security_poll", detected_by="security_poll", account_id="Agenticops-Global",
+                    issue_type="security_finding", kind="detection", resource_id=OTHER_ARN)
+    defaults.update(kw)
+    return _sig(**defaults)
+
+
+def test_a_security_finding_about_another_accounts_resource_is_listed_under_its_collector(session):
+    """GLOBAL's detector reported it; the ARN names another account, so nothing in GLOBAL's inventory is it —
+    unanchored, as before — but the finding belongs to the account whose collection job found it."""
+    issue = _issue(session, _process(_security()).issue_id)
+    assert (issue.anchor_status, issue.resource_ref) == (ir.UNANCHORED, None)
+    assert issue.anchor_candidates["rule"] == "account_conflict"          # the audit says what the resolver found
+    assert issue.account_id == GLOBAL
+
+
+def test_the_same_signal_from_another_detector_keeps_the_anchoring_rule(session):
+    issue = _issue(session, _process(_security(source="webhook_prometheus", detected_by="detect_agent",
+                                               kind="alert", issue_type="cpu_spike")).issue_id)
+    assert issue.anchor_candidates["rule"] == "account_conflict" and issue.account_id is None
+
+
+def test_a_security_finding_whose_anchoring_blew_up_still_has_its_account(session):
+    with patch.object(ir, "resolve", side_effect=RuntimeError("inventory unreadable")):
+        issue = _issue(session, _process(_security(resource_id="sg-1")).issue_id)
+    assert (issue.anchor_status, issue.account_id) == (None, GLOBAL)
+
+
+def test_a_security_finding_stating_an_account_nobody_manages_has_none(session):
+    issue = _issue(session, _process(_security(account_id="some-other-org", resource_id="sg-1")).issue_id)
+    assert issue.anchor_candidates["rule"] == "unknown_account" and issue.account_id is None
+
+
+def test_the_detector_names_are_the_gates_to_own():
+    from agenticops.services import security_service
+    assert sg.SECURITY_DETECTORS == ("security_poll", "security_posture")
+    assert security_service._SECURITY_DETECTORS is sg.SECURITY_DETECTORS

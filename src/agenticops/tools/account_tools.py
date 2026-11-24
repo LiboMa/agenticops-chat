@@ -2,7 +2,8 @@
 
 Manage cloud accounts (AWS/Azure/GCP) via natural language.
 Credentials are encrypted at rest via CredentialStore.
-Sensitive fields are masked on read, only updatable.
+Sensitive fields are masked on read, only updatable; an update merges into the stored credentials.
+Add / update / remove write one audit row each (services/account_audit), as the run's actor.
 """
 
 from __future__ import annotations
@@ -28,6 +29,14 @@ def _mask_credentials(creds: dict) -> dict:
         else:
             masked[k] = v
     return masked
+
+
+def _actor():
+    """The run's actor (a chat turn's user, the CLI); a context-less call is an agent acting, never a human."""
+    from agenticops.auth.actor import Actor, actor_from_run_context
+    from agenticops.run_context import get_run_context
+    ctx = get_run_context()
+    return actor_from_run_context(ctx) if ctx.actor != "system" else Actor("agent", "unattributed")
 
 
 @tool
@@ -86,8 +95,10 @@ def add_cloud_account(
     Returns:
         Confirmation with masked credentials.
     """
+    from agenticops.audit.service import Actions
     from agenticops.models import CloudAccount, get_db_session
     from agenticops.credentials.store import get_credential_store
+    from agenticops.services import account_audit
 
     valid_providers = {"aws", "azure", "gcp", "alicloud"}
     if provider not in valid_providers:
@@ -135,6 +146,9 @@ def add_cloud_account(
         session.add(account)
         session.flush()
         aid = account.id
+        account_audit.record(session, Actions.CREATE, account, _actor(), via="agent_tool",
+                             after=account_audit.snapshot(account),
+                             secrets=account_audit.secrets_change(None, stored_creds, creds))
 
     masked = _mask_credentials(creds)
     backend_name = store.backend_name
@@ -152,44 +166,65 @@ def update_cloud_account(
     regions: str = "",
     enabled: str = "",
     credential_source_type: str = "",
+    clear_secrets: str = "",
 ) -> str:
     """Update an existing cloud account's credentials, regions, or status.
 
-    Only provided fields are updated. Credentials are write-only (masked on read).
+    Only provided fields are updated. Credentials are write-only (masked on read) and merged into the stored ones:
+    a field left out of credentials_json is kept; a stored secret (access keys, tokens, passwords) is kept unless
+    a new non-empty value is given; a non-secret field (role_arn, external_id, account_id, ...) is deleted by ""
+    or null. Changing credential_source_type drops the previous method's own fields (role_arn and external_id,
+    or profile_name); stored secrets go only with clear_secrets.
 
     Args:
         name: Account name to update.
-        credentials_json: New credentials JSON (replaces existing). Empty = no change.
+        credentials_json: Credential fields to change, as JSON. Empty = no change.
         regions: New comma-separated regions. Empty = no change.
         enabled: 'true' or 'false'. Empty = no change.
         credential_source_type: New source type. Empty = no change.
+        clear_secrets: 'true' removes every stored secret first (e.g. an assume_role account then uses the
+            platform identity); keys given in credentials_json are then the only ones stored. Empty = keep them.
 
     Returns:
         Confirmation with masked credentials.
     """
+    from agenticops.audit.service import Actions
     from agenticops.models import CloudAccount, get_db_session
     from agenticops.credentials.store import get_credential_store
     from agenticops.credentials.session_factory import get_session_factory
+    from agenticops.services import account_audit
 
     with get_db_session() as session:
         account = session.query(CloudAccount).filter_by(name=name).first()
         if not account:
             return f"Account '{name}' not found."
 
-        updated = []
+        # Validate everything before changing anything: the session commits whatever was set when this returns
+        creds = None
         if credentials_json:
             try:
                 creds = json.loads(credentials_json) if isinstance(credentials_json, str) else credentials_json
             except json.JSONDecodeError as e:
                 return f"Invalid credentials_json: {e}"
-            # Encrypt before storage
-            store = get_credential_store()
-            account.credentials = store.encrypt_credentials(creds)
-            updated.append("credentials")
+            if not isinstance(creds, dict):
+                return "Invalid credentials_json: expected a JSON object."
+        if credential_source_type and credential_source_type not in _VALID_SOURCE_TYPES:
+            return f"Invalid source type '{credential_source_type}'. Valid: {', '.join(sorted(_VALID_SOURCE_TYPES))}"
+        clear = clear_secrets.strip().lower() in ("true", "1", "yes")
+
+        before = account_audit.snapshot(account)
+        stored_before = dict(account.credentials or {})
+        switched_from = (account.credential_source_type
+                         if credential_source_type and credential_source_type != account.credential_source_type
+                         else None)
+        updated = []
+        if creds or clear or switched_from:
+            account.credentials = get_credential_store().merge_update(
+                stored_before, creds, clear_secrets=clear, switched_from=switched_from)
+            if account.credentials != stored_before:
+                updated.append("credentials")
 
         if credential_source_type:
-            if credential_source_type not in _VALID_SOURCE_TYPES:
-                return f"Invalid source type '{credential_source_type}'. Valid: {', '.join(sorted(_VALID_SOURCE_TYPES))}"
             account.credential_source_type = credential_source_type
             updated.append("credential_source_type")
 
@@ -202,7 +237,11 @@ def update_cloud_account(
             updated.append("enabled")
 
         if not updated:
-            return "Nothing to update. Provide credentials_json, regions, enabled, or credential_source_type."
+            return ("Nothing to update. Provide credentials_json, regions, enabled, credential_source_type, "
+                    "or clear_secrets.")
+        account_audit.record(session, Actions.UPDATE, account, _actor(), via="agent_tool",
+                             before=before, after=account_audit.snapshot(account),
+                             secrets=account_audit.secrets_change(stored_before, account.credentials, creds))
 
     # Invalidate cached session
     get_session_factory().invalidate(name)
@@ -219,12 +258,16 @@ def remove_cloud_account(name: str) -> str:
     Returns:
         Confirmation.
     """
+    from agenticops.audit.service import Actions
     from agenticops.models import CloudAccount, get_db_session
+    from agenticops.services import account_audit
 
     with get_db_session() as session:
         account = session.query(CloudAccount).filter_by(name=name).first()
         if not account:
             return f"Account '{name}' not found."
+        before = account_audit.snapshot(account)
         session.delete(account)
+        account_audit.record(session, Actions.DELETE, account, _actor(), via="agent_tool", before=before)
 
     return f"Account '{name}' removed."

@@ -8,17 +8,119 @@ version it approved, and get_approved_fix_plan refuses a plan whose recomputed h
 
 import hashlib
 import json
+from datetime import timezone
 from typing import Optional
 
 from agenticops.models import FIXPLAN_TERMINAL_STATUSES, ChangeRequest, FixPlan, HealthIssue
 
 # The reason an execution is aborted with when the plan changed after its approval (spec §3.D.1)
 CONTENT_CHANGED = "content changed after approval"
+# What the deprecated `PUT /api/fix-plans/{id}` with status=rejected stores as the reason
+DEPRECATED_REJECT = "(rejected via deprecated PUT status)"
+
+HUMAN_ACTORS = ("user:", "cli:", "web:", "im:")
+
+
+def rejected_by_person(plan) -> bool:
+    """A PERSON said no to this plan — by any route, with or without a reason. A rejection made by code is not
+    one: by an agent or the policy engine, or a plan withdrawn because its content changed after approval (that
+    one is stamped with whoever started the run). The plan written after such a «no» is never approved without a
+    person (pipeline_service.trigger_auto_approve; round-2 review C1)."""
+    reason = (getattr(plan, "rejection_reason", None) or "").strip()
+    by = getattr(plan, "rejected_by", None) or ""
+    return getattr(plan, "status", None) == "rejected" and by.startswith(HUMAN_ACTORS) and reason != CONTENT_CHANGED
+
+
+def rejection_is_feedback(plan) -> bool:
+    """Whether a rejected plan's reason is something a PERSON wrote about the plan — what is quoted under their name
+    and passed to the agent asked for the next plan (MVP-2.9.0). A person's «no» (rejected_by_person) that carries
+    a sentence of theirs: not an empty reason, and not the filler the deprecated PUT writes."""
+    reason = (getattr(plan, "rejection_reason", None) or "").strip()
+    return rejected_by_person(plan) and bool(reason) and reason != DEPRECATED_REJECT
+
+
+def previous_fix_plan(session, plan: "FixPlan"):
+    """The plan before this one on the same issue — the newest OLDER fix plan, whatever became of it. None for an
+    issue's first plan and for a change plan (it belongs to its change request)."""
+    if plan.plan_kind != "fix" or plan.health_issue_id is None:
+        return None
+    return (session.query(FixPlan)
+            .filter(FixPlan.health_issue_id == plan.health_issue_id, FixPlan.plan_kind == "fix", FixPlan.id < plan.id)
+            .order_by(FixPlan.id.desc()).first())
+
+
+def _utc(ts) -> Optional[str]:
+    if ts is None:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def previous_plan_diff(session, plan: FixPlan) -> dict:
+    """What this fix plan changed relative to the plan before it on the same issue (MVP-2.9.0 N14) — the newest
+    OLDER fix plan of the issue, whatever became of it (sent back, failed, run and not accepted). A redone plan is
+    a new row, and the old row keeps its content, so nothing new is stored. `previous` is None for an issue's first
+    plan and for a change plan (it belongs to its change request).
+
+    `steps` / `rollback`: change_steps.plan_diff. `same_content`: the two content hashes are equal — the plan was
+    redone word for word (None when either has no hash). `same_diagnosis`: both were written from the same
+    diagnosis (None when either does not say). `rejection_is_feedback`: a person wrote the reason about the plan
+    (the one rule, above) — only then is it quoted under their name."""
+    from agenticops.services.change_steps import plan_diff, plan_steps, rollback_steps
+    from agenticops.services.verification import declared_checks
+    out = {"plan_id": plan.id, "previous": None, "same_content": None, "steps": None, "rollback": None,
+           "rollback_same": None, "checks": None, "risk_same": None}
+    prev = previous_fix_plan(session, plan)
+    if prev is None:
+        return out
+    out["previous"] = {
+        "id": prev.id, "status": prev.status, "plan_version": prev.plan_version or 1, "risk_level": prev.risk_level,
+        "created_at": _utc(prev.created_at),
+        "rejected_by": prev.rejected_by, "rejected_at": _utc(prev.rejected_at), "rejection_reason": prev.rejection_reason,
+        "rejection_is_feedback": rejection_is_feedback(prev),
+        "same_diagnosis": (prev.rca_result_id == plan.rca_result_id
+                           if prev.rca_result_id is not None and plan.rca_result_id is not None else None),
+    }
+    if prev.content_hash and plan.content_hash:
+        out["same_content"] = prev.content_hash == plan.content_hash
+    out["steps"] = plan_diff(plan_steps(prev.steps), plan_steps(plan.steps))
+    out["rollback"] = plan_diff(rollback_steps(prev.rollback_plan), rollback_steps(plan.rollback_plan))
+    # Round-2 review C-I2. The two lists above compare LINES; a rollback written as a sentence has none, and the
+    # checks are not steps — yet both are part of what an approval covers. So the page is also told, whole against
+    # whole: is the rollback the same (whatever its shape), are the checks, is the risk level.
+    out["rollback_same"] = _canonical(prev.rollback_plan) == _canonical(plan.rollback_plan)
+    pre = (plan_steps(prev.pre_checks), plan_steps(plan.pre_checks))
+    post = (declared_checks(prev.post_checks), declared_checks(plan.post_checks))
+    out["checks"] = {"same": _canonical(pre[0]) == _canonical(pre[1]) and _canonical(post[0]) == _canonical(post[1]),
+                     "pre": [len(pre[0]), len(pre[1])], "post": [len(post[0]), len(post[1])]}
+    out["risk_same"] = prev.risk_level == plan.risk_level
+    return out
+
+
+def _canonical(value) -> str:
+    """A plan column as one comparable text: a legacy JSON string decoded (it may be encoded more than once), keys
+    sorted. Prose that is no JSON stays the prose it is."""
+    for _ in range(3):
+        if not isinstance(value, str):
+            break
+        try:
+            value = json.loads(value)
+        except ValueError:
+            break
+    return json.dumps(value, sort_keys=True, ensure_ascii=False, default=str)
 
 
 def content_hash(*, steps, rollback_plan, pre_checks, post_checks, account_id, risk_level) -> str:
-    doc = {"steps": steps, "rollback_plan": rollback_plan, "pre_checks": pre_checks, "post_checks": post_checks,
-           "account_id": account_id, "risk_level": risk_level}
+    """sha256 of the content AS IT IS STORED. Every text / JSON column is scrubbed of secrets when it is written
+    (security/db_redaction), so a plan whose step names an access key id is stored with the id masked. A hash
+    stamped over the step as the agent wrote it was not the hash of the stored step — the approve route recomputed
+    another one and answered «changed since it was loaded» for good (MVP-2.9.0 N15: 4 of the 80 plans waiting for
+    approval on a copy of the local database). The same scrub is applied here first; it is idempotent, so stored
+    content hashes as before, and content without a secret hashes exactly as it always did."""
+    from agenticops.security.redaction import redact_obj
+    doc = {"steps": redact_obj(steps), "rollback_plan": redact_obj(rollback_plan), "pre_checks": redact_obj(pre_checks),
+           "post_checks": redact_obj(post_checks), "account_id": account_id, "risk_level": risk_level}
     canonical = json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -60,6 +162,16 @@ def stamp_approval(session, plan: FixPlan) -> None:
     """Record what an approval approved — call right after the plan moves to approved."""
     stamp_content(session, plan)
     plan.approved_hash, plan.approved_version = plan.content_hash, plan.plan_version
+
+
+def repair_stale_hash(session, plan: FixPlan) -> bool:
+    """Restamp a stored hash that is not the hash of the stored content — none at all (a plan from before 2.6.1), or
+    one stamped before the database redaction rewrote the content (N15) — so that the reload a refused approval asks
+    for shows a hash that CAN be approved. True = it was restamped (the caller commits)."""
+    if plan.content_hash == current_hash(session, plan):
+        return False
+    stamp_content(session, plan)
+    return True
 
 
 def approval_conflict(session, plan: FixPlan, seen_hash: str) -> Optional[str]:

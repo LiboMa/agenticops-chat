@@ -22,6 +22,7 @@ from agenticops.auth import authz
 from agenticops.auth.actor import Actor, agent_actor, webhook_actor
 from agenticops.audit.service import Actions, AuditService, EntityTypes
 from agenticops.config import generate_trace_id, get_trace_id, set_trace_id, settings
+from agenticops.services import exec_switches
 from agenticops.models import (  # noqa: F401  (CHANGE_TERMINAL_STATUSES / transition_plan: later stages)
     CHANGE_TERMINAL_STATUSES, ChangeRequest, CloudAccount, CloudResource, FixExecution, FixPlan,
     InvalidStatusTransition, get_db_session, transition_change, transition_plan,
@@ -32,9 +33,10 @@ from agenticops.services.notification_service import (  # noqa: F401  (pending_a
     notify_execution_pending_acceptance,
 )
 from agenticops.services.verification import FAILED, PASSED, PENDING, as_results, evaluate
-from agenticops.services.change_steps import blocked_commands, diff_steps, normalize_steps
+from agenticops.services.change_steps import (blocked_commands, diff_steps, normalize_steps, plan_steps,
+                                              rollback_steps, unclassified_commands)
 from agenticops.services.pipeline_events import log_event
-from agenticops.services.plan_content import approval_conflict, plan_label, stamp_approval, stamp_content
+from agenticops.services.plan_content import approval_conflict, plan_label, repair_stale_hash, stamp_approval, stamp_content
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +188,63 @@ def list_changes(*, status: Optional[str] = None, account_id: Optional[int] = No
         if since is not None:
             q = q.filter(ChangeRequest.created_at >= since)
         return [to_dict(c) for c in q.offset(offset).limit(limit).all()]
+
+
+CHANGE_SORTS = ("newest", "oldest")
+
+
+def page_changes(*, statuses: Optional[list[str]] = None, account_id: Optional[int] = None, requested_by: Optional[str] = None,
+                 since: Optional[datetime] = None, q: Optional[str] = None, ids: Optional[list[int]] = None,
+                 sort: str = "newest", limit: int = 50, offset: int = 0) -> dict:
+    """One page of change requests and how many match in all (MVP-2.9.0 N18 — the list half of the 2.8.0 spec's S5).
+    `q`: the title, the account's name, or the number (C#12 / c12 / 12); what was typed is matched literally.
+    `ids`: only these (a view — «waiting on me» — computed by the caller); every other filter still applies.
+    Each row also says who it waits on and since when (services/attention.change_waits, the change page's own
+    answer), the version of its newest implementation plan, and its account's name."""
+    from sqlalchemy import or_
+    from agenticops.models import CloudAccount
+    from agenticops.services.attention import change_waits
+    from agenticops.services.listing import like_pattern, ref_number
+    with _session() as s:
+        query = s.query(ChangeRequest)
+        if statuses:
+            query = query.filter(ChangeRequest.status.in_(statuses))
+        if account_id is not None:
+            query = query.filter(ChangeRequest.account_id == account_id)
+        if requested_by:
+            query = query.filter(ChangeRequest.requested_by == requested_by)
+        if since is not None:
+            query = query.filter(ChangeRequest.created_at >= since)
+        if ids is not None:
+            query = query.filter(ChangeRequest.id.in_(ids))
+        term = (q or "").strip()
+        if term:
+            like = like_pattern(term)
+            named = s.query(CloudAccount.id).filter(CloudAccount.name.ilike(like, escape="\\"))
+            conds = [ChangeRequest.title.ilike(like, escape="\\"), ChangeRequest.account_id.in_(named)]
+            number = ref_number(term, "Cc")
+            if number is not None:
+                conds.append(ChangeRequest.id == number)
+            query = query.filter(or_(*conds))
+        total = query.count()
+        order = ((ChangeRequest.created_at.asc(), ChangeRequest.id.asc()) if sort == "oldest"
+                 else (ChangeRequest.created_at.desc(), ChangeRequest.id.desc()))
+        crs = query.order_by(*order).offset(offset).limit(limit).all()
+        if not crs:
+            return {"items": [], "total": total}
+        waits = change_waits(crs)
+        versions: dict[int, Optional[int]] = {}
+        for plan in (s.query(FixPlan).filter(FixPlan.change_request_id.in_([c.id for c in crs]), FixPlan.plan_kind == "change")
+                     .order_by(FixPlan.created_at.desc(), FixPlan.id.desc())):
+            versions.setdefault(plan.change_request_id, plan.plan_version)      # the newest plan's
+        accounts = {c.account_id for c in crs if c.account_id is not None}
+        names = dict(s.query(CloudAccount.id, CloudAccount.name).filter(CloudAccount.id.in_(accounts))) if accounts else {}
+        items = []
+        for cr in crs:
+            phase, waiting_since = waits[cr.id]
+            items.append({**to_dict(cr), "waiting_on": phase.waiting_for, "waiting_since": waiting_since,
+                          "plan_version": versions.get(cr.id), "account_name": names.get(cr.account_id)})
+        return {"items": items, "total": total}
 
 
 def active_plan_for(session, cr_id: int) -> Optional[FixPlan]:
@@ -789,6 +848,8 @@ def evaluate_policy(cr_id: int, risk_level: str, action_type: Optional[str]):
             [t.get("db_id") for t in targets], cr.account_id)
         plan = active_plan_for(s, cr_id)
         blocked = blocked_commands(cr.proposed_steps, plan.steps if plan else None)
+        unclassified = (unclassified_commands(plan_steps(plan.steps), rollback_steps(plan.rollback_plan))
+                        if plan else [])
     first = targets[0]["resource_id"] if targets else None
     if blocked:
         decision = PolicyDecision(action="block", rule_name="blocked_command",
@@ -799,6 +860,11 @@ def evaluate_policy(cr_id: int, risk_level: str, action_type: Optional[str]):
             blast_radius=blast_radius, plan_kind="change",
             emergency=emergency, action_type=action_type,
         )
+        if decision.action == "auto_approve" and unclassified:
+            # 2.7.0 E2E observation 3: a standard change approved by no person never covers a step the code
+            # cannot classify; it becomes a normal change that waits for a human approver
+            decision = PolicyDecision(action="require_human", rule_name="unclassified_command",
+                                      reasons=[f"unclassified command: {c[:200]}" for c in unclassified][:5])
     decision.shadow_blast_radius = shadow_blast_radius
     _event(cr_id, "policy_decision", "approval", decision.action,
            detail={"risk_level": risk_level, "action_type": action_type, "policy_decision": decision.to_dict()},
@@ -1011,8 +1077,7 @@ def approve(cr_id: int, *, actor: Actor, reason: str = "", content_hash: str) ->
             raise ChangeStateError("no active change plan to approve")
         conflict = approval_conflict(s, plan, content_hash)
         if conflict:
-            if plan.content_hash is None:  # stored without one: stamp it now, so the reload shows a hash to send
-                stamp_content(s, plan)
+            if repair_stale_hash(s, plan):  # the stored hash was not of the stored content: the reload shows one that is
                 s.commit()
             raise ChangeStateError(conflict)
         if not _claim(s, cr_id, "planned", "approved"):
@@ -1116,7 +1181,7 @@ def request_execution(cr_id: int, *, actor: Actor) -> dict:
     concurrent move off 'approved' can never enqueue a double AWS mutation."""
     _require_enabled()
     from agenticops.models import FixExecution
-    if not settings.executor_enabled:
+    if not exec_switches.effective().executor_enabled:
         raise ChangeStateError("Executor is disabled (executor_enabled=false)")
     with _session() as s:
         cr = _load(s, cr_id)
@@ -1237,8 +1302,12 @@ def on_execution_result(fix_plan_id: int, execution_status: str, *, post_check_r
     return snap
 
 
-def resolve_review(cr_id: int, *, actor: Actor, outcome: str, reason: str) -> dict:
-    """Human verdict on a needs_review change. A redo is a NEW change request — no re-run edge."""
+def resolve_review(cr_id: int, *, actor: Actor, outcome: str, reason: str,
+                   confirmed_checks: Optional[list] = None) -> dict:
+    """Human verdict on a needs_review change. A redo is a NEW change request — no re-run edge.
+    MVP-2.8.0 S2: `confirmed_checks` = the declared checks (pc-n) the person ticked; recorded with the verdict,
+    refused (422, nothing written) when the run's plan does not declare one of them."""
+    from agenticops.services.verification import undeclared_checks
     _require_enabled()
     reason = _require_reason(reason)
     if outcome not in ("completed", "failed"):
@@ -1248,23 +1317,30 @@ def resolve_review(cr_id: int, *, actor: Actor, outcome: str, reason: str) -> di
         _check(actor, "change.approve", subject=cr)
         if cr.status != "needs_review":
             raise ChangeStateError(f"ChangeRequest #{cr_id} is '{cr.status}', not needs_review")
-        if not _claim(s, cr_id, "needs_review", outcome):
-            raise ChangeStateError(f"ChangeRequest #{cr_id} {_LOST_CLAIM}")
-        _transition(cr, outcome)
         # The human verdict is also the acceptance of the run it reviewed (one transaction with the terminal)
         pending = (s.query(FixExecution).join(FixPlan, FixExecution.fix_plan_id == FixPlan.id)
                    .filter(FixPlan.change_request_id == cr_id, FixExecution.verification_status == PENDING)
                    .order_by(FixExecution.id.desc()).first())
+        if confirmed_checks is not None:
+            run_plan = s.get(FixPlan, pending.fix_plan_id) if pending is not None else None
+            unknown = undeclared_checks(run_plan.post_checks if run_plan is not None else [], confirmed_checks)
+            if unknown:
+                raise ChangeValidationError(f"{', '.join(unknown)} is not a declared check of this change's run")
+        if not _claim(s, cr_id, "needs_review", outcome):
+            raise ChangeStateError(f"ChangeRequest #{cr_id} {_LOST_CLAIM}")
+        _transition(cr, outcome)
         if pending is not None:
             pending.verification_status = PASSED if outcome == "completed" else FAILED
             pending.accepted_by, pending.accepted_at, pending.acceptance_note = (
                 actor.key, datetime.now(timezone.utc), reason)
         action = Actions.CHANGE_COMPLETED if outcome == "completed" else Actions.CHANGE_FAILED
+        ticked = {"confirmed_checks": list(confirmed_checks)} if confirmed_checks is not None else {}
         _audit(s, action, cr, actor, details={"reason": reason, "resolved_by_human": True,
-                                              "execution_id": pending.id if pending is not None else None},
+                                              "execution_id": pending.id if pending is not None else None, **ticked},
                old_status="needs_review", new_status=outcome)
         snap = to_dict(cr)
-    _event(cr_id, "change_review_resolved", "execution", outcome, detail={"reason": reason}, actor=actor.key, trace_id=snap["trace_id"])
+    _event(cr_id, "change_review_resolved", "execution", outcome, detail={"reason": reason, **ticked},
+           actor=actor.key, trace_id=snap["trace_id"])
     try:
         notify_change_result(snap, outcome)
     except Exception:

@@ -62,8 +62,9 @@ def _health_issue_to_anomaly_response(issue: HealthIssue, account_name: Optional
     )
 
 
-def _auto_learn_dismissed(issue_id: int, resource_id: str, title: str, description: str) -> None:
-    """Auto-create detect agent memory when an issue is dismissed (best-effort)."""
+def _auto_learn_dismissed(issue_id: int, resource_id: str, title: str, description: str, note: str = "") -> None:
+    """Auto-create detect agent memory when an issue is dismissed (best-effort). `note` = the person's reason
+    for dismissing it, when they gave one (MVP-2.9.0) — as a false-positive verdict's note is kept."""
     try:
         from agenticops.memory.agent_memory import save_memory_file
 
@@ -76,6 +77,9 @@ def _auto_learn_dismissed(issue_id: int, resource_id: str, title: str, descripti
             f"{title}\n\n{description}\n\n"
             f"Auto-learned: issue I#{issue_id} was dismissed by user."
         )
+        if note:
+            # the body is injected into the detect agent's prompt on every run: a short copy; the timeline has it whole
+            body += f"\nUser note: {note[:300]}{'…' if len(note) > 300 else ''}"
         save_memory_file(
             agent_name="detect",
             filename=filename,

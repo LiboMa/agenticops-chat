@@ -29,6 +29,12 @@ export function loadDraft(storage: Pick<Storage, "getItem">, key: string): Draft
   }
 }
 
+/** Whether a chat has something kept: words, or an upload. */
+export function hasDraft(storage: Pick<Storage, "getItem">, key: string): boolean {
+  const d = loadDraft(storage, key);
+  return d.text.trim() !== "" || d.attachmentIds.length > 0;
+}
+
 export function saveDraft(storage: Pick<Storage, "setItem" | "removeItem">, key: string, d: Draft): void {
   try {
     if (!d.text.trim() && d.attachmentIds.length === 0) storage.removeItem(key);

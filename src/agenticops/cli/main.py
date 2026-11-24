@@ -34,6 +34,7 @@ from rich.markup import escape
 
 from agenticops import __version__
 from agenticops.config import settings
+from agenticops.services import exec_switches
 from agenticops.models import (
     CloudAccount,
     CloudResource,
@@ -746,6 +747,22 @@ def describe_report(report_id: int = typer.Argument(..., help="Report ID")):
 # ============================================================================
 
 
+def _account_snapshot(account) -> dict:
+    from agenticops.services import account_audit
+    return account_audit.snapshot(account)
+
+
+def _audit_account(session, action: str, account, *, before: dict | None = None,
+                   stored_before: dict | None = None) -> None:
+    """One audit row per CLI account write (services/account_audit), as the CLI user, in the command's session."""
+    from agenticops.auth.actor import cli_actor
+    from agenticops.services import account_audit
+    deleted = action == "delete"
+    account_audit.record(session, action, account, cli_actor(), via="cli", before=before,
+                         after=None if deleted else account_audit.snapshot(account),
+                         secrets=None if deleted else account_audit.secrets_change(stored_before, account.credentials))
+
+
 @create_app.command("account")
 def create_account(
     name: str = typer.Argument(..., help="Account name"),
@@ -781,6 +798,8 @@ def create_account(
             is_enabled=activate,
         )
         session.add(account)
+        session.flush()
+        _audit_account(session, "create", account)
         session.commit()
 
         console.print(f"[green]account/{name} created[/green]")
@@ -875,7 +894,9 @@ def delete_account(
             if not confirm:
                 raise typer.Exit(0)
 
+        before = _account_snapshot(account)
         session.delete(account)
+        _audit_account(session, "delete", account, before=before)
         session.commit()
         console.print(f"[green]account/{name} deleted[/green]")
 
@@ -907,6 +928,54 @@ def delete_schedule(
         raise typer.Exit(1)
 
 
+@delete_app.command("issues")
+def delete_issues(
+    all_issues: bool = typer.Option(False, "--all", help="Required: every issue (there is no partial delete)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Count what would go; change nothing"),
+    yes: bool = typer.Option(False, "--yes", help="Really delete — an online backup is taken first"),
+    reset_poll_cursors: bool = typer.Option(False, "--reset-poll-cursors",
+                                            help="Also forget the security poll's cursors (it backfills 24 hours)"),
+    move_knowledge: bool = typer.Option(False, "--move-knowledge",
+                                        help="Also move what was learned from issues (KB cases and SOPs, issue-derived "
+                                             "agent memory) into the backup folder — not deleted"),
+    memory_dir: Optional[List[Path]] = typer.Option(None, "--memory-dir",
+                                                    help="Another agent-memory root to move entries from (repeatable); "
+                                                         "this code's own is always included"),
+):
+    """Delete EVERY issue and everything that hangs off it (diagnoses, fix plans and their runs, timelines, signals,
+    steps). Change requests, the audit trails, inventory and reports stay. SQLite only; stop the service first."""
+    from agenticops.services import issue_purge
+
+    if not all_issues:
+        console.print("[red]Pass --all: this deletes every issue, there is no partial delete.[/red]")
+        raise typer.Exit(2)
+    init_db()
+    roots = None
+    if move_knowledge:
+        from agenticops.memory.agent_memory import AGENT_MEMORY_DIR
+        roots = [AGENT_MEMORY_DIR] + [p for p in (memory_dir or []) if Path(p).resolve() != AGENT_MEMORY_DIR.resolve()]
+    try:
+        report = issue_purge.purge(yes=yes, dry_run=dry_run, reset_poll_cursors=reset_poll_cursors,
+                                   move_knowledge=move_knowledge, memory_dirs=roots)
+    except issue_purge.PurgeRefused as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
+    deleted = dict(report.deleted)
+    table = Table(title="Dry run — nothing changed" if dry_run else "Deleted")
+    table.add_column("table")
+    table.add_column("rows", justify="right")
+    for label, count in report.planned:
+        table.add_row(label, str(deleted.get(label, count)))
+    console.print(table)
+    if dry_run:
+        return
+    console.print(f"Backup: {report.backup}")
+    console.print(f"Chats unbound from an issue: {report.chats_unbound}")
+    if report.knowledge_moved_to:
+        console.print(f"Moved {len(report.moved_files)} knowledge / memory files to {report.knowledge_moved_to} "
+                      "(MANIFEST.tsv lists where each came from)")
+
+
 # ============================================================================
 # UPDATE Commands - Update Resources
 # ============================================================================
@@ -931,6 +1000,7 @@ def update_account(
             console.print(f"[red]Account '{name}' not found.[/red]")
             raise typer.Exit(1)
 
+        before, stored_before = _account_snapshot(account), dict(account.credentials or {})
         if role_arn or external_id is not None:
             creds = dict(account.credentials or {})
             if role_arn:
@@ -946,6 +1016,7 @@ def update_account(
         if disable:
             account.is_enabled = False
 
+        _audit_account(session, "update", account, before=before, stored_before=stored_before)
         session.commit()
         console.print(f"[green]account/{name} updated[/green]")
 
@@ -1758,7 +1829,9 @@ def _slash_account(ctx: ChatContext, args: list) -> str:
             if account.is_enabled:
                 return f"[yellow]Account '{name}' is already active.[/yellow]"
 
+            before = _account_snapshot(account)
             account.is_enabled = True
+            _audit_account(session, "update", account, before=before, stored_before=account.credentials)
             session.commit()
             return f"[green]Account '{name}' is now active.[/green]"
 
@@ -1771,7 +1844,9 @@ def _slash_account(ctx: ChatContext, args: list) -> str:
             if not account.is_enabled:
                 return f"[yellow]Account '{name}' is already inactive.[/yellow]"
 
+            before = _account_snapshot(account)
             account.is_enabled = False
+            _audit_account(session, "update", account, before=before, stored_before=account.credentials)
             session.commit()
             return f"[yellow]Account '{name}' deactivated.[/yellow]"
 
@@ -1785,7 +1860,9 @@ def _slash_account(ctx: ChatContext, args: list) -> str:
             if "--force" not in args and "-f" not in args:
                 return f"[yellow]Are you sure? Use '/account delete {name} --force' to confirm.[/yellow]"
 
+            before = _account_snapshot(account)
             session.delete(account)
+            _audit_account(session, "delete", account, before=before)
             session.commit()
             return f"[green]Account '{name}' deleted.[/green]"
 
@@ -2546,7 +2623,7 @@ def _slash_approve(ctx: ChatContext, args: list) -> str:
         if out["status"] == "executing":
             return f"[green]Change C#{cr_id} approved by {actor.key} and queued for execution.[/green]"
         if out["status"] == "approved":
-            why = " (the executor is disabled)" if not settings.executor_enabled else ""
+            why = " (the executor is disabled)" if not exec_switches.effective().executor_enabled else ""
             return (f"[yellow]Change C#{cr_id} approved by {actor.key}, but its run could not be queued{why}. "
                     f"Retry with: /execute C{cr_id}[/yellow]")
         return (f"[yellow]Change C#{cr_id} approved by {actor.key}; another request moved it to "
@@ -2695,13 +2772,20 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
         if plan.status != "approved":
             return f"[yellow]Fix plan status is '{plan.status}', must be 'approved' to execute.[/yellow]"
 
-        if not settings.executor_enabled:
-            return "[red]Executor is disabled. Set AIOPS_EXECUTOR_ENABLED=true to enable.[/red]"
+        if not exec_switches.effective().executor_enabled:
+            return "[red]Executor is disabled. An administrator switches it on in Settings.[/red]"
 
         try:
             authz.check(actor, "plan.execute", subject=plan)
         except authz.AuthzDenied as e:
             return f"[red]{e}[/red]"
+
+        # a plan runs only while its issue waits for that run (MVP-2.9.0 N26 / N27) — said before the prompt, and
+        # looked at again after it: the prompt waits without limit, and the issue may be closed meanwhile
+        from agenticops.services.issue_state import run_refusal
+        cannot = run_refusal(session, plan.health_issue_id)
+        if cannot:
+            return f"[yellow]{_safe_text(cannot)}[/yellow]"
 
         console.print(
             f"[bold]Execute fix plan #{plan_id}?[/bold]\n"
@@ -2711,6 +2795,9 @@ def _slash_execute(ctx: ChatContext, args: list) -> str:
         )
         if not Confirm.ask("Confirm execution?"):
             return "[dim]Execution cancelled.[/dim]"
+        cannot = run_refusal(session, plan.health_issue_id)     # read again: the prompt may have waited for long
+        if cannot:
+            return f"[yellow]{_safe_text(cannot)}[/yellow]"
 
         # Create FixExecution record. The plan moves only if it is still 'approved' (compare-and-set, MVP-2.7.0 S3):
         # someone may have withdrawn or queued it while the confirmation prompt waited.

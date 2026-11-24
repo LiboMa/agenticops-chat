@@ -159,6 +159,12 @@ class SSHProvider(CloudProvider):
                 record_command(tool=LEDGER_TOOL, tier="blocked", command=command, outcome="blocked",
                                account=account_name, target=host)
                 return _execute()
+            # where the run may only read, every command in the line must be one the stricter rule knows (N30) —
+            # how the line begins is not enough
+            from agenticops.services.command_audit import read_only_context
+            if read_only_context():
+                from agenticops.services.change_steps import read_only_host_tier
+                tier = read_only_host_tier(command, tier)
             return guarded_run(tool=LEDGER_TOOL, tier=tier, command=command, run=_execute,
                                outcome_of=cli_outcome, account=account_name, target=host)
 

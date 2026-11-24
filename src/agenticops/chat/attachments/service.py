@@ -114,6 +114,17 @@ def session_uuid_of(db, att: ChatAttachment) -> Optional[str]:
     return row.session_id if row else None
 
 
+def delete_staged_of(db, owner_key: str) -> list[str]:
+    """Delete every unsent upload of one uploader in the caller's transaction (a deleted user, MVP-2.8.0) and return
+    their ids — the caller removes the files after its commit (store.remove_staged)."""
+    rows = db.query(ChatAttachment).filter(ChatAttachment.owner_key == owner_key,
+                                           ChatAttachment.session_id.is_(None)).all()
+    ids = [r.id for r in rows]
+    for r in rows:
+        db.delete(r)
+    return ids
+
+
 def check_for_send(db, ids: list[str], actor, cfg) -> list[ChatAttachment]:
     """The caller's staged attachments `ids`, in order, if they may be sent together under `cfg`."""
     if len(ids) != len(set(ids)) or len(ids) > cfg.max_files:

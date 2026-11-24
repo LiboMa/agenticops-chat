@@ -6,6 +6,9 @@ export interface PlanDetailModel {
   redirect: string | null;
   actions: { approve: UiAction | null; reject: UiAction | null; execute: UiAction | null };
   runKey: "plans.run.notRun" | "plans.run.running" | "plans.run.done" | "plans.run.failed";
+  /** An approved plan that will not run because of its issue — it was closed, or moved on from where the approval
+   *  left it (MVP-2.9.0 N26 / N27). The page says so: leaving the button out said nothing. */
+  noRun: "issue_closed" | "issue_moved" | null;
   targetLink: string | null;
   accountId: number | null;   // the account the plan runs in — part of the content hash an approval binds (final review I3)
   pollMs: number | false;     // refresh while a run can still move (final review U7)
@@ -27,8 +30,12 @@ export function planDetailModel(plan: FixPlan, runs: FixExecution[] | undefined)
     : run && ["failed", "aborted", "rolled_back"].includes(run.status) ? "plans.run.failed"
     : "plans.run.notRun";
   const t = plan.target;
+  const run_ = findAction(plan.available_actions, "execute");
+  const noRun = run_ && !run_.allowed && (run_.reason_code === "issue_closed" || run_.reason_code === "issue_moved")
+    ? run_.reason_code : null;
   return {
     redirect,
+    noRun,
     actions: { approve: allowed(plan, "approve"), reject: allowed(plan, "reject"), execute: allowed(plan, "execute") },
     runKey,
     targetLink: t && t.anchor_status === "anchored" && t.resource_ref != null ? `/app/resources/${t.resource_ref}` : null,

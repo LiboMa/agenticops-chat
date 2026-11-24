@@ -1,3 +1,5 @@
+import { changesState } from "@/lib/changesEnabled";
+import { ChangesUnavailable } from "@/components/change/ChangesUnavailable";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useChange, useChangeAction, type ChangeActionArgs } from "@/hooks/useChanges";
@@ -34,6 +36,11 @@ import { planCounts, planLabel, shortHash } from "@/lib/plans";
 import type { Account, ChangeRequestDetail } from "@/api/types";
 import { useReadOnly } from "@/hooks/useBootstrap";
 import { viewerActions } from "@/lib/permissions";
+import { RunSummaryBlock, WorkSummary } from "@/components/workitem/WorkSummary";
+import { AcceptDialog } from "@/components/workitem/AcceptDialog";
+import { runSummary as summarizeRun } from "@/lib/runSummary";
+import { waitFact } from "@/lib/inbox";
+import { StatusText } from "@/components/ui/StatusText";
 
 // The dialog-driven actions; `useChanges` exports the discriminated `ChangeActionArgs`, not a `ChangeAction` alias,
 // so `action` is kept to this subset and branched on below to build a well-typed mutate() argument.
@@ -78,7 +85,11 @@ export default function ChangeDetail() {
   return <ChangeDetailView key={id} crId={Number(id)} />;
 }
 
-function ChangeDetailView({ crId }: { crId: number }) {
+/** One change request's page. `embedded`: the workbench's reading pane (one column, no way back — the queue is
+ *  beside it); `back`: how a full-screen pane returns to the queue (MVP-2.8.0 S2). */
+export function ChangeDetailView({ crId, embedded = false, back }: {
+  crId: number; embedded?: boolean; back?: { to: string };
+}) {
   const { t } = useLocale();
   const readOnly = useReadOnly();  // a viewer account: no write actions
   const settings = useSettings();
@@ -91,7 +102,8 @@ function ChangeDetailView({ crId }: { crId: number }) {
   const [copy, setCopy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const changesOn = settings.data?.change_management_enabled === true;
+  const changes = changesState(settings);
+  const changesOn = changes === "on";
   const valid = Number.isInteger(crId) && crId > 0;
   // 0 keeps both queries disabled, so a disabled flag or a bad id never fetches (the API would 404).
   const qId = changesOn && valid ? crId : 0;
@@ -108,8 +120,8 @@ function ChangeDetailView({ crId }: { crId: number }) {
   });
 
   const backLink = (
-    <Link to="/app/plans?tab=changes" className="text-sm text-muted-foreground hover:text-foreground">
-      ← {t("nav.plans")}
+    <Link to={back?.to ?? "/app/plans?tab=changes"} className="text-sm text-muted-foreground hover:text-foreground">
+      ← {back ? t("inbox.back") : t("nav.plans")}
     </Link>
   );
   const notFoundNotice = (
@@ -119,8 +131,7 @@ function ChangeDetailView({ crId }: { crId: number }) {
     </div>
   );
 
-  if (settings.isLoading) return <Spinner label={t("common.loading")} />;
-  if (!changesOn) return <p className="text-sm text-muted-foreground">{t("changes.disabled")}</p>;
+  if (changes !== "on") return <ChangesUnavailable state={changes} onRetry={() => void settings.refetch()} />;
   if (!valid || (q.error instanceof ApiError && q.error.status === 404)) return notFoundNotice;
   if (q.isLoading) return <Spinner label={t("common.loading")} />;
   if (q.error)
@@ -248,7 +259,7 @@ function ChangeDetailView({ crId }: { crId: number }) {
 
   /* -- Render ------------------------------------------------------ */
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <div className={embedded ? "grid gap-6" : "grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]"}>
       <div className="space-y-4 min-w-0">
         <StatusLine
           refLabel={`C#${cr.id}`}
@@ -269,9 +280,34 @@ function ChangeDetailView({ crId }: { crId: number }) {
           menu={readOnly ? viewerActions(menu) : menu}
           error={error}
           onDismissError={() => { setMsg(null); act.reset(); }}
-          backTo="/app/plans?tab=changes"
-          backLabel={t("nav.plans")}
+          backTo={embedded ? undefined : back?.to ?? "/app/plans?tab=changes"}
+          backLabel={back ? t("inbox.back") : t("nav.plans")}
         />
+
+        <WorkSummary
+          steps={model.phase.phases.map((p) => ({ id: p.id, label: t(`workitem.phase.${p.id}`), state: p.state }))}
+          facts={{ owner: model.waitingKey ? t(model.waitingKey) : null,
+                   waiting: waitFact(cr.waiting_on, cr.waiting_since, Date.now(), t),
+                   plan: model.plan ? planLabel(model.plan, t) : null }}
+          expand={{ label: t("workitem.summary.expand"), onClick: () => {
+            const target: ChangePhaseId = model.latestRun ? (model.phase.current === "accept" ? "accept" : "run") : "plan";
+            cards.openCard(target); cards.scrollTo(target);
+          } }}
+          t={t}>
+          {model.latestRun
+            ? <RunSummaryBlock t={t} summary={summarizeRun(model.latestRun,
+                cr.plans.find((p) => p.id === model.latestRun!.fix_plan_id) ?? null)} />
+            : model.plan && (
+              <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span className="font-mono">{`Plan #${model.plan.id} · v${model.plan.plan_version || 1} · hash ${shortHash(model.plan.content_hash)}`}</span>
+                {model.plan.approved_hash && (
+                  <StatusText tone={model.plan.approved_hash === model.plan.content_hash ? "ok" : "danger"}>
+                    {t(model.plan.approved_hash === model.plan.content_hash ? "plan.hashMatches" : "plan.hashDrifted")}
+                  </StatusText>
+                )}
+              </p>
+            )}
+        </WorkSummary>
 
         {cards.openable.length > 0 && (
           <div className="flex justify-end">
@@ -354,7 +390,14 @@ function ChangeDetailView({ crId }: { crId: number }) {
         </section>
       </aside>
 
-      {pending && (
+      {pending && pending.action === "resolve-review" && pending.extra?.outcome === "completed" && model.latestRun && (
+        <AcceptDialog summary={summarizeRun(model.latestRun, cr.plans.find((p) => p.id === model.latestRun!.fix_plan_id) ?? null)}
+                      busy={act.isPending} error={act.error?.message ?? null} onClose={() => setPending(null)}
+                      onConfirm={({ reason, confirmedChecks }) => act.mutate(
+                        { id: cr.id, action: "resolve-review", body: { outcome: "completed", reason, confirmed_checks: confirmedChecks } },
+                        { onSuccess: () => setPending(null) })} />
+      )}
+      {pending && !(pending.action === "resolve-review" && pending.extra?.outcome === "completed" && model.latestRun) && (
         <ReasonDialog
           title={pending.title}
           description={pending.description}

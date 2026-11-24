@@ -63,9 +63,11 @@ MAX_LIST_RESULT_CHARS = 6000  # lists may need slightly more room
 
 
 def _truncate(text: str, limit: int = MAX_RESULT_CHARS) -> str:
-    """Truncate tool output to *limit* characters."""
+    """Truncate tool output to *limit* characters. A cut is counted on a reporter run's coverage record."""
     if len(text) <= limit:
         return text
+    from agenticops.services import report_coverage
+    report_coverage.note_truncated()
     return text[:limit] + "\n... (output truncated, use get_* with specific ID for full details)"
 
 
@@ -108,6 +110,27 @@ def get_active_account() -> str:
     return get_enabled_accounts()
 
 
+_MANAGED_RESOURCES_CAP = 50     # rows get_managed_resources hands over; it does not say when there were more
+
+
+def _bound_resource_list(query, rows: list[dict]) -> str:
+    """A bound run's list (N32): whole rows, as many as fit the list limit, and — when that is not all of them — a
+    last line saying how many there are and of which types, so the model can ask again by type or region."""
+    from sqlalchemy import func
+    total = query.count()
+    shown = rows
+    while shown and len(json.dumps(shown, default=str)) > MAX_LIST_RESULT_CHARS:
+        shown = shown[:-1]
+    text = json.dumps(shown, default=str)
+    if len(shown) == total:
+        return text
+    by_type = (query.with_entities(CloudResource.resource_type, func.count(CloudResource.id))
+               .group_by(CloudResource.resource_type).order_by(func.count(CloudResource.id).desc()).all())
+    types = ", ".join(f"{t} {n}" for t, n in by_type)
+    return (f"{text}\n[showing {len(shown)} of {total} managed resources of this account — by type: {types}; "
+            f"call again with resource_type or region for the rest]")
+
+
 @tool
 def get_managed_resources(resource_type: str = "", region: str = "") -> str:
     """List resources from the inventory, optionally filtered.
@@ -119,11 +142,14 @@ def get_managed_resources(resource_type: str = "", region: str = "") -> str:
     Returns:
         JSON list of resources with id, resource_id, type, name, region, status.
     """
+    from agenticops.run_context import get_run_context
+    # A run bound to one account (a per-account detection, a bound chat) lists only that account's rows (N32)
+    bound = get_run_context().bound_account_id
     session = get_session()
     try:
         cloud_accounts = session.query(CloudAccount).filter(CloudAccount.is_enabled == True).all()  # noqa: E712
         if cloud_accounts:
-            account_ids = [a.id for a in cloud_accounts]
+            account_ids = [a.id for a in cloud_accounts if bound is None or a.id == bound]
             query = session.query(CloudResource).filter(
                 CloudResource.account_id.in_(account_ids),
                 CloudResource.managed == True,  # noqa: E712
@@ -134,7 +160,18 @@ def get_managed_resources(resource_type: str = "", region: str = "") -> str:
             if region:
                 query = query.filter_by(region=region)
 
-            resources = query.limit(50).all()
+            # one row more than is handed over: the cap is a cut only when something is behind it
+            resources = query.limit(_MANAGED_RESOURCES_CAP + 1).all()
+            from agenticops.services import report_coverage
+            if report_coverage.current() is not None:   # a reporter run: say what this read ranged over
+                # the regions of the rows that matched — never the `region` argument itself: that is the
+                # model's text, and a filter that found nothing read no region (N27, review)
+                report_coverage.note_scope(
+                    [a.name for a in cloud_accounts],
+                    [r for (r,) in query.with_entities(CloudResource.region).distinct()])
+                if len(resources) > _MANAGED_RESOURCES_CAP:
+                    report_coverage.note_truncated()
+            resources = resources[:_MANAGED_RESOURCES_CAP]
             if not resources:
                 filters = []
                 if resource_type:
@@ -156,6 +193,8 @@ def get_managed_resources(resource_type: str = "", region: str = "") -> str:
                     "status": r.status,
                     "managed": r.managed,
                 })
+            if bound is not None:
+                return _bound_resource_list(query, result)
             return _truncate(json.dumps(result, default=str), MAX_LIST_RESULT_CHARS)
 
         return json.dumps({"error": "No enabled accounts found. Add accounts via CLI or Web UI."})
@@ -371,7 +410,12 @@ def _create_health_issue_impl(
     RCA is not meaningful.
     """
     try:
+        from agenticops.run_context import get_run_context
         from agenticops.services.signal_gate import SignalInput, process_signal
+
+        # A run bound to one account states it (N32): an issue about `root`, an IAM user or anything no inventory
+        # holds still belongs to the account it was found in, and the same finding in two accounts is two issues.
+        bound = get_run_context().bound_account_id
 
         try:
             metric_data_parsed = json.loads(metric_data) if isinstance(metric_data, str) else metric_data
@@ -393,6 +437,7 @@ def _create_health_issue_impl(
             description=description,
             severity=severity,
             resource_id=resource_id or "",
+            account_id=str(bound) if bound is not None else "",
             issue_type=issue_type or "",
             upstream_key=alarm_name or "",
             kind="detection",
@@ -572,7 +617,14 @@ def list_health_issues(
         if resource_type:
             query = query.filter(HealthIssue.resource_id.like(f"{resource_type}%"))
 
-        issues = query.limit(limit).all()
+        issues = query.limit(limit + 1).all()     # one more than asked for: is anything behind the limit?
+        from agenticops.services import report_coverage
+        if report_coverage.current() is not None:   # a reporter run: the list ranges over every enabled account
+            report_coverage.note_scope([name for (name,) in session.query(CloudAccount.name)
+                                        .filter(CloudAccount.is_enabled == True)])  # noqa: E712
+            if len(issues) > limit:
+                report_coverage.note_truncated()
+        issues = issues[:limit]
 
         if not issues:
             return "No health issues found matching filters."
@@ -755,6 +807,7 @@ def save_rca_result(
         if not issue:
             return f"HealthIssue #{health_issue_id} not found."
 
+        from agenticops.run_context import get_run_context
         rca = RCAResult(
             health_issue_id=health_issue_id,
             root_cause=root_cause,
@@ -765,7 +818,8 @@ def save_rca_result(
             fix_risk_level=fix_risk_level,
             sop_used=sop_used or None,
             similar_cases=cases_parsed,
-            model_id=model_id,
+            # the model rca_agent built its agent with; the agent's own argument only when the code named none
+            model_id=get_run_context().model_id or model_id,
             evidence=evidence_parsed,
         )
         from agenticops.services.rca_location import INVALID, validate_location
@@ -929,6 +983,17 @@ def save_fix_plan(
                                  estimated_impact, pre_parsed, post_parsed)
     if not health_issue_id or not rca_result_id:
         return "health_issue_id and rca_result_id are required for plan_kind='fix'."
+    # 2.7.0 E2E observation 2: undoing a fix must never recreate the fault (a change plan is not checked —
+    # rolling a scale-up from 0 back to 0 is a legitimate undo there)
+    from agenticops.services.change_steps import outage_commands, rollback_steps
+    takes_down = outage_commands(rollback_steps(rollback_parsed))
+    if takes_down:
+        return ("INVALID: the rollback would take the service down — "
+                + "; ".join(c[:200] for c in takes_down[:3])
+                + ". A fix plan's rollback undoes this plan's own steps back to the last working state and never "
+                  "recreates the fault the issue describes: when the state before the fix IS the outage (replicas "
+                  "at 0, a stopped service), the rollback keeps what was restored and stops there. Nothing was "
+                  "saved: call save_fix_plan again with a corrected rollback_plan.")
 
     session = get_session()
     try:
@@ -1479,8 +1544,9 @@ def get_approved_fix_plan(fix_plan_id: int) -> str:
         if drift:
             return _abort_drifted_plan(session, plan, drift)
 
-        # Never truncated: this is what will be executed and verified. The fields the run needs come first, so
-        # an oversized plan offloaded by the SDK's ContextOffloader still shows them in the preview it keeps.
+        # Never truncated: this is what will be executed and verified. Not by this tool, and since MVP-2.9.0 N28 not by
+        # the SDK's ContextOffloader either (config.WHOLE_RESULT_TOOLS) — until then a plan over 6,000 characters
+        # reached the executor as a preview of its first 3,000. The fields the run needs still come first.
         from agenticops.services.verification import annotated_checks
         return json.dumps({
             "id": plan.id,
@@ -1623,8 +1689,33 @@ def save_execution_result(
             _UNCOVERED_REFUSED.discard(run_key)
         verdict, why = evaluate(status, plan.post_checks, parsed_post, parsed_steps, error_message,
                                 plan_changed=approval_drift(session, plan) is not None)
+        # A person stopped this run (MVP-2.9.0 N9): the reason says so, and a run that did not succeed for that
+        # reason says nothing about the diagnosis — it is not disputed below.
+        stopped_by = None
+        if rc.execution_id:
+            stopped_by = (session.query(FixExecution.stop_requested_by)
+                          .filter(FixExecution.id == rc.execution_id, FixExecution.stop_requested_at.isnot(None)).scalar())
+        if stopped_by and status != "succeeded":
+            why = f"stopped by {stopped_by}: {why}"
+        elif stopped_by and verdict == PASSED:
+            # The stop landed after the last change: every call left was a read or this save, so nothing was
+            # refused and nothing was rolled back. What happened is recorded as it happened (succeeded) — but a run
+            # a person asked to stop is never «passed» by the code: the issue must not resolve itself after that.
+            # A person accepts the result or does not (round-2 review A-I4).
+            verdict = PENDING
+            why = (f"stopped by {stopped_by} after its steps had run; nothing was rolled back — the checks passed, "
+                   f"a person decides whether the result stands")
 
         now = datetime.now(timezone.utc)
+        # The run's duration is measured (E2E obs. 5: both live runs reported 45000): from when executor_agent
+        # began it, else from the queued ticket's claim; the agent's own figure only when neither is known.
+        began = rc.run_started_at
+        if began is None and rc.execution_id:
+            ticket = session.get(FixExecution, rc.execution_id)
+            began = ticket.started_at if ticket is not None else None
+        if began is not None:
+            began = began if began.tzinfo else began.replace(tzinfo=timezone.utc)  # SQLite hands back naive UTC
+            duration_ms = max(0, int((now - began).total_seconds() * 1000))
         fields = dict(
             status=status,
             completed_at=now,
@@ -1665,7 +1756,7 @@ def save_execution_result(
             execution = FixExecution(
                 fix_plan_id=fix_plan_id,
                 health_issue_id=issue_id,
-                started_at=now,
+                started_at=began or now,
                 executed_by=executed_by,
                 **fields,
             )
@@ -1673,7 +1764,10 @@ def save_execution_result(
             session.flush()  # its id names the result (and a dispute) below
 
         # Update FixPlan status through the state machine (approved → executing → terminal).
-        # aborted: an approved plan stays approved (retry allowed, as today); an executing plan → failed.
+        # aborted: an executing plan → failed. Since MVP-2.9.0 N8 every run finds its plan `executing` (the run's
+        # record is opened first — services/run_tickets.open_ticket), so an aborted run ends its plan on every
+        # path: the issue goes back to root_cause_identified for a new plan. (Until N8 a run started by an
+        # approval or from a chat found the plan still `approved`, and an abort left it there for a retry.)
         terminal = {"succeeded": "executed", "failed": "failed", "rolled_back": "failed"}.get(status)
         ran = bool(terminal) or plan.status == "executing"
         if terminal:
@@ -1707,7 +1801,10 @@ def save_execution_result(
                     issue_status = target
                 except InvalidStatusTransition as e:  # moved concurrently: left where it is
                     issue_note = f" HealthIssue #{issue_id} left where it is: {e}."
-                if issue_status is not None and verdict == FAILED:
+                # Not disputed: a run a person stopped (N9), and an aborted run that tried nothing (N26) — a
+                # pre-check that failed before any step says nothing about the cause. The plan has ended all the same.
+                if (issue_status is not None and verdict == FAILED and not stopped_by
+                        and not nothing_tried(status, parsed_steps, rc.execution_id)):
                     disputed = dispute_rca(session, issue_id, rc.execution_id or execution.id, why)
         execution_ref = rc.execution_id or execution.id
         auto_resolved = issue_status == "resolved"
@@ -1716,18 +1813,17 @@ def save_execution_result(
         if disputed is not None:
             log_rca_disputed(issue_id, disputed.id, execution_ref, why)
 
-        # Log pipeline event (against the CR for a change plan, else the issue)
-        try:
-            from agenticops.services.pipeline_events import log_event
-            detail = {"plan_id": fix_plan_id, "duration_ms": duration_ms, "auto_resolved": auto_resolved,
-                      "verification": verdict}
-            if is_change:
-                log_event(None, "execution_completed", "execution", status, detail=detail, duration_ms=duration_ms,
-                          change_request_id=change_request_id)
-            else:
+        # The run's end on the issue's timeline. A change run's is written by the change mapper below
+        # (change_service.on_execution_result), with the request's own terminal status: until MVP-2.9.0 N8 both
+        # wrote one, and a change's timeline said «completed» twice for one run.
+        if not is_change:
+            try:
+                from agenticops.services.pipeline_events import log_event
+                detail = {"plan_id": fix_plan_id, "duration_ms": duration_ms, "auto_resolved": auto_resolved,
+                          "verification": verdict}
                 log_event(issue_id, "execution_completed", "execution", status, detail=detail, duration_ms=duration_ms)
-        except Exception:
-            pass
+            except Exception:
+                pass
 
         # Trigger post-resolution pipeline (RAG + case distillation) in background
         if auto_resolved:
@@ -1862,6 +1958,19 @@ def mark_fix_executed(health_issue_id: Optional[int], execution_id: int) -> str:
         session.close()
 
 
+def nothing_tried(status: Optional[str], steps: list, execution_id: Optional[int]) -> bool:
+    """An ABORTED run that tried nothing (MVP-2.9.0 N26): its failure says nothing about the diagnosis, so it is
+    not disputed. What was tried is the code's own knowledge where there is any — the run's guard counts the
+    commands it let through that could have changed something and were not the plan's own declared checks
+    (agents/run_guard.tried_of; N27: a failed pre-check no read list knows is still only a check); where no guard
+    watched the run in this process, the run's own step results decide: none reported."""
+    if status != "aborted":
+        return False
+    from agenticops.agents.run_guard import tried_of
+    tried = tried_of(execution_id)
+    return tried == 0 if tried is not None else not steps
+
+
 def dispute_rca(session, health_issue_id: int, execution_id: int, reason: str = "") -> Optional[RCAResult]:
     """Execution-failure feedback (MVP-2.2.0): a failed fix disputes the RCA it was based on — surfaced on the
     latest RCAResult for review, once per execution. Returns the disputed RCA (None = none, or already noted);
@@ -1895,9 +2004,9 @@ def log_rca_disputed(health_issue_id: int, rca_id: int, execution_id: int, reaso
 def mark_fix_failed(health_issue_id: Optional[int], execution_id: int, reason: str = "") -> str:
     """Record that a fix execution failed, and dispute the RCA it was based on.
 
-    A run that ended its plan (failed, or aborted mid-run) sends the HealthIssue back to root_cause_identified,
-    where a new fix plan can be made. A run aborted before it started leaves the plan approved and the issue
-    where it is, so the same plan can be retried.
+    A run that ended its plan (failed, or aborted) sends the HealthIssue back to root_cause_identified, where a
+    new fix plan can be made. (Since MVP-2.9.0 N8 every run opens its record first, so its plan is `executing`
+    by the time anything can abort it: there is no «aborted before it started, retry the same plan» any more.)
 
     Args:
         health_issue_id: The HealthIssue ID.
@@ -1909,6 +2018,7 @@ def mark_fix_failed(health_issue_id: Optional[int], execution_id: int, reason: s
     """
     if not health_issue_id:
         return "This is a change plan (no HealthIssue); nothing to mark — the change request state is derived from save_execution_result."
+    from agenticops.services.verification import as_results
     session = get_session()
     try:
         issue = session.query(HealthIssue).filter_by(id=health_issue_id).first()
@@ -1957,7 +2067,9 @@ def mark_fix_failed(health_issue_id: Optional[int], execution_id: int, reason: s
             outcome = (f"stays '{seen}' (FixPlan #{execution.fix_plan_id} is "
                        f"'{state}'{'; retry allowed' if state == 'approved' else ''})")
 
-        rca = dispute_rca(session, health_issue_id, execution_id, reason) if on_fix else None
+        # an aborted run that tried nothing says nothing about the diagnosis (MVP-2.9.0 N26)
+        tried = not nothing_tried(execution.status, as_results(execution.step_results), execution_id)
+        rca = dispute_rca(session, health_issue_id, execution_id, reason) if on_fix and tried else None
         session.commit()
         if rca is not None:
             log_rca_disputed(health_issue_id, rca.id, execution_id, reason)

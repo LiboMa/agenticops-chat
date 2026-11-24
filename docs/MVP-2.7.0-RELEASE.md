@@ -901,40 +901,7 @@
 
 ## 核心能力轨：变更感知的系统模型（A1–A4）
 
-> **不在 v2.7.0：移至 MVP-2.7.1（主人 10-08）。** 下面是 10-06 并入时的规划原样，由 MVP-2.7.1 的 RELEASE 接手。
-
-主人 10-06 批准 spec `docs/superpowers/specs/2026-10-06-change-aware-system-model-design.md`（10-05/06 架构讨论的收敛：三分法 A' 系统模型 → B RCA 调查运行时 → C 易用性并入验收），并裁定在 MVP-2.7.0 上实现、并入本发布规划。它与界面阶段并行，不改界面阶段的顺序；阶段编号用 A（= spec §12 的 P1–P4）以避开设计包的 P0–P6 和 S1–S7。路线图：`docs/superpowers/plans/2026-10-05-mvp-2.7.0-roadmap.md`「核心能力轨」节。
-
-### 一句话
-
-图只按小时轮询、RCA 看不到「告警前谁动了什么」、锚定率 66%：A' 给每个资源一个**感知度**（hourly / minute / live，系统零 LLM 自己维护，SRE 手设钉住），用一个常驻 **Sensing Worker** 按感知度拉取变更（CloudTrail 游标、K8s events、live 探针，**只拉取、不在客户账户部署任何东西**），写成**变更账本** `change_events`（证据，不驱动 Issue、不驱动执行），触发单资源增量刷新与 $0 的 rule-only 图刷新，并把真实的变更时间线（谁、何时、改了什么）放进 RCA 证据包。正确性仍由对账扫描保证，增量只负责新鲜度。`sensing_enabled` 默认 false 直到 A4 评测通过——关 = 2.6.1 行为。
-
-### 阶段
-
-| 阶段 | 内容 | 退出标准 | 状态 |
-|---|---|---|---|
-| **A1 账本与分钟级** | 两表 + 5 列与迁移；Curator 规则 1–4、6；Worker 的 CloudTrail / K8s events 拉取 + 增量刷新 + 预算计数 + 状态；status / changes / sensitivity 端点；CLI；Settings 感知卡；ResourceDetail 徽标与时间线；IssueDetail 窗口内变更；RCA 接入 | 实验室 K8s 变更 ≤ 2 min 可见；账本有真实 actor；AC@1 不退；全量测试绿 | **计划待出**（预定路径 `docs/superpowers/plans/2026-10-06-change-aware-a1-ledger-minute.md`） |
-| A2 live 级 | 探针 + 预算降级 + `request_sensitivity` + 两种端点采集 + `VOLATILE_KEYS` 补齐 | live ≤ 60 s；Galaxy 每小时 LLM $0 | 未开始 |
-| A3 覆盖面 | 重测 + 九种解析器 + ALB → 目标组 | 锚定率 ≥ 95% 或如实报告 | 未开始 |
-| A4 评测门禁 | 每夜指标 + 三个感知场景 + `--assert` | 一次完整评测过阈值 | 未开始 |
-
-### A1 六个可达面（spec §8；Web API 与 Web UI 两行）
-
-- **CLI** — 做：`aiops sensing status`、`aiops sensing set <resource-id|R<n>> <hourly|minute|live|auto>`（`auto` = 交还系统；actor `cli:<user>`，写审计）。非目标：手动触发一轮拉取。
-- **Web API** — 做：`GET /api/sensing/status`；`GET /api/resources/{id}/changes?window_minutes=&limit=`；`PUT /api/resources/{id}/sensitivity`（会话 actor；404 / 403（新权限 `resource.sensitivity`，影子模式照旧）/ 422；写审计）；`GET /api/resources[/{id}]` 多返回 5 个感知度字段。不新增其它端点。
-- **Web UI** — 做：Settings → 常规加感知卡（总开关只读、每账户游标与滞后、预算、三级计数、worker 存活）；`ResourceDetail` 概览加感知度徽标（级别 + 原因 + 下次核对 + 手设 / 交还）与变更时间线；`IssueDetail` 诊断卡列出窗口内的 change_events；中英成对。
-- **Agent tool** — 非目标（A2 才有 `request_sensitivity`）；RCA 的 `get_topology_evidence` 证据包多一种 `change_event`，提示词改为「先读证据包里的变更，再按需查 CloudTrail」。
-- **Schedule** — 非目标（Worker 是常驻线程，不是调度行；`SensingMetrics` 每日一条在 A4）。
-- **Notification** — 非目标：预算触顶、凭证失败只记日志与状态卡。
-- **Webhook** — 非目标：推送接入；只保证 `change_events.source` 能容纳 `push`。
-
-### A1 升级注意（预告）
-
-1. 启动时自动迁移：`cloud_resources` 加 5 列（现有行按类型默认表回填感知度，`set_by=system`），新表 `change_events`、`change_cursors` 由 `init_db` 自动建立。
-2. `sensing_enabled` 默认 false：不开就没有 Worker、没有新调用；`GET /api/sensing/status` 返回 `enabled=false`。
-3. 开启后每账户每分钟只读调用数受 `sensing_max_calls_per_minute_per_account`（默认 60）限制；超了先推迟拉取，永不停对账。
-
-门禁数字与验收清单在 A1 实现后回填。
+> **不在 v2.7.0：移至 MVP-2.7.1（主人 10-08）。** 正文（一句话、阶段、A1 六个可达面、A1 升级注意）已搬到 `docs/MVP-2.7.1-RELEASE.md`。
 
 ---
 
@@ -950,6 +917,11 @@ v2.7.0 之后直接在 main 上交付的工作。版本串仍是 2.7.0，它们�
 | RAW 想法文档只留本地 | `f02769b`（PR #30，11-06） | `RAW-Idea-latest-v3.md`、`RAW-Creative-Idea.md` 不再进 git（已在 `.gitignore`），本地副本保留 |
 | 两份研究 | `c7db5f6`（PR #31，11-06） | `superpowers/specs/2026-11-06-agentcore-china-region-study.md`、`superpowers/specs/2026-11-06-strands-upgrade-study.md` |
 | Strands 1.45 → 1.64 保持行为升级 + 下个版本可行性报告 | `3eb8883` + `18d587a`（PR #32；与 #29 一起经 PR #33 合入，合并提交 `603046d`，11-07） | 详见 [`STRANDS-1.64-UPGRADE-REPORT.md`](STRANDS-1.64-UPGRADE-REPORT.md)；可行性报告 `superpowers/specs/2026-11-06-strands-164-feature-feasibility.md`（主人 11-07 选组合 A） |
+| 模型配置一致性 | PR #35，合并提交 `f115743`（11-07） | 所有直连模型调用走 `preamble.converse_text`（只对接受的模型发 `temperature`、跳过推理块、空回答报错）；技能生成 / 案例提炼 / SOP / 旧 RCAEngine 跟随 Main；`agent_logs` 记实际运行的模型；价格表取自 AWS Price List；提交的默认模型 = 开发机在用的。详见 `superpowers/plans/2026-11-07-model-config-fixes.md` |
+| 聊天附件 | PR #36，合并提交 `7893547`（11-07） | 对话可附加任何常见文件（粘贴 / 拖入 / 选择即传），按模型交付并守 Bedrock 上限，历史附件预算钩子，上传配置存数据库并由管理员修改。详见 `superpowers/plans/2026-11-07-chat-attachments.md` |
+| 开发机 Node 22 | PR #37，合并提交 `bb01e5f`（11-07） | deploy-sg 装 Node 22：ACP Claude Code 适配器 0.50+ 需要 Node ≥ 22 |
+
+> 2026-11-07：`MVP-2.7.1` 已 rebase 到 main（`bb01e5f`），上表各项都已进入 2.7.1，见 `MVP-2.7.1-RELEASE.md`「随 rebase 带入的 main 交付」。
 
 ### 只读账户的六个可达面
 

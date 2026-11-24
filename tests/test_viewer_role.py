@@ -60,6 +60,8 @@ def test_settings_are_visible_to_writers_and_to_a_viewer_with_settings_read():
     ("POST", f"/api/chat/sessions/{SID}/messages"),
     ("POST", "/api/graph/vpc/vpc-0abc123/dependency-chain"), ("POST", "/api/graph/vpc/vpc-0abc123/change-simulation"),
     ("GET", "/api/settings"), ("GET", "/api/health-issues/5"), ("get", "/api/accounts"),
+    ("POST", "/api/api-keys"), ("DELETE", "/api/api-keys/1"),     # MVP-2.8.0: its own read-only keys
+    ("POST", "/api/api-keys/1/rotate"),                           # ... and updates one (a new read-only key)
 ])
 def test_reads_and_the_allowlisted_writes_pass(method, path):
     assert viewer_may(method, path)
@@ -69,7 +71,7 @@ def test_reads_and_the_allowlisted_writes_pass(method, path):
     ("POST", f"/api/chat/sessions/{SID}"),             # a session id is never the create route
     ("PATCH", "/api/chat/sessions"), ("DELETE", "/api/chat/sessions"), ("POST", "/api/chat/sessions/"),
     ("POST", f"/api/chat/sessions/{SID}/messages/x"), ("PATCH", f"/api/chat/sessions/{SID}/messages"),
-    ("PATCH", "/api/settings"), ("POST", "/api/api-keys"), ("DELETE", "/api/api-keys/1"),
+    ("PATCH", "/api/settings"),
     ("POST", "/api/health-issues/5/rca"), ("POST", "/api/galaxy/rebuild"), ("POST", "/api/reports/from-session"),
     ("PUT", "/api/users/me/preferences"), ("POST", "/api/auth/register"),
     ("POST", "/api/graph/vpc/a/b/dependency-chain"), ("post", "/api/scan"),
@@ -131,6 +133,8 @@ def test_the_walk_covers_the_app_and_every_allowlist_entry_is_a_real_route():
         ("POST", "/api/graph/vpc/x1/change-simulation"),
         # 2026-11-07: a viewer attaches files to its own chats (the service touches only its own uploads)
         ("POST", "/api/chat/attachments"), ("DELETE", "/api/chat/attachments/x1"),
+        # MVP-2.8.0 (owner): a viewer issues and revokes its own read-only API keys
+        ("POST", "/api/api-keys"), ("DELETE", "/api/api-keys/x1"), ("POST", "/api/api-keys/x1/rotate"),
     }
 
 
@@ -148,12 +152,26 @@ def test_a_viewer_is_refused_every_write_outside_the_allowlist(gate, who):
     assert refused > 100
 
 
-@pytest.mark.parametrize("who", ["writer", "admin", "admin_read_key"])
-def test_writers_admins_and_api_keys_are_never_stopped_by_it(gate, who):
-    """API-key scope semantics are unchanged: an admin's read-scoped key passes the middleware as before."""
+@pytest.mark.parametrize("who", ["writer", "admin"])
+def test_writers_and_admins_are_never_stopped_by_it(gate, who):
     for method, template, path in _mutating_api_routes():
         r = gate.client.request(method, path, headers=gate.tokens[who])
         assert (r.status_code, r.text) == (200, "passed"), (who, method, template)
+
+
+def test_a_read_scoped_key_is_a_viewer_for_its_request(gate):
+    """MVP-2.8.0 (owner: a read-only key really is read-only): an admin's read-scoped key is refused every write a
+    viewer is refused — before, it passed the middleware and RBAC shadow mode let its writes through."""
+    from agenticops.web.app import _PUBLIC_PATHS
+    refused = 0
+    for method, template, path in _mutating_api_routes():
+        r = gate.client.request(method, path, headers=gate.tokens["admin_read_key"])
+        if viewer_may(method, path) or path in _PUBLIC_PATHS:
+            assert (r.status_code, r.text) == (200, "passed"), (method, template)
+        else:
+            assert (r.status_code, r.json()) == (403, READ_ONLY_BODY), (method, template)
+            refused += 1
+    assert refused > 100
 
 
 def test_a_viewer_still_reads(gate):
@@ -396,8 +414,10 @@ def test_the_read_only_flag_comes_from_the_users_row_and_travels_in_the_run_cont
     viewer = SimpleNamespace(id=9, email="viewer", permissions=["read"])
     writer = SimpleNamespace(id=1, email="w", permissions=["read", "write"])
     assert actor_from_request(SimpleNamespace(state=SimpleNamespace(user=viewer))).read_only is True
-    key = SimpleNamespace(permissions=["read"])  # a read-scoped key does not make a writer a viewer
-    assert actor_from_request(SimpleNamespace(state=SimpleNamespace(user=writer, api_key=key))).read_only is False
+    key = SimpleNamespace(permissions=["read"])  # MVP-2.8.0: a read-scoped key makes its request read-only
+    assert actor_from_request(SimpleNamespace(state=SimpleNamespace(user=writer, api_key=key))).read_only is True
+    rw = SimpleNamespace(permissions=["read", "write"])
+    assert actor_from_request(SimpleNamespace(state=SimpleNamespace(user=writer, api_key=rw))).read_only is False
     with run_context(actor="user:viewer", actor_user_id=9, actor_permissions=("read",), read_only=True):
         assert actor_from_run_context(get_run_context()).read_only is True
 

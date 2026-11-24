@@ -18,11 +18,11 @@ import re
 import shlex
 import subprocess
 import time
-from typing import Any
+from typing import Any, Optional
 
 from strands import tool
 
-from agenticops.skills.security import classify_shell_command, classify_kubectl_command
+from agenticops.skills.security import classify_kubectl_command, classify_shell_command, kubectl_words
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +115,23 @@ def _resolve_host_account(host_id: str, account: str, region: str):
     return snap, eff_region, "default account"
 
 
+# What a command may be sent to: an instance id, a host name or an IP address, with an optional `user@` in front
+# (MVP-2.9.0 N30). A host_id that is no instance id used to go to the ssh client as it stood, with nothing in front
+# of it: `-oProxyCommand=<anything>` made ssh run <anything> on the machine AgenticOps runs on — and the call's own
+# command was a read, so nothing asked and nothing was on the ledger. Found by reading the code, not by an incident.
+_SSH_USER = r"[A-Za-z_][A-Za-z0-9_.-]{0,63}"
+_HOST_RE = re.compile(rf"(?:{_SSH_USER}@)?[A-Za-z0-9][A-Za-z0-9._:-]{{0,254}}")
+_SSH_USER_RE = re.compile(_SSH_USER)
+
+
+def _host_refusal(host: str) -> Optional[str]:
+    """Why `host` is not something a command may be sent to — None when it is."""
+    if isinstance(host, str) and _HOST_RE.fullmatch(host):
+        return None
+    return ("Error: host_id must be an instance id, a host name or an IP address (optionally user@host) — letters, "
+            "digits, '.', '-', '_' and ':' only, and not starting with '-'. Nothing was sent anywhere.")
+
+
 @tool
 def run_on_host(
     host_id: str,
@@ -151,6 +168,9 @@ def run_on_host(
     Returns:
         Command output, or error/confirmation message.
     """
+    refused_host = _host_refusal(host_id)
+    if refused_host:                       # before anything else is decided: this «host» is sent nothing
+        return refused_host
     command = command.strip()
     if not command:
         return "Error: Empty command."
@@ -159,7 +179,7 @@ def run_on_host(
     # ledgered (command_audits), read-only ones are not.
     tier = classify_shell_command(command)
     from agenticops.services.command_audit import (approved_plan_in_context, change_context_refusal,
-                                                    change_required_refusal, record_command)
+                                                    change_required_refusal, read_only_context, record_command)
     if tier == "blocked":
         record_command(tool="run_on_host", tier=tier, command=command, outcome="blocked",
                        account=account, region=region, target=host_id)
@@ -168,6 +188,12 @@ def run_on_host(
             f"'rm -rf /', 'mkfs', 'shutdown', 'reboot', and pipe-to-bash are not allowed. "
             f"Command: {command}"
         )
+    # Where the run may only read, how the line BEGINS is not enough (N30): «cat x && systemctl restart y» begins
+    # like a read. Every command in the line must be one the stricter rule knows — and a query it knows
+    # (systemctl status …) needs no confirmation there.
+    if read_only_context():
+        from agenticops.services.change_steps import read_only_host_tier
+        tier = read_only_host_tier(command, tier)
     # A change review / preflight (change context, no approved plan) is read-only in code, not just prompt.
     refused = change_context_refusal(tool="run_on_host", tier=tier, command=command,
                                      account=account, region=region, target=host_id)
@@ -380,6 +406,12 @@ def _execute_ssh(
     """Execute a command via SSH (BatchMode, fail-closed on missing key/host)."""
     from agenticops.providers.ssh import _clean_subprocess_env
 
+    refused_host = _host_refusal(host)     # whoever calls this: a host that begins with a dash is an ssh option
+    if refused_host:
+        return refused_host
+    if user and not _SSH_USER_RE.fullmatch(user):
+        return "Error: the SSH user name is not a user name. Nothing was sent anywhere."
+
     ssh_args = [
         "ssh",
         "-o", "BatchMode=yes",
@@ -392,7 +424,7 @@ def _execute_ssh(
     if bastion:
         ssh_args += ["-J", bastion]
     target = f"{user}@{host}" if user else host
-    ssh_args += [target, command]
+    ssh_args += ["--", target, command]    # «--»: nothing after it is read as an option
 
     try:
         result = subprocess.run(
@@ -431,8 +463,13 @@ _SECRET_MATERIAL_RE = re.compile(r"(?<![\w-])secrets?(?![\w-])|--raw\b", re.IGNO
 
 
 def _reveals_secret_material(command: str) -> bool:
-    """kubectl args that name Secrets (`secret`, `secrets`, `secret/x`) or ask for a raw kubeconfig."""
-    return bool(_SECRET_MATERIAL_RE.search(command or ""))
+    """kubectl args that name Secrets (`secret`, `secrets`, `secret/x`) or ask for a raw kubeconfig.
+
+    Read on the words kubectl is handed, not on the spelling (MVP-2.9.0 N29): the tier and the argv come from the
+    shlex words, so `get sec''ret db` was a read that this check — made on the raw text — did not see, and a
+    read-only account got the Secret. A line that cannot be split is not run; it counts as revealing."""
+    words = kubectl_words(command or "")
+    return words is None or bool(_SECRET_MATERIAL_RE.search(" ".join(words)))
 
 
 @tool
@@ -467,6 +504,11 @@ def run_kubectl(
         kubectl output, or error/confirmation message.
     """
     command = command.strip()
+    # The word itself is accepted: a plan's step reads «kubectl rollout undo …», the classifier below already reads
+    # it either way, and a stopped run is told to run its rollback «exactly as written» (MVP-2.9.0 round-2 review:
+    # with the word this built `kubectl -n <ns> kubectl rollout undo …`).
+    if command == "kubectl" or command.startswith("kubectl "):
+        command = command[len("kubectl"):].strip()
     if not command:
         return "Error: Empty kubectl command."
 

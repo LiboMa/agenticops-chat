@@ -6,6 +6,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# Imported before any _patch_db: _load_history_messages imports it lazily, and a module first imported inside that window
+# keeps the fake get_db_session for the rest of the process (2026-11-08 — every later chat test failed on FakeQuery)
+import agenticops.services.chat_dispatch  # noqa: F401
 from agenticops.web.session_manager import _load_history_messages, _MAX_MSG_CHARS
 
 
@@ -185,6 +188,34 @@ class TestLoadHistoryMessages:
         assert tool_uses[0]["toolUse"]["name"] == "scan_resources"
         assert len(tool_results) == 1
         assert tool_results[0]["toolResult"]["content"] == [{"text": "(result from previous session)"}]
+
+    def test_steps_that_were_not_the_agents_tools_are_not_rebuilt(self):
+        """An enhanced_task's inner steps (Claude Code's "Read File", "Terminal"…) were stored as tool calls before
+        2026-11-07; rebuilt, they become toolUse blocks Strands renames INVALID_TOOL_NAME. Only the agent's tools."""
+        tool_calls = [{"name": "enhanced_task", "call_id": "t1"}, {"name": "Read File", "status": "done"},
+                      {"name": "Terminal", "status": "done"}]
+        msgs = [_make_msg("user", "research it", minutes_ago=2),
+                _make_msg("assistant", "Done", tool_calls=tool_calls, minutes_ago=1)]
+        with _patch_db(_make_session_row(), list(reversed(msgs))):
+            result = _load_history_messages("test-session", 20, known_tools={"enhanced_task", "sre_query"})
+        names = [b["toolUse"]["name"] for m in result for b in m["content"] if "toolUse" in b]
+        assert names == ["enhanced_task"]
+
+    def test_a_turn_whose_steps_were_all_unknown_is_plain_text(self):
+        msgs = [_make_msg("user", "research it", minutes_ago=2),
+                _make_msg("assistant", "Done", tool_calls=[{"name": "Read File"}], minutes_ago=1)]
+        with _patch_db(_make_session_row(), list(reversed(msgs))):
+            result = _load_history_messages("test-session", 20, known_tools={"sre_query"})
+        blocks = [b for m in result for b in m["content"]]
+        assert not any("toolUse" in b for b in blocks)
+        assert [b["text"] for b in blocks if "text" in b][-1] == "Done"   # no "[Used tools: …]" prefix
+
+    def test_without_known_tools_every_step_is_rebuilt_as_before(self):
+        msgs = [_make_msg("user", "x", minutes_ago=2),
+                _make_msg("assistant", "y", tool_calls=[{"name": "Read File"}], minutes_ago=1)]
+        with _patch_db(_make_session_row(), list(reversed(msgs))):
+            result = _load_history_messages("test-session", 20)
+        assert [b["toolUse"]["name"] for m in result for b in m["content"] if "toolUse" in b] == ["Read File"]
 
     def test_tool_calls_fallback_to_prefix_on_invalid_data(self):
         """When tool_calls data is invalid, falls back to [Used tools: ...] prefix."""
@@ -448,12 +479,12 @@ class TestGetOrCreateWithHistory:
         creation_order = []
         barrier = threading.Barrier(2, timeout=5)
 
-        def slow_create(model_id_override="", effort_override=""):
+        def slow_create(model_id_override="", effort_override="", rich_output=False):
             agent = MagicMock()
             agent.messages = []
             return agent
 
-        def slow_load(sid, depth):
+        def slow_load(sid, depth, **_kw):   # 2026-11-08: also given known_tools
             creation_order.append(f"load-start-{sid}")
             barrier.wait()  # both threads must reach here
             creation_order.append(f"load-end-{sid}")
@@ -495,3 +526,16 @@ class TestGetOrCreateWithHistory:
         mgr.remove("sess-z")
         assert "sess-z" not in mgr._agents
         assert "sess-z" not in mgr._session_locks
+
+
+def test_no_module_keeps_the_fake_session_maker():
+    """_patch_db replaces agenticops.models.get_db_session for one call. A module first imported inside that window
+    (chat_dispatch, imported lazily by _load_history_messages) must not keep the fake for the rest of the process —
+    every later chat test failed on FakeQuery (2026-11-08). The modules it pulls in are imported at the top of this
+    file, so they bind the real one first."""
+    import agenticops.models as models
+    msgs = [_make_msg("user", "q", minutes_ago=2), _make_msg("assistant", "a", minutes_ago=1)]
+    with _patch_db(_make_session_row(), list(reversed(msgs))):   # past the early return: the lazy imports run
+        _load_history_messages("test-session", 20)
+    from agenticops.services import chat_dispatch
+    assert chat_dispatch.get_db_session is models.get_db_session

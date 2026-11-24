@@ -66,7 +66,7 @@ def test_an_issue_never_anchored_reads_as_nulls(client):
 
 
 def test_the_list_carries_the_anchor_too(client):
-    rows = {r["id"]: r for r in client.get("/api/health-issues").json()}
+    rows = {r["id"]: r for r in client.get("/api/health-issues").json()["items"]}
     assert _anchor(rows[1])["anchor_status"] == "anchored" and rows[2]["anchor_status"] == "ambiguous"
 
 
@@ -80,5 +80,11 @@ def test_a_non_dict_candidates_value_reads_as_null(client):
     s.close()
     resp = client.get("/api/health-issues")
     assert resp.status_code == 200, resp.text
-    rows = {r["id"]: r for r in resp.json()}
+    rows = {r["id"]: r for r in resp.json()["items"]}
     assert rows[4]["anchor_candidates"] is None and rows[2]["anchor_candidates"] == CANDIDATES
+
+
+
+def test_the_issue_page_says_who_it_waits_on(client):
+    body = client.get("/api/health-issues/2").json()
+    assert "waiting_on" in body and "waiting_since" in body

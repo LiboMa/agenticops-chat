@@ -99,7 +99,8 @@ def test_an_im_agent_turn_runs_off_the_event_loop(app_db):
     ("agenticops.web.app", ["api_health", "api_create_health_issue", "api_run_rag_pipeline", "api_generate_report",
                             "api_get_settings"]),
     ("agenticops.web.routers.skills", ["api_generate_skill"]),
-    ("agenticops.web.routers.accounts", ["api_test_account_connection"]),
+    ("agenticops.web.routers.accounts", ["api_test_account_connection", "api_create_account", "api_update_account",
+                                         "api_delete_account"]),  # credentials go through the store (KMS)
     ("agenticops.web.routers.changes", ["api_create_change", "api_approve_change", "api_execute_change",
                                         "api_get_change", "api_review_change"]),
     ("agenticops.graph.api", ["get_region_graph", "get_vpc_graph", "get_multi_region_graph", "get_spof"]),

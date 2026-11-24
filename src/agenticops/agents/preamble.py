@@ -73,6 +73,15 @@ def skills_activation_block(extra_routes: list[str], outro: str) -> str:
     )
 
 
+# What a diagnosis and a fix-plan run are told about commands (MVP-2.9.0 N30): what the code does, in the words of
+# no cloud. Each prompt writes its own first and last words around it (__READ_ONLY_RUN_RULE__). Kept short: the
+# plan agent's assembled prompt has a size budget (tests/test_prompt_budget.py), and the refusal a tool answers
+# with says the rest — that require_confirmation changes nothing, and what a host line may hold.
+READ_ONLY_RUN_RULE = """\
+the code refuses any command it does not know to be read-only,
+        confirmed or not"""
+
+
 LOCAL_FILE_INSPECTION_BLOCK = """\
 LOCAL FILE INSPECTION (when you need to read configs, logs, or templates):
      a. First call activate_skill("local-os-operator") to load file operation tools and decision trees.
@@ -254,6 +263,11 @@ def media_capabilities(model_id: str) -> MediaCaps:
 # live against Bedrock us-east-1; 4.6 accepts either, so it takes the modern
 # one — budget_tokens is deprecated there and only ever gets narrower.
 _ADAPTIVE_THINKING_MIN = (4, 6)
+# From 4.7 the thinking display defaults to "omitted": the model sends no bytes while it thinks, so a long think at a
+# high effort trips the stream's read timeout (measured 2026-11-08: Fable 5.1 at effort max silent for 272 s) and the
+# user sees nothing happen. "summarized" streams a summary as it goes (Fable 5.1 max: the largest gap 7.3 s) at the
+# same billing. Accepted by Opus 5.5 / Sonnet 5.5 / Fable 5.1 on Bedrock us-east-1; 4.6 summarizes by default.
+_SUMMARIZED_DISPLAY_FROM = (4, 7)
 
 
 def _claude_version(model_id: str) -> Optional[tuple[int, int]]:
@@ -274,7 +288,7 @@ def supports_adaptive_thinking(model_id: str) -> bool:
 
     False means the legacy `thinking.budget_tokens` shape — correct for
     pre-4.6 Claude models and for non-Anthropic ids, whose budget
-    bedrock_model_kwargs translates into their native reasoning_effort.
+    bedrock_model_kwargs translates into their family's reasoning field.
     """
     version = _claude_version(model_id)
     return version is not None and version >= _ADAPTIVE_THINKING_MIN
@@ -392,42 +406,77 @@ def _effort_tier(budget: int) -> str:
     return "max"
 
 
-def _openai_reasoning_effort(budget: int) -> Optional[str]:
-    """Map an anthropic-style thinking budget to OpenAI's reasoning_effort tier.
+_UNVERIFIED_REASONING_WARNED: set = set()
+_EFFORT_TIERS = ("low", "medium", "high", "xhigh", "max")
+# OpenAI on Bedrock: (model id substring, request field, highest tier the model takes). Measured live on Bedrock,
+# 2026-11-08, every tier sent to every model in the chat picker:
+# - GPT-5.6 / GPT-6.x reject `reasoning_effort` ("Unknown parameter" — the whole request fails; every chat turn with
+#   an effort set read "The reply failed.") and take `reasoning: {"effort": …}` up to max;
+# - GPT 5.4 / 5.5 accept `reasoning_effort` and ignore it (even "bogus") and take `reasoning` up to xhigh ("'max' is
+#   not supported");
+# - gpt-oss (and its safeguard models) take `reasoning_effort` low | medium | high — minimal, xhigh and max fail.
+_OPENAI_REASONING = (
+    ("openai.gpt-oss", "reasoning_effort", "high"),
+    ("openai.gpt-5.4", "reasoning", "xhigh"),
+    ("openai.gpt-5.5", "reasoning", "xhigh"),
+    ("openai.gpt-5.6", "reasoning", "max"),
+    ("openai.gpt-6", "reasoning", "max"),      # gpt-6-astra / -sol / -luna, gpt-6.1-terra / -sol
+)
 
-    OpenAI Bedrock models take low|medium|high (verified live on gpt-oss):
-    low ≤ 2048 < medium ≤ 4096 < high. 0 = no override (model default).
+
+def _openai_reasoning_fields(model_id: str, budget: int) -> Optional[dict]:
+    """The reasoning request field for an OpenAI model on Bedrock, or None (see `_OPENAI_REASONING`).
+
+    The budget maps to Claude's effort tiers (`_effort_tier`), capped at the model's highest tier. A model of an
+    unverified family gets no field: a request without one is always valid, a guessed one can fail it. A budget of
+    0 = no override (the model's default).
     """
     if budget <= 0:
         return None
-    if budget <= 2048:
-        return "low"
-    if budget <= 4096:
-        return "medium"
-    return "high"
+    mid = (model_id or "").lower()
+    for needle, field, top in _OPENAI_REASONING:
+        if needle in mid:
+            tier = _EFFORT_TIERS[min(_EFFORT_TIERS.index(_effort_tier(budget)), _EFFORT_TIERS.index(top))]
+            return {"reasoning_effort": tier} if field == "reasoning_effort" else {"reasoning": {"effort": tier}}
+    if mid not in _UNVERIFIED_REASONING_WARNED:
+        _UNVERIFIED_REASONING_WARNED.add(mid)
+        _retry_logger.warning("no verified reasoning field for model %s — its effort is not sent", model_id)
+    return None
+
+
+def _stream_client_config():
+    """The botocore config every agent's model stream gets (2026-11-08): the read timeout from the model connection
+    settings (`agents/model_runtime`, DB-overridable) — Strands' own default is 120 s, shorter than a long think."""
+    from botocore.config import Config as BotocoreConfig
+
+    from agenticops.agents import model_runtime
+    return BotocoreConfig(read_timeout=model_runtime.effective().stream_read_timeout_seconds)
 
 
 def bedrock_model_kwargs(model_id: str, thinking_fields: Optional[dict] = None) -> dict:
-    """Prompt-cache + extended-thinking kwargs for a BedrockModel, capability-gated.
+    """Client config + prompt-cache + extended-thinking kwargs for a BedrockModel, capability-gated.
+
+    Every model gets `boto_client_config` (the stream read timeout, `_stream_client_config`): a build site must not
+    pass its own.
 
     Anthropic models: prompt caching + the anthropic `thinking` field.
-    OpenAI models (gpt-oss / gpt-5.x on Bedrock): no promptCaching cachePoints
+    OpenAI models (gpt-oss / GPT-5.x / GPT-6.x on Bedrock): no promptCaching cachePoints
     and no `thinking` field (either fails the whole request) — instead the
-    thinking budget is translated to their native `reasoning_effort` tier.
+    thinking budget becomes the family's own reasoning field (`_openai_reasoning_fields`).
     Single source of truth for all agent build sites.
     """
-    kwargs: dict = {}
+    kwargs: dict = {"boto_client_config": _stream_client_config()}
     if not is_anthropic_model(model_id):
         budget = (thinking_fields or {}).get("thinking", {}).get("budget_tokens", 0)
-        effort = _openai_reasoning_effort(budget)
-        if effort:
-            kwargs["additional_request_fields"] = {"reasoning_effort": effort}
+        reasoning = _openai_reasoning_fields(model_id, budget)
+        if reasoning:
+            kwargs["additional_request_fields"] = reasoning
         return kwargs
     if settings.bedrock_cache_enabled:
         from strands.models.model import CacheConfig
         # Exactly what Strands 1.45 cached (auto message cache points + the tool definitions; the old cache_tools is
         # deprecated). 1.64 would also cache the system prompt by default — kept off until measured on its own.
-        kwargs = {"cache_config": CacheConfig(strategy="auto", tools_ttl=True, system_prompt_ttl=False)}
+        kwargs["cache_config"] = CacheConfig(strategy="auto", tools_ttl=True, system_prompt_ttl=False)
     if thinking_fields:
         kwargs["additional_request_fields"] = thinking_fields
     return kwargs
@@ -459,8 +508,11 @@ def thinking_fields_for_budget(budget: int, max_tokens: int, model_id: str):
         )
         return None
     if supports_adaptive_thinking(model_id):
-        return {"thinking": {"type": "adaptive"},
-                "output_config": {"effort": _effort_tier(budget)}}
+        thinking = {"type": "adaptive"}
+        version = _claude_version(model_id)
+        if version is not None and version >= _SUMMARIZED_DISPLAY_FROM:
+            thinking["display"] = "summarized"
+        return {"thinking": thinking, "output_config": {"effort": _effort_tier(budget)}}
     return {"thinking": {"type": "enabled", "budget_tokens": budget}}
 
 

@@ -97,11 +97,35 @@ def approved_plan_in_context() -> Optional[int]:
         return None
 
 
+# the tools that send a line to a host's shell: where a run may only read they follow the stricter rule of
+# services/change_steps.host_reads_only, and their refusal says what that rule takes
+HOST_TOOLS = ("run_on_host", "provider_ssh")
+
+
+def read_only_context() -> bool:
+    """True while the Run Context lets command tools only read — exactly where change_context_refusal refuses what
+    is not tier `readonly`: a read-only account's turn, a diagnosis or a fix-plan run (N30), a change's review /
+    preflight (a change request with no approved plan in the context)."""
+    from agenticops.run_context import get_run_context
+    ctx = get_run_context()
+    if ctx.read_only or ctx.read_only_run:
+        return True
+    return bool(ctx.change_request_id) and approved_plan_in_context() is None
+
+
+def _host_hint(tool: str) -> str:
+    if tool not in HOST_TOOLS:
+        return ""
+    from agenticops.services.change_steps import HOST_READS_HINT
+    return HOST_READS_HINT
+
+
 def change_context_refusal(
     *, tool: str, tier: str, command: str, account: str = "", region: str = "", target: str = ""
 ) -> Optional[str]:
     """Refuse (as text) a write command run while the Run Context names a change with no approved plan — or at
-    all while it is a read-only account's turn (RunContext.read_only; reason `read_only_account`).
+    all while it is a read-only account's turn (RunContext.read_only; reason `read_only_account`), or a diagnosis
+    or fix-plan run (RunContext.read_only_run; reason `read_only_run`, MVP-2.9.0 N30).
 
     A change review / preflight runs under change_request_id but no fix plan; the change's plan is only
     approved after review. Until then the run is read-only IN CODE: readonly commands are unaffected
@@ -112,8 +136,14 @@ def change_context_refusal(
     if tier == "readonly":
         return None
     from agenticops.run_context import get_run_context
+    hint = _host_hint(tool)          # a host tool's refusal says what a read-only run takes on a host
     if get_run_context().read_only:  # a viewer's chat turn (auth/viewer.py): read-only whatever the tool is told
-        return read_only_refusal(tool=tool, tier=tier, command=command, account=account, region=region, target=target)
+        return read_only_refusal(tool=tool, tier=tier, command=command, account=account, region=region,
+                                 target=target, hint=hint)
+    kind = get_run_context().read_only_run
+    if kind:  # a diagnosis / a fix-plan run: before the change guard below — an approved plan does not lift this one
+        return read_only_run_refusal(kind=kind, tool=tool, tier=tier, command=command,
+                                     account=account, region=region, target=target, hint=hint)
     if not get_run_context().change_request_id:
         return None
     if approved_plan_in_context() is not None:
@@ -121,16 +151,40 @@ def change_context_refusal(
     record_command(tool=tool, tier=tier, command=command, outcome="refused",
                    reason="change_not_approved", account=account, region=region, target=target)
     return ("This change request has no approved plan yet, so its review/preflight is read-only. "
-            "Approve the change's plan before running write commands. Command: " + command)
+            "Approve the change's plan before running write commands." + hint + " Command: " + command)
 
 
 def read_only_refusal(*, tool: str, tier: str, command: str, account: str = "", region: str = "",
-                      target: str = "") -> str:
+                      target: str = "", hint: str = "") -> str:
     """Refuse (as text, with a `read_only_account` ledger row) a command a read-only account may not run."""
     record_command(tool=tool, tier=tier, command=command, outcome="refused", reason="read_only_account",
                    account=account, region=region, target=target)
     return ("This account is read-only: only read-only commands run here, and none that reveals secret material. "
-            "Ask an operator to make the change. Command: " + command)
+            "Ask an operator to make the change." + hint + " Command: " + command)
+
+
+# what a read-only run is called, and where what it may not do belongs (RunContext.read_only_run → words)
+_READ_ONLY_RUNS = {
+    "diagnosis": ("a diagnosis run", "name it in your recommendations instead"),
+    "plan": ("a fix-plan run", "write it as a step of the plan instead — it runs once the plan is approved"),
+    # N31: a detection writes nothing but the issues it opens
+    "detect": ("a detection run", "describe it in the issue you open instead — a fix is planned and approved later"),
+}
+
+
+def read_only_run_refusal(*, kind: str, tool: str, tier: str, command: str, account: str = "", region: str = "",
+                          target: str = "", hint: str = "") -> str:
+    """Refuse (as text, with a `read_only_run` ledger row) a command a diagnosis or a fix-plan run may not send
+    (MVP-2.9.0 N30). These runs read: until N30 their model could answer a tool's «confirm?» itself — nobody is
+    there in a pipeline run — and the account-bound CLI tool asked nothing at all. The sentence goes to the model,
+    so it says what to do next and names no cloud; a kind the table does not know is refused all the same."""
+    record_command(tool=tool, tier=tier, command=command, outcome="refused", reason="read_only_run",
+                   account=account, region=region, target=target)
+    what, instead = _READ_ONLY_RUNS.get(kind, ("a read-only run", "say so in your answer instead"))
+    return (f"This is {what}: it only reads. The code refuses every command it does not recognise as read-only "
+            f"(this one is classified '{tier}'), and require_confirmation changes nothing here — do not send it "
+            f"again. If it would change something, {instead}. If it only reads, send it as one plain read command "
+            f"the tool recognises, or use a read tool.{hint} Command: {command}")
 
 
 def change_required_refusal(command: str, pattern: str) -> str:

@@ -41,6 +41,9 @@ READONLY_PREFIXES = [
     "aws cloudwatch describe-", "aws cloudwatch get-", "aws cloudwatch list-",
     # CloudTrail
     "aws cloudtrail lookup-", "aws cloudtrail describe-", "aws cloudtrail get-",
+    # CloudFormation — describe- and list- only (MVP-2.9.0 N26, the owner's ruling): `get-template` hands back the
+    # whole template, parameters and all, so `get-` stays unclassified and a person looks
+    "aws cloudformation describe-", "aws cloudformation list-",
     # IAM
     "aws iam get-", "aws iam list-",
     # STS
@@ -131,6 +134,17 @@ READONLY_PREFIXES = [
     "aws athena get-", "aws athena list-",
     # EMR
     "aws emr describe-", "aws emr list-",
+    # MVP-2.9.0 N30 — what the diagnosis and the plan agent really read. Since N30 those two can send only what
+    # this table calls a read; on a copy of the local database they had sent 31 commands it did not know, none a
+    # change. The describe- / list- operations of the services they asked, row by row — never a rule by verb
+    # (`aws --no-p lambda invoke … list-out.json` reads as a «list-» operation to anything that looks for one).
+    "aws kafka describe-", "aws kafka list-",
+    "aws configservice describe-", "aws configservice list-",
+    "aws s3control describe-", "aws s3control list-",
+    "aws osis list-",
+    "aws emr-serverless list-",
+    "aws bedrock-agentcore-control list-",
+    "aws efs describe-",
 ]
 
 WRITE_PREFIXES = [
@@ -218,21 +232,102 @@ def blocked_pattern_match(command: str, patterns=None) -> Optional[str]:
     return pattern_token_match(command, patterns)
 
 
+# 2.7.0 E2E observation 3: a write the prefix tables do not list (`aws eks create-addon`) was 'unknown'. The
+# execution gates already treat 'unknown' as a write, but auto-approval refuses to vouch for it, so an operation
+# whose verb is a mutation is classified as a write. This only ever raises a tier: a read verb the tables miss
+# stays 'unknown', and blocked patterns are still checked first.
+_AWS_WRITE_VERBS = frozenset({
+    "accept", "add", "allocate", "apply", "assign", "associate", "attach", "authorize", "cancel", "change", "copy",
+    "create", "decrease", "delete", "deploy", "deregister", "detach", "disable", "disassociate", "enable", "execute",
+    "failover", "import", "increase", "invoke", "merge", "modify", "move", "promote", "publish", "purge", "put",
+    "reboot", "register", "reject", "release", "remove", "replace", "reset", "resize", "restart", "restore",
+    "revoke", "rotate", "run", "schedule", "send", "set", "start", "stop", "tag", "terminate", "unassign", "untag",
+    "update", "upload", "write",
+})
+# Global options that take no value; every other `--option` is followed by its value unless written `--opt=value`.
+_AWS_FLAG_OPTIONS = frozenset({
+    "--debug", "--no-verify-ssl", "--no-paginate", "--no-sign-request", "--no-cli-pager", "--cli-auto-prompt",
+    "--no-cli-auto-prompt",
+})
+
+
+def _as_run(command: str) -> list[str] | None:
+    """The words of `command` as the tool hands them to the CLI — split the way the tool splits it (shlex), in
+    lower case: `get-object''`, `get-ob\\ject` and "get-object" all run get-object, and a classifier that read the
+    spelling called them reads (MVP-2.9.0 N27, review). None when the line cannot be split (an unbalanced quote):
+    the tool refuses to run it."""
+    try:
+        return [word.lower() for word in shlex.split(command)]
+    except ValueError:
+        return None
+
+
+def _aws_service_operation(command: str) -> tuple[str, str]:
+    """The service and the operation of `aws [options] <service> [options] <operation> …` — '' where there is none."""
+    tokens = _as_run(command)
+    if not tokens or tokens[0] != "aws":
+        return "", ""
+    positional, i = [], 1
+    while i < len(tokens):
+        token = tokens[i]
+        if token.startswith("--"):
+            i += 1 if token in _AWS_FLAG_OPTIONS or "=" in token else 2
+            continue
+        positional.append(token)
+        if len(positional) == 2:
+            return positional[0], token
+        i += 1
+    return (positional[0] if positional else ""), ""
+
+
+def _aws_operation(command: str) -> str:
+    """The operation of `aws [options] <service> [options] <operation> …` — '' when there is none."""
+    return _aws_service_operation(command)[1]
+
+
+# «Reads» that save what they read to a file on the host AgenticOps runs on — the command names the path (MVP-2.9.0
+# N26). They change nothing in the cloud, but they are not read-only: classified `write`, so outside an approved
+# plan they need a confirmation, they are on the command ledger, a plan step holding one is not «read-only», and
+# after a stop they are refused. The operations beside them that only answer (get-object-acl, get-stages …) stay
+# reads: the match is on the exact operation.
+_SAVES_A_LOCAL_FILE = frozenset({("s3api", "get-object"), ("s3api", "get-object-torrent"),
+                                 ("apigateway", "get-export"), ("apigateway", "get-sdk")})
+
+
+def _is_write_verb(operation: str) -> bool:
+    parts = operation.split("-")
+    verb = parts[1] if parts[0] == "batch" and len(parts) > 1 else parts[0]  # batch-write-item vs batch-get-item
+    return verb in _AWS_WRITE_VERBS
+
+
 def _classify_command(command: str) -> str:
     """Classify a command as 'blocked', 'write', 'readonly', or 'unknown'."""
-    cmd_lower = command.lower().strip()
-
     blocked = blocked_pattern_match(command)
     if blocked:
+        return "blocked"
+
+    # judged as it will run: the words the tool hands the CLI, single-spaced (see _as_run)
+    words = _as_run(command)
+    if words is None:
+        return "unknown"
+    cmd_lower = " ".join(words)
+    if blocked_pattern_match(cmd_lower):
         return "blocked"
 
     for prefix in WRITE_PREFIXES:
         if cmd_lower.startswith(prefix.lower()):
             return "write"
 
+    if _aws_service_operation(command) in _SAVES_A_LOCAL_FILE:
+        return "write"
+
     for prefix in READONLY_PREFIXES:
         if cmd_lower.startswith(prefix.lower()):
             return "readonly"
+
+    operation = _aws_operation(command)
+    if operation and _is_write_verb(operation):
+        return "write"
 
     return "unknown"
 

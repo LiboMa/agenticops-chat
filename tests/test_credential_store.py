@@ -283,3 +283,148 @@ class TestLocalKeyGeneration:
         backend = LocalKeyBackend(key)
         data = b"test data"
         assert backend.decrypt(backend.encrypt(data)) == data
+
+
+class TestIsSensitiveKey:
+    """One rule decides which fields are secrets — the encryption and the edit merge both use it."""
+
+    def test_secret_names(self):
+        from agenticops.credentials.store import is_sensitive_key
+
+        for name in ("access_key_id", "secret_access_key", "session_token", "client_secret",
+                     "service_account_key", "access_key_secret", "password", "bot_token", "My_Api_Key"):
+            assert is_sensitive_key(name), name
+
+    def test_plain_names(self):
+        from agenticops.credentials.store import is_sensitive_key
+
+        for name in ("role_arn", "external_id", "account_id", "profile_name", "kubeconfigs",
+                     "tenant_id", "client_id", "subscription_id", "project_id"):
+            assert not is_sensitive_key(name), name
+
+
+class TestMergeCredentials:
+    """An edit merges into the stored credentials (2026-11-09: a region edit dropped a stored key pair)."""
+
+    STORED = {"role_arn": "arn:aws:iam::111122223333:role/Ops", "external_id": "ext-1",
+              "account_id": "111122223333", "kubeconfigs": {"eks-a": "/etc/kube/eks-a"},
+              "access_key_id": "AKIAOLD", "secret_access_key": "old-secret", "session_token": "old-token"}
+
+    def merge(self, incoming, **kw):
+        from agenticops.credentials.store import merge_credentials
+        return merge_credentials(dict(self.STORED), incoming, **kw)
+
+    def test_a_secret_left_out_is_kept(self):
+        # what the edit form sent on 2026-11-09: the role ARN only — it never sees the stored keys
+        assert self.merge({"role_arn": "arn:aws:iam::111122223333:role/Ops"}) == self.STORED
+
+    def test_a_new_secret_replaces_the_stored_one(self):
+        merged = self.merge({"secret_access_key": "new-secret"})
+        assert merged["secret_access_key"] == "new-secret"
+        assert merged["access_key_id"] == "AKIAOLD"
+
+    def test_an_empty_secret_keeps_the_stored_one(self):
+        assert self.merge({"access_key_id": "", "secret_access_key": None}) == self.STORED
+
+    def test_a_redacted_or_masked_echo_changes_nothing(self):
+        # a GET response sent back, or an agent repeating list_cloud_accounts' masked value
+        merged = self.merge({"_encrypted": "***REDACTED***", "access_key_id": "***REDACTED***",
+                             "secret_access_key": "****cret", "role_arn": "****/Ops"})
+        assert merged == self.STORED
+
+    def test_clear_secrets_removes_every_stored_secret(self):
+        merged = self.merge({}, clear_secrets=True)
+        assert merged == {k: v for k, v in self.STORED.items()
+                          if k not in ("access_key_id", "secret_access_key", "session_token")}
+
+    def test_clear_secrets_with_new_keys_keeps_only_the_new_ones(self):
+        merged = self.merge({"access_key_id": "AKIANEW", "secret_access_key": "new-secret"}, clear_secrets=True)
+        assert (merged["access_key_id"], merged["secret_access_key"]) == ("AKIANEW", "new-secret")
+        assert "session_token" not in merged
+
+    def test_an_empty_plain_field_is_deleted(self):
+        merged = self.merge({"external_id": "", "account_id": None})
+        assert "external_id" not in merged and "account_id" not in merged
+
+    def test_a_plain_field_is_set(self):
+        assert self.merge({"external_id": "ext-2"})["external_id"] == "ext-2"
+
+    def test_fields_left_out_are_kept(self):
+        merged = self.merge({"role_arn": "arn:aws:iam::111122223333:role/Other"})
+        assert merged["account_id"] == "111122223333"
+        assert merged["kubeconfigs"] == {"eks-a": "/etc/kube/eks-a"}
+
+    def test_leaving_assume_role_drops_the_role(self):
+        # the provider assumes any role_arn it finds, whatever credential_source_type says
+        merged = self.merge({}, switched_from="assume_role")
+        assert "role_arn" not in merged and "external_id" not in merged
+        assert merged["access_key_id"] == "AKIAOLD" and merged["account_id"] == "111122223333"
+
+    def test_leaving_profile_drops_the_profile(self):
+        from agenticops.credentials.store import merge_credentials
+        merged = merge_credentials({"profile_name": "prod", "account_id": "1"}, {"access_key_id": "AKIA"},
+                                   switched_from="profile")
+        assert merged == {"account_id": "1", "access_key_id": "AKIA"}
+
+    def test_a_value_sent_with_the_switch_still_applies(self):
+        assert self.merge({"role_arn": "arn:x"}, switched_from="assume_role")["role_arn"] == "arn:x"
+
+    def test_nothing_stored_yet(self):
+        from agenticops.credentials.store import merge_credentials
+        assert merge_credentials(None, {"role_arn": "arn:x", "external_id": ""}) == {"role_arn": "arn:x"}
+
+
+class TestMergeUpdate:
+    """The store's merge: decrypt what is stored, merge, encrypt again."""
+
+    def setup_method(self):
+        from agenticops.credentials.store import CredentialStore, LocalKeyBackend
+        self.store = CredentialStore(LocalKeyBackend("merge-test-key"))
+
+    def test_the_stored_keys_survive_an_edit_that_omits_them(self):
+        stored = self.store.encrypt_credentials(
+            {"role_arn": "arn:aws:iam::1:role/R", "access_key_id": "AKIAOLD", "secret_access_key": "old"})
+        updated = self.store.merge_update(stored, {"role_arn": "arn:aws:iam::1:role/R"})
+        assert "_encrypted" in updated and "access_key_id" not in updated
+        assert self.store.decrypt_credentials(updated) == {
+            "role_arn": "arn:aws:iam::1:role/R", "access_key_id": "AKIAOLD", "secret_access_key": "old"}
+
+    def test_an_edit_that_leaves_the_secrets_keeps_the_ciphertext(self):
+        # the credential fingerprint (session cache key, private kubeconfig path) hashes the stored form: a region
+        # edit must not move it — Fernet would give a new ciphertext for the same secrets
+        stored = self.store.encrypt_credentials({"role_arn": "arn:x", "access_key_id": "A", "secret_access_key": "S"})
+        updated = self.store.merge_update(stored, {"role_arn": "arn:x", "external_id": "e"})
+        assert updated == {"role_arn": "arn:x", "external_id": "e", "_encrypted": stored["_encrypted"]}
+
+    def test_a_changed_secret_is_encrypted_again(self):
+        stored = self.store.encrypt_credentials({"access_key_id": "A", "secret_access_key": "S"})
+        updated = self.store.merge_update(stored, {"secret_access_key": "S2"})
+        assert updated["_encrypted"] != stored["_encrypted"]
+        assert self.store.decrypt_credentials(updated) == {"access_key_id": "A", "secret_access_key": "S2"}
+
+    def test_clearing_leaves_no_encrypted_blob(self):
+        stored = self.store.encrypt_credentials({"role_arn": "arn:x", "access_key_id": "A", "secret_access_key": "S"})
+        assert self.store.merge_update(stored, {}, clear_secrets=True) == {"role_arn": "arn:x"}
+
+    def test_nothing_stored(self):
+        updated = self.store.merge_update({}, {"access_key_id": "A", "secret_access_key": "S"})
+        assert self.store.decrypt_credentials(updated) == {"access_key_id": "A", "secret_access_key": "S"}
+
+
+class TestAuditView:
+    """What an audit row may say about stored credentials: the plain fields and whether secrets are stored."""
+
+    def test_no_secret_value_and_no_blob(self):
+        from agenticops.credentials.store import CredentialStore, PlaintextBackend, audit_view
+        stored = CredentialStore(PlaintextBackend()).encrypt_credentials(
+            {"role_arn": "arn:x", "access_key_id": "AKIAOLD", "secret_access_key": "old"})
+        assert audit_view(stored) == {"fields": {"role_arn": "arn:x"}, "stored_secrets": True}
+
+    def test_a_legacy_plaintext_secret_is_left_out(self):
+        from agenticops.credentials.store import audit_view
+        assert audit_view({"account_id": "1", "access_key_id": "AKIA"}) == {
+            "fields": {"account_id": "1"}, "stored_secrets": True}
+
+    def test_empty(self):
+        from agenticops.credentials.store import audit_view
+        assert audit_view(None) == {"fields": {}, "stored_secrets": False}

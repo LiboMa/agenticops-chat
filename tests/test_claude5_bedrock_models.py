@@ -36,6 +36,7 @@ CLAUDE5_IDS = [
     "global.anthropic.claude-opus-5",
     "global.anthropic.claude-sonnet-5",
     "global.anthropic.claude-fable-5-1",
+    "global.anthropic.claude-fable-5-2",
     "global.anthropic.claude-opus-5-5",
     "global.anthropic.claude-sonnet-5-5",
     "global.anthropic.claude-haiku-5-5",
@@ -46,12 +47,19 @@ CLAUDE5_IDS = [
 # Cost key normalization
 # ---------------------------------------------------------------------------
 
+
+def _sans_client(kwargs: dict) -> dict:
+    """The kwargs without the stream client config every model gets (2026-11-08, test_model_runtime)."""
+    return {k: v for k, v in kwargs.items() if k != "boto_client_config"}
+
+
 class TestClaude5CostKeys:
     @pytest.mark.parametrize("mid,key", [
         ("anthropic.claude-opus-5", "claude-opus-5"),
         ("global.anthropic.claude-opus-5", "claude-opus-5"),
         ("us.anthropic.claude-sonnet-5", "claude-sonnet-5"),
         ("global.anthropic.claude-fable-5-1", "claude-fable-5-1"),
+        ("global.anthropic.claude-fable-5-2", "claude-fable-5-2"),
         ("global.anthropic.claude-fable-5", "claude-fable-5"),
         # a later dated/versioned respin must still collapse to the family key
         ("global.anthropic.claude-opus-5-v1:0", "claude-opus-5"),
@@ -80,7 +88,7 @@ class TestClaude5CostKeys:
 
 class TestClaude5Windows:
     @pytest.mark.parametrize("family", [
-        "claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-haiku-5-5", "gpt-6",
+        "claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-fable-5-2", "claude-haiku-5-5", "gpt-6",
     ])
     def test_family_registered(self, family):
         assert family in MODEL_WINDOW_DEFAULTS
@@ -99,6 +107,7 @@ class TestClaude5Windows:
         ("global.anthropic.claude-opus-5", "claude-opus-5"),
         ("global.anthropic.claude-sonnet-5", "claude-sonnet-5"),
         ("global.anthropic.claude-fable-5-1", "claude-fable-5-1"),
+        ("global.anthropic.claude-fable-5-2", "claude-fable-5-2"),   # not its prefix claude-fable-5
         ("global.anthropic.claude-opus-5-5", "claude-opus-5"),       # 5.5 shares its 5.0 family's windows
         ("global.anthropic.claude-haiku-5-5", "claude-haiku-5-5"),
         ("global.openai.gpt-6-astra", "gpt-6"),
@@ -129,10 +138,12 @@ class TestClaude5Presets:
             ("anthropic.claude-opus-5", "Claude Opus 5"),
             ("anthropic.claude-sonnet-5", "Claude Sonnet 5"),
             ("anthropic.claude-fable-5-1", "Claude Fable 5.1"),
+            ("anthropic.claude-fable-5-2", "Claude Fable 5.2"),
         )
         assert labels["Opus 5"] == "global.anthropic.claude-opus-5"
         assert labels["Sonnet 5"] == "global.anthropic.claude-sonnet-5"
         assert labels["Fable 5.1"] == "global.anthropic.claude-fable-5-1"
+        assert labels["Fable 5.2"] == "global.anthropic.claude-fable-5-2"
 
     def test_four_x_labels_unchanged(self):
         labels = self._presets(
@@ -172,7 +183,7 @@ class TestClaude5CapabilityGate:
     def test_gets_cache_and_thinking(self, monkeypatch, mid):
         monkeypatch.setattr(settings, "bedrock_cache_enabled", True)
         fields = {"thinking": {"type": "enabled", "budget_tokens": 4096}}
-        kw = bedrock_model_kwargs(mid, fields)
+        kw = _sans_client(bedrock_model_kwargs(mid, fields))
         assert "cache_config" in kw
         assert kw["additional_request_fields"] is fields
 
@@ -230,7 +241,8 @@ class TestThinkingRequestShape:
     @pytest.mark.parametrize("mid", CLAUDE5_IDS)
     def test_claude5_gets_adaptive_not_budget_tokens(self, mid):
         fields = thinking_fields_for_budget(4096, 16384, mid)
-        assert fields == {"thinking": {"type": "adaptive"},
+        # 5.x: the thinking summary is asked for (its default "omitted" streams no bytes while the model thinks)
+        assert fields == {"thinking": {"type": "adaptive", "display": "summarized"},
                           "output_config": {"effort": "medium"}}
         assert "budget_tokens" not in fields["thinking"]
 
@@ -259,14 +271,14 @@ class TestThinkingRequestShape:
             if fields:
                 assert fields["output_config"]["effort"] in valid
 
-    def test_openai_still_translates_to_reasoning_effort(self):
+    def test_openai_budget_becomes_the_family_reasoning_field(self):
         """OpenAI ids fall to the budget_tokens shape on purpose — that is what
-        bedrock_model_kwargs reads to build their native reasoning_effort."""
+        bedrock_model_kwargs reads to build their family's reasoning field."""
         mid = "global.openai.gpt-5.6-terra"
         fields = thinking_fields_for_budget(4096, 16384, mid)
         assert fields == {"thinking": {"type": "enabled", "budget_tokens": 4096}}
-        assert bedrock_model_kwargs(mid, fields) == {
-            "additional_request_fields": {"reasoning_effort": "medium"}
+        assert _sans_client(bedrock_model_kwargs(mid, fields)) == {
+            "additional_request_fields": {"reasoning": {"effort": "medium"}}
         }
 
     def test_shipped_agent_models_never_get_a_rejected_shape(self, monkeypatch):
@@ -279,6 +291,11 @@ class TestThinkingRequestShape:
             thinking_type = fields["thinking"]["type"]
             assert thinking_type == ("adaptive" if supports_adaptive_thinking(mid)
                                      else "enabled"), f"{agent} -> {mid}"
+            if "openai." in mid:
+                # 2026-11-08: GPT-5.6 / GPT-6 reject `reasoning_effort` ("Unknown parameter"); gpt-oss takes it
+                sent = _sans_client(bedrock_model_kwargs(mid, fields))["additional_request_fields"]
+                expected = "reasoning_effort" if "gpt-oss" in mid else "reasoning"
+                assert list(sent) == [expected], f"{agent} -> {mid}: {sent}"
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +309,9 @@ class TestClaude5SettingsSync:
         assert aliases["opus"] == "global.anthropic.claude-opus-5-5"
         assert aliases["sonnet"] == "global.anthropic.claude-sonnet-5-5"
         assert aliases["haiku"] == "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-        assert aliases["fable"] == "global.anthropic.claude-fable-5-1"
+        assert aliases["fable"] == "global.anthropic.claude-fable-5-2"     # 2026-11-10: the latest Fable
+        assert aliases["fable-5-2"] == "global.anthropic.claude-fable-5-2"
+        assert aliases["fable-5-1"] == "global.anthropic.claude-fable-5-1"
         assert aliases["opus-5-5"] == "global.anthropic.claude-opus-5-5"
         assert aliases["sonnet-5-5"] == "global.anthropic.claude-sonnet-5-5"
         assert aliases["gpt-6-astra"] == "global.openai.gpt-6-astra"
@@ -303,7 +322,7 @@ class TestClaude5SettingsSync:
 
     def test_cost_table_has_claude5_families(self):
         table = settings.token_cost_table
-        for key in ("claude-opus-5", "claude-sonnet-5", "claude-fable-5-1",
+        for key in ("claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-fable-5-2",
                     "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "gpt-6-astra"):
             assert key in table, f"token_cost_table missing {key}"
             assert table[key]["input"] > 0
@@ -341,6 +360,8 @@ class TestClaude5SettingsSync:
         ("global.anthropic.claude-opus-4-8", 5.0 + 25.0, 0.5 + 6.25),
         ("global.anthropic.claude-opus-4-6-v1", 5.0 + 25.0, 0.5 + 6.25),
         ("global.anthropic.claude-fable-5-1", 10.0 + 50.0, 0.25 + 12.5),
+        # Fable 5.2: Price List us-east-1 global standard tier, fetched 2026-11-10
+        ("global.anthropic.claude-fable-5-2", 8.0 + 40.0, 0.2 + 10.0),
         ("global.anthropic.claude-fable-5", 10.0 + 50.0, 1.0 + 12.5),
         ("global.anthropic.claude-sonnet-5", 2.0 + 10.0, 0.2 + 2.5),
         ("global.anthropic.claude-haiku-4-5-20251001-v1:0", 1.0 + 5.0, 0.1 + 1.25),

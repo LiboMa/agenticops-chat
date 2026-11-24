@@ -28,9 +28,25 @@ def test_fix_approve_effect_follows_auto_fix_and_executor():
         assert ua.fix_approve_effect() == "approve_only"
 
 
-def test_pending_plan_offers_approve_and_reject():
+def test_pending_plan_offers_approve_reject_and_request_changes():
+    """MVP-2.9.0 N14: «request changes» — send it back and ask the plan agent for the next one — is offered beside
+    approve and reject, to whoever may reject."""
     acts = _by(ua.plan_actions(_plan(), WRITER, issue_status="fix_planned", run_in_flight=False))
-    assert set(acts) == {"approve", "reject"} and acts["approve"]["allowed"] and acts["approve"]["reason_code"] is None
+    assert set(acts) == {"approve", "reject", "request_changes"}
+    assert acts["approve"]["allowed"] and acts["approve"]["reason_code"] is None
+    assert acts["request_changes"] == {"action": "request_changes", "allowed": True, "reason_code": None,
+                                       "effect": "reject_and_request_plan"}
+
+
+def test_a_closed_issue_gets_no_new_plan_through_request_changes():
+    acts = _by(ua.plan_actions(_plan(), WRITER, issue_status="dismissed", run_in_flight=False))
+    assert (acts["request_changes"]["allowed"], acts["request_changes"]["reason_code"]) == (False, "issue_closed")
+    assert acts["reject"]["allowed"]                                   # sending it back is still possible
+
+
+def test_an_approved_plan_is_withdrawn_not_sent_back_for_changes():
+    acts = _by(ua.plan_actions(_plan(status="approved"), WRITER, issue_status="fix_approved", run_in_flight=False))
+    assert "request_changes" not in acts and "reject" in acts
 
 
 def test_a_reader_is_shadow_allowed_then_forbidden_under_enforce():

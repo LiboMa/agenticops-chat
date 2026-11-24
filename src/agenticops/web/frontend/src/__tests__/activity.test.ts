@@ -95,3 +95,34 @@ describe("notes (MVP-2.7.0 S4)", () => {
     expect(toActivity([ev("note_added", "not json")])[0].note).toBe("");
   });
 });
+
+describe("a plan request that followed sending a plan back (MVP-2.9.0 N14)", () => {
+  const ev = (id: number, detail: unknown) => ({ id, health_issue_id: 1, event_type: "fix_plan_requested", stage: "sre", status: "started",
+                                                actor: "user:alice", created_at: `2026-11-18T08:0${id}:00Z`, detail }) as unknown as PipelineEvent;
+
+  it("says which plan was sent back — the rejection itself is not a timeline event", () => {
+    const [e] = toActivity([ev(1, { trigger: "manual", requested_by: "user:alice", after_plan: 160 })]);
+    expect(e.labelKey).toBe("activity.type.fix_plan_requested_after");
+    expect(e.labelParams).toEqual({ plan: "160" });
+  });
+
+  it("a plain request keeps its plain sentence, whatever else the detail holds", () => {
+    expect(toActivity([ev(1, { trigger: "manual" })])[0].labelKey).toBe("activity.type.fix_plan_requested");
+    expect(toActivity([ev(1, { trigger: "manual", after_plan: "160; drop" })])[0].labelKey).toBe("activity.type.fix_plan_requested");
+    expect(toActivity([ev(1, JSON.stringify({ after_plan: 7 }))])[0].labelParams).toEqual({ plan: "7" });   // a detail stored as a JSON string
+  });
+
+  it("two requests about two plans are two entries, never ×2", () => {
+    const out = toActivity([ev(1, { after_plan: 160 }), ev(2, { after_plan: 167 })]);
+    expect(out.map((e) => [e.labelParams.plan, e.count])).toEqual([["160", 1], ["167", 1]]);
+  });
+});
+
+describe("a plan written by the agent has a sentence of its own (MVP-2.9.0 N15)", () => {
+  // the top bar's band says each event in the timeline's own words: «事件：fix_plan_created» is no sentence
+  it("names a plan that was written and one that was rewritten", () => {
+    const [made, redone] = toActivity([ev("fix_plan_created", { plan_id: 7, risk_level: "L2" }), ev("fix_plan_updated", { plan_id: 7, risk_level: "L1" }, { created_at: "2026-10-03T03:40:00" })]);
+    expect([made.labelKey, made.summary]).toEqual(["activity.type.fix_plan_created", "L2"]);
+    expect(redone.labelKey).toBe("activity.type.fix_plan_updated");
+  });
+});

@@ -8,7 +8,7 @@ export type Home = "resume" | "chat" | "issues" | "reports";
 // tests/fixtures/ui_last_route_cases.json pins both.
 const ROUTES = [
   /^\/app\/(chat|issues|reports|changes|plans|resources|schedules|skills)(\/[A-Za-z0-9][A-Za-z0-9_-]{0,99})?$/,
-  /^\/app\/(audit|overview|agent-metrics|galaxy|security|settings|signals)$/,
+  /^\/app\/(audit|overview|agent-metrics|galaxy|security|settings|signals|inbox)$/,
 ];
 
 export function allowedRoute(route: unknown): route is string {
@@ -21,8 +21,13 @@ const PINNED: Record<Exclude<Home, "resume">, string> = {
   reports: "/app/reports",
 };
 
-export function homeTarget(prefs: { home?: string } | null, lastRoute: string | null): string {
+/** In the new interface (round 3) /app lands on what waits on the person — «待决» — unless chat or reports is the
+ *  pinned home. «Resume» means nothing there: NewUI's own addresses are never recorded as the last place. */
+export const NEW_HOME = "/app/new/decide";
+
+export function homeTarget(prefs: { home?: string } | null, lastRoute: string | null, shell: "classic" | "new" = "classic"): string {
   const home = prefs?.home;
+  if (shell === "new") return home === "chat" || home === "reports" ? PINNED[home] : NEW_HOME;
   if (home === "chat" || home === "issues" || home === "reports") return PINNED[home];
   return allowedRoute(lastRoute) ? lastRoute : "/app/chat";
 }

@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from agenticops.config import settings
+from agenticops.services import exec_switches
 
 
 def _policy():
@@ -40,12 +41,13 @@ def is_admin(actor) -> bool:
 
 def fix_approve_effect() -> str:
     """pipeline_service.trigger_auto_execute starts the run iff auto_fix_enabled and executor_enabled."""
-    return "approve_and_queue_execution" if settings.auto_fix_enabled and settings.executor_enabled else "approve_only"
+    switches = exec_switches.effective()
+    return "approve_and_queue_execution" if switches.auto_fix_enabled and switches.executor_enabled else "approve_only"
 
 
 def change_approve_effect(actor, cr: Any) -> str:
     """change_service.approve_and_execute queues the run iff the executor is on and the approver may execute it."""
-    queues = settings.executor_enabled and route_allows(actor, "change.execute", cr)[0]
+    queues = exec_switches.effective().executor_enabled and route_allows(actor, "change.execute", cr)[0]
     return "approve_and_queue_execution" if queues else "approve_only"
 
 
@@ -55,7 +57,7 @@ def _action(name: str, allowed: bool, reason_code: Optional[str], effect: str) -
 
 def _execute(actor, permission: str, subject: Any, blocked: Optional[str]) -> dict:
     """The execute routes' order: executor off → authz → anything still in the way (`blocked`)."""
-    if not settings.executor_enabled:
+    if not exec_switches.effective().executor_enabled:
         return _action("execute", False, "executor_disabled", "queue_execution")
     ok, code = route_allows(actor, permission, subject)
     if ok and blocked:
@@ -64,7 +66,8 @@ def _execute(actor, permission: str, subject: Any, blocked: Optional[str]) -> di
 
 
 def plan_actions(plan: Any, actor, *, issue_status: Optional[str], run_in_flight: bool) -> list[dict]:
-    """A fix plan's actions (PUT /approve, POST /reject, POST /execute). A change plan's belong to its change."""
+    """A fix plan's actions (PUT /approve, POST /reject, POST /request-changes, POST /execute). A change plan's
+    belong to its change."""
     if getattr(plan, "plan_kind", "fix") != "fix":
         return []
     out = []
@@ -78,8 +81,22 @@ def plan_actions(plan: Any, actor, *, issue_status: Optional[str], run_in_flight
         if ok and plan.status == "approved" and run_in_flight:
             ok, code = False, "run_in_flight"   # withdrawing mid-run would leave the executor running (route: 409)
         out.append(_action("reject", ok, code, "update"))
+    if plan.status in ("draft", "pending_approval"):
+        # MVP-2.9.0 N14: send it back AND ask the plan agent for the next one. A rejection by another name, so the
+        # same permission; a closed issue gets no new plan. (An agent already on the issue is the route's 409 —
+        # it is not known here without making this read depend on the process's claims.)
+        ok, code = route_allows(actor, "plan.reject", plan)
+        if ok and issue_status in ("resolved", "dismissed"):
+            ok, code = False, "issue_closed"
+        out.append(_action("request_changes", ok, code, "reject_and_request_plan"))
     if plan.status == "approved":
-        out.append(_execute(actor, "plan.execute", plan, "run_in_flight" if run_in_flight else None))
+        # a plan runs only while its issue waits for that run (issue_state.run_refusal: the route's and
+        # open_ticket's 409) — a closed issue (N26), or one that moved anywhere else (N27) — said before a run in
+        # flight. An issue status the caller did not look up is not refused on a guess.
+        blocked = ("issue_closed" if issue_status in ("resolved", "dismissed")
+                   else "issue_moved" if issue_status is not None and issue_status != "fix_approved"
+                   else "run_in_flight" if run_in_flight else None)
+        out.append(_execute(actor, "plan.execute", plan, blocked))
     return out
 
 

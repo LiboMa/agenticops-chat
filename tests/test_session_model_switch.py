@@ -30,7 +30,7 @@ class TestPatchModelId:
         assert r.status_code == 200
         assert r.json()["model_id"] == "global.anthropic.claude-opus-4-8"
         # persisted — list endpoint echoes it too
-        rows = client.get("/api/chat/sessions").json()
+        rows = client.get("/api/chat/sessions").json()["items"]
         mine = [s for s in rows if s["session_id"] == session_id][0]
         assert mine["model_id"] == "global.anthropic.claude-opus-4-8"
 
@@ -107,8 +107,8 @@ class TestModelResolution:
             from agenticops.web.app import _chat_sessions
             _chat_sessions.remove(session_id)
             _chat_sessions.get_or_create(session_id)
-            mock_create.assert_called_once_with(
-                model_id_override="global.anthropic.claude-opus-4-8", effort_override="")
+            mock_create.assert_called_once_with(   # a Web chat build: rich_output (2026-11-07)
+                model_id_override="global.anthropic.claude-opus-4-8", effort_override="", rich_output=True)
             _chat_sessions.remove(session_id)
 
     def test_auto_session_passes_empty_override(self, client, session_id):
@@ -118,7 +118,7 @@ class TestModelResolution:
             from agenticops.web.app import _chat_sessions
             _chat_sessions.remove(session_id)
             _chat_sessions.get_or_create(session_id)
-            mock_create.assert_called_once_with(model_id_override="", effort_override="")
+            mock_create.assert_called_once_with(model_id_override="", effort_override="", rich_output=True)
             _chat_sessions.remove(session_id)
 
     def test_session_effort_reaches_agent_build(self, client, session_id):
@@ -131,7 +131,7 @@ class TestModelResolution:
             from agenticops.web.app import _chat_sessions
             _chat_sessions.remove(session_id)
             _chat_sessions.get_or_create(session_id)
-            mock_create.assert_called_once_with(model_id_override="", effort_override="deep")
+            mock_create.assert_called_once_with(model_id_override="", effort_override="deep", rich_output=True)
             _chat_sessions.remove(session_id)
 
     def test_invalid_effort_rejected(self, client, session_id):

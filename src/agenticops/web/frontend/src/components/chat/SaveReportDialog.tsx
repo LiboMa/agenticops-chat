@@ -51,7 +51,7 @@ export default function SaveReportDialog({ sessionId, sessionName, isPrivate = f
       <div className="bg-background rounded-xl shadow-2xl w-full max-w-md mx-4 animate-[slideInRight_0.2s_ease-out]">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-          <h2 className="text-lg font-semibold text-foreground">Save as Report</h2>
+          <h2 className="text-lg font-semibold text-foreground">{t("saveReport.title")}</h2>
           <button
             onClick={onClose}
             className="text-muted-foreground hover:text-foreground transition-colors"
@@ -67,13 +67,13 @@ export default function SaveReportDialog({ sessionId, sessionName, isPrivate = f
           {savedReport ? (
             <>
               <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700">
-                Report saved successfully
+                {t("saveReport.saved")}
               </div>
               <button
                 onClick={() => navigate(`/app/reports/${savedReport.id}`)}
                 className="text-sm font-medium text-primary-600 hover:text-primary-700 transition-colors"
               >
-                View Report
+                {t("saveReport.view")}
               </button>
             </>
           ) : (
@@ -101,7 +101,7 @@ export default function SaveReportDialog({ sessionId, sessionName, isPrivate = f
                   rows={3}
                   value={summary}
                   onChange={(e) => setSummary(e.target.value)}
-                  placeholder="Brief summary of the conversation..."
+                  placeholder={t("saveReport.summaryPh")}
                   className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
                 />
               </div>
@@ -151,7 +151,7 @@ export default function SaveReportDialog({ sessionId, sessionName, isPrivate = f
                 disabled={mutation.isPending}
                 className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition-colors"
               >
-                {mutation.isPending ? "Saving..." : "Save Report"}
+                {mutation.isPending ? t("common.saving") : t("saveReport.save")}
               </button>
             </>
           )}

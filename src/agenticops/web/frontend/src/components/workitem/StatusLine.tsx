@@ -91,7 +91,7 @@ export function StatusLine({
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-mono text-xs px-2 py-0.5 rounded bg-secondary text-muted-foreground">{refLabel}</span>
             {badges}
-            <h1 className="text-2xl font-semibold text-foreground">{title}</h1>
+            <h1 className="min-w-0 basis-full text-xl font-semibold text-foreground [overflow-wrap:anywhere] sm:basis-auto sm:text-2xl">{title}</h1>
           </div>
           <div className="flex flex-wrap items-start gap-3">
             <div className="min-w-0 flex-1 space-y-1">
@@ -110,7 +110,7 @@ export function StatusLine({
               {waiting && <p className="text-sm text-muted-foreground">{waiting}</p>}
             </div>
             {(primary || items.length > 0) && (
-              <div ref={menuRef} className="relative ml-auto shrink-0 whitespace-nowrap flex items-center gap-2">
+              <div ref={menuRef} className="relative flex w-full shrink-0 items-center justify-end gap-2 whitespace-nowrap sm:ml-auto sm:w-auto">
                 {primary && (
                   <button
                     onClick={primary.run}

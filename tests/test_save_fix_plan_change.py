@@ -172,8 +172,10 @@ def test_save_execution_result_for_change_calls_mapper(db):
     assert not fix_notify.called
     db.expire_all()
     assert db.get(FixPlan, plan.id).status == "executed"
+    # the run's end on the change's timeline is the mapper's to write (MVP-2.9.0 N8: both used to write one —
+    # tests/test_executor_reconcile.py pins the single event with the real mapper); with the mapper replaced, none
     ev = db.query(PipelineEvent).filter_by(change_request_id=cr_id, event_type="execution_completed").count()
-    assert ev == 1
+    assert ev == 0
 
 
 def test_executor_service_crash_calls_mapper(db):

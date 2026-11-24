@@ -139,5 +139,5 @@ def test_list_and_get_carry_the_context(client):
     iid = _issue()
     sid = _create(client, {"primary": {"entity_type": "health_issue", "entity_id": iid}}).json()["session_id"]
     assert client.get(f"/api/chat/sessions/{sid}").json()["context"]["primary"]["ref"] == f"I#{iid}"
-    row = next(r for r in client.get("/api/chat/sessions").json() if r["session_id"] == sid)
+    row = next(r for r in client.get("/api/chat/sessions").json()["items"] if r["session_id"] == sid)
     assert row["context"]["account_name"] == "lab"

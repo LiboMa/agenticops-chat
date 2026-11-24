@@ -6,6 +6,7 @@ import { IssueStatusBadge } from "@/components/ui/IssueStatusBadge";
 import { useAnomalyRca } from "@/hooks/useAnomalyRca";
 import type { HealthIssue } from "@/api/types";
 import { issueFacts } from "@/lib/issueDetail";
+import { formatFullDate } from "@/lib/formatDate";
 
 const SEV_COLOR: Record<string, string> = {
   critical: "#d03b3b", high: "#fab219", medium: "#fab219", low: "#7d8590",
@@ -121,7 +122,7 @@ export function GalaxyIssueDialog({ issue, onClose }: { issue: HealthIssue; onCl
               <Field k={t("galaxy.resourceId")} v={issue.resource_id} />
               <Field k={t("galaxy.type")} v={f.resourceType ?? "—"} />
               <Field k={t("galaxy.region")} v={f.region ?? "—"} />
-              <Field k={t("issues.detected")} v={new Date(issue.detected_at).toLocaleString()} />
+              <Field k={t("issues.detected")} v={formatFullDate(issue.detected_at)} />
             </dl>
           </section>
         </div>

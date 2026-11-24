@@ -14,6 +14,7 @@ lib/
 # The Python `lib/` rule above also swallows the React source dir — every file there
 # had to be force-added, and a forgotten -f ships a build importing a file git never saw.
 !src/agenticops/web/frontend/src/lib/
+!src/agenticops/web/frontend/src/newui/lib/
 lib64/
 parts/
 sdist/

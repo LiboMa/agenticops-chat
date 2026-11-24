@@ -6,12 +6,12 @@
 @layer base {
   :root {
     --background: 0 0% 100%;
-    --foreground: 222 47% 11%;
+    --foreground: 219 45% 16%;
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 219 45% 16%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-    --primary: 221 83% 53%;
+    --popover-foreground: 219 45% 16%;
+    --primary: 222 83% 54%;
     --primary-foreground: 210 40% 98%;
     --primary-50: 214 100% 97%;
     --primary-100: 214 95% 93%;
@@ -19,27 +19,34 @@
     --primary-300: 212 96% 78%;
     --primary-400: 213 94% 68%;
     --primary-500: 217 91% 60%;
-    --primary-600: 221 83% 53%;
+    --primary-600: 222 83% 54%;
     --primary-700: 224 76% 48%;
     --primary-800: 226 71% 40%;
     --secondary: 210 40% 96%;
-    --secondary-foreground: 222 47% 11%;
+    --secondary-foreground: 219 45% 16%;
     --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
+    --muted-foreground: 216 20% 44%;
     --accent: 210 40% 96%;
-    --accent-foreground: 222 47% 11%;
+    --accent-foreground: 219 45% 16%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 210 40% 98%;
     --border: 214 32% 91%;
     --input: 214 32% 91%;
-    --ring: 221 83% 53%;
+    --ring: 222 83% 54%;
     --radius: 0.5rem;
     /* blue/white workspace (MVP-2.7.0): the page canvas behind white surfaces, the selected-row tint, button hover */
-    --canvas: 210 40% 98%;
+    --canvas: 220 50% 98%;
     --selected: 214 100% 97%;
     --primary-hover: 224 76% 48%;
     /* the shell's top bar; full-height pages subtract it */
     --topbar-h: 64px;
+    /* the sidebar's width (components/layout/Sidebar: none below 801px, 166px, then 200px): what a layer that must start
+       beside it — the chat list's drawer — is offset by. NewUI's frame has no sidebar and sets it to 0 (bridge.css) */
+    --side-w: 0px;
+    /* MVP-2.8.0: the design's state colours (#167351 / #915B0A / #B42318) — always beside a word, never alone */
+    --status-ok: 158 68% 27%;
+    --status-warn: 36 87% 30%;
+    --status-danger: 5 76% 40%;
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
@@ -81,6 +88,9 @@
     --canvas: 0 0% 4%;
     --selected: 142 71% 45% / 0.12;
     --primary-hover: 142 76% 36%;
+    --status-ok: 158 55% 55%;
+    --status-warn: 38 85% 60%;
+    --status-danger: 5 80% 66%;
     --chart-1: 220 70% 50%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
@@ -109,6 +119,12 @@
   }
   @media (max-width: 800px) {
     :root { --topbar-h: 56px; }
+  }
+  @media (min-width: 801px) {
+    :root { --side-w: 166px; }
+  }
+  @media (min-width: 1101px) {
+    :root { --side-w: 200px; }
   }
 }
 
@@ -156,9 +172,13 @@ input:focus, select:focus, textarea:focus {
 ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.5); }
 
 /* ── Report Markdown ── */
+/* a word longer than its line — a bare web address — wraps instead of widening the page (break-word, not
+   anywhere: a table keeps its columns and scrolls inside .md-table-wrap) */
+.report-content { overflow-wrap: break-word; }
 .report-content .md-h1 { @apply text-2xl font-semibold mt-8 mb-4 pb-2 border-b; }
 .report-content .md-h1:first-child { @apply mt-0; }
 .report-content .md-h2 { @apply text-xl font-semibold mt-6 mb-3; }
+.report-content [id] { scroll-margin-top: calc(var(--topbar-h) + 1rem); }  /* an outline link stops below the bar */
 .report-content .md-h3 { @apply text-lg font-semibold mt-5 mb-2; }
 .report-content .md-h4 { @apply text-base font-semibold mt-4 mb-2; }
 .report-content .md-p  { @apply text-sm leading-relaxed mb-3; }
@@ -166,6 +186,8 @@ input:focus, select:focus, textarea:focus {
 .report-content .md-ol { @apply list-decimal list-inside text-sm space-y-1 mb-4 ml-2; }
 .report-content .md-hr { @apply my-6; }
 .report-content .md-code { @apply px-1.5 py-0.5 text-xs font-mono rounded; background: hsl(var(--muted)); color: hsl(var(--foreground)); }
+/* inline code wherever markdown renders it: a long token breaks instead of widening the page (S2 rework E2E: skill detail at 320 px) */
+.md-code { overflow-wrap: anywhere; }
 .report-content .md-pre {
   @apply p-4 text-xs font-mono overflow-x-auto mb-4 leading-relaxed rounded-lg;
   background-color: #1e1e2e;
@@ -176,6 +198,19 @@ input:focus, select:focus, textarea:focus {
 .report-content .md-table th { @apply text-left px-4 py-2.5 text-xs font-medium uppercase tracking-wider border-b; }
 .report-content .md-table td { @apply px-4 py-2 border-b; }
 .report-content .md-table tr:last-child td { @apply border-b-0; }
+
+/* Chat answers (2026-11-07): code blocks carry a copy button; flowcharts keep their natural width and scroll */
+.report-content .md-pre-wrap { position: relative; }
+.report-content .md-copy {
+  @apply absolute right-2 top-2 rounded-md px-2 py-0.5 text-[11px] opacity-0 transition-opacity;
+  background: rgba(255, 255, 255, 0.12);
+  color: #cdd6f4;
+}
+.report-content .md-pre-wrap:hover .md-copy,
+.report-content .md-copy:focus-visible { opacity: 1; }
+@media (pointer: coarse) { .report-content .md-copy { opacity: 1; } }
+.aiops-mermaid svg { height: auto; margin: 0 auto; display: block; }
+.aiops-mermaid-zoom svg { width: 100% !important; max-width: none !important; }
 
 /* Code blocks: <pre><code> has no chip background (the pre provides the surface) */
 .report-content pre code {

@@ -199,6 +199,10 @@ flowchart TD
 
 > **AuthN vs AuthZ separation:** AuthN decides *whose* credentials (provider layer, fail-closed); AuthZ decides *what's permitted* (3-tier classifier + L0–L4 approval gate in the fix pipeline). A read-only command on the right account still runs; a write command on the right account still needs confirmation / approval.
 
+**What the classifier knows, and auto-approval (MVP-2.7.1):** an AWS operation the prefix tables do not list is classified by its verb — `create-` / `delete-` / `update-` / `put-` / `modify-` / `attach-` / `start-` / `stop-` / `tag-` / `invoke` / `publish` / …, and `batch-write-…` (global options and their values are skipped, so `aws --region r eks create-addon` is a write). This only ever raises a tier: a read verb the tables miss stays `unknown`, and blocked patterns are still checked first. `kubectl rollout status` / `rollout history` are reads; `rollout restart` / `undo` / `pause` / `resume` stay writes. The gates above already treat `unknown` like a write, but **auto-approval never covers a step the code cannot classify**: an L0/L1 fix plan or a standard change whose steps or rollback hold an `unknown` command, or a step with no command at all (the executor would choose what to run), waits for a human — one `policy_decision` event on the timeline, rule `unclassified_command`, action `require_human` (a prose-only rollback carries no step and is not counted).
+
+**Where a run may only read (MVP-2.9.0 N30).** A diagnosis (`rca_agent`) and a fix-plan run (`sre_agent`) only read — in code, like a change's review and a read-only account's chat. Under them the gate above has no «confirm» branch: a command that is not `READ-ONLY` is refused (ledger `refused` / `read_only_run`) whatever `require_confirmation` says, and the reply tells the model where a change belongs — a diagnosis: its recommendations; a plan: a step of the plan. On a host the line is not judged by how it begins there: it is split as a shell would split it (`|`, `;`, `&&`, `||`, line breaks) and every command in it must be one the rule knows cannot change anything — `ls`, `cat`, `grep`, `ps`, `df` …, and `journalctl`, `systemctl status`, `ip … show`, `ss`, `sysctl`, `dpkg -l`, `rpm -q`, `sort`, `uniq` with their arguments checked. `awk`, `sed`, `find`, `xargs`, `curl`, `sudo`, a redirect to a file, `$(…)` and `$VAR` are refused, with a sentence that says what such a run takes. A skill activated there registers only its read tools, and the plan run does not carry the enhanced backend. Chat and the executor keep the gate as drawn above.
+
 ---
 
 ## Core Workflow: Issue Lifecycle
@@ -359,7 +363,7 @@ flowchart TD
 
 ## Auto-Fix Pipeline (Closed-Loop Remediation)
 
-When alerts arrive via webhook, the entire pipeline runs automatically — no human intervention needed for L0/L1 risk fixes:
+When alerts arrive via webhook, the entire pipeline runs automatically — no human intervention needed for L0/L1 risk fixes whose every step the command classifier can read (MVP-2.7.1; see «What the classifier knows» above). A fix plan only restores the affected resource (improvements go to its summary as follow-ups for a change request), and `save_fix_plan` refuses a fix plan whose rollback would take the service down — scale a workload to 0 or delete it, stop an instance, database or service (MVP-2.7.1):
 
 ```mermaid
 flowchart TD
@@ -471,7 +475,8 @@ flowchart TD
   context is **refused** and the user is pointed at `/change`.
 
 **Invariants:** the CR terminal state is written only by `on_execution_result`; an unprovable target
-yields no plan; auto-approval needs both the yaml rule and the `change_auto_approve_standard` flag.
+yields no plan; auto-approval needs both the yaml rule and the `change_auto_approve_standard` flag, and no step
+the command classifier cannot read (MVP-2.7.1: otherwise rule `unclassified_command` → a normal change).
 A `webhook:*` requester (change intake) never approves or executes, even in shadow mode.
 
 ---
@@ -748,6 +753,48 @@ existing value; a `****`-masked value is never persisted). The old `/api/notific
 
 ---
 
+## Reading a Chat Answer (ChatGPT-style chat, 2.7.1)
+
+Every Web chat answer has three parts: the **work log** (what the agent did), the **answer**, and what you can do next.
+
+```mermaid
+flowchart LR
+    SSE["SSE frames<br/>text · tool_start (text_offset)<br/>tool_input (summary) · tool_end (duration, result, text_end)"] --> STORE["chatStream store<br/>+ chat_messages.tool_calls"]
+    STORE --> SPLIT["splitWork<br/>cut the reply at each step's offsets"]
+    SPLIT --> LOG["Work log<br/>steps + narration between them<br/>«Worked through N steps · T»"]
+    SPLIT --> ANS["Answer<br/>the text after the last step's result"]
+    ANS --> RICH["splitRichBlocks"]
+    RICH --> MD["markdown<br/>tables, code (copy), I#/R#/C# links"]
+    RICH --> CH["```chart → recharts<br/>bar · line · area · pie"]
+    RICH --> MM["```mermaid → flowchart<br/>(loaded on demand, strict)"]
+    ANS --> ACT["copy · regenerate · ⋯ save as report<br/>«Next steps» chips (click = send)"]
+```
+
+How to read it:
+
+1. **The work log.**
+   - While the agent works, it is open: each step appears as it starts, with what it ran (credentials masked) and how long it took. Click a step to see the start of its result.
+   - When the answer is done it folds to one line: «Worked through N steps · T». Click it to open the log again; it reads the same after a reload.
+   - The model's own remarks between steps («let me check …») are in the log, not in the answer.
+2. **The answer.**
+   - Statistics come as charts. Hover for values; ⤢ enlarges the chart and shows its data as a table.
+   - Flows come as flowcharts. Click to enlarge and zoom; ESC closes.
+   - Code blocks have a copy button.
+3. **Next.**
+   - Copy takes the answer as markdown; ⋯ copies it as plain text or saves the chat as a report.
+   - Regenerate (last answer only) asks the same question again and the new answer comes below. It is off when the question carried attachments, because attachments go with one message; attach them again instead.
+   - «Next steps» are what you would likely ask next; a click sends one.
+4. **Attaching.**
+   - Drop files anywhere on the chat, paste a screenshot, or use ＋.
+   - Files sit inside the input box: images as thumbnails with an upload ring, documents as coloured cards, refused files in red with the reason.
+   - Send waits until every upload is processed.
+5. **On a phone.**
+   - The chat list is a drawer (☰), and the input box stays at the bottom.
+   - Enter makes a new line; the arrow sends.
+   - Swipe left or right in the image viewer.
+
+Only the Web chat draws charts and flowcharts. The CLI, IM bots and scheduled runs keep plain text answers.
+
 ## Concurrent Chat Sessions & Fast Session Open
 
 The Web chat supports **multiple simultaneously-streaming conversations** in one browser tab and opens any session **instantly**, regardless of history size.
@@ -964,13 +1011,25 @@ Open `http://localhost:8000/app/` and sign in. **The workspace shell (MVP-2.7.0)
   nothing) — otherwise Chat. A full URL (a notification link, a bookmark) always opens exactly that page.
 - **Signed out?** Any page sends you to `/app/login?next=…` and back to the same page (query and hash
   included) after signing in; only same-origin `/app` pages are accepted as `next`.
-- **Needs your attention** (top bar, left of search; MVP-2.7.0 S3): the count of work items that wait on *you* — the same «Waiting for you / an approver / acceptance» the issue and change pages show, filtered by what you may do (your own change never asks you to approve it). Click it for one row per item; a row opens the place it is decided (a plan's page for an approval, the issue's or change's card otherwise). Nothing is approved from the list.
-- **Account scope** (top bar, between «Needs your attention» and search; in the avatar menu on a phone; MVP-2.7.0 S4): pick one account (or All) and the issue queue, the Fix plans and Changes tabs, Resources and «Needs your attention» show only that account. A detail page shows its own record's account, so the scope is greyed there; pages it does not filter (overview, security, Galaxy, Chat, Settings) grey it out and say so. An old link with `?account=` / `?account_id=` sets the scope once and drops the parameter.
+- **Every dialog closes on Escape** (MVP-2.9.0): the forms and confirmations the pages draw themselves do too — a
+  delete confirmation closed with Escape deletes nothing.
+- **Needs your attention** (top bar, left of search; MVP-2.7.0 S3, a link since 2.8.0 S2): the count of work items that wait on *you* — the same «Waiting for you / an approver / acceptance» the issue and change pages show, filtered by what you may do (your own change never asks you to approve it). It is the same number as the sidebar's on Issues. Click it to open **Issues · Waiting on me** (below). Nothing is approved from the list.
+- **Issues · Waiting on me** (`/app/issues`, its first tab; the to-do workbench of 2.8.0 S2 merged into Issues on 2026-11-10): every item that waits on *you* — issues and changes — grouped by the decision it needs: *To approve*, *To accept*, *Failed* (including «approved but not started»), *To confirm* (including «needs clarification»); each group heading has its count, the longest wait comes first in each, and 50 load at a time («Load more»). The tabs beside it are *All*, *Failed* and *Waiting long* (issues only), each with its count. Search a title, a resource or a number (`I#12`, `12`). Each row says the item (a change carries `C#n`), its severity or risk, the resource · account · region, why it waits, and for how long (hover for the UTC time). On a wide screen (≥ 1280px) the list sits beside the item's own page — an issue's or a change's — decide there; on a narrower one the list and the item take turns and «← Back to «Waiting on me»» returns to the same search and scroll. When the item you are on has just been handled it says so and offers the next one. The tab, search and item are in the URL (`?view=waiting&item=I12` / `C3`), so a link opens the same view; the top bar's account scope applies. It lists only what *you* can do: a read-only account opens Issues on *All*, and its *Waiting on me* says it has nothing to do. Old workbench links (`/app/inbox`, with or without a search or an item) open here.
+- **Account scope** (top bar, between «Needs your attention» and search; in the avatar menu on a phone; MVP-2.7.0 S4): pick one account (or All) and the issue queue, the Fix plans and Changes tabs, Resources and «Needs your attention» show only that account. A detail page shows its own record's account, so the scope is greyed there; pages it does not filter (overview, Galaxy, Chat, Settings) grey it out — Security follows it since MVP-2.9.0 and say so. An old link with `?account=` / `?account_id=` sets the scope once and drops the parameter.
 - **Approvals say what they do**: «Approve & run» only when approving really queues the run (auto-fix and the executor on); otherwise «Approve», with a note that someone presses **Execute** afterwards. Every approval asks you to tick «I have reviewed this version, the target scope, the risks and the recovery checks» first.
-- **Sidebar**: *Daily work* (Chat, Issues, Reports), then the collapsible *Operations tools* (Plans & changes,
-  Resources, Schedules) and *Administration* (Runtime overview, Agent metrics, Skills, Galaxy, Security,
-  Settings) — the group holding the current page opens by itself; drag to reorder inside a group. Below 800px
-  the sidebar becomes a menu in the top bar.
+- **Sidebar** (regrouped by the owner in the 2.8.0 S2 rework; numbers and hints since 2026-11-10): *Daily work* (Issues,
+  Chat, Plans & changes, Security, Reports), the collapsible *Operations* (Runtime overview, Galaxy, Schedules, Resources, Agent
+  metrics, Skills), and *Administration* at the foot of the sidebar, never folded (Users — admins only — and
+  Settings, the last entry). The group holding the current page opens by itself; drag to reorder inside a group. A
+  group you can open nothing in is not shown (a read-only account has no Administration). An order you saved before
+  keeps its sequence; entries that changed group appear at their default place in their new group, and Issues takes
+  the old workbench's place. Chat has the same full sidebar as every page. Below 800px the sidebar becomes a menu in
+  the top bar. An entry shows at most one number: Issues — what waits on you (red when a critical issue is among
+  them; it follows the account scope), Security — open high and critical findings, Schedules — schedules whose latest
+  run failed (red), Skills — drafts waiting for review. No number means nothing to do; when the numbers cannot be
+  fetched the entry says «Numbers unavailable right now» instead of showing 0, and a read-only account sees no numbers. Hovering,
+  focusing or being on an entry shows a hint line under its name («132 waiting on you, 36 critical»), which a screen
+  reader reads too. A folded *Operations* keeps a red number beside its heading.
 - **Top bar**: breadcrumb, search (⌘K / Ctrl K), 中文 | English, and the avatar menu (account, theme, font
   size, Home & language, sign out). Preferences (home, language, open groups, last page) follow your account
   to other browsers (`GET /api/ui/bootstrap`, `GET`/`PATCH /api/users/me/preferences`, If-Match revisions);
@@ -978,26 +1037,51 @@ Open `http://localhost:8000/app/` and sign in. **The workspace shell (MVP-2.7.0)
 
 | Page | What You Can Do |
 |------|----------------|
-| **Runtime overview** | Overview stats, recent issues (`/app/overview`; it was the `/app` home before 2.7.0) |
-| **Chat** | Same as CLI but with SSE streaming, file upload button, concurrent session history. **MVP-2.7.0 S5:** a new chat takes its context — **Ask Agent** on an issue links it (the chat is bound to the issue's account), otherwise the top bar's account binds it (or none: all accounts); the line above the composer says which, and an open chat shows its account, locked. A bound chat's tools refuse every other account. A linked chat's agent reads the issue's newest notes each turn. Sending is safe to repeat (one message, one run); a reply cut off by a reload is labelled *interrupted*; errors say their kind; **Stop** ends the reply only — queued or running work keeps going. Drafts (text) survive navigation, a language switch and a reload; unsent files must be selected again after a reload. Empty state: three starters that fill the composer |
+| **Runtime overview** | Overview stats, recent issues (`/app/overview`; it was the `/app` home before 2.7.0) **MVP-2.9.0:** *Recent issues* is a table — title (a link), severity in words, who it waits on and for how long, the resource's short id with a copy button; the security card lists each account (score and tier, or «cannot be scored») |
+| **Chat** | Same as CLI but with SSE streaming, file upload button, concurrent session history. **MVP-2.7.0 S5:** a new chat takes its context — **Ask Agent** on an issue links it (the chat is bound to the issue's account), otherwise the top bar's account binds it (or none: all accounts); the line above the composer says which, and an open chat shows its account, locked. A bound chat's tools refuse every other account. A linked chat's agent reads the issue's newest notes each turn. Sending is safe to repeat (one message, one run); a reply cut off by a reload is labelled *interrupted*; errors say their kind; **Stop** ends the reply only — queued or running work keeps going. Drafts (text) survive navigation, a language switch and a reload; unsent files must be selected again after a reload. Empty state: three starters that fill the composer **MVP-2.9.0 (the conversation list):** three tabs — *All*, *Starred*, *Archived* — each asks the server, so an archived conversation can be found again (and restored) and a pinned one stays at the top however old; search looks through every conversation of the tab (its name, the number or title of the issue / change it is about, the account); each row says what it is about, private or shared, and what is going on (replying · waits for your decision · the last send did not finish · a tool step failed · draft kept); a **⋯** menu on every row (rename, pin, star, archive / restore, share, delete — with a confirmation), *Undo* for 8 s after archiving; when the list cannot be fetched it says so instead of «no conversations» |
 | **Issues (Cases)** | `/app/issues` (MVP-2.7.0 S4): at ≥ 1280px a queue beside the reading pane — select a row and the issue's phase cards open on the right, the filters stay; below 1280px the list and a full-screen issue take turns, and back (the page's or the browser's) returns to the same filters, scroll and row. Queue rows: ref, severity, title, resource · status (×N when it recurred), who it waits on; filters, all on the server and in the URL: ops events (default) / security findings / all, status, severity, sort, search (title, resource, or `I#3`); at most 200 rows, with a notice beyond. **Raw signals →** above. An old `?view=resources` / `?view=signals` link redirects to the pages below |
 | **Issue Detail** | The work-item template (see *Issue & Change UI* below): one status line with the one primary button and a **⋯** menu, four phase cards ① Diagnose (RCA, confidence against the auto-fix gate, root-cause location, a compact local graph, **Your verdict**) ② Plan (`I#N fix plan vN` + content hash) ③ Approve & run (approval, run evidence) ④ Accept, and a right rail of key facts + activity (in the Cases split view the rail sits under the cards). **Add a note** in the activity card (append-only, under your name, kept as written; needs the write permission); **⋯ → Ask Agent** opens a new chat with the issue in its context panel, nothing sent until you send it. `#diagnose` / `#plan` / `#run` / `#accept` / `#activity` open a card; an old `?tab=` link maps onto them |
-| **Resources** / **Resource Detail** | The resource inventory (`/app/resources`, its own sidebar entry): a table of name + id, type, account, region, lifecycle (present / gone — **Show absent**), health (open issues anchored to it; none = *Unknown*, never "healthy") and last observed; type / region / search / page in the URL, each row a real link. One resource: overview, its issues and fix plans, network / contains, tags — and the **Local graph** tab with its neighbourhood |
+| **Resources** / **Resource Detail** | The resource inventory (`/app/resources`, its own sidebar entry): a table of name + id, type, account, region, lifecycle (present / gone — **Show absent**), health (open issues anchored to it; none = *Unknown*, never "healthy") and last observed; type / region / search / page in the URL, each row a real link. One resource: overview, its issues and fix plans, network / contains, tags — and the **Local graph** tab with its neighbourhood **MVP-2.9.0:** an *Unknown* health always says why — *no open issue*, *stale data* (not observed for two scan intervals, with how long ago), *gone*, *never observed*; the page head says when the last resource scan ran, how it ended and links to its runs; every row has the short id with a copy button; on a phone the table becomes cards |
 | **Signals** | Every signal the Signal Gate judged (`/app/signals`): reached from the issue list's **Raw signals →** and an issue's rail, not from the sidebar |
 | **Plans & changes** / **Plan Detail** | One hub at `/app/plans` with three tabs (MVP-2.7.0 S3): **Fix plans** — every fix plan in the work-item table, status / risk / search filters kept in the URL (the account is the top bar's scope), a row opens `/app/plans/:id`, which reads like an approval: origin issue, target, version and hash, what changes, checks, rollback, then the approval record and the runs; **Changes**; **Audit** (admins only when sign-in is on). Each tab shows how many of its items need you. Old `/app/changes` and `/app/audit` links land on their tab, query kept |
 | **Change Detail** | Change requests (the hub's **Changes** tab, the same work-item table; **New change request** with optional steps + external ticket); the detail page is the same template with five phase cards ① Request ② Review (verdict, policy, shadow impact, the clarification box) ③ Plan (`C#N implementation plan vN` with `steps_diff`) ④ Approve & run ⑤ Accept, anchors `#request` … `#accept` / `#activity` |
 | **Audit** | Decision ledger, command ledger and the plan KPIs (the hub's **Audit** tab) |
 | **Galaxy** | The resource starfield; `?focus=<resource id>` opens it centred on one resource |
-| **Security** | Posture scores and 30-day trend, category scores, findings, recommendations, exposure paths |
-| **Reports** / **Report Detail** | Generate and view daily/incident/inventory reports. **MVP-2.7.0 S6:** every report has a version and an owner (one saved from a private chat is yours and admins' only) and is readable in Chinese and English — the list shows each language's state; a report page shows one language at a time, with a **中文 / English** toggle (your interface language first; never side by side). A language that is not ready says so, with **Prepare translation** / **Retry** and **Read in the source language** — never the other language silently. New reports are translated automatically by the cheap model; commands, references, ids and numbers are protected (a translation that changes one is refused). **Export** downloads html (pdf / docx when the server can), **Print** prints only the paper shown, **Publish** shows the real destination (SNS topic / SES recipients) first and sends exactly the shown version and language, once |
+| **Security** | Per-account posture (MVP-2.9.0): the page follows the top bar's account scope — *All accounts* shows one card and one trend line per account, one account shows only its own cards, trend, radar, findings, recommendations and exposure paths. A card: score / 100 and tier (≥ 80 good, 50–80 needs attention, < 50 look first), reachable paths, **this account's** open findings, when it was scored (UTC). An account none of whose sources could be read says **Cannot be scored** with each source's reason — not 0 and not 100; a partly collected one is scored and says which source failed (a control whose source could not be read counts as *undetermined*, never as a pass). Trend: 7 / 30 / 90 days, one point per UTC day, gaps left open. Findings: severity, status, reachability and search are applied by the server and kept in the address; «1–20 of 821»; each row links to its issue |
+| **Reports** / **Report Detail** | Generate and view daily/incident/inventory reports. **MVP-2.7.0 S6:** every report has a version and an owner (one saved from a private chat is yours and admins' only) and is readable in Chinese and English — the list shows each language's state; a report page shows one language at a time, with a **中文 / English** toggle (your interface language first; never side by side). A language that is not ready says so, with **Prepare translation** / **Retry** and **Read in the source language** — never the other language silently. New reports are translated automatically by the cheap model; commands, references, ids and numbers are protected (a translation that changes one is refused). **Export** downloads html (pdf / docx when the server can), **Print** prints only the paper shown, **Publish** shows the real destination (SNS topic / SES recipients) first and sends exactly the shown version and language, once **MVP-2.9.0:** the search box looks through the title, summary and body of **every** report you may see (`R#145` opens that one), with *From* / *To* dates (UTC days); «matching X · all Z», 50 a page; the query is in the address. A report written by the reporter agent has a **Coverage** card — complete or partial, the accounts and regions it read, when, and how often a tool result was cut short, kept only as a preview, or failed — recorded by the system while the report was generated, not written by the model (a report without such a record shows no card). Long reports have a table of contents; a section's address can be shared |
 | **Schedules** / **Schedule Detail** | Set up cron-based automated scans/detections |
+| **Sign-in** / **Setup overview** | The sign-in page (MVP-2.9.0) tells a wrong name or password from a service that is unavailable, and keeps what you typed. `/app/setup` — from the sign-in page, the avatar menu, NewUI's account menu or the head of Settings — says on one page where **cloud accounts** (connected / configured · not verified / verification failed / not configured), the **model** (verified / configured · not verified / verification failed), **execution and approval** (a person approves / partly automatic) and **notifications** stand, with the facts behind each and a button to the place that changes it. A verification counts only for the credentials or the model it tested. *Verify the model* (administrators) makes one real call; *Try a read-only patrol* opens a new conversation with the request written and not sent. An administrator with no enabled account lands here first |
 | **Skills** / **Skill Detail** | Browse the 16 domain skills; import packages from a URL / git repo / zip (result manifest, *Imported* badge); view/promote/rollback drafts |
-| **Agent Metrics** | Per-agent token/latency/usage metrics; the **RCA root-cause location** card (7 / 30 / 90 days: Top-1, judged, anchoring rate) |
-| **Settings** | Models, Messaging (channels + IM apps), MCP servers, Accounts, Enhanced Backend; **Pull connectors** card on General (Run now, recent runs) |
+| **Agent Metrics** | Per-agent token/latency/usage metrics; the **RCA root-cause location** card (7 / 30 / 90 days: Top-1, judged, anchoring rate) **MVP-2.9.0:** one time range (7 / 30 / 90 days, in the address) for every module, each heading says which range it shows; a module can take its own (cost by month, tokens for the last hours) and says so; accuracy reads «1 / 1 judged correct · small sample · 1 of 56 RCAs judged» rather than a bare percentage; costs show a rounded figure with the exact one in the tooltip; every metric has a definition (ⓘ) |
+| **Settings** | Models, Messaging (channels + IM apps), MCP servers, Accounts, Enhanced Backend; **Pull connectors** card on General (Run now, recent runs). **MVP-2.9.0:** the tab is in the address (`?tab=accounts`). *General* has three sections with anchors — **Basics**, **Automation and execution**, **Models**. The six high-impact switches (auto-fix pipeline, executor, L0 / L1 auto-approval, the executor's step-by-step confirmation, standard-change auto-approval, enforce permission rules) are **staged** by a click and saved together by **Preview and save changes**, which lists from → to, what each affects and what on / off means; each says the value in force and where it comes from (stored by an administrator — kept across restarts —, the settings file's default, or **held by the process's environment**: a switch the environment sets to its strict value, such as `AIOPS_EXECUTOR_ENABLED=false`, is shown disabled with the variable that holds it and cannot be switched from the page). The step-by-step confirmation has no place to give that confirmation in this version: switched on, it holds every run back, and the page says so. Only an administrator can change them, and every change of any setting is in the audit records (*View the audit records of settings changes* — shown to administrators, who alone can read them). *Models* shows the model region, Main's model, the last verification, and whether each agent's model is in the list of available models |
 
 > **Note:** Settings consolidates account management, messaging channels, MCP servers, and the optional Enhanced Backend selector. The standalone Network topology page was removed (the graph engine remains as agent tools — see Tutorial 7).
 
 **Web chat takes any common file** — paste, drop or click the paperclip: screenshots and photos (incl. HEIC / TIFF), PDFs (scanned too), Word / Excel / PowerPoint, csv / tsv / json / logs / code. Each uploads at once; the message shows how each reached the model (see «Chat attachments» above).
+
+#### The new interface — NewUI (MVP-2.9.0, `/app/new`)
+
+A second interface beside the classic pages above, built around one question: *what needs a decision from me now?* Open it from **New interface (NewUI)** under the sidebar logo, the avatar menu, or the phone menu; **Classic view** (top right) brings you back. That choice is remembered for you in this browser: once you are in the new interface, **every page opens in it** — the pages below at their own addresses under its top bar and command bar, in its day / night colours — and links in notifications open there too; `/app` lands on **Decide**. Until you switch, nothing changes: the classic interface is the default and looks as it did. In a narrower window the top bar stays one row: the «last 24 hours» band is shown only while there is room for it, and below 960 px **Classic view** and the day / night switch are in the account menu (the avatar), as on a phone. Release note: [`MVP-2.9.0-RELEASE.md`](MVP-2.9.0-RELEASE.md).
+
+| Lens | Address | What you do there |
+|------|---------|-------------------|
+| **Decide** (`1`) | `/app/new/decide/I12` | Your queue (the same items as *Issues · Waiting on me*: issues and changes, most severe first, filters All / Approve / Accept / Trouble / Confirm) and **one brief per item** — a page that asks for one decision and shows what it rests on: the diagnosis and its evidence, every step of the plan with the tier the code gave its command (read-only / changes something / cannot be classified / blocked), what it touches, how success is checked. There is a brief for each combination of reason the server reports (20 today — since round 3 also an issue that was **reopened and not diagnosed since**, and one whose **plan run left no plan**, each with its one main action); an unknown one gets a generic page with a link to the classic one |
+| **Story** | `/app/new/story/I12`, `…/C3` | One item's whole record — found, diagnosed, planned, approved, run, accepted — with every timeline event, notes (issues), and *Reopen* for a dismissed issue. `Enter` on a brief opens it; `Esc` returns to where you were |
+| **Live** (`2`) | `/app/new/live` | What agents are doing **now** (and for how long, flagged when past its own time limit), what **stalled** (a diagnosis that ended without a result, or began and never ended — no agent is on it; such an item now waits on a person and is in **Decide** as «diagnose again»), what is **due next**, and what **ended in the last day** (the newest 20; the page says when there were more). Built from state the server can check, refreshed every 10 s. Open a lane to read the run **step by step** as the code recorded it while the agent worked (fetched every 3 s): ◆ a fact a tool fetched, ▸ something the agent did, ◇ the model's own words; a step in progress blinks, a failed one is red, a refused one is struck through with the reason. For an execution, each plan step is marked from the command that is word for word its own, a line says how many of the commands that could change something are the plan's own text, and — before anyone stops it — how much of the plan's rollback could run exactly as written. **A diagnosis, a plan or a change review at work takes a word from you**: press `E`, type up to 200 characters, Enter — the agent reads it before its next model call as added information (it changes neither its task nor what it may do), and the note stays in the run's record («the agent has read it» once it has; a note written after the run's last thought is marked «not read: the run ended first» — the page does not promise that it will be read). A read-only account sees which steps were taken, by which tool and how they ended, but not a command's line or what it returned. A lane you were watching that ends is followed to the result it left — only one made since it began; otherwise the page says it ended and left nothing new. **A run in progress can be stopped**: hold `A` («Hold to stop & roll back»). The command it is on finishes, no further step of the plan runs, and the executor may then run only that plan's own rollback steps and read-only checks; the lane turns red («stop requested») and says who stopped it. The item comes back to **Decide** as a failed run that says who stopped it, how many steps had reported done, and what the rollback record holds — the page never says «rolled back» unless rollback results are on record. Three things to know: a stop that arrives before the run has changed anything lets nothing through, the rollback included (there is nothing to roll back); a stop that arrives after the last step leaves the run recorded as it happened, but it then **waits for a person's acceptance** — it never resolves its issue by itself; and a run in progress keeps its own lane (and its stop) while another agent works on the same issue |
+| **All items** | `/app/new/items` | One table of every issue, or every change — closed, dismissed and rejected ones included. Kind, status (open / closed / all, or one status), severity, search (a title, a resource, an account, or a number such as `I#12`) and sort are in the address, so a filtered table can be shared; the counts are the server's («50 of 320 listed», then *List 50 more*). A row opens the item's story, and *back* returns to the same table. It is the first entry of the top bar's **Pages** menu; the classic issue list's address opens it |
+| **World** (`3`) | `/app/new/world` | Every resource of the latest relation-graph build on one map, flat or 3D (`V`). Find (`F`), filter by type / tag group / only abnormal, open a resource, see only what is around it (`G`), find a path between two (`L`), back to the whole (`H`). A resource with open issues wears a ring; no open issue means *unknown*, not healthy; a resource that is gone is a dashed outline. Relations are those of the build (its finish time is on the card); health and «gone» are read again every 30 s and after a decision, with their own read time. A path takes relations the rules found first and a relation a model only inferred when nothing else joins the two — each step names its relation and says when it is inferred. The **data check** card compares how many of each kind the canvas drew (plus what is off the screen) with the data every second and turns red if they differ; it checks counts, not colours or positions |
+
+**Deciding with the keyboard** (`?` lists the keys; they work whenever you are not typing, and can be switched off in the account menu): `J` / `K` next / previous item · **hold** `A` for the page's main action when it changes infrastructure or is final (approve, retry a run, mark resolved; on **Live**: stop a run in progress — the executor finishes the command it is on, is told of the stop before its next thought, may then run only the plan's own rollback lines and read-only checks, and records who stopped it) — the approval goes to exactly the plan version you were shown, a resolve to the status you were shown, and letting go, pressing any other key or moving to another item cancels it · `R` request changes to a plan / not accepted and `D` dismiss, each with a reason — on an approval, `R` sends the plan back **and** asks the plan agent to redo it with your sentence, in one step; when the new plan arrives its brief shows **what changed since the previous plan** (your sentence quoted, then — each on its own line — the changed, added and removed steps, the rollback (line by line when it is written as commands; «the same text» or «rewritten» when it is a sentence), the checks (unchanged, another number, or the same number with other content) and the risk level) · `S` **later**: the item goes to the end of its severity for an hour (the page says until when) and comes back by itself; press again to take it back · `X` tick the next check before accepting · `Y` / `P` / `N` / `F` the diagnosis is right / partly right / wrong / a false alarm (the verdict goes to the diagnosis you read; if a newer one exists it is refused and the page shows the new one), `M` diagnose again · `Space` peek at the evidence · `Enter` the item's story · `1` `2` `3` the lenses · `T` day / night · `Esc` closes one layer at a time · **`Z` undoes the decision you just made**: every decision shows at once and is sent five seconds later — the line at the foot says «… takes effect in 5 seconds · Undo» — and until then undo means it was never sent; a new decision, closing the page, leaving NewUI or signing out sends the waiting one at once (signing out waits for its answer first).
+
+**Command bar** (`/` or `⌘K` / `Ctrl K`, at the foot of every lens): `/` lists commands (the lenses, all items, day / night, the keyboard list, every other page), `@` lists things — what waits on you first, then what the global search finds (issues, changes, resources, fix plans, reports; a number such as `12`, `I12` or `C3` finds that item first) — and plain text lists both. It takes you to places; it is not a chat. **To ask an agent**: `Q` on a brief or a story opens a conversation tied to that item; and a sentence typed into the bar ends the list with «ask an agent: …» — choosing it opens a **new** conversation with the sentence in the composer, not sent (you press Enter there). On the conversation page the bar is tucked away — the composer is the input — and `⌘K` / `Ctrl K` still calls it.
+
+**What the buttons mean.** «Hold to approve **and run**» appears only when the server says approving starts the run; otherwise it is «Hold to approve», and the page says that approving does not run it (the same rule as the classic «Approve & run» / «Approve»). An approved plan runs only while its issue is still waiting for that run: if the issue was closed, reopened or diagnosed again after the approval, the run is refused and the page says why — withdraw the plan and plan again from where the issue is now. The tier beside each plan step is the code's: *read-only* only for one command that a shell would not split, redirect, substitute into or comment; anything else that merely begins like a read is *cannot be classified*, and a plan holding such a step is never approved automatically. A command that lost a value when the plan was stored (it shows `[REDACTED-SECRET]` — every stored text is scrubbed of secrets) is *cannot be classified* too, and the brief says so: the text you approve does not say which value. **A plan written after a person sent the previous one back always comes back to a person** — it is never approved automatically, whatever its risk level. After you ask an agent to diagnose again, to write a plan or to change one, the item is the agent's: it leaves your queue (and everyone's «waiting on me») until the agent has finished or run past its time limit, its address says «it is with an agent now» with a way to **Live**, and a second request is refused (409) meanwhile — that is the server's record, the same for everyone; if the agent fails, the timeline says so and the item is back where it was. The plan run the pipeline starts by itself once a diagnosis passes its gate (auto-fix on) is on the same record: **Live** lists it as started by the pipeline, and asking for a plan or a new diagnosis meanwhile is refused the same way.
+
+**The last 24 hours.** The top bar carries a band: one mark for each thing that happened in the last day — an issue found (red), an agent's start or end (mint), a person's decision (amber), a change's course (violet) — with the item's own timeline sentence on hover; recent hours get more room. On **World**, the bar at the foot goes back in time: drag the slider (five-minute steps), `[` / `]` jump to the event before / after, `P` plays the day, `0` returns to now. In the past the map shows which resources had an open issue and which were already gone **at that moment**; each issue's severity, the resource it is anchored to and the relations are today's — the page says so in three places — and the map is not tied to your queue. Leaving World returns to now.
+
+**The other pages** (chat, reports, plans & changes, resources, schedules, skills, security, agent metrics, settings, users, API keys, the overview) are the classic pages inside the new frame: pick one from **Pages** in the top bar or from the command bar. On them the single-key shortcuts are off (only `⌘K` / `Ctrl K` and `Esc` belong to the frame) and the account scope in the top bar follows that page's own rule. Issue and change addresses open the story, the issue list opens **All items** or **Decide**, the Galaxy address opens **World**; the classic versions are still one click away — «open the classic page» on a story, «classic Galaxy (rebuild the graph there)» on the map's data card — and you stay on them until you leave that section.
+
+**Not in NewUI yet** (the control is not shown, rather than shown and dead): pausing an agent.
 
 ---
 
@@ -1109,6 +1193,76 @@ generate an inventory report for EC2
 # - Weekly inventory scan on Mondays
 # - Hourly critical-issue detection
 ```
+
+**Reading the Schedules page (2.8.0).** «Configuration» says whether a schedule is enabled; «Latest run» is
+its newest real run (running / retrying / succeeded / failed / not run yet) — the two are separate facts, so
+an enabled schedule that never ran says «not run yet», never «running». «Run times» are UTC. After **Run now**
+the schedule's page says «submitted» until the run record appears and refreshes while the run is live.
+
+**Reading any data module (2.8.0).** Every module says one of four things: loading, failed (with Retry), empty
+(only when the request succeeded and returned nothing), or its data. When a refresh fails, the last data stays
+on screen under «refresh failed — as of HH:MM UTC». A failed request is never shown as "no findings".
+
+**Reading an issue, change or plan page (2.8.0).** Above the phase cards, the first screen says where the item
+stands (a step bar), who it waits on, for how long (only while someone waits) and which plan version. Once there
+is a run it shows the latest run first: steps done against *that run's* plan, «Plan #id · vN · hash» and whether
+the content still matches what was approved (nothing is said for a plan approved before hashes were recorded),
+then one line per declared check — failed, to check and warnings first. Before any run it shows the diagnosis
+evidence: whether the root cause is located on a resource, the model's own confidence, the critic's conclusion and
+the human verdict — four separate lines, never one folded number. «Expand the check records and plan basis» opens the card underneath. A fix plan's page has the same
+latest-run block and, when its issue waits for acceptance, a «Go accept this run» link to the issue (not shown to a
+read-only account, which cannot accept).
+
+**Managing users (2.8.0, admins).** **Administration → Users** (`/app/users`) lists every web account with its
+role (Admin, Writer, Viewer, Viewer who may view Settings), its state and its last sign-in (UTC). **New user** asks for
+a sign-in name, an optional display name and the role; the password is generated and shown once — copy it before
+closing. Each row has one line of icon buttons (hover or focus one for what it does — the same words a screen
+reader says): first password and keys — **reset password** (a new password shown once; the user's browsers sign out —
+your own reset keeps you signed in here) and **issue a key** — then the account — **change role**, **disable** (their
+browsers sign out at once and their API keys are revoked; **re-enable** restores neither) and **delete user**. You
+cannot disable, demote or delete yourself, and the last active admin stays. Every change is in the audit log, never
+the password. `aiops users create / list / disable` still works.
+Each row's **API keys: N** (active, unexpired keys; «none» at 0) opens the user's keys — name, prefix, access, last
+use, expiry, state — where you **issue** one for them, **update** one (a new key under the same name, the old one dead
+at once) or **delete** one. A key you issue is never above that person's role (a read-only account gets read-only
+keys) and is shown to you once, like a reset password; a listed key never shows in full.
+**Delete user** says what goes and what stays before you confirm: sign-in, every session, every API key and unsent
+attachments end at once; their chats, reports and audit records stay, and who may see them does not change; the
+sign-in name can never be used again (a new user with it is refused). It is refused while a change request waits on
+them (a draft, one needing clarification, or one under review) and names it — cancel those first, or disable the
+account instead. It cannot be undone.
+
+**API keys for apps and coding agents (2.8.0).** Avatar menu → **API keys** (`/app/account/api-keys`), for every
+signed-in person. **New API key** asks for a name, the access — *Read only* (see issues, plans, resources and
+reports, hold read-only chats) or *Read & write* (also request changes, add notes and chat as you; a read-only
+account issues read-only keys only) — and the expiry (30 days, 90 days, 1 year or never; 90 by default). The full
+key is shown **once**, with Copy and an example:
+
+```bash
+curl -H "Authorization: Bearer aiops_…" https://<your-site>/api/health-issues?limit=5
+```
+
+The list shows each active key's prefix, access, created / last used / expiry (UTC) and state (active / expired);
+**Update** issues a new key under the same name (choose the access and expiry again) and the old one stops at once;
+**Delete** takes effect at once; disabling or deleting an account voids its keys. Whatever its access, a key never
+approves, rejects, deletes, runs or accepts a plan or change — not even through the agent in a chat it started (the
+403 says `code: human_session_required`) — and never creates or revokes keys, changes a password or manages users:
+do those signed in. *Still open (owner's decision): a read-write key's chat can use the writer tools that reach the
+host itself — Claude Code (`enhanced_task`, when enabled), MCP server settings, local file writes, schedules.* A user who loses write access has their
+keys downgraded to read only. With API sign-in off a banner says requests need no key and its limits do not apply.
+
+**Statistics in a chat answer (2.8.0).** Counts, comparisons, shares and trends come as one sentence plus a table —
+it costs fewer tokens. Ask for a chart («画个柱状图», "plot it") and the answer draws one; a flow, call chain or
+sequence of steps is drawn as a flowchart.
+
+**Accepting a run (2.8.0).** **Accept result** opens «Accept this run»: tick each check still to verify (no
+result, or a warning) and the overall confirmation; **Confirm acceptance** stays off until every box is ticked.
+The note is optional (without one the reason says how many checks you verified — the overall confirmation is not counted). The ticked `pc-n` ids are
+recorded with the acceptance in the audit log. Rejecting keeps its own reason dialog.
+
+**Cases quick views (2.8.0).** Above the issue queue: All / Waiting on me / Failed / Waiting long (over
+`attention_long_wait_hours`, default 24), each with its count; each row says who the issue waits on and, when it
+is a person, for how long.
 
 ---
 
@@ -1348,6 +1502,47 @@ SNS (CloudWatch alarms) cannot set headers: put `?token=<AIOPS_WEBHOOK_SECRET>` 
 
 **Identity hints**: parsers fill only what the source itself carries — `hints` (account / region / cluster / namespace / workload / pod / service), `observed_at` (the source's fault time, UTC) and `alarm_name` — and `alert_processor` hands them to the Signal Gate unchanged. Prometheus' `service` label is not a hint (it is usually the scrape target's Service); CloudWatch K8s hints come only from `ContainerInsights` dimensions, and its region only from `AlarmArn`.
 
+
+---
+
+## Clearing Every Issue — `aiops delete issues --all` (MVP-2.9.0)
+
+For starting the issue list over (the owner's reset of 2026-11-23). It deletes every issue **and everything keyed by an
+issue number**, because SQLite reuses ids: once the table is empty the next issue is I#1 again, and any diagnosis, fix
+plan, run, timeline event, signal, recorded step, «later», chat binding, ITSM link or case record left behind would
+quietly belong to the new I#1.
+
+```bash
+aiops service stop                                    # it refuses while another AgenticOps process holds the lock
+aiops delete issues --all --dry-run                   # rows per table, nothing changed
+aiops delete issues --all --yes --reset-poll-cursors --move-knowledge
+```
+
+| | |
+|---|---|
+| Refused (nothing done) | without `--yes` (a dry run needs none); a database that is not SQLite; another process holding `<data_dir>/.scheduler.lock` |
+| Backup first | an online backup (SQLite backup API — the database runs in WAL mode, the `.db` file alone is not a full copy) to `<data_dir>/backups/pre-delete-issues-<UTC>.db`, checked (integrity, same issue count) before anything is deleted |
+| Deleted, in ONE transaction | `agent_steps` / `attention_snoozes` rows of `I…`; the `itsm_links` of issues and fix plans; fix plans (`plan_kind='fix'`) and their runs; every RCA result; the issues' timeline (notes included); every signal (`alert_events` — old ones would make the first re-detected signals noise); case and SOP records made from an issue; the issues |
+| Kept | change requests with their plans, runs and timeline; `audit_logs` and the command ledger; inventory, graph, security snapshots, reports, accounts, users, schedules, settings. A chat bound to an issue stays, unbound from it — its account binding stays |
+| `--reset-poll-cursors` | the security poll's cursors go: its next run backfills 24 hours (older GuardDuty / CloudTrail findings do not come back) |
+| `--move-knowledge` | moves what was learned from issues into `<backup>-knowledge/` (with `MANIFEST.tsv`), never deletes it: the knowledge base's case and SOP files (their records and vectors leave the database — re-embed after putting them back) and the agent-memory entries written from an issue (`related_issue_id`) or by the detect agent (`detect/auto_*`). `--memory-dir DIR` (repeatable) adds another checkout's `agent-memory` |
+
+There is no Web API, Web UI or agent tool for it — an administrator runs it in a terminal. To re-scan afterwards, hold
+the automatic steps off while it runs (`AIOPS_AUTO_RCA_ENABLED`, `AIOPS_AUTO_FIX_ENABLED`,
+`AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1`, `AIOPS_EXECUTOR_ENABLED`, `AIOPS_NOTIFICATIONS_ENABLED` = `false`) and run, in
+order: `aiops run schedule resource-scan`, `aiops run schedule galaxy-auto-build` (an incremental build WITH the model —
+after a fresh scan most content hashes change, so it is not cheap: $10.15 on the preview with Fable 5.2; the reset itself
+used a rule-only refresh, `galaxy.builder.build_graph("k8s-discovery", llm=False)`, which has no CLI),
+`aiops run schedule security-posture-snapshot`,
+`aiops run detect`, `aiops run schedule security-incremental-poll`. The first poll after a cursor reset pages every
+CloudTrail management event of the last 24 hours at CloudTrail's rate limit (about 2 requests a second per account and
+region) — measured: almost 3 hours in all for an account whose us-east-1 is busy; run one poll per account at a time.
+**Known limit**: CloudTrail's pagination tokens live one hour and the window is paged in one go, so a region that takes longer
+to page fails (`InvalidNextTokenException`), keeps nothing and writes no cursor — the next poll starts the same 24 hours
+again (us-east-1 of one account: 60 minutes from inside AWS and 63 through one network both got through; over 2 hours through a
+slow proxy failed).
+Detection runs read-only in code (N31, as diagnosis and planning since N30).
+
 ---
 
 ## CLI Slash Command Quick Reference
@@ -1575,7 +1770,12 @@ export AIOPS_BEDROCK_REGION="us-east-1"
 export AIOPS_BEDROCK_MAX_TOKENS=16384
 export AIOPS_BEDROCK_WINDOW_SIZE=40    # Sliding window conversation manager
 
-# Auto-Fix Pipeline
+# Auto-Fix Pipeline — EXECUTOR_ENABLED, AUTO_FIX_ENABLED, EXECUTOR_AUTO_APPROVE_L0_L1 (and EXECUTOR_HITL_ENABLED) are DEFAULTS
+# since MVP-2.9.0: what an administrator saves in Settings → Automation and execution is stored in the database,
+# wins over these, and survives a restart.
+# One exception (the close of 2.9.0): the environment can only make a process stricter. A value HERE that is the strict
+# one — false for the first three, true for EXECUTOR_HITL_ENABLED — holds the switch there whatever is stored;
+# Settings shows it disabled and names the variable.
 export AIOPS_EXECUTOR_ENABLED=true              # Enable fix execution (default: true)
 export AIOPS_AUTO_RCA_ENABLED=true              # Auto-trigger RCA on new issue (default: true)
 export AIOPS_AUTO_FIX_ENABLED=true              # Auto-fix pipeline master switch (default: true)

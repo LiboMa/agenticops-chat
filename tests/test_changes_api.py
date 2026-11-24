@@ -139,11 +139,13 @@ def test_create_lists_and_detail(client):
     body = r.json()
     assert body["status"] == "draft" and body["requested_by"] == "web:anonymous" and body["source"] == "web"
     sr.assert_called_once_with(body["id"], sync=False)
-    assert client.get("/api/changes").json()[0]["id"] == body["id"]
-    assert client.get("/api/changes?status=planned").json() == []
+    assert client.get("/api/changes").json()["items"][0]["id"] == body["id"]
+    assert client.get("/api/changes?status=planned").json() == {"items": [], "total": 0}
     d = client.get(f"/api/changes/{body['id']}").json()
     assert d["plans"] == [] and d["executions"] == [] and d["target_hints"] == ["i-0abc"]
     assert client.get("/api/changes/9999").status_code == 404
+    # MVP-2.8.0 S2: who it waits on (work_phases.change_phase) and since when (its last update)
+    assert d["waiting_on"] == "requester" and d["waiting_since"]
 
 
 def test_create_records_the_api_source_for_api_key_callers(client):
@@ -181,11 +183,102 @@ def test_validation_errors(client):
 
 def test_list_inputs_are_validated(client):
     r = client.get("/api/changes?status=bogus")
-    assert r.status_code == 422 and "invalid status 'bogus'" in r.json()["detail"]
+    assert r.status_code == 422 and "invalid status ['bogus']" in r.json()["detail"]
     assert client.get("/api/changes?status=").status_code == 200  # empty = no filter, as in change_service
     assert client.get("/api/changes?period=1y").status_code == 422
     assert client.get("/api/changes?limit=0").status_code == 422
     assert client.get("/api/command-audits?limit=0").status_code == 422
+
+
+# ── the list (MVP-2.9.0 N18 — the S5 back-end part of the 2.8.0 spec: {items, total}, who each row waits on) ──
+
+def _change_ids(client, query=""):
+    return [c["id"] for c in client.get(f"/api/changes{query}").json()["items"]]
+
+
+def test_the_list_says_how_many_there_are_and_pages(client):
+    ids = [_draft(title=f"change {k}")["id"] for k in range(5)]
+    page = client.get("/api/changes?limit=2").json()
+    assert set(page) == {"items", "total"}
+    assert page["total"] == 5                                  # of everything that matches, not of the page
+    assert [c["id"] for c in page["items"]] == ids[::-1][:2]   # newest first
+    assert _change_ids(client, "?limit=2&offset=4") == [ids[0]]
+    assert client.get("/api/changes?limit=2&offset=4").json()["total"] == 5
+
+
+def test_each_row_says_who_it_waits_on_its_plan_version_and_its_account(client):
+    planned, draft = _planned(), _draft()["id"]
+    rows = {c["id"]: c for c in client.get("/api/changes").json()["items"]}
+    assert rows[planned]["waiting_on"] == "approver" and rows[planned]["waiting_since"]
+    assert rows[planned]["plan_version"] == 1 and rows[planned]["account_name"] == "dev"
+    assert rows[draft]["waiting_on"] == "requester"
+    assert rows[draft]["plan_version"] is None and rows[draft]["account_name"] is None      # no plan yet, no account
+    # one definition (attention.change_waits): the row and the change's own page agree
+    detail = client.get(f"/api/changes/{planned}").json()
+    assert (rows[planned]["waiting_on"], rows[planned]["waiting_since"]) == (detail["waiting_on"], detail["waiting_since"])
+
+
+def test_a_closed_change_waits_on_nobody(client):
+    from agenticops.services import change_service as cs
+    cr = _draft()["id"]
+    cs.cancel(cr, actor=ALICE, reason="not needed")
+    row = client.get("/api/changes").json()["items"][0]
+    assert row["status"] == "cancelled" and row["waiting_on"] is None
+
+
+def test_status_takes_a_comma_list(client):
+    planned, draft = _planned(), _draft()["id"]
+    assert _change_ids(client, "?status=planned") == [planned]
+    assert sorted(_change_ids(client, "?status=planned,draft")) == sorted([planned, draft])
+    assert sorted(_change_ids(client, "?status=planned, draft ,")) == sorted([planned, draft])   # spaces and an empty item
+    assert _change_ids(client, "?status=rejected,cancelled") == []
+    r = client.get("/api/changes?status=planned,bogus")
+    assert r.status_code == 422 and "bogus" in r.json()["detail"] and "planned" in r.json()["detail"]
+
+
+def test_q_finds_by_title_by_number_and_by_account_and_a_wildcard_is_a_character(client):
+    a = _draft(title="Rotate 100% of the keys")["id"]
+    b = _draft(title="Scale out web_tier")["id"]
+    planned = _planned()                                        # «Tag web», in the account «dev»
+    got = lambda q: sorted(c["id"] for c in client.get("/api/changes", params={"q": q}).json()["items"])
+    assert got("rotate") == [a] and got("ROTATE") == [a]
+    assert got(f"C#{b}") == [b] and got(f"c{b}") == [b] and got(str(b)) == [b]
+    assert got("dev") == [planned]                              # the account's name
+    assert got("%") == [a]                                      # not «everything»
+    assert got("_") == [b]
+    assert got("nothing like this") == []
+    assert got("   ") == sorted([a, b, planned])                # blank = no search
+    assert client.get("/api/changes", params={"q": "x" * 201}).status_code == 422
+    assert client.get("/api/changes", params={"q": "rotate"}).json()["total"] == 1
+
+
+def test_sort_oldest_first(client):
+    ids = [_draft(title=f"c{k}")["id"] for k in range(3)]
+    assert _change_ids(client, "?sort=oldest") == ids
+    assert _change_ids(client, "?sort=newest") == ids[::-1] == _change_ids(client)
+    assert client.get("/api/changes?sort=sideways").status_code == 422
+
+
+def test_view_mine_is_what_waits_on_the_caller(client):
+    planned, _other = _planned(), _draft()["id"]      # the draft is alice's: it waits on her, not on this caller
+    from agenticops.auth.actor import web_anonymous_actor
+    from agenticops.services.attention import attention_items
+    mine = sorted(int(i["id"][1:]) for i in attention_items(web_anonymous_actor()) if i["id"].startswith("C"))
+    assert mine == [planned]                           # the to-do list's own answer for this caller…
+    assert sorted(_change_ids(client, "?view=mine")) == mine      # …is this view's
+    assert client.get("/api/changes?view=mine").json()["total"] == 1
+    assert len(_change_ids(client, "?view=all")) == 2
+    assert _change_ids(client, "?view=mine&status=draft") == []     # every other filter still applies
+    assert client.get("/api/changes?view=theirs").status_code == 422
+
+
+def test_the_list_filters_compose(client):
+    planned = _planned()
+    for k in range(3):
+        _draft(title=f"Tag batch {k}")
+    assert _change_ids(client, f"?q=tag&status=planned&account_id={_account_id('dev')}") == [planned]
+    assert client.get("/api/changes?q=tag").json()["total"] == 4
+    assert client.get("/api/changes?q=tag&status=draft&limit=2").json()["total"] == 3
 
 
 def test_disabled_returns_404(client):
@@ -583,7 +676,8 @@ def test_settings_security_toggle_needs_admin_when_auth_on(client, settings_io, 
     finally:
         app.dependency_overrides.pop(deps.current_actor, None)
     assert r.status_code == 200 and settings.auto_rca_enabled is False and settings.rbac_enforce is True
-    assert root.user_id and _settings_audits("entity_id", "actor", "user_id") == [
+    assert root.user_id and sorted(_settings_audits("entity_id", "actor", "user_id")) == [
+        ("auto_rca_enabled", "user:root@example.com", root.user_id),       # MVP-2.9.0 N25: every changed value is audited
         ("rbac_enforce", "user:root@example.com", root.user_id)]
 
 

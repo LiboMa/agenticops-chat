@@ -1,6 +1,10 @@
 import { useStats } from "@/hooks/useStats";
 import { useHealthIssues } from "@/hooks/useHealthIssues";
-import { issueFacts } from "@/lib/issueDetail";
+import { isBlank, issueFacts } from "@/lib/issueDetail";
+import { issueRow, shortId } from "@/lib/workItems";
+import { waitLabel } from "@/lib/inbox";
+import { CopyId } from "@/components/ui/CopyId";
+import { SeverityBadge } from "@/components/ui/SeverityBadge";
 import { useSchedules } from "@/hooks/useSchedules";
 import { useFixPlans } from "@/hooks/useFixPlans";
 import { useSettings } from "@/hooks/useSettings";
@@ -13,19 +17,22 @@ import { ServiceStatusBar } from "@/components/dashboard/ServiceStatusBar";
 import { InteractionStats } from "@/components/dashboard/InteractionStats";
 import { AgentActivityFeed } from "@/components/dashboard/AgentActivityFeed";
 import { formatShortDate } from "@/lib/formatDate";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useMemo } from "react";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useSecuritySummary } from "@/hooks/useSecurity";
+import { StatusText } from "@/components/ui/StatusText";
+import { TIER_TONE, cardView, exposureView } from "@/lib/security";
 
-const SEV_DOT: Record<string, string> = {
-  critical: "bg-red-500",
-  high: "bg-orange-500",
-  medium: "bg-amber-400",
-  low: "bg-blue-500 dark:bg-green-500",
-};
+/** An account's reachable exposures on the security card: not «0» where its security groups were not read. */
+function exposureLine(a: { reachable_paths: number | null; exposure_read?: boolean | null }, t: (key: string) => string): string {
+  const v = exposureView(a);
+  if (v.kind === "unread") return t("dashboard.securityReachable.unread");
+  return (v.kind === "atLeast" ? "≥ " : "") + v.n + " " + t("dashboard.securityReachable");
+}
 
 const CLOSED_STATUSES = new Set(["resolved", "dismissed"]);
+const TH = "px-4 py-2.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground";
 
 export default function Dashboard() {
   const { t } = useLocale();
@@ -65,7 +72,8 @@ export default function Dashboard() {
     { label: t("dashboard.accounts"), value: s.total_accounts, hot: false },
   ];
 
-  const openIssues = (anomalies.data ?? []).filter((a) => !CLOSED_STATUSES.has(a.status));
+  const openIssues = (anomalies.data?.items ?? []).filter((a) => !CLOSED_STATUSES.has(a.status));
+  const now = Date.now();
 
   return (
     <div>
@@ -94,25 +102,33 @@ export default function Dashboard() {
       {/* 3. Interaction stats — compact single row (cost/token consolidated) */}
       <InteractionStats />
 
-      {/* 3.5 Security highlight (MVP-2.5.0) */}
+      {/* 3.5 Security highlight (MVP-2.5.0; one row per account since MVP-2.9.0 N20 — an account nobody could
+          read says «not scored», it is never folded into a lowest score) */}
       {(() => {
         const accounts = security.data?.accounts ?? [];
         if (accounts.length === 0) return null;
-        const minScore = Math.min(...accounts.map((a) => a.overall_score));
-        const reachable = accounts.reduce((n, a) => n + a.reachable_paths, 0);
-        const hot = minScore < 70 || reachable > 0;
         return (
           <button
             onClick={() => navigate("/app/security")}
-            className="w-full text-left bg-card border border-border rounded-lg px-4 py-3 mb-6 flex items-center gap-4 hover:bg-accent/50 transition-colors"
+            className="w-full text-left bg-card border border-border rounded-lg px-4 py-3 mb-6 hover:bg-accent/50 transition-colors"
           >
-            <span className="text-sm text-muted-foreground">{t("dashboard.securityScore")}</span>
-            <span className={`text-2xl font-light font-mono ${hot ? "text-primary" : ""}`}>
-              {minScore.toFixed(1)}
-            </span>
-            <span className="text-sm text-muted-foreground ml-auto">
-              {reachable} {t("dashboard.securityReachable")}
-            </span>
+            <div className="text-sm text-muted-foreground">{t("dashboard.securityScore")}</div>
+            <ul className="mt-1 divide-y divide-border/50">
+              {accounts.map((a) => {
+                const view = cardView(a);
+                return (
+                  <li key={a.account_name} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-1.5">
+                    <span className="min-w-0 flex-1 basis-32 text-sm [overflow-wrap:anywhere]">{a.account_name}</span>
+                    {view.score === null
+                      ? <StatusText tone="danger" className="text-sm">{t("security.unscored")}</StatusText>
+                      : <span className="text-xl font-light font-mono">{view.score}</span>}
+                    {view.tier && <StatusText tone={TIER_TONE[view.tier]} className="text-xs">{t(`security.tier.${view.tier}`)}</StatusText>}
+                    {view.state === "partial" && <StatusText tone="warn" className="text-xs">{t("security.partial")}</StatusText>}
+                    <span className="text-sm text-muted-foreground">{exposureLine(a, t)}</span>
+                  </li>
+                );
+              })}
+            </ul>
           </button>
         );
       })()}
@@ -126,41 +142,55 @@ export default function Dashboard() {
           {anomalies.isLoading ? (
             <Spinner />
           ) : openIssues.length > 0 ? (
+            // MVP-2.9.0 N24 (the 2.8.0 spec's R09): the title first; the resource as a short id (the whole of it in
+            // the tooltip, one button copies it); then how bad, who it waits on, the account, when it was found
             <div className="bg-card border rounded-lg overflow-hidden">
-              <table className="w-full">
+              <table className="w-full table-fixed">
                 <thead>
                   <tr className="border-b">
-                    <th className="w-8 pl-4 pr-1 py-2.5" />
-                    <th className="px-4 py-2.5 text-left text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Title</th>
-                    <th className="px-4 py-2.5 text-left text-[11px] font-medium text-muted-foreground uppercase tracking-wider hidden lg:table-cell">Account</th>
-                    <th className="px-4 py-2.5 text-left text-[11px] font-medium text-muted-foreground uppercase tracking-wider hidden md:table-cell">Resource</th>
-                    <th className="px-4 py-2.5 text-right text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Detected</th>
+                    <th scope="col" className={`${TH} text-left`}>{t("dashboard.col.title")}</th>
+                    <th scope="col" className={`${TH} w-24 text-left`}>{t("dashboard.col.severity")}</th>
+                    <th scope="col" className={`${TH} hidden w-44 text-left sm:table-cell`}>{t("dashboard.col.waiting")}</th>
+                    <th scope="col" className={`${TH} hidden w-32 text-left lg:table-cell`}>{t("dashboard.col.account")}</th>
+                    <th scope="col" className={`${TH} hidden w-36 text-right md:table-cell`}>{t("dashboard.col.detected")}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {openIssues.slice(0, 8).map((a) => (
-                    <tr
-                      key={a.id}
-                      className="border-b border-border/50 last:border-b-0 cursor-pointer transition-colors duration-150 hover:bg-accent"
-                      onClick={() => navigate(`/app/issues/${a.id}`)}
-                    >
-                      <td className="pl-4 pr-1 py-2.5">
-                        <span className={`block w-2 h-2 rounded-full ${SEV_DOT[a.severity] ?? "bg-muted-foreground"}`} />
-                      </td>
-                      <td className="px-4 py-2.5 text-sm">
-                        <span className="line-clamp-1">{a.title}</span>
-                      </td>
-                      <td className="px-4 py-2.5 text-xs text-muted-foreground hidden lg:table-cell">
-                        {a.account_name ?? "-"}
-                      </td>
-                      <td className="px-4 py-2.5 text-xs font-mono text-muted-foreground hidden md:table-cell">
-                        <span className="line-clamp-1">{[issueFacts(a).resourceType, a.resource_id].filter(Boolean).join("/")}</span>
-                      </td>
-                      <td className="px-4 py-2.5 text-xs text-muted-foreground text-right whitespace-nowrap">
-                        {formatShortDate(a.detected_at)}
-                      </td>
-                    </tr>
-                  ))}
+                  {openIssues.slice(0, 8).map((a) => {
+                    const row = issueRow(a);
+                    const type = issueFacts(a).resourceType;
+                    return (
+                      // the title's link stretches over the row: a click anywhere opens the issue, the keyboard reaches it
+                      <tr key={a.id} className="relative border-b border-border/50 last:border-b-0 transition-colors duration-150 hover:bg-accent">
+                        <td className="px-4 py-2.5">
+                          <Link to={`/app/issues/${a.id}`} className="block truncate text-sm text-foreground after:absolute after:inset-0 hover:text-primary" title={a.title}>
+                            {a.title}
+                          </Link>
+                          {!isBlank(a.resource_id) && (
+                            <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                              {!isBlank(type) && <span className="shrink-0">{type}</span>}
+                              <CopyId id={a.resource_id} short={shortId(a.resource_id)} />
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 align-top"><SeverityBadge severity={a.severity} /></td>
+                        <td className="hidden px-4 py-2.5 align-top text-xs text-muted-foreground sm:table-cell">
+                          {row.waitKey ? (
+                            <>
+                              <span className="block">{t(row.waitKey)}</span>
+                              {row.waitSince && <span className="block">{waitLabel(row.waitSince, now, t)}</span>}
+                            </>
+                          ) : "—"}
+                        </td>
+                        <td className="hidden truncate px-4 py-2.5 align-top text-xs text-muted-foreground lg:table-cell" title={a.account_name ?? undefined}>
+                          {a.account_name ?? "—"}
+                        </td>
+                        <td className="hidden whitespace-nowrap px-4 py-2.5 text-right align-top text-xs text-muted-foreground md:table-cell">
+                          {formatShortDate(a.detected_at)}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -242,11 +272,11 @@ export default function Dashboard() {
                     <span>
                       {sched.last_run_at
                         ? formatShortDate(sched.last_run_at)
-                        : "Never run"}
+                        : t("dashboard.neverRun")}
                     </span>
                     {sched.next_run_at && (
                       <span className="text-primary">
-                        Next: {formatShortDate(sched.next_run_at)}
+                        {t("dashboard.nextRun")}{formatShortDate(sched.next_run_at)}
                       </span>
                     )}
                   </div>

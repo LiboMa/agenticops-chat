@@ -3,13 +3,14 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 router = APIRouter()
 
 _PERIOD = {
     "7d": (timedelta(days=7), "day"),
     "30d": (timedelta(days=30), "day"),
+    "90d": (timedelta(days=90), "day"),
     "day": (timedelta(days=30), "day"),
     "month": (timedelta(days=365), "month"),
     "year": (timedelta(days=365 * 3), "year"),
@@ -17,7 +18,7 @@ _PERIOD = {
 
 
 @router.get("/api/cost/summary")
-async def api_cost_summary(
+def api_cost_summary(
     period: str = Query("30d"),
     bucket: Optional[str] = None,
     group_by: str = Query("agent"),
@@ -30,7 +31,9 @@ async def api_cost_summary(
 ):
     from agenticops.services import cost_service
 
-    delta, default_bucket = _PERIOD.get(period, _PERIOD["30d"])
+    if period not in _PERIOD:      # it used to answer the last 30 days under whatever name it was asked for
+        raise HTTPException(status_code=422, detail=f"unknown period '{period}' — one of {', '.join(_PERIOD)}")
+    delta, default_bucket = _PERIOD[period]
     end_dt = datetime.fromisoformat(end) if end else datetime.now(timezone.utc)
     start_dt = datetime.fromisoformat(start) if start else (end_dt - delta)
     filters = {k: v for k, v in {

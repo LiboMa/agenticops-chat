@@ -29,7 +29,34 @@ function isSafeHref(href: string): boolean {
   return /^(https?:|\/|#)/.test(h);
 }
 
-export function renderMarkdown(md: string): string {
+/** One h2 / h3 of a rendered text (MVP-2.9.0 N21): its level, its words without markup, and the id it carries. */
+export interface Heading { level: 2 | 3; text: string; id: string }
+
+/** A heading's words as plain text: emphasis marks and backticks dropped, a link reduced to its label. */
+function plainHeading(raw: string): string {
+  return raw
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[`*_~]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** A stable id for a heading: its letters and digits (any script — Chinese stays), the rest as hyphens; a repeat
+ *  gets a number, a heading with no letter or digit a name. Only letters, digits and hyphens: safe in an attribute. */
+function headingId(text: string, used: Map<string, number>): string {
+  const slug = text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "");
+  const base = `h-${slug || "section"}`;
+  const n = (used.get(base) ?? 0) + 1;
+  used.set(base, n);
+  return n === 1 ? base : `${base}-${n}`;
+}
+
+/** `copyButtons` (chat only, 2026-11-07): each fenced block gets a copy button — the chat page handles its click.
+ *  `headings` (reports, MVP-2.9.0 N21): pass an array and every h2 / h3 gets an id and is appended to it, in
+ *  order — the outline is read off the SAME pass that renders, so its links cannot disagree with the text. */
+export function renderMarkdown(md: string, opts: { copyButtons?: boolean; copyLabel?: string; headings?: Heading[] } = {}): string {
+  const copyLabel = escapeHtml(opts.copyLabel ?? "Copy");
+  const usedIds = new Map<string, number>();
   const lines = md.split("\n");
   const out: string[] = [];
   let inCodeBlock = false;
@@ -93,7 +120,7 @@ export function renderMarkdown(md: string): string {
     // Code blocks
     if (raw.trimStart().startsWith("```")) {
       if (inCodeBlock) {
-        out.push("</code></pre>");
+        out.push(opts.copyButtons ? "</code></pre></div>" : "</code></pre>");
         inCodeBlock = false;
         codeLang = "";
       } else {
@@ -102,7 +129,9 @@ export function renderMarkdown(md: string): string {
         inCodeBlock = true;
         codeLang = raw.trimStart().slice(3).trim().toLowerCase();
         const langAttr = codeLang ? ` data-lang="${escapeHtml(codeLang)}"` : "";
-        out.push(`<pre class="md-pre"${langAttr}><code>`);
+        out.push((opts.copyButtons
+          ? `<div class="md-pre-wrap"><button type="button" class="md-copy" data-md-copy aria-label="${copyLabel}">${copyLabel}</button>`
+          : "") + `<pre class="md-pre"${langAttr}><code>`);
       }
       continue;
     }
@@ -165,8 +194,15 @@ export function renderMarkdown(md: string): string {
     if (headingMatch) {
       closeList();
       const level = headingMatch[1].length;
+      let idAttr = "";
+      if (opts.headings && (level === 2 || level === 3)) {
+        const text = plainHeading(headingMatch[2]);
+        const id = headingId(text, usedIds);
+        opts.headings.push({ level, text, id });
+        idAttr = ` id="${id}"`;
+      }
       out.push(
-        `<h${level} class="md-h${level}">${inlineFormat(headingMatch[2])}</h${level}>`,
+        `<h${level} class="md-h${level}"${idAttr}>${inlineFormat(headingMatch[2])}</h${level}>`,
       );
       continue;
     }
@@ -201,7 +237,7 @@ export function renderMarkdown(md: string): string {
 
   closeList();
   closeTable();
-  if (inCodeBlock) out.push("</code></pre>");
+  if (inCodeBlock) out.push(opts.copyButtons ? "</code></pre></div>" : "</code></pre>");
 
   return out.join("\n");
 }

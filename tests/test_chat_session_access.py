@@ -73,7 +73,7 @@ def test_a_private_session_is_a_404_on_every_route_for_someone_else(env):
     sid = _new(env, ALICE)["session_id"]
     _add_message(sid)
     bob = env.as_(BOB)
-    assert sid not in [x["session_id"] for x in bob.get("/api/chat/sessions").json()]
+    assert sid not in [x["session_id"] for x in bob.get("/api/chat/sessions").json()["items"]]
     assert bob.get(f"/api/chat/sessions/{sid}").status_code == 404
     assert bob.get(f"/api/chat/sessions/{sid}/messages").status_code == 404
     assert bob.post(f"/api/chat/sessions/{sid}/messages", json={"content": "hi", "client_message_id": str(uuid.uuid4())}).status_code == 404
@@ -89,7 +89,7 @@ def test_a_private_session_is_a_404_on_every_route_for_someone_else(env):
 def test_an_admin_sees_every_session(env):
     sid = _new(env, ALICE)["session_id"]
     admin = env.as_(ADMIN)
-    assert sid in [x["session_id"] for x in admin.get("/api/chat/sessions").json()]
+    assert sid in [x["session_id"] for x in admin.get("/api/chat/sessions").json()["items"]]
     body = admin.get(f"/api/chat/sessions/{sid}").json()
     assert (body["visibility"], body["owned_by_me"]) == ("private", False)
 
@@ -99,7 +99,7 @@ def test_a_workspace_session_is_everyones(env):
     r = env.as_(ALICE).patch(f"/api/chat/sessions/{sid}", json={"visibility": "workspace"})
     assert r.status_code == 200 and r.json()["visibility"] == "workspace"
     bob = env.as_(BOB)
-    assert sid in [x["session_id"] for x in bob.get("/api/chat/sessions").json()]
+    assert sid in [x["session_id"] for x in bob.get("/api/chat/sessions").json()["items"]]
     body = bob.get(f"/api/chat/sessions/{sid}").json()
     assert (body["owned_by_me"], body["can_manage"]) == (False, False)
     _add_message(sid)
@@ -194,11 +194,13 @@ def test_the_list_counts_messages_in_one_query(env):
     listener = lambda *a: statements.append(a[2])  # noqa: E731 — (conn, cursor, statement, ...)
     event.listen(env.engine, "before_cursor_execute", listener)
     try:
-        rows = env.as_(ALICE).get("/api/chat/sessions").json()
+        rows = env.as_(ALICE).get("/api/chat/sessions").json()["items"]
     finally:
         event.remove(env.engine, "before_cursor_execute", listener)
     assert [r["message_count"] for r in rows] == [1] * 6
-    assert len([q for q in statements if "chat_messages" in q]) == 1
+    # never one statement per session: ONE grouped statement (the count, the newest send and reply of each), and
+    # one more that reads those newest rows for the row's activity (MVP-2.9.0 N22) — two, however long the list
+    assert len([q for q in statements if "chat_messages" in q]) == 2
 
 
 def test_with_auth_off_every_session_is_visible_and_new_ones_have_no_owner(env, monkeypatch):
@@ -206,7 +208,7 @@ def test_with_auth_off_every_session_is_visible_and_new_ones_have_no_owner(env, 
     monkeypatch.setattr(env.settings, "api_auth_enabled", False)
     anon = env.as_(Actor("web", "anonymous"))
     assert anon.get(f"/api/chat/sessions/{sid}").status_code == 200
-    assert sid in [x["session_id"] for x in anon.get("/api/chat/sessions").json()]
+    assert sid in [x["session_id"] for x in anon.get("/api/chat/sessions").json()["items"]]
     body = _new(env, Actor("web", "anonymous"))
     assert (body["visibility"], body["owned_by_me"]) == ("workspace", False)
 

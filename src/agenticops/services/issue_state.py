@@ -27,11 +27,13 @@ class IssueStatusConflict(InvalidStatusTransition):
 
 
 def transition_issue(session, issue_id: int, new_status: str, *, actor: str, reason: str,
-                     expected: Optional[str] = None) -> str:
+                     expected: Optional[str] = None, note: Optional[str] = None) -> str:
     """Move HealthIssue `issue_id` to `new_status`; returns the status it moved from.
 
     `expected` is the status the caller read; None = the loaded row's status. A same-status request writes
     nothing (no row, no event). `actor` is an actor key string (`user:alice`, `agent:executor`, `system`).
+    `reason` says why and is often the code's own sentence; `note` is what a PERSON typed with the decision, and
+    is given only then — a page quotes `note` under their name, never `reason` (MVP-2.9.0).
 
     Raises IssueNotFound, ValueError (unknown status), InvalidStatusTransition (illegal edge) and
     IssueStatusConflict (the row is no longer in `expected`).
@@ -55,9 +57,12 @@ def transition_issue(session, issue_id: int, new_status: str, *, actor: str, rea
         raise IssueStatusConflict(f"HealthIssue #{issue_id} is no longer '{current}'; it was changed concurrently")
     for key, value in values.items():  # the bulk UPDATE bypassed the loaded row; mirror it without dirtying it
         set_committed_value(issue, key, value)
+    detail = {"from": current, "to": new_status, "reason": (reason or "")[:2000]}
+    if note and note.strip():
+        detail["note"] = note.strip()[:2000]     # a person's own words, kept whole, as a plan's rejection reason is
     session.add(PipelineEvent(
         health_issue_id=issue_id, event_type="status_changed", stage="issue", status="completed",
-        detail=json.dumps({"from": current, "to": new_status, "reason": (reason or "")[:500]}),
+        detail=json.dumps(detail),
         actor=actor[:100] if actor else actor, trace_id=issue.trace_id,  # the column is String(100)
     ))
     return current
@@ -88,10 +93,39 @@ def advance_issue(session, issue_id: int, new_status: str, *, actor: str, reason
         return str(e)
 
 
-def closed_issue_refusal(session, issue_id: Optional[int]) -> Optional[str]:
-    """Why a plan of this issue may not be approved: a resolved or dismissed issue is reopened first, so no
-    approval (human, agent or auto) puts a fix in motion for it. None = approvable (or a change plan)."""
+def closed_issue_refusal(session, issue_id: Optional[int], doing: str = "approving") -> Optional[str]:
+    """Why a plan of this issue may not be approved — or, since MVP-2.9.0 N26, run (`doing="running"`): a resolved
+    or dismissed issue is reopened first, so no approval (human, agent or auto) and no run puts a fix in motion for
+    it. An approved plan whose issue was closed afterwards could still be executed until N26. None = it may (or it
+    is a change plan)."""
     issue = session.get(HealthIssue, issue_id) if issue_id else None
     if issue is not None and issue.status in ("resolved", "dismissed"):
-        return f"HealthIssue #{issue_id} is '{issue.status}'; reopen it before approving its plan"
+        return f"HealthIssue #{issue_id} is '{issue.status}'; reopen it before {doing} its plan"
     return None
+
+
+def run_refusal(session, issue_id: Optional[int], *, claimed: bool = False) -> Optional[str]:
+    """Why a fix plan of this issue may not start a run — None = it may (or it is a change plan: no issue).
+
+    A run moves its issue `fix_approved → fix_executing`, and its result moves it on from there. An issue that is
+    anywhere else cannot follow the run: a passed run would not resolve it, an acceptance would be refused, a
+    failed run would not give it back. So a plan runs only while its issue waits for exactly that (MVP-2.9.0 N27,
+    review). N26 refused a closed issue's plan with «reopen it before running its plan» — but a reopened issue is
+    `open` (it starts again from its diagnosis) and a resolved one cannot be reopened; that sentence is gone.
+
+    `claimed` = a queued ticket being claimed: the issue moved to `fix_executing` when the ticket was queued, so
+    it is still on this run there (or at `fix_approved`, where a path that did not move it left it: the result
+    moves it from either) — a ticket whose issue was closed, or moved elsewhere, while it waited is not run.
+
+    The issue is read as it is NOW (`populate_existing`): a session that already has it in hand — the command
+    line's, across its confirmation prompt, which waits without limit — would otherwise answer from that copy."""
+    issue = session.get(HealthIssue, issue_id, populate_existing=True) if issue_id else None
+    if issue is None:
+        return None
+    if issue.status in (("fix_executing", "fix_approved") if claimed else ("fix_approved",)):
+        return None
+    if issue.status in ("resolved", "dismissed"):
+        return (f"HealthIssue #{issue_id} is '{issue.status}': its approved plan is not run. A dismissed issue that "
+                f"is reopened starts again from its diagnosis.")
+    return (f"HealthIssue #{issue_id} is '{issue.status}', not waiting for this plan's run: the plan was approved "
+            f"for the issue as it stood then. Withdraw the plan and plan again from where the issue is now.")

@@ -55,7 +55,7 @@ export function PlanView({ plan, stepsDiff, hideHeader = false, t }: {
         </p>
       </div>
 
-      <div className="text-muted-foreground report-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(plan.summary) }} />
+      <div className="text-muted-foreground report-content [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: renderMarkdown(plan.summary) }} />
       <p className="text-xs text-muted-foreground">
         {/* a blank impact is not a fact: no row, never "-" (spec §1-6) */}
         {!isBlank(plan.estimated_impact) && <>{t("issues.impact")}: <span className="text-foreground">{plan.estimated_impact}</span>{" · "}</>}

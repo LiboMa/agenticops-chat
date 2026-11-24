@@ -5,11 +5,13 @@ from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from sqlalchemy import select
 
 from agenticops.config import settings
 from agenticops.models import get_db_session
 from agenticops.web.schemas import (
     ScheduleCreate,
+    ScheduleLastExecution,
     ScheduleExecutionResponse,
     ScheduleResponse,
     ScheduleUpdate,
@@ -20,14 +22,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+ERROR_SUMMARY_CHARS = 200
+
+
 @router.get("/api/schedules", response_model=List[ScheduleResponse])
-async def api_list_schedules():
-    """List all schedules."""
-    from agenticops.scheduler.scheduler import Schedule
+def api_list_schedules():
+    """List all schedules, each with its newest run (MVP-2.8.0 S1): one grouped query, not one per schedule."""
+    from agenticops.scheduler.scheduler import Schedule, latest_executions
 
     with get_db_session() as session:
         schedules = session.query(Schedule).order_by(Schedule.created_at.desc()).all()
-        return [ScheduleResponse.model_validate(s) for s in schedules]
+        latest = latest_executions(session)
+        out = []
+        for s in schedules:
+            resp = ScheduleResponse.model_validate(s)
+            e = latest.get(s.id)
+            if e is not None:
+                resp.last_execution = ScheduleLastExecution(
+                    id=e.id, status=e.status, started_at=e.started_at, completed_at=e.completed_at,
+                    duration_ms=e.duration_ms, error_summary=(e.error or "")[:ERROR_SUMMARY_CHARS] or None)
+            out.append(resp)
+        return out
 
 
 @router.get("/api/schedules/pipeline-options")
@@ -170,7 +185,7 @@ async def api_run_schedule(schedule_id: int, background_tasks: BackgroundTasks):
 
 
 @router.get("/api/schedules/{schedule_id}/executions", response_model=List[ScheduleExecutionResponse])
-async def api_list_schedule_executions(
+def api_list_schedule_executions(
     schedule_id: int,
     limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
     offset: int = Query(default=0, ge=0),

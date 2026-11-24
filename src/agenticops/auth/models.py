@@ -22,6 +22,9 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     permissions: Mapped[list] = mapped_column(JSON, default=list)  # ["read", "write", "admin"]
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # MVP-2.8.0: a deleted user's row stays (its login name is never reused; private records keep their owner);
+    # no sign-in path accepts a row with this set (auth/service)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)

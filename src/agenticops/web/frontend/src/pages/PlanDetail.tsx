@@ -5,6 +5,7 @@ import { useApproveFixPlan, useExecuteFixPlan, useFixPlan, useRejectFixPlan } fr
 import { useFixExecutions } from "@/hooks/useFixExecutions";
 import { useEntityAudit } from "@/hooks/useEntityAudit";
 import { useAccounts } from "@/hooks/useAccounts";
+import { useReadOnly } from "@/hooks/useBootstrap";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { ApiError } from "@/api/client";
 import { PlanView } from "@/components/plans/PlanView";
@@ -20,6 +21,8 @@ import { planDetailModel } from "@/lib/planDetailModel";
 import { planLabel, shortHash } from "@/lib/plans";
 import { newestFirst } from "@/lib/issueDetail";
 import { formatFullDate } from "@/lib/formatDate";
+import { RunSummaryBlock } from "@/components/workitem/WorkSummary";
+import { runSummary as summarizeRun } from "@/lib/runSummary";
 
 /** /app/plans/:id — a fix plan as an approver reads it (MVP-2.7.0 S3): where it comes from, what it changes and how
  *  it is checked, then the approval and its runs. A change plan lives on its change request. */
@@ -31,6 +34,7 @@ export default function PlanDetail() {
   const q = useFixPlan(id, pollMs);
   const runs = useFixExecutions(id, pollMs);
   const accounts = useAccounts();
+  const readOnly = useReadOnly();
   const nextPoll = q.data ? planDetailModel(q.data, runs.data).pollMs : false;
   useEffect(() => setPollMs(nextPoll), [nextPoll]);
   const audit = useEntityAudit("fix_plan", id);
@@ -58,6 +62,8 @@ export default function PlanDetail() {
     if (await confirm(t("plans.executeConfirm"), { confirmText: t("issues.execute"), cancelText: t("common.cancel") })) executeMut.mutate(plan.id);
   };
   const btn = "rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50";
+  // MVP-2.8.0 S2: the latest run and what it waits for come before the plan's long text
+  const latestRun = (runs.data ?? [])[0] ?? null;
 
   return (
     <div className="mx-auto max-w-[960px] space-y-5">
@@ -69,8 +75,9 @@ export default function PlanDetail() {
           <FixPlanStatusBadge status={plan.status} />
           <span className="rounded bg-secondary px-1.5 py-0.5">{t(m.runKey)}</span>
         </div>
+        {m.noRun && <p role="status" className="text-sm text-status-warn">{t(`plans.noRun.${m.noRun}`)}</p>}
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <h1 className="text-2xl font-semibold text-foreground">{plan.title}</h1>
+          <h1 className="min-w-0 basis-full text-xl font-semibold text-foreground [overflow-wrap:anywhere] sm:flex-1 sm:basis-auto sm:text-2xl">{plan.title}</h1>
           <div className="flex gap-2">
             {m.actions.approve && <button className={`${btn} bg-primary text-primary-foreground hover:bg-primary-hover`} disabled={approveMut.isPending} onClick={() => { approveMut.reset(); setPinnedHash(plan.content_hash ?? ""); setOpen("approve"); }}>{t(copy.buttonKey)}</button>}
             {m.actions.reject && <button className={`${btn} border border-red-500/40 text-red-600`} disabled={rejectMut.isPending} onClick={() => { rejectMut.reset(); setOpen("reject"); }}>{t("issues.reject")}</button>}
@@ -85,6 +92,19 @@ export default function PlanDetail() {
         </p>
         {executeMut.error && <p role="alert" className="text-sm text-red-500">{executeMut.error.message}</p>}
       </header>
+
+      {latestRun && (
+        <section className="space-y-3 rounded-lg border border-border bg-card p-4">
+          <RunSummaryBlock summary={summarizeRun(latestRun, plan)} t={t} />
+          {/* a viewer cannot accept, so the page does not send one there (S2 leftover) */}
+          {latestRun.verification_status === "pending_acceptance" && plan.health_issue_id && !readOnly && (
+            <Link to={`/app/issues/${plan.health_issue_id}#accept`}
+                  className="inline-flex rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary-hover">
+              {t("plans.detail.goAccept")}
+            </Link>
+          )}
+        </section>
+      )}
 
       <PlanView plan={plan} t={t} hideHeader />
 

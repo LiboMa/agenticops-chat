@@ -24,6 +24,10 @@ export interface Resource {
   // The list only (MVP-2.7.0 S4): open anchored issues and their worst health; no open issue = unknown, never healthy
   open_issues?: number;
   health?: "unknown" | "notice" | "warning" | "critical" | null;
+  // MVP-2.9.0 N24: why the health reads as it does — open_issue | no_open_issue | stale | never_observed | absent —
+  // and when the row was last observed (= scanned_at)
+  health_reason?: string | null;
+  observed_at?: string | null;
 }
 
 export interface PaginatedResources {
@@ -72,6 +76,14 @@ export interface Signal {
 
 /** GET /api/health-issues/{id} (HealthIssueResponse) — IssueDetail's source; the legacy /issues shape drops
  *  trace_id and merged_alerts. */
+/** GET /api/health-issues (MVP-2.8.0 S2) */
+export interface HealthIssuePage {
+  items: HealthIssue[];
+  total: number;
+  /** the next page's offset; null on the last page */
+  next_cursor?: string | null;
+}
+
 export interface HealthIssue {
   id: number;
   resource_id: string;
@@ -98,6 +110,14 @@ export interface HealthIssue {
   anchor_status: AnchorStatus | null;
   anchor_candidates: { rule?: string | null; candidates?: { ref: number; account_id: number; reason: string }[] } | null;
   observed_at: string | null;
+  /** MVP-2.8.0 S2: who it waits on (work_phases) and since when — null when unknown */
+  waiting_on?: string | null;
+  waiting_since?: string | null;
+  /** MVP-2.9.0 N11: its newest diagnosis ended without a result and no agent is on it — it waits on a person */
+  rca_stopped?: boolean;
+  /** MVP-2.9.0 N26: a person reopened it and nothing has diagnosed it since / its plan run ended without a plan */
+  reopened?: boolean;
+  plan_stopped?: boolean;
   available_actions?: UiAction[]; // the detail route only (MVP-2.7.0 S4): "note"
 }
 
@@ -166,6 +186,26 @@ export interface Report {
   owned_by_me?: boolean;
   /** each language's rendering status (the list and detail carry it) */
   language_status?: Partial<Record<"zh" | "en", RenderingStatus>>;
+  /** MVP-2.9.0 N21: what the reporter run that wrote the report read — recorded by code, never by the model.
+   *  null / absent = the report was not saved inside a reporter run (no card is shown; nothing is guessed). */
+  coverage?: ReportCoverage | null;
+}
+
+export interface ReportCoverage {
+  accounts: string[];
+  regions: string[];
+  completeness: "complete" | "partial" | "none";
+  /** how many tool results were cut, moved out of the context by the offloader, or errors */
+  partial: { truncated: number; offloaded: number; failed: number };
+  /** when the run began reading (UTC) */
+  read_at: string;
+}
+
+/** GET /api/reports — `total` = what matches the search and dates, `all_total` = every report the caller may see. */
+export interface ReportPage {
+  items: Report[];
+  total: number;
+  all_total: number;
 }
 
 export type RenderingStatus = "ready" | "pending" | "missing" | "failed" | "stale";
@@ -214,6 +254,36 @@ export interface UiAction { action: string; allowed: boolean; reason_code: strin
 export interface FixPlanTarget { resource_id: string | null; resource_ref: number | null; anchor_status: string | null;
   resource_type: string | null; region: string | null }
 
+/** One list of a plan against the same list of the plan before it (MVP-2.9.0 N14; change_steps.plan_diff): by what
+ *  would run — a step's command, or for a step without one its words. Step numbers are 1-based, each in its own plan. */
+export interface PlanLineDiff {
+  added: { step: number; text: string }[];
+  removed: { previous_step: number; text: string }[];
+  modified: { previous_step: number; step: number; previous: string; now: string }[];
+  unchanged: number;
+}
+
+/** GET /api/fix-plans/{id}/previous-diff — `previous` is null for an issue's first plan (and for a change plan). */
+export interface PreviousPlanDiff {
+  plan_id: number;
+  previous: {
+    id: number; status: string; plan_version: number; risk_level: string | null; created_at: string | null;
+    rejected_by: string | null; rejected_at: string | null; rejection_reason: string | null;
+    /** a person wrote the reason about the plan — only then is it quoted under their name */
+    rejection_is_feedback: boolean;
+    same_diagnosis: boolean | null;
+  } | null;
+  /** the two content hashes are equal: redone word for word. null = one of them has no hash */
+  same_content: boolean | null;
+  steps: PlanLineDiff | null;
+  rollback: PlanLineDiff | null;
+  /** whole against whole (a rollback written as a sentence has no line to compare): is the rollback the same */
+  rollback_same?: boolean | null;
+  /** the declared checks: the same, and how many before / after a run — [the previous plan, this plan] */
+  checks?: { same: boolean; pre: [number, number]; post: [number, number] } | null;
+  risk_same?: boolean | null;
+}
+
 export interface FixPlan {
   id: number;
   plan_kind: PlanKind;
@@ -246,6 +316,16 @@ export interface FixPlan {
   issue_status?: IssueStatus | null;
   target?: FixPlanTarget | null;
   available_actions?: UiAction[];
+  /** MVP-2.9.0: how the code classifies each step's command (services/change_steps.step_tier), one per step:
+   *  write | readonly | blocked | unknown. Read context, never part of the content hash. */
+  step_tiers?: string[];
+  /** MVP-2.9.0 N10: what stopping a run of this plan could roll back, as its rollback is written — how many
+   *  rollback steps, how many carry a command, how many of those can run exactly as written. Read context. */
+  rollback_outlook?: { steps: number; commands: number; as_written: number };
+  /** MVP-2.9.0: whether `rejection_reason` is something a person wrote about this plan (not a reason code wrote) */
+  rejection_is_feedback?: boolean;
+  /** MVP-2.9.0, on the approve response only: whether the approval queued the plan's run */
+  run_queued?: boolean | null;
 }
 
 export interface FixExecution {
@@ -268,6 +348,10 @@ export interface FixExecution {
   accepted_by: string | null;
   accepted_at: string | null;
   acceptance_note: string | null;
+  // MVP-2.9.0 N9: a person asked this run to stop — who, when, what they wrote. null / absent = nobody did
+  stop_requested_at?: string | null;
+  stop_requested_by?: string | null;
+  stop_note?: string | null;
   created_at: string;
   // MVP-2.7.0: the run's results paired with its own plan's declared checks (verification.bind_results)
   post_check_binding?: PostCheckBinding[];
@@ -317,10 +401,13 @@ export interface AccountCreate {
 export interface AccountUpdate {
   name?: string;
   credential_source_type?: CredentialSourceType;
+  /** Merged into the stored credentials: a secret left out or empty is kept, a plain field sent as "" is deleted. */
   credentials?: Record<string, unknown>;
   regions?: string[];
   labels?: Record<string, string>;
   is_enabled?: boolean;
+  /** Remove every stored secret (access keys, tokens) — the only way an edit drops one. */
+  clear_secrets?: boolean;
 }
 
 export interface AvailableProfiles {
@@ -484,6 +571,16 @@ export interface SkillImprovementRecord {
 
 export type ScheduleType = "recurring" | "one_time";
 
+/** A schedule's newest run (MVP-2.8.0 S1, GET /api/schedules) */
+export interface ScheduleLastExecution {
+  id: number;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  duration_ms: number | null;
+  error_summary: string | null;
+}
+
 export interface Schedule {
   id: number;
   name: string;
@@ -497,6 +594,7 @@ export interface Schedule {
   next_run_at: string | null;
   created_at: string;
   updated_at: string;
+  last_execution?: ScheduleLastExecution | null;
 }
 
 export interface ScheduleCreate {
@@ -747,6 +845,20 @@ export interface ChatSession {
   can_manage?: boolean;
   /** MVP-2.7.0 S5: what the chat is about and the account it is bound to (services/chat_context) */
   context?: ChatContextView | null;
+  /** MVP-2.9.0 N22 (the list only): a send is running / the last send did not finish / a tool of the last reply
+   *  failed; null = nothing of the kind */
+  activity?: "generating" | "failed" | "tool_failed" | null;
+  /** the issue / change the conversation is about waits on you (the to-do list's own answer) */
+  waiting_on_you?: boolean;
+}
+
+/** GET /api/chat/sessions — one page of one view. `total` = what matches the search, `all_total` = everything in
+ *  this view; `next_cursor` is null on the last page. */
+export interface ChatSessionPage {
+  items: ChatSession[];
+  total: number;
+  all_total: number;
+  next_cursor: string | null;
 }
 
 /** A chat's context as the server resolved it; locked at the first sent message. */
@@ -760,11 +872,27 @@ export interface ChatContextView {
 
 export type DispatchState = "accepted" | "running" | "completed" | "failed" | "interrupted";
 
+/** One tool step of a reply, as the stream and the stored message carry it. 2026-11-07: where it sat in the reply
+ *  text, a redacted summary of its input, its duration and a redacted result preview (older rows: name + status). */
+export interface ToolStep {
+  name: string;
+  status: string;
+  call_id?: string;
+  outcome?: "ok" | "error" | "unknown"; // S5: from the tool's result, never assumed from its name
+  summary?: string;
+  duration_ms?: number;
+  result_preview?: string;
+  text_offset?: number;
+  text_end?: number;
+  /** ms since the turn began when the step started running (its input complete) — the work log's total is a span */
+  started_ms?: number;
+}
+
 export interface ChatMessage {
   id: number;
   role: "user" | "assistant";
   content: string;
-  tool_calls?: Array<{ name: string; status: string; call_id?: string; outcome?: "ok" | "error" | "unknown" }>;
+  tool_calls?: ToolStep[];
   token_usage?: {
     input: number;
     output: number;
@@ -773,7 +901,8 @@ export interface ChatMessage {
     cost_usd?: number;
     model?: string;
     error?: string; // persisted when the stream failed (e.g. model unavailable)
-    error_code?: string; // S5: throttled | model_unavailable | context_too_long | internal
+    error_code?: string; // S5: throttled | model_unavailable | context_too_long | timeout | max_tokens | request_rejected | internal
+    error_detail?: string; // 2026-11-08: Bedrock's reason, only for request_rejected
   };
   trace_id?: string;
   cost_usd?: number;
@@ -1037,31 +1166,120 @@ export interface GalaxyGraph {
   nodes: GalaxyGraphNode[];
   edges: GalaxyGraphEdge[];
   build_id: number | null;
+  /** MVP-2.9.0: when this build finished (UTC, Z) — the age of the relations */
+  built_at?: string | null;
+  /** MVP-2.9.0: when health and «absent» were read (UTC, Z) — they are not the build's, they are of then */
+  health_at?: string | null;
+}
+/** GET /api/galaxy/health (MVP-2.9.0): health and «absent» alone, as of `at`, for the build the graph endpoint serves.
+ *  A resource node not listed under `health` has no open issue (unknown). */
+export interface GalaxyHealthRead {
+  build_id: number | null;
+  health: Record<string, string>;
+  absent: string[];
+  at: string | null;
+  /** MVP-2.9.0 N15 — the reading is of this past moment (GET /api/galaxy/health?at=), not of now */
+  as_of?: string | null;
 }
 
-// ── Security review (MVP-2.5.0) ────────────────────────────────
+// ── Setup overview (MVP-2.9.0 N23) ─────────────────────────────────────────────
+/** The last time something was actually checked: who, when (UTC), and what it found. */
+export interface ReadinessCheckView {
+  ok: boolean;
+  detail: string;
+  checked_at: string;
+  checked_by: string;
+}
+
+/** GET /api/setup/readiness — how far the installation is set up. It reads only; it never runs a check. */
+export interface Readiness {
+  accounts: {
+    state: "connected" | "configured" | "failed" | "missing";
+    enabled: number;
+    regions: number;
+    /** `check` is of the credentials the account has NOW; null = never tested with them */
+    items: { id: number; name: string; provider: string; regions: number; check: ReadinessCheckView | null }[];
+  };
+  model: {
+    state: "verified" | "configured" | "failed";
+    model_id: string;
+    /** where the model is called — not where resources are scanned */
+    region: string;
+    check: ReadinessCheckView | null;
+  };
+  execution: {
+    state: "manual" | "partly_automatic" | "read_only";
+    executor_enabled: boolean;
+    auto_fix_enabled: boolean;
+    auto_approve_l0_l1: boolean;
+    rbac_enforce: boolean;
+    change_auto_approve_standard: boolean;
+    you_can_approve: boolean;
+    read_only: boolean;
+  };
+  notifications: { state: "optional"; channels: number };
+  can_verify: boolean;
+  generated_at: string;
+}
+
+/** POST /api/setup/verify-model */
+export interface ModelVerification extends ReadinessCheckView {
+  model_id: string;
+  region: string;
+}
+
+// ── Security review (MVP-2.5.0; per account since MVP-2.9.0 N20) ──────────────
+// `account_id` is cloud_accounts.id — the top bar's scope — and null when the snapshot's account is no longer
+// managed; `account_name` is always there.
 export interface SecurityAccountScore {
-  account_id: string;
-  overall_score: number;
-  category_scores: Record<string, number>;
+  account_id: number | null;
+  account_name: string;
+  partition: "aws" | "aws-cn" | "aws-us-gov" | null;
+  /** null = no collection source of this account could be read: there is nothing to score */
+  overall_score: number | null;
+  /** a category nobody could read is null */
+  category_scores: Record<string, number | null>;
   created_at: string | null;
-  reachable_paths: number;
+  /** null = the security groups were not read and no path was seen: not known, not zero */
+  reachable_paths: number | null;
+  /** false = the security groups were not (all) read: a number is «at least»; null on an older snapshot */
+  exposure_read?: boolean | null;
+  /** THIS account's open findings — the total of its findings list */
   open_findings: number;
+  /** null on a snapshot written before collection health was recorded */
+  collection: "complete" | "partial" | "failed" | null;
+  collection_errors: { source: string; error: string }[];
 }
 
 export interface SecuritySummary {
   accounts: SecurityAccountScore[];
+  /** open findings that no account holds (listed only under «all accounts») */
+  unassigned_open_findings: number;
   generated_at: string;
 }
 
+/** One account's score on one UTC day: that day's last score. A day without one has no point. */
 export interface SecurityTrendPoint {
-  account_id: string;
-  created_at: string | null;
-  overall_score: number;
+  day: string;
+  score: number;
+  partial: boolean;
+}
+
+export interface SecurityTrendAccount {
+  account_id: number | null;
+  account_name: string;
+  points: SecurityTrendPoint[];
+}
+
+export interface SecurityTrend {
+  days: number;
+  accounts: SecurityTrendAccount[];
 }
 
 export interface SecurityFindingItem {
   id: number;
+  /** "I#12" — the issue this finding is */
+  issue_ref: string;
   title: string;
   severity: string;
   status: string;
@@ -1069,12 +1287,24 @@ export interface SecurityFindingItem {
   issue_type: string;
   detected_by: string;
   last_seen: string | null;
+  /** a state word (an evidence object on the stored finding is sent as "undetermined"); null when not assessed */
   reachability: string | null;
+  account_id: number | null;
+  account_name: string | null;
+  /** of the inventory row the issue is anchored to; null when it is not anchored */
+  region: string | null;
+  resource_type: string | null;
+}
+
+export interface SecurityFindingPage {
+  items: SecurityFindingItem[];
+  total: number;
 }
 
 export interface SecurityRecommendationItem {
   id: number;
-  account_id: string;
+  account_id: number | null;
+  account_name: string;
   category: string;
   title: string;
   detail: string;
@@ -1086,7 +1316,8 @@ export interface SecurityRecommendationItem {
 }
 
 export interface AttackPathItem {
-  account_id: string;
+  account_id: number | null;
+  account_name: string;
   resource_id: string;
   port: number | null;
   path: string[];
@@ -1173,7 +1404,20 @@ export interface ChangeStepsDiff {
   unchanged: number;
 }
 
+/** A row of GET /api/changes (MVP-2.9.0 N18): who it waits on and since when (the change page's own answer), its
+ *  newest plan's version, its account's name. */
+export interface ChangeRequestListItem extends ChangeRequest {
+  waiting_on?: string | null;
+  waiting_since?: string | null;
+  plan_version?: number | null;
+  account_name?: string | null;
+}
+export interface ChangeRequestPage { items: ChangeRequestListItem[]; total: number }
+
 export interface ChangeRequestDetail extends ChangeRequest {
+  /** MVP-2.8.0 S2: who it waits on and since when */
+  waiting_on?: string | null;
+  waiting_since?: string | null;
   plans: FixPlan[];
   executions: FixExecution[];
   policy_decision: Record<string, unknown> | null;
@@ -1349,8 +1593,50 @@ export interface RcaLocationStats {
   days: number;
   top1: number | null; // correct / judged; null when nothing is judged
   judged: number;
+  // MVP-2.9.0 N24: the counts behind the rate — judged «correct», and every RCA created in the window
+  correct?: number;
+  rcas?: number;
   anchoring_rate: number | null; // (anchored + account_level) / issues naming a resource_id
   issues_with_resource_id: number;
   anchor_status_counts: Record<AnchorStatus, number>;
   location_status_counts: Record<LocationStatus, number>;
+}
+
+// ── Users (MVP-2.8.0 S2 rework): GET/POST/PATCH /api/users ───────────────────────────────────────────────
+export type UserRole = "admin" | "writer" | "viewer";
+export interface UserRow {
+  id: number;
+  email: string;
+  name: string | null;
+  role: UserRole;
+  /** a viewer who may view Settings read-only */
+  settings_view: boolean;
+  is_active: boolean;
+  last_login_at: string | null;
+  created_at: string | null;
+  /** active, unexpired API keys (MVP-2.8.0) */
+  active_api_keys?: number;
+}
+
+// ── API keys (MVP-2.8.0): GET/POST/DELETE /api/api-keys, GET/DELETE /api/users/{id}/api-keys ────────────────────
+export interface ApiKeyRow {
+  id: number;
+  name: string;
+  /** the first 12 characters — the full key is shown once, at creation */
+  key_prefix: string;
+  permissions: string[];
+  is_active: boolean;
+  last_used_at: string | null;
+  expires_at: string | null;
+  created_at: string | null;
+}
+
+/** GET /api/ui/nav-counts (MVP-2.8.0 direction A): the sidebar's numbers; a count that failed is null, never 0. */
+export interface NavCounts {
+  read_only: boolean;
+  attention: { total: number; critical: number } | null;
+  security_high: number | null;
+  schedules_failed: number | null;
+  skill_drafts: number | null;
+  generated_at: string;
 }

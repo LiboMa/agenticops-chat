@@ -23,7 +23,7 @@ async def current_actor(request: Request) -> Actor:
     """
     actor = actor_from_request(request)
     update_run_context(actor=actor.key, actor_user_id=actor.user_id, actor_permissions=actor.permissions,
-                       read_only=actor.read_only, trace_id=get_trace_id())
+                       read_only=actor.read_only, via_api_key=actor.via_api_key, trace_id=get_trace_id())
     return actor
 
 
@@ -50,4 +50,19 @@ async def require_authenticated_user(request: Request, *, admin: bool) -> Any:
         if not getattr(user, "is_admin", False) or (
                 api_key is not None and "admin" not in (getattr(api_key, "permissions", None) or ())):
             raise HTTPException(status_code=403, detail="Admin privileges required")
+    return user
+
+
+async def require_session_user(request: Request, *, admin: bool) -> Any:
+    """MVP-2.8.0: require_authenticated_user, and refuse a request that came through an API key (403
+    session_required) — keys, the password and users are managed only from a signed-in session, so a leaked key can
+    never mint its successor or take an account over. Checked on the token itself too, so it holds with sign-in off
+    (no middleware then)."""
+    from fastapi.responses import JSONResponse  # noqa: F401  (kept local: deps imports stay light)
+    user = await require_authenticated_user(request, admin=admin)
+    header = request.headers.get("authorization") or ""
+    if getattr(request.state, "api_key", None) is not None or header[7:].startswith("aiops_"):
+        raise HTTPException(status_code=403, detail={"detail": "Manage API keys, the password and users from a "
+                                                               "signed-in session, not with an API key.",
+                                                     "code": "session_required"})
     return user

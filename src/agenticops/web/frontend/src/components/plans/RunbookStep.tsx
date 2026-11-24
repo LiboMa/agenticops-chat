@@ -22,7 +22,7 @@ export function RunbookStep({ index, step }: { index: number; step: unknown }) {
         <div className="flex-1 min-w-0">
           {text ? (
             <div
-              className="text-foreground text-sm leading-relaxed report-content"
+              className="text-foreground text-sm leading-relaxed report-content [overflow-wrap:anywhere]"
               dangerouslySetInnerHTML={{ __html: renderMarkdown(text) }}
             />
           ) : (

@@ -30,21 +30,21 @@ export default function ResourceDetail() {
   const fixPlans = useResourceFixPlans(resourceId, tab === "fix-plans");
   const related = useResourceRelated(resourceId, tab === "network");
 
-  if (resource.isLoading) return <Spinner label="Loading resource..." />;
+  if (resource.isLoading) return <Spinner label={t("resource.loading")} />;
   if (resource.error) return <ErrorBanner message={resource.error.message} onRetry={() => resource.refetch()} />;
-  if (!resource.data) return <ErrorBanner message="Resource not found" />;
+  if (!resource.data) return <ErrorBanner message={t("resource.notFound")} />;
 
   const r = resource.data;
   const isInfra = INFRA_TYPES.has(r.resource_type);
-  const networkTabLabel = isInfra ? "Contains" : "Network";
+  const networkTabLabel = t(isInfra ? "resource.tab.contains" : "resource.tab.network");
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: "overview", label: "Overview" },
-    { key: "issues", label: "Issues" },
-    { key: "fix-plans", label: "Fix Plans" },
+    { key: "overview", label: t("resource.tab.overview") },
+    { key: "issues", label: t("resource.tab.issues") },
+    { key: "fix-plans", label: t("resource.tab.fixPlans") },
     { key: "network", label: networkTabLabel },
     { key: "graph", label: t("graph.title") },
-    { key: "tags", label: "Tags" },
+    { key: "tags", label: t("resource.tab.tags") },
   ];
 
   return (
@@ -68,12 +68,13 @@ export default function ResourceDetail() {
           </div>
         </div>
 
-        <div className="flex border-b px-5">
+        {/* the tabs scroll sideways on a phone instead of widening the page (S2 rework E2E: 120 px at 320) */}
+        <div className="flex overflow-x-auto border-b px-5">
           {tabs.map((t) => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+              className={`shrink-0 whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
                 tab === t.key
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
@@ -98,8 +99,9 @@ export default function ResourceDetail() {
 }
 
 function OverviewTab({ metadata }: { metadata: Record<string, unknown> }) {
+  const { t } = useLocale();
   const entries = Object.entries(metadata).filter(([, v]) => v != null && v !== "");
-  if (entries.length === 0) return <p className="text-sm text-muted-foreground">No metadata available.</p>;
+  if (entries.length === 0) return <p className="text-sm text-muted-foreground">{t("resource.noMetadata")}</p>;
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1">
       {entries.map(([k, v]) => (
@@ -115,8 +117,9 @@ function OverviewTab({ metadata }: { metadata: Record<string, unknown> }) {
 }
 
 function IssuesTab({ data, isLoading }: { data?: HealthIssue[]; isLoading: boolean }) {
+  const { t } = useLocale();
   if (isLoading) return <Spinner />;
-  if (!data?.length) return <p className="text-sm text-muted-foreground">No issues found.</p>;
+  if (!data?.length) return <p className="text-sm text-muted-foreground">{t("resource.noIssues")}</p>;
   return (
     <div className="space-y-1">
       {data.map((i) => (
@@ -140,8 +143,9 @@ function IssuesTab({ data, isLoading }: { data?: HealthIssue[]; isLoading: boole
 }
 
 function FixPlansTab({ data, isLoading }: { data?: FixPlanWithExecutions[]; isLoading: boolean }) {
+  const { t } = useLocale();
   if (isLoading) return <Spinner />;
-  if (!data?.length) return <p className="text-sm text-muted-foreground">No fix plans found.</p>;
+  if (!data?.length) return <p className="text-sm text-muted-foreground">{t("resource.noPlans")}</p>;
   return (
     <div className="space-y-1">
       {data.map((p) => (
@@ -178,10 +182,11 @@ function ResLink({ item }: { item: RelatedResourceItem }) {
 }
 
 function NetworkTab({ data, isLoading, isInfra }: { data?: { network: RelatedResourceItem[]; contains: RelatedResourceItem[] }; isLoading: boolean; isInfra: boolean }) {
+  const { t } = useLocale();
   if (isLoading) return <Spinner />;
-  if (!data) return <p className="text-sm text-muted-foreground">No related resources.</p>;
+  if (!data) return <p className="text-sm text-muted-foreground">{t("resource.noRelated")}</p>;
   const items = isInfra ? data.contains : data.network;
-  if (items.length === 0) return <p className="text-sm text-muted-foreground">No related resources found.</p>;
+  if (items.length === 0) return <p className="text-sm text-muted-foreground">{t("resource.noRelated")}</p>;
   return (
     <div className="space-y-1">
       {items.map((item, i) => (
@@ -195,8 +200,9 @@ function NetworkTab({ data, isLoading, isInfra }: { data?: { network: RelatedRes
 }
 
 function TagsTab({ tags }: { tags: Record<string, string> }) {
+  const { t } = useLocale();
   const entries = Object.entries(tags);
-  if (entries.length === 0) return <p className="text-sm text-muted-foreground">No tags.</p>;
+  if (entries.length === 0) return <p className="text-sm text-muted-foreground">{t("resource.noTags")}</p>;
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1">
       {entries.map(([k, v]) => (

@@ -25,6 +25,7 @@ from agenticops.skills.loader import (
     load_skill_body,
     load_skill_reference as _load_ref,
     resolve_skill_tools,
+    skill_tool_paths,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,29 @@ def list_skills() -> str:
         "\nUse activate_skill(skill_name) to load full decision trees and procedures."
     )
     return "\n".join(lines)
+
+
+# What a skill may register on an agent whose run may only read — a diagnosis, a fix-plan run, a change's review,
+# a read-only account (services/command_audit.read_only_context): the read tools the published skills declare
+# (local files, traces, the web by GET, the list of notification channels). An allow-list by dotted path (N30): a
+# skill's `tools:` may name ANY path, a draft can be activated, and an agent can write a draft — there, what is not
+# on this list is not registered and not even imported. Not on it: write_local_file, send_to_channel,
+# distribute_report. Chat and the executor register what a skill declares, as before.
+READ_ONLY_SKILL_TOOLS = frozenset({
+    "agenticops.tools.file_tools.file_stat",
+    "agenticops.tools.file_tools.list_local_directory",
+    "agenticops.tools.file_tools.read_document",
+    "agenticops.tools.file_tools.read_local_file",
+    "agenticops.tools.file_tools.search_local_file",
+    "agenticops.tools.file_tools.tail_local_file",
+    "agenticops.tools.trace_tools.find_error_traces",
+    "agenticops.tools.trace_tools.get_service_dependencies",
+    "agenticops.tools.trace_tools.get_trace_detail",
+    "agenticops.tools.trace_tools.query_traces",
+    "agenticops.tools.web_tools.web_fetch",
+    "agenticops.tools.web_tools.web_search",
+    "agenticops.tools.notification_tools.list_notification_channels",
+})
 
 
 @tool
@@ -115,7 +139,9 @@ def activate_skill(skill_name: str, agent: Any = None) -> str:
     # Dynamic tool registration — if the skill declares tools AND we have an agent
     tools_info = ""
     if agent is not None:
-        skill_tools = resolve_skill_tools(skill_name)
+        from agenticops.services.command_audit import read_only_context
+        only = READ_ONLY_SKILL_TOOLS if read_only_context() else None
+        skill_tools = resolve_skill_tools(skill_name, only=only)
         if skill_tools:
             registered = []
             for tool_fn in skill_tools:
@@ -137,6 +163,11 @@ def activate_skill(skill_name: str, agent: Any = None) -> str:
                     f"\n\nDynamically registered tools: {', '.join(registered)}\n"
                     "You can now call these tools directly."
                 )
+        if only is not None:
+            withheld = [path.rsplit(".", 1)[-1] for path in skill_tool_paths(skill_name) if path not in only]
+            if withheld:
+                tools_info += (f"\n\nNot registered in this run, which may only read: {', '.join(withheld)}. "
+                               "Use the read tools; what would change something does not belong in this run.")
 
     return (
         f'<activated_skill name="{skill_name}">\n{body}{refs_info}</activated_skill>'

@@ -12,11 +12,12 @@ model_aliases:
   opus: global.anthropic.claude-opus-5-5
   sonnet: global.anthropic.claude-sonnet-5-5
   haiku: global.anthropic.claude-haiku-4-5-20251001-v1:0
-  fable: global.anthropic.claude-fable-5-1
+  fable: global.anthropic.claude-fable-5-2
   opus-5-5: global.anthropic.claude-opus-5-5
   sonnet-5-5: global.anthropic.claude-sonnet-5-5
   opus-5: global.anthropic.claude-opus-5
   sonnet-5: global.anthropic.claude-sonnet-5
+  fable-5-2: global.anthropic.claude-fable-5-2
   fable-5-1: global.anthropic.claude-fable-5-1
   fable-5: global.anthropic.claude-fable-5
   opus-4-8: global.anthropic.claude-opus-4-8
@@ -78,6 +79,11 @@ token_cost_table:
     output: 10.0
     cache_read: 0.2
     cache_write: 2.5
+  claude-fable-5-2:   # Price List us-east-1, global cross-region, standard tier, fetched 2026-11-10
+    input: 8.0
+    output: 40.0
+    cache_read: 0.2
+    cache_write: 10.0
   claude-fable-5-1:
     input: 10.0
     output: 50.0
@@ -209,6 +215,9 @@ noise_flap_threshold: 3
 noise_flap_window_minutes: 30
 signal_retention_days: 30
 # RCA Quality (MVP-2.2.0)
+# Workbench (MVP-2.8.0 S2): an item waiting on a person longer than this is in the Cases 'waiting long' view
+attention_long_wait_hours: 24
+attention_snooze_minutes: 60   # «later» in NewUI: how long a snoozed item stays at the end of its group (MVP-2.9.0 N14)
 rca_min_confidence_for_autofix: 0.6
 rca_critic_enabled: true
 rca_critic_model_id: ''
@@ -241,6 +250,7 @@ api_auth_enabled: false
 rbac_enforce: false          # shadow mode by default — see config/rbac.yaml
 rbac_file: config/rbac.yaml
 audit_retention_days: 365
+agent_steps_retention_days: 30   # an agent run's recorded steps (MVP-2.9.0 N10); 0 = keep forever
 command_audit_enabled: true
 session_ttl_minutes: 30
 event_loop_executor_threads: 64   # AgenticOps runs as ONE process; this pool serves to_thread + every agent stream
@@ -259,6 +269,8 @@ chat_upload:                  # chat attachment limits; admins override fields a
   native_media_max_mb: 16     # native image/document bytes per request, MiB
   staged_ttl_hours: 24        # hours an unsent upload is kept
 chat_attachments_dir: ''      # empty = <data_dir>/chat_attachments
+model_runtime:                # model connection; admins override at runtime (Settings → Model connection)
+  stream_read_timeout_seconds: 600  # a model stream may send nothing this long before it is cut (60–3600)
 default_regions:
   aws:
   - us-east-1

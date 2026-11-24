@@ -496,13 +496,25 @@ def test_a_failed_run_sends_its_issue_back_and_is_disputed_once(db, quiet):
     assert _event_types(db, crashed_issue).count("rca_disputed") == 1
 
 
-def test_a_run_aborted_before_it_started_still_disputes_its_rca(db):
-    """2.2.0 execution-failure feedback kept: the issue stays at fix_approved (retry), its RCA is disputed."""
+def test_a_run_aborted_before_anything_was_tried_does_not_dispute_its_rca(db):
+    """MVP-2.9.0 N26 (the owner's ruling): a pre-check failed before any step — nothing was tried, so the failure
+    says nothing about the diagnosis. Since 2.2.0 it had disputed the RCA all the same. The issue stays at
+    fix_approved, as before."""
     from agenticops.tools.metadata_tools import mark_fix_failed
     issue_id, plan_id, rca_id = _fix(db)
     _save(plan_id, status="aborted", steps=(), error="pre-check failed")
     mark_fix_failed(issue_id, _only_execution(plan_id).id, reason="pre-check failed")
     assert _fresh(HealthIssue, issue_id).status == "fix_approved"
+    assert _fresh(RCAResult, rca_id).critic_verdict is None
+    assert _event_types(db, issue_id).count("rca_disputed") == 0
+
+
+def test_a_run_aborted_after_a_step_was_tried_still_disputes_its_rca(db):
+    """2.2.0 execution-failure feedback kept where something was tried: the run reports a step."""
+    from agenticops.tools.metadata_tools import mark_fix_failed
+    issue_id, plan_id, rca_id = _fix(db)
+    _save(plan_id, status="aborted", steps=({"step_index": 1, "status": "failed"},), error="step 1 failed, stopped")
+    mark_fix_failed(issue_id, _only_execution(plan_id).id, reason="step 1 failed")
     assert _fresh(RCAResult, rca_id).critic_verdict == "disputed_by_execution"
 
 
@@ -794,7 +806,8 @@ def test_accepting_a_change_goes_through_resolve_review(db, decision, terminal, 
     _save_change(cr_id, plan_id, ex_id)
     with patch.object(cs, "resolve_review", wraps=cs.resolve_review) as resolve:
         out = vf.accept_execution(ex_id, actor=BOB, decision=decision, reason="looked at it")
-    resolve.assert_called_once_with(cr_id, actor=BOB, outcome=terminal, reason="looked at it")
+    resolve.assert_called_once_with(cr_id, actor=BOB, outcome=terminal, reason="looked at it",
+                                    confirmed_checks=None)   # MVP-2.8.0 S2: passed through
     assert out == {"execution_id": ex_id, "decision": decision, "kind": "change", "status": terminal}
     assert _fresh(ChangeRequest, cr_id).status == terminal
     ex = _fresh(FixExecution, ex_id)
@@ -995,3 +1008,82 @@ def test_the_api_pairs_each_run_with_its_own_plans_checks(db, quiet):
     _save_change(cr_id, change_plan, change_ex, post=[OK])
     shown = client.get(f"/api/changes/{cr_id}").json()["executions"][0]["post_check_binding"]
     assert [(b["check_id"], b["problem"], b["result_status"]) for b in shown] == [("pc-1", None, "pass")]
+
+
+# ── MVP-2.8.0 S2: the checks a person ticked go with the acceptance ─────────────────────────────────────────────
+
+def _last_audit(db):
+    from agenticops.audit.models import AuditLog
+    db.expire_all()
+    return db.query(AuditLog).order_by(AuditLog.id.desc()).first()
+
+
+def _pending_with_a_check(db):
+    issue_id, plan_id, _ = _fix(db, post_checks=(CHECK,))
+    _save(plan_id, post=[])          # no result for pc-1 → pending acceptance
+    return issue_id, _only_execution(plan_id).id
+
+
+def test_the_ticked_checks_are_recorded_with_the_acceptance(db, quiet):
+    _, ex_id = _pending_with_a_check(db)
+    vf.accept_execution(ex_id, actor=BOB, decision="accepted", reason="checked", confirmed_checks=["pc-1"])
+    row = _last_audit(db)
+    assert row.action == "execution.accepted" and row.details["confirmed_checks"] == ["pc-1"]
+
+
+def test_an_undeclared_check_id_is_422_and_nothing_is_written(db, quiet):
+    issue_id, ex_id = _pending_with_a_check(db)
+    with pytest.raises(vf.AcceptanceInvalid, match="pc-9"):
+        vf.accept_execution(ex_id, actor=BOB, decision="accepted", reason="r", confirmed_checks=["pc-1", "pc-9"])
+    assert _fresh(FixExecution, ex_id).verification_status == PENDING
+    assert _fresh(HealthIssue, issue_id).status == "fix_executed"
+
+
+def test_an_acceptance_without_the_list_still_works(db, quiet):
+    _, ex_id = _pending_with_a_check(db)
+    vf.accept_execution(ex_id, actor=BOB, decision="accepted", reason="r")
+    assert "confirmed_checks" not in (_last_audit(db).details or {})
+
+
+def test_a_change_review_records_the_ticked_checks_and_refuses_an_undeclared_one(db, quiet):
+    cr_id, plan_id, ex_id = _change(db)
+    _save_change(cr_id, plan_id, ex_id, post=[])
+    with pytest.raises(cs.ChangeValidationError, match="pc-7"):
+        cs.resolve_review(cr_id, actor=BOB, outcome="completed", reason="r", confirmed_checks=["pc-7"])
+    assert _fresh(ChangeRequest, cr_id).status == "needs_review"
+    cs.resolve_review(cr_id, actor=BOB, outcome="completed", reason="r", confirmed_checks=["pc-1"])
+    event = db.query(PipelineEvent).filter_by(event_type="change_review_resolved").order_by(PipelineEvent.id.desc()).first()
+    assert json.loads(event.detail)["confirmed_checks"] == ["pc-1"]
+
+
+def test_the_api_takes_confirmed_checks_and_the_accept_route_is_plain_def(db, quiet):
+    import inspect
+    from agenticops.web import app as webapp
+    from agenticops.web import deps
+    assert not inspect.iscoroutinefunction(webapp.api_accept_execution)
+    _, ex_id = _pending_with_a_check(db)
+    webapp.app.dependency_overrides[deps.current_actor] = lambda: BOB
+    try:
+        c = TestClient(webapp.app)
+        bad = c.post(f"/api/fix-executions/{ex_id}/accept", json={"decision": "accepted", "reason": "r",
+                                                                   "confirmed_checks": ["drop table"]})
+        assert bad.status_code == 422
+        ok = c.post(f"/api/fix-executions/{ex_id}/accept", json={"decision": "accepted", "reason": "r",
+                                                                  "confirmed_checks": ["pc-1"]})
+        assert ok.status_code == 200, ok.text
+    finally:
+        webapp.app.dependency_overrides.clear()
+
+
+def test_a_stopped_change_run_whose_steps_had_run_needs_review_instead_of_completing(db, quiet):
+    """MVP-2.9.0 round-2 review (A-I4), the change side: a person asked the run to stop; the stop landed after
+    its last change, so nothing was refused and the checks pass. It is recorded as it happened — and a person
+    decides whether it stands; it does not complete by itself."""
+    from agenticops.services.run_tickets import request_stop
+    cr_id, plan_id, ex_id = _change(db)
+    assert request_stop(ex_id, by="user:alice")
+    _save_change(cr_id, plan_id, ex_id, post=[OK])
+    cr = _fresh(ChangeRequest, cr_id)
+    ex = _fresh(FixExecution, ex_id)
+    assert (ex.status, ex.verification_status) == ("succeeded", PENDING)
+    assert cr.status == "needs_review" and "stopped by user:alice" in (cr.needs_review_reason or "")

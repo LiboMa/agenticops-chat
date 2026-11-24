@@ -1,0 +1,53 @@
+import { useNavigate } from "react-router-dom";
+import { useAccountScope } from "@/components/layout/AccountScope";
+import { useActivity } from "../hooks/useActivity";
+import { useNfT, type NfT } from "../i18n";
+import { railRows, type ActivityLane } from "../lib/activity";
+import { waitedParts } from "../lib/queue";
+
+/** "诊断 · 已经 3 分钟": what a lane is doing and for how long — or that nothing on record says since when. A diagnosis
+ *  that stopped (its end is on the timeline, the status stayed) reads "诊断停了 · 42 天前"; a run a person asked to
+ *  stop reads "执行 · 已叫停" while it winds down. */
+export function laneLabel(lane: Pick<ActivityLane, "kind" | "since" | "basis" | "execution">, now: number, t: NfT): string {
+  const what = t(`lane.${lane.kind}`) === `lane.${lane.kind}` ? lane.kind : t(`lane.${lane.kind}`);
+  if (lane.execution?.status === "running" && lane.execution.stop_requested_at) return t("lane.stopping", { what });
+  const w = waitedParts(lane.since, now);
+  const span = !w ? null : w.unit === "now" ? t("unit.min", { n: 0 }) : t(`unit.${w.unit}`, { n: w.n });
+  if (lane.basis === "stopped") return span ? t("lane.stopped", { what, t: span }) : t("lane.stopped.unknown", { what });
+  return `${what} · ${span ? t("lane.for", { t: span }) : t("lane.sinceUnknown")}`;
+}
+
+/** The rail beside the brief: what agents are doing now, and the last few things that ended — so a decision does
+ *  not just vanish from the queue. Every card opens that work in «现场». */
+export function Feed({ now }: { now: number }) {
+  const t = useNfT();
+  const navigate = useNavigate();
+  const { accountId } = useAccountScope();
+  const q = useActivity(accountId);
+  const rows = railRows(q.data);
+  const open = (id: string) => navigate(`/app/new/live/${encodeURIComponent(id)}`);
+  return (
+    <aside className="side-live">
+      <div className="rail-title"><span>{t("feed.title")}</span></div>
+      <div className="feed">
+        {q.isError && !q.data ? <p className="q-note">{t("feed.failed")}</p>
+          : q.isPending ? <div className="skel" style={{ height: 56, borderRadius: 10 }} />
+          : rows.running.length === 0 ? <p className="q-note">{t("feed.none")}</p>
+          : rows.running.map((l) => (
+            <button key={l.id} type="button" className={`f run${l.overdue ? " late" : ""}`} onClick={() => open(l.id)}>
+              <span className="h"><span><span className="dot" />{laneLabel(l, now, t)}</span><span className="num">{l.ref ?? ""}</span></span>
+              <span className="b">{l.title}</span>
+              {l.overdue && l.basis !== "stopped" && <span className="b late-note">{t("lane.overdue")}</span>}
+            </button>
+          ))}
+        {rows.recent.length > 0 && <div className="lgroup"><span>{t("feed.recent")}</span></div>}
+        {rows.recent.map((l) => (
+          <button key={l.id} type="button" className="f" onClick={() => open(l.id)}>
+            <span className="h"><span>{t(`lane.${l.kind}`)} · {t(`outcome.${l.outcome}`)}</span><span className="num">{l.ref ?? ""}</span></span>
+            <span className="b">{l.title}</span>
+          </button>
+        ))}
+      </div>
+    </aside>
+  );
+}

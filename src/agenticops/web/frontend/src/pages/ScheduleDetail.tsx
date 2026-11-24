@@ -6,10 +6,21 @@ import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { formatFullDate } from "@/lib/formatDate";
-import { PIPELINE_META } from "./Schedules";
+import { StatusText, type StatusTone } from "@/components/ui/StatusText";
+import { QueryState } from "@/components/ui/QueryState";
+import { runState, type RunKind } from "@/lib/scheduleRows";
+import { useLocale } from "@/i18n/LocaleContext";
+import { PIPELINE_META, pipelineDesc, pipelineLabel } from "./Schedules";
 import { useReadOnly } from "@/hooks/useBootstrap";
 
+const POLL_MS = 3000;
+const SUBMITTED_MAX_MS = 60_000;
+const RUN_TONE: Record<RunKind, StatusTone> = {
+  running: "info", retrying: "warn", succeeded: "ok", failed: "danger", never_run: "neutral", other: "neutral",
+};
+
 export default function ScheduleDetail() {
+  const { t } = useLocale();
   const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
   const { id } = useParams<{ id: string }>();
   const scheduleId = Number(id);
@@ -18,18 +29,28 @@ export default function ScheduleDetail() {
   const executions = useScheduleExecutions(scheduleId);
   const runMut = useRunSchedule();
   const [expandedExec, setExpandedExec] = useState<number | null>(null);
-  const [runSuccess, setRunSuccess] = useState(false);
+  // MVP-2.8.0 S1: after «Run now» the page says «submitted» until a run newer than the one before appears (≤ 60 s),
+  // and keeps polling while the newest run is still running — the state shown is always a real run's.
+  const [submitted, setSubmitted] = useState<{ after: number; at: number } | null>(null);
+  const newest = executions.data?.[0];
+  const newestLive = !!newest && (newest.status === "running" || newest.status === "retrying");
 
-  // Auto-clear success state after 3s and refresh executions
   useEffect(() => {
-    if (runSuccess) {
-      executions.refetch();
-      const t = setTimeout(() => setRunSuccess(false), 3000);
-      return () => clearTimeout(t);
-    }
-  }, [runSuccess]);
+    if (!submitted) return;
+    if ((newest?.id ?? 0) > submitted.after || Date.now() - submitted.at > SUBMITTED_MAX_MS) setSubmitted(null);
+  }, [submitted, newest?.id]);
 
-  if (schedule.isLoading) return <Spinner label="Loading schedule..." />;
+  useEffect(() => {
+    if (!submitted && !newestLive) return;
+    const timer = setInterval(() => {
+      void executions.refetch();
+      if (submitted && Date.now() - submitted.at > SUBMITTED_MAX_MS) setSubmitted(null);
+    }, POLL_MS);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submitted, newestLive]);
+
+  if (schedule.isLoading) return <Spinner label={t("schedules.loadingOne")} />;
   if (schedule.error)
     return (
       <ErrorBanner
@@ -60,7 +81,7 @@ export default function ScheduleDetail() {
             d="M15 19l-7-7 7-7"
           />
         </svg>
-        Back to Schedules
+        {t("schedules.back")}
       </Link>
 
       {/* Header card */}
@@ -76,23 +97,18 @@ export default function ScheduleDetail() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              {runSuccess && (
-                <span className="text-sm text-primary-600 font-medium flex items-center gap-1 duo-fade">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  Triggered
-                </span>
+              {submitted && (
+                <StatusText tone="info" className="text-sm">{t("schedules.run.submitted")}</StatusText>
               )}
               {runMut.isError && (
-                <span className="text-sm text-destructive">Failed</span>
+                <StatusText tone="danger" className="text-sm">{t("schedules.run.submitFailed")}</StatusText>
               )}
               {!readOnly && (
                 <button
                   onClick={() => {
-                    setRunSuccess(false);
+                    const after = executions.data?.[0]?.id ?? 0;
                     runMut.mutate(scheduleId, {
-                      onSuccess: () => setRunSuccess(true),
+                      onSuccess: () => { setSubmitted({ after, at: Date.now() }); void executions.refetch(); },
                     });
                   }}
                   disabled={runMut.isPending}
@@ -104,7 +120,7 @@ export default function ScheduleDetail() {
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                     </svg>
                   )}
-                  {runMut.isPending ? "Running..." : "Run Now"}
+                  {t("schedules.runNow")}
                 </button>
               )}
             </div>
@@ -114,10 +130,10 @@ export default function ScheduleDetail() {
             <div>
               <span className="text-muted-foreground block">Pipeline</span>
               <Badge className={PIPELINE_META[s.pipeline_name]?.badge ?? "bg-blue-100 text-blue-700"}>
-                {PIPELINE_META[s.pipeline_name]?.label ?? s.pipeline_name}
+                {pipelineLabel(s.pipeline_name, t)}
               </Badge>
-              {PIPELINE_META[s.pipeline_name]?.desc && (
-                <p className="text-xs text-muted-foreground mt-1">{PIPELINE_META[s.pipeline_name].desc}</p>
+              {pipelineDesc(s.pipeline_name, t) !== null && (
+                <p className="text-xs text-muted-foreground mt-1">{pipelineDesc(s.pipeline_name, t)}</p>
               )}
             </div>
             <div>
@@ -133,11 +149,11 @@ export default function ScheduleDetail() {
               <span>{formatFullDate(s.created_at)}</span>
             </div>
             <div>
-              <span className="text-muted-foreground block">Last Run</span>
+              <span className="text-muted-foreground block">{t("schedules.lastRun")}</span>
               <span>{s.last_run_at ? formatFullDate(s.last_run_at) : "Never"}</span>
             </div>
             <div>
-              <span className="text-muted-foreground block">Next Run</span>
+              <span className="text-muted-foreground block">{t("schedules.nextRun")}</span>
               <span>{s.next_run_at ? formatFullDate(s.next_run_at) : "-"}</span>
             </div>
           </div>
@@ -159,8 +175,8 @@ export default function ScheduleDetail() {
                         <span className="text-muted-foreground">{(cfg.providers as string) || "all"}</span>
                       </div>
                       <div>
-                        <span className="font-medium text-foreground">Deep Investigation:</span>{" "}
-                        <span className="text-muted-foreground">{cfg.deep ? "Yes" : "No"}</span>
+                        <span className="font-medium text-foreground">{t("schedules.deep")}</span>{" "}
+                        <span className="text-muted-foreground">{cfg.deep ? t("schedules.yes") : t("schedules.no")}</span>
                       </div>
                     </div>
                   );
@@ -201,7 +217,7 @@ export default function ScheduleDetail() {
                       )}
                       {reportType && (
                         <div>
-                          <span className="font-medium text-foreground">Report Type:</span>{" "}
+                          <span className="font-medium text-foreground">{t("schedules.reportType")}</span>{" "}
                           <span className="text-muted-foreground">{reportType}</span>
                         </div>
                       )}
@@ -213,7 +229,7 @@ export default function ScheduleDetail() {
                       )}
                       {reportTemplate && (
                         <div>
-                          <span className="font-medium text-foreground">Report Template:</span>
+                          <span className="font-medium text-foreground">{t("schedules.reportTemplate")}</span>
                           <pre className="mt-1 text-muted-foreground text-xs bg-background rounded p-2 whitespace-pre-wrap">{reportTemplate}</pre>
                         </div>
                       )}
@@ -240,11 +256,11 @@ export default function ScheduleDetail() {
       <Card>
         <CardBody>
           <h2 className="text-xl font-semibold text-foreground mb-4">
-            Execution History
+            {t("schedules.history")}
           </h2>
-          {executions.isLoading ? (
-            <Spinner label="Loading executions..." />
-          ) : executions.data && executions.data.length > 0 ? (
+          <QueryState query={executions} isEmpty={(d) => d.length === 0} emptyText={t("schedules.noRuns")}
+                      onRetry={() => void executions.refetch()}>
+            {(runs) => (
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -270,7 +286,7 @@ export default function ScheduleDetail() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {executions.data.map((ex) => {
+                  {runs.map((ex) => {
                     const agentOutput = (ex.result as Record<string, unknown>)?.agent_output as string | undefined;
                     const presignedUrl = (ex.result as Record<string, unknown>)?.presigned_url as string | undefined;
                     const isExpanded = expandedExec === ex.id;
@@ -278,19 +294,14 @@ export default function ScheduleDetail() {
                       <tr key={ex.id} className="hover:bg-secondary align-top">
                         <td className="px-4 py-2 text-sm font-mono">#{ex.id}</td>
                         <td className="px-4 py-2">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                              ex.status === "completed" || ex.status === "succeeded"
-                                ? "bg-green-100 text-green-800"
-                                : ex.status === "failed"
-                                  ? "bg-red-100 text-red-800"
-                                  : ex.status === "running"
-                                    ? "bg-blue-100 text-blue-800"
-                                    : "bg-secondary text-foreground"
-                            }`}
-                          >
-                            {ex.status}
-                          </span>
+                          {(() => {
+                            const run = runState(ex);
+                            return (
+                              <StatusText tone={RUN_TONE[run.kind]} className="text-xs">
+                                {run.kind === "other" ? run.raw : t(`schedules.run.${run.kind}`)}
+                              </StatusText>
+                            );
+                          })()}
                         </td>
                         <td className="px-4 py-2 text-sm text-muted-foreground">
                           {formatFullDate(ex.started_at)}
@@ -338,9 +349,8 @@ export default function ScheduleDetail() {
                 </tbody>
               </table>
             </div>
-          ) : (
-            <p className="text-muted-foreground text-sm">No executions yet.</p>
-          )}
+            )}
+          </QueryState>
         </CardBody>
       </Card>
     </div>

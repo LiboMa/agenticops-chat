@@ -2,7 +2,7 @@
 
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Optional, List
 
 from fastapi import FastAPI, Request, Query, HTTPException, Body, BackgroundTasks, UploadFile, File, Depends
@@ -52,7 +52,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from agenticops.graph.api import router as graph_router
 from agenticops.services.executor_service import ExecutorService
-from agenticops.services.plan_content import approval_conflict, stamp_approval, stamp_content
+from agenticops.services.plan_content import approval_conflict, repair_stale_hash, stamp_approval, stamp_content
 from agenticops.services.inventory import PRESENT
 from agenticops.web.session_manager import ChatSessionManager
 
@@ -151,6 +151,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Chat: interrupt_stale failed: %s", e)
     await _sweep_chat_attachments_at_startup()
+
+    # MVP-2.9.0 (round-2 review): a run an earlier process left `running` — its timer and its reconcile went with
+    # that process — is closed, or timed for the moment its time limit is up, so its issue is on somebody's list again
+    try:
+        from agenticops.services.run_tickets import close_orphans
+        _closed, _timed = await asyncio.to_thread(close_orphans)
+        if _closed or _timed:
+            logger.warning("Executions: %d run(s) left running by an earlier process closed, %d given their remaining time",
+                           len(_closed), len(_timed))
+    except Exception as e:
+        logger.warning("Executions: close_orphans failed: %s", e)
 
     # Seed default admin user if auth is enabled and no users exist
     if settings.api_auth_enabled:
@@ -382,6 +393,8 @@ from agenticops.web.routers import signals as _signals_router
 app.include_router(_signals_router.router)
 from agenticops.web.routers import security as _security_router
 app.include_router(_security_router.router)
+from agenticops.web.routers import setup as _setup_router  # noqa: E402  (MVP-2.9.0 N23: the setup overview)
+app.include_router(_setup_router.router)
 from agenticops.web.routers import changes as _changes_router
 app.include_router(_changes_router.router)
 from agenticops.web.routers import plans as _plans_router
@@ -394,6 +407,10 @@ from agenticops.web.routers import chat_attachments as _chat_attachments_router 
 app.include_router(_chat_attachments_router.router)
 from agenticops.web.routers import upload_settings as _upload_settings_router  # 2026-11-07: chat upload limits
 app.include_router(_upload_settings_router.router)
+from agenticops.web.routers import model_runtime_settings as _model_runtime_router  # 2026-11-08: model stream read timeout
+app.include_router(_model_runtime_router.router)
+from agenticops.web.routers import users as _users_router  # MVP-2.8.0 S2 rework: admins manage web accounts
+app.include_router(_users_router.router)
 
 # Chat session manager
 _chat_sessions = ChatSessionManager()
@@ -452,37 +469,48 @@ class TraceIdFilter(logging.Filter):
 _trace_filter = TraceIdFilter()
 
 
-def _setup_service_logging() -> None:
-    """Configure file-based logging for backend + frontend (access) logs."""
+_SERVICE_LOG_HANDLERS: dict[str, logging.Handler] = {}   # by file: installing twice adds nothing (2026-11-08)
+
+
+def _service_log_handler(path: Path, level: int, fmt: logging.Formatter) -> logging.Handler:
     import logging.handlers
 
-    from agenticops.config import PROJECT_ROOT
-    log_dir = PROJECT_ROOT / "logs"
-    log_dir.mkdir(exist_ok=True)
+    handler = _SERVICE_LOG_HANDLERS.get(str(path))
+    if handler is None:
+        handler = logging.handlers.RotatingFileHandler(path, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8")
+        handler.setLevel(level)
+        handler.setFormatter(fmt)
+        handler.addFilter(_trace_filter)
+        _SERVICE_LOG_HANDLERS[str(path)] = handler
+    return handler
+
+
+def _setup_service_logging() -> None:
+    """Configure file-based logging for backend + frontend (access) logs.
+
+    The directory is `settings.log_dir` (`<project>/logs`; the test suite sets AIOPS_LOG_DIR to a temp dir, so a test
+    that starts the lifespan never writes, or rotates away, the running service's logs — 2026-11-08). Idempotent: a
+    logger never gets the same file's handler twice.
+    """
+    log_dir = Path(settings.log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
 
     fmt = logging.Formatter("%(asctime)s %(name)s %(levelname)s [%(trace_id)s] %(message)s")
 
     # backend.log — application errors, startup, agent activity
-    backend_handler = logging.handlers.RotatingFileHandler(
-        log_dir / "backend.log", maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8",
-    )
-    backend_handler.setLevel(logging.DEBUG)
-    backend_handler.setFormatter(fmt)
-    backend_handler.addFilter(_trace_filter)
+    backend_handler = _service_log_handler(log_dir / "backend.log", logging.DEBUG, fmt)
     for name in ("agenticops", "uvicorn.error", "uvicorn"):
         _logger = logging.getLogger(name)
-        _logger.addHandler(backend_handler)
+        if backend_handler not in _logger.handlers:
+            _logger.addHandler(backend_handler)
         if _logger.level == logging.NOTSET:
             _logger.setLevel(logging.DEBUG)
 
     # frontend.log — HTTP access logs (asset + API requests)
-    access_handler = logging.handlers.RotatingFileHandler(
-        log_dir / "frontend.log", maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8",
-    )
-    access_handler.setLevel(logging.INFO)
-    access_handler.setFormatter(fmt)
-    access_handler.addFilter(_trace_filter)
-    logging.getLogger("uvicorn.access").addHandler(access_handler)
+    access_handler = _service_log_handler(log_dir / "frontend.log", logging.INFO, fmt)
+    access_logger = logging.getLogger("uvicorn.access")
+    if access_handler not in access_logger.handlers:
+        access_logger.addHandler(access_handler)
 
 
 # ============================================================================
@@ -683,13 +711,18 @@ def api_get_settings():  # plain def: model presets may list Bedrock models sync
         feishu_ws_active = False
         slack_ws_active = False
 
+    from agenticops.services import exec_switches
+    switches = exec_switches.effective()        # the four high-impact switches: the values in force (N25)
     return {
         "scan_focus": settings.scan_focus,
-        "executor_enabled": settings.executor_enabled,
-        "auto_fix_enabled": settings.auto_fix_enabled,
+        "executor_enabled": switches.executor_enabled,
+        "auto_fix_enabled": switches.auto_fix_enabled,
         "auto_rca_enabled": settings.auto_rca_enabled,
         "notifications_enabled": settings.notifications_enabled,
-        "executor_auto_approve_l0_l1": settings.executor_auto_approve_l0_l1,
+        "executor_auto_approve_l0_l1": switches.executor_auto_approve_l0_l1,
+        "executor_hitl_enabled": switches.executor_hitl_enabled,
+        # which of the four are an administrator's stored values, the yaml defaults, and who last changed them
+        "execution_switches": exec_switches.stored_info(),
         "notifications_consolidated": settings.notifications_consolidated,
         "bedrock_cache_enabled": settings.bedrock_cache_enabled,
         "skills_auto_improve_enabled": settings.skills_auto_improve_enabled,
@@ -725,10 +758,61 @@ def api_get_settings():  # plain def: model presets may list Bedrock models sync
     }
 
 
+# What PATCH /api/settings changes without the audited transactions of the high-impact switches and the security
+# toggles: the low-impact keys. Their change is audited by comparing the value before and after (N25).
+_LOW_IMPACT_SETTINGS = (
+    "auto_rca_enabled", "notifications_enabled", "notifications_consolidated", "bedrock_cache_enabled",
+    "skills_auto_improve_enabled", "skills_post_resolution_review", "skills_improvement_notify",
+    "scan_focus", "galaxy_model_id", "acp_enhanced_enabled", "acp_enhanced_backend",
+    "report_storage", "report_s3_bucket", "report_s3_prefix", "report_s3_region", "report_presigned_url_expiry",
+)
+_AGENT_MODEL_FIELDS = ("model_id", "max_tokens", "window_size")
+
+
+def _low_impact_values(body: dict) -> dict:
+    """The current value of every low-impact setting the request names (an agent's model settings by attribute)."""
+    out = {key: getattr(settings, key, None) for key in _LOW_IMPACT_SETTINGS if key in body}
+    models = body.get("agent_models")
+    for name, cfg in (models.items() if isinstance(models, dict) else ()):
+        for field in (_AGENT_MODEL_FIELDS if isinstance(cfg, dict) else ()):
+            if field in cfg:
+                out[f"agent_{name}_{field}"] = getattr(settings, f"agent_{name}_{field}", None)
+    return out
+
+
+def _audit_low_impact(before: dict, after: dict, actor: Actor) -> None:
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    changed = sorted(key for key in before if before[key] != after.get(key))
+    if not changed:
+        return
+    with get_db_session() as s:
+        for key in changed:
+            AuditService.log(Actions.UPDATE, EntityTypes.SYSTEM, key, entity_name="settings", actor=actor.key,
+                             user_id=actor.user_id, old_values={key: before[key]}, new_values={key: after.get(key)},
+                             session=s)
+
+
 @app.patch("/api/settings")
 async def api_update_settings(request: Request, body: dict = Body(...), current: Actor = Depends(current_actor)):
+    """Update runtime settings (`_apply_settings`) — and leave one audit row per changed value (MVP-2.9.0 N25: «每次
+    设置变更都留审计记录»). The high-impact switches and the security toggles write theirs inside their own
+    transactions; every other key is audited here, from its value before and after — also when a later key of the
+    same request was refused (those keys are applied one by one)."""
+    before = _low_impact_values(body)
+    try:
+        return await _apply_settings(request, body, current)
+    finally:
+        await asyncio.to_thread(_audit_low_impact, before, _low_impact_values(body), current)
+
+
+async def _apply_settings(request: Request, body: dict, current: Actor):
     """Update runtime settings. Agent models + report config persist to settings.yaml;
     boolean toggles and scan_focus are session-level (reset on restart).
+
+    The four high-impact switches (EXEC_KEYS: the executor, auto-fix, L0 / L1 auto-approval, the executor's HITL
+    gate — MVP-2.9.0 N25) are stored in the database (services/exec_switches), so they survive a restart; like the
+    security toggles below they need an admin when api_auth_enabled, write one audit row per changed value in the
+    transaction that stores them, and a request refused by their checks applies nothing.
 
     The security toggles (CHANGE_KEYS: change_auto_approve_standard, rbac_enforce) persist to settings.yaml,
     need an admin when api_auth_enabled, write one audit row per changed value, and are applied last — a
@@ -740,9 +824,10 @@ async def api_update_settings(request: Request, body: dict = Body(...), current:
     from agenticops.audit.service import Actions, AuditService, EntityTypes
     from agenticops.config import AGENT_NAMES, VALID_SCAN_FOCUS, set_scan_focus, save_to_yaml
 
+    from agenticops.services import exec_switches
+
     BOOL_KEYS = {
-        "executor_enabled", "auto_fix_enabled", "auto_rca_enabled",
-        "notifications_enabled", "executor_auto_approve_l0_l1",
+        "auto_rca_enabled", "notifications_enabled",
         "notifications_consolidated", "bedrock_cache_enabled",
         "skills_auto_improve_enabled", "skills_post_resolution_review",
         "skills_improvement_notify",
@@ -757,7 +842,10 @@ async def api_update_settings(request: Request, body: dict = Body(...), current:
     # Change-management security toggles — persisted to settings.yaml (must survive a restart)
     CHANGE_KEYS = {"change_auto_approve_standard", "rbac_enforce"}
 
-    ALL_KEYS = (BOOL_KEYS | REPORT_STR_KEYS | REPORT_INT_KEYS | ACP_KEYS | CHANGE_KEYS
+    # The high-impact switches — stored in the DB (services/exec_switches), never set on the process's settings
+    EXEC_KEYS = set(exec_switches.FIELDS)
+
+    ALL_KEYS = (BOOL_KEYS | REPORT_STR_KEYS | REPORT_INT_KEYS | ACP_KEYS | CHANGE_KEYS | EXEC_KEYS
                 | {"scan_focus", "agent_models", "galaxy_model_id"})
     unknown = set(body.keys()) - ALL_KEYS
     if unknown:
@@ -765,11 +853,17 @@ async def api_update_settings(request: Request, body: dict = Body(...), current:
 
     # Security toggles are validated and authorized BEFORE anything is applied
     change_updates = {k: body[k] for k in CHANGE_KEYS if k in body}
-    for key in sorted(change_updates):
-        if not isinstance(change_updates[key], bool):
+    exec_updates = {k: body[k] for k in EXEC_KEYS if k in body}
+    for key in sorted({**change_updates, **exec_updates}):
+        if not isinstance(body[key], bool):
             raise HTTPException(400, f"{key} must be a boolean")
-    if change_updates and settings.api_auth_enabled:
+    if (change_updates or exec_updates) and settings.api_auth_enabled:
         await require_authenticated_user(request, admin=True)
+    # a switch this process's environment holds at its strict value cannot be changed here (review, N27)
+    held = exec_switches.held(exec_updates)
+    if held:
+        return JSONResponse(status_code=409, content={
+            "detail": exec_switches.held_message(held), "code": "held_by_environment", "fields": held})
 
     for key in BOOL_KEYS:
         if key in body:
@@ -884,6 +978,24 @@ async def api_update_settings(request: Request, body: dict = Body(...), current:
             raise
         for key, new in changed.items():
             setattr(settings, key, new)
+
+    # The high-impact switches: one audit row per changed value and the stored object, in ONE transaction — the
+    # value is in force only once that commits (services/exec_switches reads the database, not the process).
+    in_force = exec_switches.effective()
+    switched = {k: v for k, v in sorted(exec_updates.items()) if getattr(in_force, k) != v}
+    if switched:
+        def _store():
+            with get_db_session() as s:
+                for key, new in switched.items():
+                    AuditService.log(Actions.UPDATE, EntityTypes.SYSTEM, key, entity_name="settings",
+                                     actor=current.key, user_id=current.user_id,
+                                     old_values={key: getattr(in_force, key)}, new_values={key: new}, session=s)
+                exec_switches.save(switched, current.key, session=s)
+        await asyncio.to_thread(_store)
+        if switched.get("executor_enabled"):
+            # The queue's poller is started at boot only when the executor is on: switched on at runtime, the
+            # tickets queued from then on waited for the next restart (MVP-2.9.0 N8). start() is idempotent.
+            _executor_service.start()
 
     return await asyncio.to_thread(api_get_settings)  # it may list Bedrock models
 
@@ -1701,13 +1813,19 @@ def api_list_resources(
         resources = q_paged.all()
         # Health is the Galaxy definition: open, same-account issues anchored to the row; none = unknown, never healthy
         from agenticops.graph.query_service import health_overlay
+        from agenticops.services.inventory import health_reason
         overlay = health_overlay(session, [r.id for r in resources])
+        # «stale» = not observed for longer than two scan intervals (the resource-scan schedule's cadence)
+        now, stale_after = datetime.now(timezone.utc), timedelta(minutes=2 * settings.resource_scan_interval_minutes)
         items = []
         for r in resources:
             item = ResourceResponse.from_resource(r)
             h = overlay.get(r.id)
             item.open_issues = len(h["issue_ids"]) if h else 0
             item.health = h["health"] if h else "unknown"
+            item.health_reason = health_reason(open_issues=item.open_issues, absent_since=r.absent_since,
+                                               scanned_at=r.scanned_at, now=now, stale_after=stale_after)
+            item.observed_at = r.scanned_at
             items.append(item)
         return {"total": total, "items": items}
 
@@ -1875,20 +1993,34 @@ _INFRA_TYPES = {"VPC", "Subnet", "SecurityGroup", "RouteTable", "IGW", "NAT", "T
 
 
 
+def _issues_of_resource(resource: CloudResource):
+    """Which issues belong to a resource: the ones anchored to it (`resource_ref`, MVP-2.6.1 — within the resource's
+    own account: SQLite does not enforce ON DELETE SET NULL, so a stale ref may point at an id another account's row
+    now uses; `health_overlay` has the same guard), and — the older tie — the ones whose alarm carried the row's own
+    resource id. The alarm's id is often an ARN or an alarm name: the string alone missed every such issue while the
+    map and the resource table (by `resource_ref`) counted it (MVP-2.9.0)."""
+    from sqlalchemy import and_
+    # the id tie stays inside the resource's account too (an issue with no account is kept): a service-linked role
+    # has the same name in every account, and another account's issue is not this resource's
+    return or_(and_(HealthIssue.resource_ref == resource.id, HealthIssue.account_id == resource.account_id),
+               and_(HealthIssue.resource_id == resource.resource_id,
+                    or_(HealthIssue.account_id == resource.account_id, HealthIssue.account_id.is_(None))))
+
+
 @app.get("/api/resources/{resource_id}/issues", response_model=List[HealthIssueResponse])
-def api_resource_issues(resource_id: int, limit: int = Query(default=20, le=100)):
-    """List health issues for a resource."""
+def api_resource_issues(resource_id: int, limit: int = Query(default=20, le=100), open: bool = Query(default=False)):
+    """List health issues for a resource: anchored to it, or carrying its resource id (same account). `open=true`
+    keeps the open ones only (the statuses the health overlay counts) — each row's `resource_ref` says whether it
+    is anchored here, which is what the resource's health is made of."""
+    from agenticops.services.signal_gate import OPEN_ISSUE_STATUSES
     with get_db_session() as session:
         resource = session.query(CloudResource).filter_by(id=resource_id).first()
         if not resource:
             raise HTTPException(status_code=404, detail="Resource not found")
-        issues = (
-            session.query(HealthIssue)
-            .filter(HealthIssue.resource_id == resource.resource_id)
-            .order_by(HealthIssue.detected_at.desc())
-            .limit(limit)
-            .all()
-        )
+        query = session.query(HealthIssue).filter(_issues_of_resource(resource))
+        if open:
+            query = query.filter(HealthIssue.status.in_(OPEN_ISSUE_STATUSES))
+        issues = query.order_by(HealthIssue.detected_at.desc()).limit(limit).all()
         return [HealthIssueResponse.model_validate(i) for i in issues]
 
 
@@ -1903,7 +2035,7 @@ async def api_resource_fix_plans(resource_id: int, limit: int = Query(default=20
             session.query(FixPlan)
             .options(joinedload(FixPlan.fix_executions))
             .join(HealthIssue, FixPlan.health_issue_id == HealthIssue.id)
-            .filter(HealthIssue.resource_id == resource.resource_id)
+            .filter(_issues_of_resource(resource))
             .order_by(FixPlan.created_at.desc())
             .limit(limit)
             .all()
@@ -2041,8 +2173,18 @@ async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate
         if not issue:
             raise HTTPException(status_code=404, detail="Anomaly not found")
 
+        # MVP-2.9.0: a page can say which status it showed — «mark resolved» is final, and must not go through
+        # from a state the issue reached while the person was reading
+        if update.expected_status and issue.status != update.expected_status:
+            return JSONResponse(status_code=409, content={
+                "detail": (f"Issue #{issue.id} is now '{issue.status}', not '{update.expected_status}' as the page "
+                           f"showed. Reload and decide again."),
+                "code": "status_moved", "status": issue.status})
+        # MVP-2.9.0: the person's own reason, when they gave one, is what the timeline keeps
+        note = (update.note or "").strip()[:2000]
         try:
-            transition_issue(session, issue.id, update.status, actor=actor.key, reason="anomaly status update")
+            transition_issue(session, issue.id, update.status, actor=actor.key, reason=note or "anomaly status update",
+                             note=note or None, expected=update.expected_status or None)
         except InvalidStatusTransition as e:
             raise HTTPException(status_code=409, detail=str(e))
         except ValueError as e:
@@ -2050,7 +2192,7 @@ async def api_update_anomaly_status(anomaly_id: int, update: AnomalyStatusUpdate
 
         # Auto-learn: dismissed issues create detect agent memory
         if update.status == "dismissed":
-            _auto_learn_dismissed(issue.id, issue.resource_id, issue.title, issue.description)
+            _auto_learn_dismissed(issue.id, issue.resource_id, issue.title, issue.description, note=note)
 
         session.flush()
         acct_name = None
@@ -2081,15 +2223,15 @@ async def api_get_anomaly_rca(issue_id: int):
 
 
 @app.post("/api/anomalies/{issue_id}/rca", status_code=202)
-async def api_trigger_anomaly_rca(issue_id: int, actor: Actor = Depends(current_actor)):
+def api_trigger_anomaly_rca(issue_id: int, actor: Actor = Depends(current_actor)):
     """Trigger RCA for an anomaly (legacy compat — delegates to health-issues endpoint) (as the session actor — the handler's own Depends does not run on a direct call)."""
-    return await api_trigger_rca(issue_id, actor)
+    return api_trigger_rca(issue_id, actor)
 
 
 @app.post("/api/anomalies/{issue_id}/generate-fix-plan", status_code=202)
-async def api_trigger_anomaly_fix_plan(issue_id: int, actor: Actor = Depends(current_actor)):
+def api_trigger_anomaly_fix_plan(issue_id: int, actor: Actor = Depends(current_actor)):
     """Trigger fix plan for an anomaly (legacy compat — delegates to health-issues endpoint) (as the session actor — the handler's own Depends does not run on a direct call)."""
-    return await api_trigger_fix_plan(issue_id, actor)
+    return api_trigger_fix_plan(issue_id, actor)
 
 
 # ============================================================================
@@ -2129,15 +2271,15 @@ async def api_get_issue_rca(issue_id: int):
 
 
 @app.post("/api/issues/{issue_id}/rca", status_code=202)
-async def api_trigger_issue_rca(issue_id: int, actor: Actor = Depends(current_actor)):
+def api_trigger_issue_rca(issue_id: int, actor: Actor = Depends(current_actor)):
     """Trigger RCA analysis for an issue (as the session actor — the handler's own Depends does not run on a direct call)."""
-    return await api_trigger_rca(issue_id, actor)
+    return api_trigger_rca(issue_id, actor)
 
 
 @app.post("/api/issues/{issue_id}/generate-fix-plan", status_code=202)
-async def api_trigger_issue_fix_plan(issue_id: int, actor: Actor = Depends(current_actor)):
+def api_trigger_issue_fix_plan(issue_id: int, actor: Actor = Depends(current_actor)):
     """Trigger fix plan generation for an issue (as the session actor — the handler's own Depends does not run on a direct call)."""
-    return await api_trigger_fix_plan(issue_id, actor)
+    return api_trigger_fix_plan(issue_id, actor)
 
 
 # ============================================================================
@@ -2145,7 +2287,40 @@ async def api_trigger_issue_fix_plan(issue_id: int, actor: Actor = Depends(curre
 # ============================================================================
 
 
-@app.get("/api/health-issues", response_model=List[HealthIssueResponse])
+_ISSUE_VIEWS = ("all", "mine", "failed", "long_wait")
+
+
+def _issue_view_ids(actor, account_id, view):
+    """The issue ids of a Cases quick view (MVP-2.8.0 S2), None for `all`: subsets of the actor's workbench rows
+    (services/attention), so the queue and the workbench never disagree."""
+    if view == "all":
+        return None
+    from agenticops.services.attention import issue_rows
+    now = datetime.now(timezone.utc)
+    rows = issue_rows(actor, account_id=account_id, now=now)
+    if view == "failed":
+        rows = [r for r in rows if r["reason"] in ("execution_failed", "execution_not_started")]
+    elif view == "long_wait":
+        cutoff = now - timedelta(hours=settings.attention_long_wait_hours)
+        rows = [r for r in rows if r["occurred_at"] <= cutoff]
+    return [int(r["id"][1:]) for r in rows]   # every issue row's id is "I<issue id>"
+
+
+def _with_waits(session, issues, responses):
+    """Fill waiting_on / waiting_since from services/attention.issue_waits — one definition for every surface."""
+    from agenticops.services.attention import issue_waits
+    waits = issue_waits(session, issues, now=datetime.now(timezone.utc))
+    for issue, resp in zip(issues, responses):
+        w = waits.get(issue.id)
+        if w is not None:
+            resp.waiting_on, resp.waiting_since = w.phase.waiting_for, w.since
+            resp.rca_stopped = w.phase.sub == "rcaStopped"
+            resp.reopened = w.phase.sub == "reopened"
+            resp.plan_stopped = w.phase.sub == "planStopped"
+    return responses
+
+
+@app.get("/api/health-issues", response_model=HealthIssueListResponse)
 def api_list_health_issues(
     severity: Optional[str] = None,
     status: Optional[str] = None,
@@ -2156,11 +2331,15 @@ def api_list_health_issues(
     scope: str = Query("all", pattern="^(ops|security|all)$"),
     q: Optional[str] = Query(None, max_length=200),
     sort: str = Query("newest", pattern="^(newest|oldest|severity)$"),
+    view: str = Query("all", pattern="^(all|mine|failed|long_wait)$"),
     limit: int = Query(default=settings.default_list_limit, ge=1, le=settings.max_list_limit),
     offset: int = Query(default=0, ge=0),
+    actor: Actor = Depends(current_actor),
 ):
     """List health issues (the Cases queue, MVP-2.7.0 S4): `scope` ops|security|all, `status` / `severity` one or a
-    comma list (422 on an unknown value), `q` = title / resource id / I#n, `sort` newest|oldest|severity."""
+    comma list (422 on an unknown value), `q` = title / resource id / I#n, `sort` newest|oldest|severity.
+    MVP-2.8.0 S2: `{items, total}`; `view` mine / failed / long_wait (subsets of the actor's workbench rows);
+    every row says who it waits on and since when."""
     import re
     from sqlalchemy import case
     from agenticops.models import VALID_ISSUE_STATUSES
@@ -2175,8 +2354,11 @@ def api_list_health_issues(
 
     statuses = _list(status, VALID_ISSUE_STATUSES, "status")
     severity_list = _list(severity, severities, "severity")
+    view_ids = _issue_view_ids(actor, account_id, view)
     with get_db_session() as session:
         query = session.query(HealthIssue)
+        if view_ids is not None:
+            query = query.filter(HealthIssue.id.in_(view_ids))
         if severity_list:
             query = query.filter(HealthIssue.severity.in_(severity_list))
         if statuses:
@@ -2206,9 +2388,33 @@ def api_list_health_issues(
         else:
             query = query.order_by(HealthIssue.detected_at.desc(), HealthIssue.id.desc())
 
+        total = query.order_by(None).count()
         issues = query.offset(offset).limit(limit).all()
         acct_names = _build_account_name_map(session, issues)
-        return [HealthIssueResponse.from_issue(i, acct_names.get(i.account_id)) for i in issues]
+        items = _with_waits(session, issues,
+                            [HealthIssueResponse.from_issue(i, acct_names.get(i.account_id)) for i in issues])
+        end = offset + len(issues)
+        return {"items": items, "total": total, "next_cursor": str(end) if issues and end < total else None}
+
+
+@app.get("/api/health-issues/view-counts")
+def api_health_issue_view_counts(
+    account_id: Optional[int] = Query(None),
+    scope: str = Query("all", pattern="^(ops|security|all)$"),
+    actor: Actor = Depends(current_actor),
+):
+    """How many issues each Cases quick view holds (MVP-2.8.0 S2), under the same scope and account as the list."""
+    out = {}
+    with get_db_session() as session:
+        for view in _ISSUE_VIEWS:
+            ids = _issue_view_ids(actor, account_id, view)
+            q = session.query(HealthIssue)
+            if ids is not None:
+                q = q.filter(HealthIssue.id.in_(ids))
+            if account_id is not None:
+                q = q.filter_by(account_id=account_id)
+            out[view] = issue_scope_filter(q, scope).count()
+    return out
 
 
 @app.get("/api/health-issues/{issue_id}", response_model=HealthIssueResponse)
@@ -2224,6 +2430,7 @@ def api_get_health_issue(issue_id: int, actor: Actor = Depends(current_actor)):
         if issue.account_id:
             acct_name = session.query(CloudAccount.name).filter_by(id=issue.account_id).scalar()
         resp = HealthIssueResponse.from_issue(issue, acct_name)
+        _with_waits(session, [issue], [resp])
         allowed, code = route_allows(actor, "issue.note", issue)
         resp.available_actions = [{"action": "note", "allowed": allowed, "reason_code": code, "effect": "update"}]
         return resp
@@ -2359,50 +2566,119 @@ _ISSUE_AGENT_LABELS = {
 }
 
 
-def _run_issue_agent(agent_name: str, issue_id: int, trace_id: Optional[str], on_behalf_of: str) -> None:
+# What a manual agent run leaves on the issue's timeline (MVP-2.9.0): (event, stage) when it is asked for, and
+# (event, stage) when the agent call itself fails — a finished diagnosis / plan writes its own events.
+_ISSUE_AGENT_EVENTS = {
+    "rca": (("rca_started", "rca"), ("rca_completed", "rca")),
+    "sre": (("fix_plan_requested", "plan"), ("fix_plan_requested", "plan")),
+}
+
+
+def _invoke_issue_agent(agent_name: str, issue_id: int):
+    """The agent call of a manual trigger, on its own so a test can stand in for the model."""
+    if agent_name == "rca":
+        from agenticops.agents.rca_agent import rca_agent as agent
+    else:
+        from agenticops.agents.sre_agent import sre_agent as agent
+    return agent(issue_id=issue_id)
+
+
+def _run_issue_agent(agent_name: str, issue_id: int, trace_id: Optional[str], on_behalf_of: str, run=None) -> None:
     """Thread target for the manual RCA / fix-plan triggers (POST /api/health-issues/{id}/rca and
     /generate-fix-plan). ContextVars do not cross threading.Thread, so THIS thread sets the issue's trace
     and a Run Context — agent:rca | agent:sre acting on behalf of the requesting web actor — and resets
-    both in finally (the pipeline-thread pattern of rca_service / pipeline_service). Failures are logged,
-    never raised out of the thread."""
+    both in finally (the pipeline-thread pattern of rca_service / pipeline_service). Failures are logged
+    and written to the timeline, never raised out of the thread. `run` is the route's claim on the issue
+    (services/agent_runs): released here, whatever happened."""
     from agenticops.config import set_trace_id
     from agenticops.run_context import RunContext, reset_run_context, set_run_context
     _tid_token = set_trace_id(trace_id)
     _rc_token = set_run_context(RunContext(actor=f"agent:{agent_name}", on_behalf_of=on_behalf_of,
-                                           trace_id=trace_id, agent_name=agent_name))
+                                           trace_id=trace_id, agent_name=agent_name, agent_run=run))
     done_label, failed_label = _ISSUE_AGENT_LABELS[agent_name]
     try:
-        if agent_name == "rca":
-            from agenticops.agents.rca_agent import rca_agent as agent
-        else:
-            from agenticops.agents.sre_agent import sre_agent as agent
-        result = agent(issue_id=issue_id)
+        result = _invoke_issue_agent(agent_name, issue_id)
         logger.info("%s for issue #%d: %s", done_label, issue_id, str(result)[:200])
     except Exception:
         logger.exception("%s for issue #%d", failed_label, issue_id)
+        from agenticops.services.pipeline_events import log_event
+        event, stage = _ISSUE_AGENT_EVENTS[agent_name][1]
+        log_event(issue_id, event, stage, "failed", detail={"trigger": "manual", "reason": "agent error"},
+                  actor=f"agent:{agent_name}", trace_id=trace_id)
     finally:
+        if run is not None:
+            from agenticops.services import agent_runs
+            agent_runs.end(run)
         reset_run_context(_rc_token)
         _tid_token.var.reset(_tid_token)  # contextvars.Token.var is the ContextVar the token came from
 
 
+def _claim_issue(agent_name: str, issue_id: int, actor: Actor):
+    """(the claim, None) — or (None, the 409 `agent_run_in_flight` answer) while an agent is on this issue and
+    within its time limit."""
+    from agenticops.services import agent_runs
+    run = agent_runs.begin(agent_name, issue_id, actor.key)
+    if run is not None:
+        return run, None
+    busy = agent_runs.get(issue_id)
+    return None, JSONResponse(status_code=409, content={
+        "detail": f"An agent is already working on issue #{issue_id}; wait for it to finish.",
+        "code": "agent_run_in_flight",
+        "agent": busy.agent if busy else agent_name,
+        "started_at": busy.started_at.isoformat().replace("+00:00", "Z") if busy else None,
+        "requested_by": busy.requested_by if busy else None,
+    })
+
+
+def _launch_issue_agent(agent_name: str, issue_id: int, trace_id: Optional[str], actor: Actor, run,
+                        detail: Optional[dict] = None) -> None:
+    """Write the request onto the issue's timeline and start the agent thread under `run`, the caller's claim —
+    released here when the thread cannot start (the thread releases it otherwise; one that never started never
+    would). `detail` adds to the event what the request was about."""
+    import threading
+    from agenticops.services import agent_runs
+    from agenticops.services.pipeline_events import log_event
+    event, stage = _ISSUE_AGENT_EVENTS[agent_name][0]
+    prefix = "rca-trigger" if agent_name == "rca" else "fixplan-trigger"
+    try:
+        agent_runs.log_replaced(run, by=actor.key)     # it took the issue over from a run past its limit: say so (N11)
+        log_event(issue_id, event, stage, "started", detail={"trigger": "manual", "requested_by": actor.key, **(detail or {})},
+                  actor=actor.key, trace_id=trace_id)
+        threading.Thread(target=_run_issue_agent, args=(agent_name, issue_id, trace_id, actor.key, run),
+                         daemon=True, name=f"{prefix}-{issue_id}").start()
+    except BaseException:
+        agent_runs.end(run)
+        raise
+
+
+def _start_issue_agent(agent_name: str, issue_id: int, trace_id: Optional[str], actor: Actor):
+    """Claim the issue, write the request onto its timeline and start the agent thread — or answer 409 when an
+    agent a person asked for is still working on this issue (MVP-2.9.0: a second click started a second agent)."""
+    run, busy = _claim_issue(agent_name, issue_id, actor)
+    if busy is not None:
+        return busy
+    _launch_issue_agent(agent_name, issue_id, trace_id, actor, run)
+    return None
+
+
 @app.post("/api/health-issues/{issue_id}/rca", response_model=RCAResponse, status_code=202)
-async def api_trigger_rca(issue_id: int, actor: Actor = Depends(current_actor)):
-    """Trigger RCA analysis for a health issue via the rca_agent.
+def api_trigger_rca(issue_id: int, actor: Actor = Depends(current_actor)):
+    """Trigger RCA analysis for a health issue via the rca_agent. A plain `def` (so are its aliases): it writes the
+    start record, and a database write must not wait for a lock on the event loop.
 
     Runs the rca_agent in a background thread (agent:rca on behalf of the requesting actor,
-    under the issue's trace) and returns immediately.
+    under the issue's trace) and returns immediately. 409 `agent_run_in_flight` while an agent a person
+    asked for is still working on this issue (MVP-2.9.0).
     """
-    import threading
-
     with get_db_session() as session:
         issue = session.query(HealthIssue).filter_by(id=issue_id).first()
         if not issue:
             raise HTTPException(status_code=404, detail="Health issue not found")
         issue_trace_id = issue.trace_id
 
-    thread = threading.Thread(target=_run_issue_agent, args=("rca", issue_id, issue_trace_id, actor.key),
-                              daemon=True, name=f"rca-trigger-{issue_id}")
-    thread.start()
+    busy = _start_issue_agent("rca", issue_id, issue_trace_id, actor)
+    if busy is not None:
+        return busy
 
     # Return a placeholder — the RCA will be available after the agent completes
     return JSONResponse(
@@ -2415,14 +2691,13 @@ async def api_trigger_rca(issue_id: int, actor: Actor = Depends(current_actor)):
 
 
 @app.post("/api/health-issues/{issue_id}/generate-fix-plan", status_code=202)
-async def api_trigger_fix_plan(issue_id: int, actor: Actor = Depends(current_actor)):
+def api_trigger_fix_plan(issue_id: int, actor: Actor = Depends(current_actor)):
     """Trigger fix plan generation for a health issue via the sre_agent.
 
     Requires an existing RCA result. Runs sre_agent in a background thread (agent:sre on behalf
-    of the requesting actor, under the issue's trace).
+    of the requesting actor, under the issue's trace). 409 `agent_run_in_flight` while an agent a person
+    asked for is still working on this issue (MVP-2.9.0).
     """
-    import threading
-
     with get_db_session() as session:
         issue = session.query(HealthIssue).filter_by(id=issue_id).first()
         if not issue:
@@ -2453,9 +2728,9 @@ async def api_trigger_fix_plan(issue_id: int, actor: Actor = Depends(current_act
                        f"Wait for it to complete or reject it first.",
             )
 
-    thread = threading.Thread(target=_run_issue_agent, args=("sre", issue_id, issue_trace_id, actor.key),
-                              daemon=True, name=f"fixplan-trigger-{issue_id}")
-    thread.start()
+    busy = _start_issue_agent("sre", issue_id, issue_trace_id, actor)
+    if busy is not None:
+        return busy
 
     return JSONResponse(
         status_code=202,
@@ -2519,7 +2794,8 @@ def _fix_plan_response(session, plan, actor: Optional[Actor] = None) -> FixPlanR
 
 
 def _like(term: str) -> str:
-    return "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    from agenticops.services.listing import like_pattern
+    return like_pattern(term)
 
 
 def _reject_plan(session, plan, actor: Actor, reason: str) -> None:
@@ -2540,7 +2816,7 @@ def _reject_plan(session, plan, actor: Actor, reason: str) -> None:
     try:
         authz.check(actor, "plan.reject", subject=plan)
     except authz.AuthzDenied as e:
-        raise HTTPException(status_code=403, detail=str(e))
+        raise HTTPException(status_code=403, detail=authz.http_detail(e))
     if plan.status == "approved":
         # an approval's auto-run writes no row until it ends: withdrawing now would leave the executor running while
         # the issue invites a new plan (final review I5)
@@ -2730,8 +3006,7 @@ async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate, actor: Actor = 
                 raise HTTPException(status_code=422, detail="content_hash is required to edit a plan's content")
             conflict = approval_conflict(session, plan, data.content_hash)
             if conflict:
-                if plan.content_hash is None:  # stored without one: stamp it now, so the reload shows a hash to send
-                    stamp_content(session, plan)
+                if repair_stale_hash(session, plan):  # the stored hash was not of the stored content: the reload shows one that is
                     session.commit()
                 raise HTTPException(status_code=409, detail=conflict)
         changed_old, changed_new = {}, {}
@@ -2742,7 +3017,8 @@ async def api_update_fix_plan(plan_id: int, data: FixPlanUpdate, actor: Actor = 
                 changed_new[key] = value
                 setattr(plan, key, value)
         if status_alias == "rejected":
-            _reject_plan(session, plan, actor, "(rejected via deprecated PUT status)")
+            from agenticops.services.plan_content import DEPRECATED_REJECT
+            _reject_plan(session, plan, actor, DEPRECATED_REJECT)
         if changed_new:
             AuditService.log(Actions.PLAN_EDITED, EntityTypes.FIX_PLAN, str(plan.id), actor=actor.key,
                              user_id=actor.user_id, details={"fields": sorted(changed_new)},
@@ -2772,7 +3048,7 @@ async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody, actor: Ac
         try:
             authz.check(actor, "plan.approve", subject=plan)
         except authz.AuthzDenied as e:
-            raise HTTPException(status_code=403, detail=str(e))
+            raise HTTPException(status_code=403, detail=authz.http_detail(e))
         from agenticops.services.change_service import fix_path_refusal
         refusal = fix_path_refusal(plan, "approved")
         if refusal:
@@ -2787,8 +3063,10 @@ async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody, actor: Ac
             raise HTTPException(status_code=409, detail=closed)
         conflict = approval_conflict(session, plan, data.content_hash)
         if conflict:
-            if plan.content_hash is None:  # stored without one: stamp it now, so the reload shows a hash to send
-                stamp_content(session, plan)
+            # The stored hash was not of the stored content: the reload shows one that is. Only for a plan that still
+            # waits for approval — one that is executing or has run is refused just below, and its columns are the
+            # record of what was approved and run (round-2 review C-M1).
+            if plan.status in ("draft", "pending_approval") and repair_stale_hash(session, plan):
                 session.commit()
             raise HTTPException(status_code=409, detail=conflict)
         old = plan.status
@@ -2815,12 +3093,14 @@ async def api_approve_fix_plan(plan_id: int, data: FixPlanApproveBody, actor: Ac
         session.flush()
         response = _fix_plan_response(session, plan, actor)
 
-    # Chain to auto-execute (outside DB session)
+    # Chain to auto-execute (outside DB session); the answer says whether the run was queued
+    queued = False
     try:
         from agenticops.services.pipeline_service import trigger_auto_execute
-        trigger_auto_execute(approved_plan_id)
+        queued = bool(trigger_auto_execute(approved_plan_id))
     except Exception:
         logger.warning("Failed to trigger auto-execute for plan #%d", approved_plan_id, exc_info=True)
+    response.run_queued = queued
 
     return response
 
@@ -2837,17 +3117,103 @@ async def api_reject_fix_plan(plan_id: int, data: FixPlanRejectBody, actor: Acto
         return _fix_plan_response(session, plan, actor)
 
 
-@app.delete("/api/fix-plans/{plan_id}", status_code=204)
-async def api_delete_fix_plan(plan_id: int):
-    """Delete a fix plan."""
+@app.get("/api/fix-plans/{plan_id}/previous-diff")
+def api_fix_plan_previous_diff(plan_id: int):
+    """What this fix plan changed relative to the plan before it on the same issue, and what became of that one
+    (MVP-2.9.0 N14; services/plan_content.previous_plan_diff). `previous` is null for an issue's first plan.
+    Plain `def`: DB work."""
+    from agenticops.services.plan_content import previous_plan_diff
     with get_db_session() as session:
         plan = session.query(FixPlan).filter_by(id=plan_id).first()
         if not plan:
             raise HTTPException(status_code=404, detail="Fix plan not found")
+        return previous_plan_diff(session, plan)
+
+
+@app.post("/api/fix-plans/{plan_id}/request-changes", status_code=202)
+def api_request_plan_changes(plan_id: int, data: FixPlanChangesBody, actor: Actor = Depends(current_actor)):
+    """Send a fix plan that waits for approval back AND ask the plan agent for the next one — both, or neither
+    (MVP-2.9.0 N14). The reason is the person's; the agent asked for the next plan is given it
+    (sre_agent.rejection_feedback). Plain `def`: it writes.
+
+    404 → 409 (a change plan; `not_awaiting_approval`; `issue_closed`) → 422 (no reason) → 409 `plan_changed` (the
+    request names the content it was shown, and the plan is no longer that: the reason would be sent to the agent
+    with a plan the reviewer never read) → 403 / 409 of a rejection → 409 `agent_run_in_flight` (an agent is on
+    the issue: the plan is NOT sent back) → 202. The rejection is written first and committed only once the issue
+    is claimed for the plan agent, so a refusal leaves nothing behind; the claim is released if the commit or the
+    thread fails."""
+    from agenticops.services import agent_runs
+    from agenticops.services.change_service import fix_path_refusal
+    reason = data.reason.strip()
+    run = None
+    try:
+        with get_db_session() as session:
+            plan = session.query(FixPlan).filter_by(id=plan_id).first()
+            if not plan:
+                raise HTTPException(status_code=404, detail="Fix plan not found")
+            refusal = fix_path_refusal(plan, "sent back")
+            if refusal:
+                raise HTTPException(status_code=409, detail=refusal)
+            if plan.status not in ("draft", "pending_approval"):
+                return JSONResponse(status_code=409, content={
+                    "detail": f"Fix plan #{plan.id} is '{plan.status}': only a plan that waits for approval can be sent back for changes.",
+                    "code": "not_awaiting_approval", "status": plan.status})
+            issue = session.get(HealthIssue, plan.health_issue_id)
+            if issue is None or issue.status in ("resolved", "dismissed"):
+                return JSONResponse(status_code=409, content={
+                    "detail": f"Issue #{plan.health_issue_id} is closed; reopen it before asking for a new plan.",
+                    "code": "issue_closed", "status": issue.status if issue else None})
+            if not reason:
+                raise HTTPException(status_code=422, detail="a reason is required")
+            if data.content_hash is not None:
+                changed = approval_conflict(session, plan, data.content_hash)
+                if changed:
+                    return JSONResponse(status_code=409, content={"detail": changed, "code": "plan_changed"})
+            issue_id, trace_id = issue.id, issue.trace_id
+            _reject_plan(session, plan, actor, reason)          # 403 / 409; added to this session, not committed yet
+            session.flush()
+            run, busy = _claim_issue("sre", issue_id, actor)
+            if busy is not None:
+                session.rollback()                              # an agent is on the issue: the plan stays as it was
+                return busy
+    except BaseException:
+        if run is not None:
+            agent_runs.end(run)                                 # the commit failed: nobody is going to work under it
+        raise
+    _launch_issue_agent("sre", issue_id, trace_id, actor, run, detail={"after_plan": plan_id})
+    return JSONResponse(status_code=202, content={
+        "message": f"Fix plan #{plan_id} sent back; a new plan was requested for issue #{issue_id}.",
+        "health_issue_id": issue_id, "fix_plan_id": plan_id})
+
+
+@app.delete("/api/fix-plans/{plan_id}", status_code=204)
+def api_delete_fix_plan(plan_id: int, actor: Actor = Depends(current_actor)):
+    """Delete a fix plan. Withdrawing a plan is a reject by another name, so it needs `plan.reject` — and through
+    an API key it is refused like one (MVP-2.8.0 final review: a read-write key withdrew a pending plan unchecked)."""
+    from agenticops.auth import authz
+    with get_db_session() as session:
+        plan = session.query(FixPlan).filter_by(id=plan_id).first()
+        if not plan:
+            raise HTTPException(status_code=404, detail="Fix plan not found")
+        try:
+            authz.check(actor, "plan.reject", subject=plan)
+        except authz.AuthzDenied as e:
+            raise HTTPException(status_code=403, detail=authz.http_detail(e))
         from agenticops.services.change_service import fix_path_refusal
         refusal = fix_path_refusal(plan, "deleted")
         if refusal:
             raise HTTPException(status_code=409, detail=refusal)
+        # A plan that is running, or has run, is part of a record (MVP-2.9.0 N8): its runs point at it. Until then
+        # the route had no state check — the plan of a run in progress could be removed under the executor, and
+        # one with a finished run answered 500 (the run rows' foreign key).
+        from agenticops.services.pipeline_service import plan_run_in_flight
+        from agenticops.services.run_tickets import OPEN
+        runs = session.query(FixExecution.status).filter(FixExecution.fix_plan_id == plan.id).all()
+        if plan.status == "executing" or any(st in OPEN for (st,) in runs) or plan_run_in_flight(session, plan.id):
+            raise HTTPException(status_code=409, detail="A run of this plan is in progress; it cannot be deleted now")
+        if runs:
+            raise HTTPException(status_code=409, detail=f"This plan has run ({len(runs)} run record"
+                                f"{'s' if len(runs) != 1 else ''}); it is kept with them and cannot be deleted")
         session.delete(plan)
 
 
@@ -2882,16 +3248,24 @@ async def api_execute_fix_plan(plan_id: int, actor: Actor = Depends(current_acto
                 detail=f"Fix plan status is '{plan.status}', must be 'approved' to execute",
             )
 
-        if not settings.executor_enabled:
+        from agenticops.services import exec_switches
+        if not exec_switches.effective().executor_enabled:
             raise HTTPException(
                 status_code=403,
-                detail="Executor is disabled. Set AIOPS_EXECUTOR_ENABLED=true to enable",
+                detail="Executor is disabled. An administrator switches it on in Settings",
             )
 
         try:
             authz.check(actor, "plan.execute", subject=plan)
         except authz.AuthzDenied as e:
-            raise HTTPException(status_code=403, detail=str(e))
+            raise HTTPException(status_code=403, detail=authz.http_detail(e))
+
+        # A plan runs only while its issue waits for that run (N26: not once it is resolved or dismissed; N27: nor
+        # once it moved anywhere else — it could not follow the run)
+        from agenticops.services.issue_state import run_refusal
+        cannot = run_refusal(session, plan.health_issue_id)
+        if cannot:
+            raise HTTPException(status_code=409, detail=cannot)
 
         # An approval's auto-run writes no row until it ends and leaves the plan 'approved': a second executor
         # must not run the same plan alongside it (2026-10-05 final review C1)
@@ -3063,10 +3437,12 @@ async def api_get_trace(trace_id: str):
 
 
 @app.post("/api/fix-executions/{execution_id}/cancel")
-async def api_cancel_execution(execution_id: int, actor: Actor = Depends(current_actor)):
+def api_cancel_execution(execution_id: int, actor: Actor = Depends(current_actor)):
     """Cancel a running fix execution — authorized against the plan behind it (plan.execute for a fix
     plan, change.execute for a change plan; cancelling a run is executing it, not change.cancel) and
-    audited (one plan.execution_cancelled row on success). An unknown/closed ticket is a 400 as before."""
+    audited (one plan.execution_cancelled row on success). An unknown/closed ticket is a 400 as before.
+    Plain `def`: closing the record fails the plan, moves the issue and writes the timeline — under the name of
+    the person who cancelled (round-2 review A-M7: it was written as the executor's)."""
     from agenticops.audit.service import Actions, AuditService, EntityTypes
     from agenticops.auth import authz
     with get_db_session() as session:
@@ -3083,8 +3459,8 @@ async def api_cancel_execution(execution_id: int, actor: Actor = Depends(current
             else:
                 authz.check(actor, "plan.execute", subject=plan)
         except authz.AuthzDenied as e:
-            raise HTTPException(status_code=403, detail=str(e))
-    if _executor_service.cancel_execution(execution_id):
+            raise HTTPException(status_code=403, detail=authz.http_detail(e))
+    if _executor_service.cancel_execution(execution_id, by=actor.key):
         AuditService.log(Actions.PLAN_EXECUTION_CANCELLED, EntityTypes.FIX_PLAN, str(plan_id),
                          actor=actor.key, user_id=actor.user_id,
                          details={"execution_id": execution_id, "plan_kind": plan_kind})
@@ -3092,16 +3468,79 @@ async def api_cancel_execution(execution_id: int, actor: Actor = Depends(current
     raise HTTPException(status_code=400, detail="Execution not found or not in running state")
 
 
+class StopExecutionBody(BaseModel):
+    reason: str = Field(default="", max_length=2000)
+
+
+@app.post("/api/fix-executions/{execution_id}/stop", response_model=FixExecutionResponse)
+def api_stop_execution(execution_id: int, body: StopExecutionBody = Body(default_factory=StopExecutionBody),
+                       actor: Actor = Depends(current_actor)):
+    """A person stops a run in progress (MVP-2.9.0 N9). Unlike cancel, the run's record stays `running`: the
+    executor finishes the command it is on, is refused every further step of the plan, may run only the plan's own
+    rollback commands and read-only checks (agents/run_guard), and records what it did. Authorized like a cancel
+    — plan.execute for a fix plan, change.execute for a change plan — so a request through an API key is refused
+    (a human decision). 404 no such run · 403 · 409 `not_running` / `already_stopping`."""
+    from agenticops.audit.service import Actions, AuditService, EntityTypes
+    from agenticops.auth import authz
+    from agenticops.services.issue_notes import reads_as_written
+    from agenticops.services.run_tickets import request_stop
+    note = body.reason.strip()
+    if not reads_as_written(note):
+        raise HTTPException(status_code=422, detail="the note may not contain control characters")
+    with get_db_session() as session:
+        ex = session.get(FixExecution, execution_id)
+        plan = session.get(FixPlan, ex.fix_plan_id) if ex is not None else None
+        if ex is None or plan is None:
+            raise HTTPException(status_code=404, detail="Execution not found")
+        plan_id, plan_kind = plan.id, plan.plan_kind or "fix"
+        issue_id, change_id = plan.health_issue_id, plan.change_request_id
+        try:
+            if plan_kind == "change":
+                authz.check(actor, "change.execute", subject=plan.change_request)
+            else:
+                authz.check(actor, "plan.execute", subject=plan)
+        except authz.AuthzDenied as e:
+            raise HTTPException(status_code=403, detail=authz.http_detail(e))
+        if ex.status != "running":
+            raise HTTPException(status_code=409, detail={
+                "detail": f"This run is not in progress (it is '{ex.status}'); there is nothing to stop.",
+                "code": "not_running", "status": ex.status})
+        if ex.stop_requested_at is not None:
+            raise HTTPException(status_code=409, detail={
+                "detail": f"{ex.stop_requested_by or 'Someone'} already asked this run to stop.",
+                "code": "already_stopping", "by": ex.stop_requested_by})
+        # The stop and its audit row are ONE write (round-2 review A-M8: as three transactions, an audit write that
+        # failed answered 500 for a stop that had taken effect, and the retry said «already stopping»).
+        if not request_stop(execution_id, by=actor.key, note=note, session=session):
+            session.expire(ex)                     # it ended, or someone else stopped it, between the read and the write
+            code = "already_stopping" if ex.status == "running" else "not_running"
+            raise HTTPException(status_code=409, detail={
+                "detail": "This run ended, or was stopped by someone else, a moment ago.", "code": code,
+                "status": ex.status})
+        AuditService.log(Actions.PLAN_EXECUTION_STOP_REQUESTED, EntityTypes.FIX_PLAN, str(plan_id), actor=actor.key,
+                         user_id=actor.user_id, details={"execution_id": execution_id, "plan_kind": plan_kind},
+                         session=session)
+    from agenticops.services.pipeline_events import log_event
+    log_event(issue_id, "execution_stop_requested", "execution", "completed",
+              detail={"execution_id": execution_id, "plan_id": plan_id, "by": actor.key,
+                      **({"note": note[:2000]} if note else {})},
+              actor=actor.key, change_request_id=change_id if plan_kind == "change" else None)
+    with get_db_session() as session:
+        return FixExecutionResponse.model_validate(session.get(FixExecution, execution_id))
+
+
 @app.post("/api/fix-executions/{execution_id}/accept", response_model=FixExecutionResponse)
-async def api_accept_execution(execution_id: int, data: ExecutionAcceptBody, actor: Actor = Depends(current_actor)):
+def api_accept_execution(execution_id: int, data: ExecutionAcceptBody, actor: Actor = Depends(current_actor)):
     """Accept or reject an execution pending acceptance (MVP-2.6.1): a fix moves its issue (fix_executed →
     resolved | root_cause_identified), a change goes through the change's resolve-review. The identity is the
     session's actor; authorized as the plan kind's approval, so a webhook actor is 403 even in shadow mode."""
     from agenticops.services.verification import AcceptanceError, accept_execution
     try:
-        accept_execution(execution_id, actor=actor, decision=data.decision, reason=data.reason)
+        accept_execution(execution_id, actor=actor, decision=data.decision, reason=data.reason,
+                         confirmed_checks=data.confirmed_checks)
     except AcceptanceError as e:
-        raise HTTPException(status_code=e.status_code, detail=str(e))
+        from agenticops.auth import authz
+        raise HTTPException(status_code=e.status_code, detail=authz.http_detail(e))
     with get_db_session() as session:
         return FixExecutionResponse.model_validate(session.get(FixExecution, execution_id))
 
@@ -3109,8 +3548,9 @@ async def api_accept_execution(execution_id: int, data: ExecutionAcceptBody, act
 @app.get("/api/executor/status")
 async def api_executor_status():
     """Get executor service status."""
+    from agenticops.services import exec_switches
     return {
-        "enabled": settings.executor_enabled,
+        "enabled": exec_switches.effective().executor_enabled,
         "running": _executor_service.is_running,
         "active_executions": _executor_service.active_count,
         "poll_interval": settings.executor_poll_interval,
@@ -3443,22 +3883,23 @@ async def api_kb_stats():
 @app.get("/api/reports")
 def api_list_reports(
     report_type: Optional[str] = None,
-    limit: int = Query(default=settings.default_list_limit, le=settings.max_list_limit),
-    offset: int = 0,
+    q: Optional[str] = Query(default=None, max_length=200),
+    date_from: Optional[date] = Query(default=None, description="UTC day, included (YYYY-MM-DD)"),
+    date_to: Optional[date] = Query(default=None, description="UTC day, included (YYYY-MM-DD)"),
+    limit: int = Query(default=settings.default_list_limit, ge=1, le=settings.max_list_limit),
+    offset: int = Query(default=0, ge=0),
     actor: Actor = Depends(current_actor),
 ):
-    """List the reports the caller may see (S6: a private report is its creator's and admins')."""
-    from agenticops.services import report_access
+    """The reports the caller may see (S6: a private report is its creator's and admins') as `{items, total,
+    all_total}` — MVP-2.9.0 N21: searched (`q`: title, summary, body, or a number — R#145), dated (whole UTC days)
+    and counted on the server. `total` = what matches, `all_total` = every report the caller may see."""
+    from agenticops.services.content_rendering import language_status
+    from agenticops.services.report_listing import page_reports
     with get_db_session() as session:
-        query = report_access.visible_filter(session.query(Report), actor).order_by(Report.created_at.desc())
-
-        if report_type:
-            query = query.filter_by(report_type=report_type)
-
-        reports = query.offset(offset).limit(limit).all()
-        from agenticops.services.content_rendering import language_status
+        reports, total, all_total = page_reports(session, actor, report_type=report_type, q=q, date_from=date_from,
+                                                 date_to=date_to, limit=limit, offset=offset)
         status = language_status(session, reports)
-        return [_enrich_report(r, actor, status[r.id]) for r in reports]
+        return {"items": [_enrich_report(r, actor, status[r.id]) for r in reports], "total": total, "all_total": all_total}
 
 
 @app.get("/api/reports/{report_id}")
@@ -4151,33 +4592,32 @@ def api_create_chat_session(payload: ChatSessionCreate, actor: Actor = Depends(c
         return _chat_session_response(row, 0, actor, context=chat_context.context_views(db, [row])[row.id])
 
 
-@app.get("/api/chat/sessions", response_model=List[ChatSessionResponse])
-async def api_list_chat_sessions(
-    limit: int = Query(default=50, le=100),
-    include_archived: bool = Query(default=False),
+@app.get("/api/chat/sessions", response_model=ChatSessionList)
+def api_list_chat_sessions(
+    view: str = Query(default="all", description="all (not archived) | starred | archived"),
+    q: Optional[str] = Query(default=None, max_length=200),
+    cursor: Optional[str] = Query(default=None, pattern=r"^[0-9]{1,9}$", description="next_cursor of the page before"),
+    limit: int = Query(default=50, ge=1, le=100),
     actor: Actor = Depends(current_actor),
 ):
-    from agenticops.services import chat_access
+    """The conversations the caller may see, as `{items, total, all_total, next_cursor}` (MVP-2.9.0 N22): the view, the search
+    (name, the linked issue / change, the account) and the order — pinned first, then last activity — are applied
+    BEFORE the cut; each row says its `activity` and whether what it is about is `waiting_on_you`."""
+    from agenticops.services.chat_context import context_views
+    from agenticops.services.chat_session_listing import page_sessions
     with get_db_session() as db:
-        query = chat_access.visible_filter(db.query(ChatSession), actor)
-        if not include_archived:
-            query = query.filter(ChatSession.archived == False)
-        rows = (
-            query
-            .order_by(ChatSession.last_activity_at.desc())
-            .limit(limit)
-            .all()
-        )
-        # One grouped count for the page, not one COUNT per session
-        counts = dict(
-            db.query(ChatMessage.session_id, func.count(ChatMessage.id))
-            .filter(ChatMessage.session_id.in_([r.id for r in rows]))
-            .group_by(ChatMessage.session_id)
-            .all()
-        ) if rows else {}
-        from agenticops.services.chat_context import context_views
+        try:
+            page = page_sessions(db, actor, view=view, q=q, limit=limit, offset=int(cursor or 0), live=_chat_dispatch_live)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        rows = page["rows"]
         views = context_views(db, rows)
-        return [_chat_session_response(r, counts.get(r.id, 0), actor, context=views[r.id]) for r in rows]
+        return ChatSessionList(
+            items=[_chat_session_response(r, page["counts"].get(r.id, 0), actor, context=views[r.id],
+                                          activity=page["activity"][r.id], waiting_on_you=page["waiting"][r.id])
+                   for r in rows],
+            total=page["total"], all_total=page["all_total"],
+            next_cursor=None if page["next_offset"] is None else str(page["next_offset"]))
 
 
 @app.get("/api/chat/sessions/{session_id}", response_model=ChatSessionDetail)
@@ -4471,6 +4911,8 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
     from agenticops.chat.preprocessor import preprocess_message
     from agenticops.chat.stream_errors import MESSAGES as STREAM_ERROR_MESSAGES
     from agenticops.chat.stream_errors import classify as classify_stream_error, tool_outcome
+    from agenticops.chat.stream_errors import rejection_detail as stream_rejection_detail
+    from agenticops.chat.tool_steps import result_preview, summarize_input
     from agenticops.services import chat_access, chat_dispatch
 
     upload_cfg = await asyncio.to_thread(upload_config.effective)
@@ -4615,10 +5057,23 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
         set_run_context(RunContext(actor=_actor.key, actor_user_id=_actor.user_id,
                                    actor_permissions=_actor.permissions, trace_id=_chat_trace_id,
                                    agent_name="main", chat_session_id=session_id,
-                                   bound_account_id=bound_account_id, read_only=_actor.read_only))
+                                   bound_account_id=bound_account_id, read_only=_actor.read_only,
+                                   via_api_key=_actor.via_api_key))
         _chat_start_time = time.monotonic()
         accumulated = ""
         tool_calls = []
+        _tool_t0: dict[str, float] = {}  # call id → when the step was first seen (its duration starts there)
+
+        def _tool_ms(call_id) -> int:
+            t0 = _tool_t0.get(call_id)
+            return int((time.monotonic() - t0) * 1000) if t0 is not None else 0
+
+        def _turn_ms() -> int:   # where on the turn's clock a step starts (the work log's total is a span, not a sum)
+            return int((time.monotonic() - _chat_start_time) * 1000)
+
+        def _u16(text: str) -> int:   # an offset the browser's String.slice reads: UTF-16 units (an emoji is two)
+            return len(text.encode("utf-16-le", "surrogatepass")) // 2
+
         input_tokens = 0
         output_tokens = 0
         cache_read_tokens = 0
@@ -4665,21 +5120,16 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
                 if ev.get("type") == "tool_stream":
                     from agenticops.acp.mapping import tool_stream_to_sse
                     _sse = tool_stream_to_sse(ev)
-                    if _sse:
-                        if _sse["event"] == "text":
-                            accumulated += _sse["data"]["token"]
-                        elif _sse["event"] == "tool_start":
-                            _n = _sse["data"]["name"]
-                            if _n not in [t["name"] for t in tool_calls]:
-                                tool_calls.append({"name": _n, "status": "running"})
-                        elif _sse["event"] == "tool_end":
-                            # already streamed live — mark done so the post-loop
-                            # sweep doesn't emit a duplicate tool_end
-                            _n = _sse["data"]["name"]
-                            for t in tool_calls:
-                                if t["name"] == _n:
-                                    t["status"] = "done"
-                        yield {"event": _sse["event"], "data": json.dumps(_sse["data"])}
+                    # 2026-11-07: an enhanced_task is ONE step of the work log — its text streams (and lands between
+                    # the step's text_offset and text_end), its inner tools are not steps
+                    if _sse and _sse["event"] == "text":
+                        accumulated += _sse["data"]["token"]
+                        yield {"event": "text", "data": json.dumps(_sse["data"])}
+                    continue
+                # 2026-11-08: the thinking summary (Claude 4.7+, "display": "summarized") — shown live in the work log,
+                # never part of the reply nor stored
+                if ev.get("reasoning") and isinstance(ev.get("reasoningText"), str) and ev["reasoningText"]:
+                    yield {"event": "thinking", "data": json.dumps({"text": ev["reasoningText"]})}
                     continue
                 # Text token
                 if "data" in ev and isinstance(ev["data"], str) and ev["data"]:
@@ -4690,12 +5140,28 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
                     tool_name = ev["current_tool_use"].get("name", "")
                     call_id = ev["current_tool_use"].get("toolUseId") or tool_name
                     if tool_name and call_id not in [t.get("call_id") for t in tool_calls]:
-                        tool_calls.append({"name": tool_name, "status": "running", "call_id": call_id})
-                        yield {"event": "tool_start", "data": json.dumps({"name": tool_name, "call_id": call_id})}
+                        # 2026-11-07 work log: where in the reply text this step began, and when (its duration)
+                        tool_calls.append({"name": tool_name, "status": "running", "call_id": call_id,
+                                           "text_offset": _u16(accumulated), "started_ms": _turn_ms()})
+                        _tool_t0[call_id] = time.monotonic()
+                        yield {"event": "tool_start", "data": json.dumps(
+                            {"name": tool_name, "call_id": call_id, "text_offset": _u16(accumulated)})}
                 # A tool's result: its outcome comes from the result's status, never from its name (S5)
                 _msg = ev.get("message")
                 if isinstance(_msg, dict):
                     for _block in _msg.get("content") or []:
+                        # the model's finished message carries each call's parsed input: its one-line summary
+                        _use = _block.get("toolUse") if isinstance(_block, dict) else None
+                        if isinstance(_use, dict):
+                            for t in tool_calls:
+                                if t.get("call_id") == _use.get("toolUseId") and "summary" not in t:
+                                    t["summary"] = summarize_input(_use.get("input"))
+                                    # its input is complete: the step runs from here — a batch of calls the model
+                                    # wrote one after another must not count the writing as running time
+                                    _tool_t0[t["call_id"]] = time.monotonic()
+                                    t["started_ms"] = _turn_ms()
+                                    yield {"event": "tool_input", "data": json.dumps(
+                                        {"call_id": t["call_id"], "summary": t["summary"]})}
                         _res = _block.get("toolResult") if isinstance(_block, dict) else None
                         if not isinstance(_res, dict):
                             continue
@@ -4704,8 +5170,13 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
                                 _txt = " ".join(c.get("text", "") for c in (_res.get("content") or [])
                                                 if isinstance(c, dict) and isinstance(c.get("text"), str))
                                 t["status"], t["outcome"] = "done", tool_outcome(_res.get("status"), _txt)
+                                t["duration_ms"] = _tool_ms(t["call_id"])
+                                t["result_preview"] = result_preview(_txt)
+                                t["text_end"] = _u16(accumulated)
                                 yield {"event": "tool_end", "data": json.dumps(
-                                    {"name": t["name"], "call_id": t["call_id"], "outcome": t["outcome"]})}
+                                    {"name": t["name"], "call_id": t["call_id"], "outcome": t["outcome"],
+                                     "duration_ms": t["duration_ms"], "result_preview": t["result_preview"],
+                                     "text_end": t["text_end"], "started_ms": t.get("started_ms")})}
                 # Completion with result
                 if "result" in ev:
                     res = ev["result"]
@@ -4726,8 +5197,14 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
                 if t["status"] == "done":
                     continue
                 t["status"], t["outcome"] = "done", "unknown"  # no result seen: unknown, never assumed ok
+                # no result: the step owns no reply text (it ends where it began)
+                t["duration_ms"] = _tool_ms(t.get("call_id"))
+                t["result_preview"] = ""
+                t["text_end"] = t.get("text_offset", _u16(accumulated))
                 yield {"event": "tool_end", "data": json.dumps(
-                    {"name": t["name"], "call_id": t.get("call_id"), "outcome": "unknown"})}
+                    {"name": t["name"], "call_id": t.get("call_id"), "outcome": "unknown",
+                     "duration_ms": t["duration_ms"], "result_preview": "", "text_end": t["text_end"],
+                     "started_ms": t.get("started_ms")})}
 
             # Persist assistant message (re-verify session still exists to avoid
             # FK violation / orphan if it was deleted mid-stream)
@@ -4827,6 +5304,9 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
             # marker rides in the token_usage JSON.
             _code = classify_stream_error(e)
             err_meta = {"input": input_tokens, "output": output_tokens, "error": str(e)[:500], "error_code": _code}
+            _detail = stream_rejection_detail(e)   # 2026-11-08: Bedrock's reason when it rejected the request
+            if _detail:
+                err_meta["error_detail"] = _detail
             with get_db_session() as db:
                 db.add(ChatMessage(
                     session_id=db_session_pk,
@@ -4840,7 +5320,8 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
                     {"dispatch_state": "failed"}, synchronize_session=False)
             closed = True
             yield {"event": "error", "data": json.dumps({"code": _code, "message": STREAM_ERROR_MESSAGES[_code],
-                                                         "trace_id": _chat_trace_id})}
+                                                         "trace_id": _chat_trace_id,
+                                                         **({"detail": _detail} if _detail else {})})}
         finally:
             # A cancelled stream (the client went away; sse-starlette cancels the generator) skips the code above:
             # the dispatch is still closed, as interrupted — a chat is never left busy (S5)
@@ -4975,6 +5456,11 @@ class APIAuthMiddleware(BaseHTTPMiddleware):
         # and chats: every other write is refused here, before routing (auth/viewer.py).
         from agenticops.auth.viewer import is_viewer, read_only_detail, viewer_may
         if is_viewer(user) and not viewer_may(request.method, path):
+            return JSONResponse(status_code=403, content={"detail": read_only_detail()})
+        # MVP-2.8.0: a key without "write" is a viewer for this request, whatever the owner's role or rbac_enforce
+        api_key = getattr(request.state, "api_key", None)
+        if api_key is not None and "write" not in (getattr(api_key, "permissions", None) or ()) \
+                and not viewer_may(request.method, path):
             return JSONResponse(status_code=403, content={"detail": read_only_detail()})
         return await call_next(request)
 
@@ -5492,6 +5978,9 @@ class RcaFeedbackRequest(BaseModel):
     verdict: Optional[str] = Field(None, pattern="^(correct|incorrect)$")
     note: str = ""
     location_verdict: Optional[str] = Field(None, pattern="^(correct|partial|incorrect)$")
+    # MVP-2.9.0: the diagnosis the person was shown. When it is no longer the newest the verdict is refused (409
+    # `rca_changed`) instead of landing on one they did not read. None = older clients: the newest, as before.
+    rca_id: Optional[int] = Field(None, ge=1)
 
 
 @app.post("/api/health-issues/{issue_id}/rca-feedback", status_code=201)
@@ -5519,6 +6008,11 @@ async def api_rca_feedback(issue_id: int, data: RcaFeedbackRequest, actor: Actor
         )
         if not rca:
             raise HTTPException(status_code=404, detail="No RCA result for this issue")
+        if data.rca_id is not None and data.rca_id != rca.id:
+            return JSONResponse(status_code=409, content={
+                "detail": (f"The diagnosis changed: RCA #{rca.id} is now the newest one of issue #{issue_id}, "
+                           f"and the verdict was given on RCA #{data.rca_id}. Reload and judge the current one."),
+                "code": "rca_changed", "rca_id": rca.id})
         if data.location_verdict is not None:
             if rca.location_status not in ("valid", "partial"):
                 raise HTTPException(status_code=409, detail=(
@@ -5539,7 +6033,7 @@ async def api_rca_feedback(issue_id: int, data: RcaFeedbackRequest, actor: Actor
         from agenticops.services.pipeline_events import log_event
         log_event(issue_id, "rca_human_feedback", "rca",
                   detail={"rca_id": rca_id, "verdict": data.verdict, "location_verdict": data.location_verdict,
-                          "by": actor.key, "note": (data.note or "")[:200]})
+                          "by": actor.key, "note": (data.note or "")[:2000]})   # whole: it is quoted back
     except Exception:
         pass
 
@@ -5570,7 +6064,7 @@ async def api_rca_feedback(issue_id: int, data: RcaFeedbackRequest, actor: Actor
 
 
 @app.get("/api/rca/location-stats")
-async def api_rca_location_stats(days: int = Query(30, ge=1, le=365)):
+def api_rca_location_stats(days: int = Query(30, ge=1, le=365)):
     """Root-cause location quality over the last `days` days (what each figure counts: services/rca_location)."""
     from agenticops.services.rca_location import location_stats
 
@@ -5655,7 +6149,9 @@ async def api_issue_feedback(issue_id: int, data: IssueFeedbackRequest, actor: A
         from agenticops.services.issue_state import IssueNotFound, transition_issue
         with get_db_session() as session:
             try:
-                transition_issue(session, issue_id, "dismissed", actor=actor.key, reason="marked as a false positive")
+                # the person's own reason stays on the timeline (it used to reach the detect agent's memory only)
+                transition_issue(session, issue_id, "dismissed", actor=actor.key, reason="marked as a false positive",
+                                 note=(data.note or "").strip() or None)
             except (IssueNotFound, InvalidStatusTransition):
                 logger.info("false-positive feedback: HealthIssue #%d keeps its status", issue_id)
 

@@ -19,7 +19,7 @@ from agenticops.services.pipeline_events import get_timeline
 from agenticops.web.deps import current_actor
 from agenticops.web.schemas import (
     ChangeApproveBody, ChangeClarifyBody, ChangeIntakeBody, ChangeReasonBody, ChangeRequestCreate, ChangeRequestDetail,
-    ChangeRequestResponse,
+    ChangeRequestList, ChangeRequestResponse,
     ChangeResolveReviewBody, ChangeTimelineEntry, FixExecutionResponse, FixPlanResponse,
 )
 
@@ -48,7 +48,8 @@ def _call(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
     except cs.ChangeError as e:
-        raise HTTPException(status_code=e.status_code, detail=str(e))
+        from agenticops.auth import authz
+        raise HTTPException(status_code=e.status_code, detail=authz.http_detail(e))
 
 
 def _last_policy_decision(cr_id: int) -> Optional[dict]:
@@ -102,18 +103,31 @@ async def api_intake_change(request: Request, response: Response):
     return cr
 
 
-@router.get("", response_model=List[ChangeRequestResponse])
+@router.get("", response_model=ChangeRequestList)
 def api_list_changes(
     status: Optional[str] = None, account_id: Optional[int] = None, requested_by: Optional[str] = None,
     period: Optional[str] = Query(None, pattern="^(7d|30d|90d)$"),
+    q: Optional[str] = Query(None, max_length=200),
+    sort: str = Query("newest", pattern="^(newest|oldest)$"),
+    view: str = Query("all", pattern="^(all|mine)$"),
     limit: int = Query(default=50, ge=1, le=500), offset: int = Query(default=0, ge=0),
+    actor: Actor = Depends(current_actor),
 ):
-    if status and status not in VALID_CHANGE_STATUSES:
+    """The change requests (MVP-2.9.0 N18): `{items, total}`. `status` one or a comma list (422 on an unknown value),
+    `q` = title / account name / C#n (matched literally), `sort` newest|oldest, `view=mine` = the ones that wait on
+    the caller (the to-do list's own rows, so the two never disagree); every row says who it waits on."""
+    statuses = [x.strip() for x in status.split(",") if x.strip()] if status else []
+    bad = [x for x in statuses if x not in VALID_CHANGE_STATUSES]
+    if bad:
         # a typo must not look like an empty list
-        raise HTTPException(status_code=422,
-                            detail=f"invalid status '{status}'; expected one of {sorted(VALID_CHANGE_STATUSES)}")
+        raise HTTPException(status_code=422, detail=f"invalid status {bad}; expected one of {sorted(VALID_CHANGE_STATUSES)}")
+    ids = None
+    if view == "mine":
+        from agenticops.services.attention import attention_items
+        ids = [int(i["id"][1:]) for i in attention_items(actor, account_id=account_id) if i["id"].startswith("C")]
     since = datetime.now(timezone.utc) - _PERIOD[period] if period else None
-    return cs.list_changes(status=status, account_id=account_id, requested_by=requested_by, since=since, limit=limit, offset=offset)
+    return cs.page_changes(statuses=statuses, account_id=account_id, requested_by=requested_by, since=since, q=q,
+                           ids=ids, sort=sort, limit=limit, offset=offset)
 
 
 @router.get("/{cr_id}", response_model=ChangeRequestDetail)
@@ -130,8 +144,11 @@ def api_get_change(cr_id: int, actor: Actor = Depends(current_actor)):
         snap["plans"] = [FixPlanResponse.model_validate(p).model_copy(update={"account_id": snap["account_id"]})
                          for p in plans]
         snap["executions"] = [FixExecutionResponse.model_validate(e) for e in executions]
-        snap["available_actions"] = change_actions(session.get(ChangeRequest, cr_id), actor,
-                                                   plan=cs.active_plan_for(session, cr_id))
+        cr_row = session.get(ChangeRequest, cr_id)
+        snap["available_actions"] = change_actions(cr_row, actor, plan=cs.active_plan_for(session, cr_id))
+        from agenticops.services.attention import change_waits
+        phase, since = change_waits([cr_row])[cr_id]
+        snap["waiting_on"], snap["waiting_since"] = phase.waiting_for, since
     snap["policy_decision"] = _last_policy_decision(cr_id)
     return snap
 
@@ -173,7 +190,8 @@ def api_execute_change(cr_id: int, actor: Actor = Depends(current_actor)):
 
 @router.post("/{cr_id}/resolve-review", response_model=ChangeRequestResponse)
 def api_resolve_review(cr_id: int, body: ChangeResolveReviewBody, actor: Actor = Depends(current_actor)):
-    return _call(cs.resolve_review, cr_id, actor=actor, outcome=body.outcome, reason=body.reason)
+    return _call(cs.resolve_review, cr_id, actor=actor, outcome=body.outcome, reason=body.reason,
+                 confirmed_checks=body.confirmed_checks)
 
 
 @router.get("/{cr_id}/timeline", response_model=List[ChangeTimelineEntry])

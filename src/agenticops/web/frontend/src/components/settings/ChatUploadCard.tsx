@@ -4,6 +4,7 @@ import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useLocale } from "@/i18n/LocaleContext";
+import { formatFullDate } from "@/lib/formatDate";
 import {
   UploadConfigError, useChatUploadSettings, usePatchChatUpload, useResetChatUpload, type ChatUploadValues,
 } from "@/hooks/useChatUploadSettings";
@@ -49,7 +50,7 @@ export function ChatUploadCard() {
   return (
     <Card>
       <CardHeader>
-        <h2 className="text-lg font-semibold text-foreground">{t("settings.chatUpload.title")}</h2>
+        <h3 className="text-lg font-semibold text-foreground">{t("settings.chatUpload.title")}</h3>
         <span className="text-xs text-muted-foreground">{t("settings.chatUpload.subtitle")}</span>
       </CardHeader>
       <CardBody>
@@ -126,7 +127,7 @@ export function ChatUploadCard() {
             {s.updated_by && (
               <span className="ml-auto text-[11px] text-muted-foreground">
                 {t("settings.chatUpload.updated").replace("{who}", s.updated_by)
-                  .replace("{when}", s.updated_at ? new Date(s.updated_at).toLocaleString() : "")}
+                  .replace("{when}", s.updated_at ? formatFullDate(s.updated_at) : "")}
               </span>
             )}
           </div>

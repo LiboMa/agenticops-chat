@@ -17,7 +17,10 @@ class Actor:
     id: str
     user_id: Optional[int] = None
     permissions: tuple[str, ...] = ()
-    read_only: bool = False   # a viewer (auth/viewer.is_viewer): its own row lacks "write" — never set by an API key
+    read_only: bool = False   # a viewer (auth/viewer.is_viewer), or a request through an API key without "write"
+    # MVP-2.8.0: the request came through an API key — the rbac rule no-api-key-human-decisions (enforce: always) then
+    # refuses approve / reject / execute / accept, so no key, and no agent tool of a key's chat, makes a human decision
+    via_api_key: bool = False
 
     @property
     def key(self) -> str:
@@ -49,7 +52,10 @@ def actor_from_request(request: Any) -> Actor:
         # API-key auth (APIAuthMiddleware leaves the key on request.state): the key's scoped permissions CAP
         # the owner's — owner ∩ key, never a grant (spec §3.3 row 1; mirrors auth/service.require_auth).
         key_perms = set(getattr(api_key, "permissions", None) or ())
-        actor = replace(actor, permissions=tuple(sorted(set(actor.permissions) & key_perms)))
+        # MVP-2.8.0: a key without "write" is read-only for this request — as a viewer is (the middleware refuses its
+        # writes, a chat turn runs the read-only agent); RBAC shadow mode would otherwise let its writes through
+        actor = replace(actor, permissions=tuple(sorted(set(actor.permissions) & key_perms)),
+                        read_only=actor.read_only or "write" not in key_perms, via_api_key=True)
     return actor
 
 
@@ -87,4 +93,4 @@ def actor_from_run_context(ctx: Any) -> Actor:
     flags travel with it — without them a user: actor would fail the rbac matrix on every check."""
     base = parse_actor(ctx.actor)
     return Actor(base.kind, base.id, ctx.actor_user_id, tuple(ctx.actor_permissions or ()),
-                 read_only=bool(getattr(ctx, "read_only", False)))
+                 read_only=bool(getattr(ctx, "read_only", False)), via_api_key=bool(getattr(ctx, "via_api_key", False)))

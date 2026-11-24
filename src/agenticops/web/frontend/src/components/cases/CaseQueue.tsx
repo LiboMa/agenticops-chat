@@ -2,6 +2,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useHealthIssues } from "@/hooks/useHealthIssues";
+import { useReadOnly } from "@/hooks/useBootstrap";
+import { QuickViews } from "@/components/cases/QuickViews";
+import { waitLabel } from "@/lib/inbox";
 import { useScopedAccountId } from "@/components/layout/AccountScope";
 import { SeverityBadge } from "@/components/ui/SeverityBadge";
 import { Spinner } from "@/components/ui/Spinner";
@@ -9,7 +12,8 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { ISSUE_SCOPES } from "@/lib/issueScope";
 import { issueRow } from "@/lib/workItems";
 import {
-  LAST_CASE_KEY, QUEUE_CAP, SEVERITY_CHOICES, SORTS, STATUS_GROUPS, capped, queueFilters, queueParams, rowState, scrollKey,
+  LAST_CASE_KEY, QUEUE_CAP, SEVERITY_CHOICES, SORTS, STATUS_GROUPS, capped, listView, defaultView, queueFilters, queueParams,
+  rowState, scrollKey,
 } from "@/lib/caseQueue";
 import type { HealthIssue } from "@/api/types";
 
@@ -34,15 +38,20 @@ export function CaseQueue({ selectedId, wide }: { selectedId: number | null; wid
   const location = useLocation();
   const [params, setParams] = useSearchParams();
   const filters = queueFilters(params);
-  const issues = useHealthIssues({ ...filters, account_id: useScopedAccountId() });
+  const accountId = useScopedAccountId();
+  const issues = useHealthIssues({ ...filters, account_id: accountId });
+  const readOnly = useReadOnly();
+  const view = listView(params, readOnly);  // the rows' own view: «在等我» is WaitingView's page
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const id = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(id); }, []);
   const [q, setQ] = useState(filters.q ?? "");
   useEffect(() => setQ(filters.q ?? ""), [filters.q]);  // back / forward changes the URL: the box follows
   const listRef = useRef<HTMLUListElement>(null);
 
   const set = (key: string, value: string) => setParams(queueParams(params, key, value), { replace: true });
-  const data: HealthIssue[] = issues.data ?? [];
+  const data: HealthIssue[] = issues.data?.items ?? [];
   const rows = data.slice(0, QUEUE_CAP).map((i) => issueRow(i, location.search));
-  const filtered = ["status", "severity", "q", "sort"].some((k) => params.has(k));
+  const filtered = ["status", "severity", "q", "sort", "view"].some((k) => params.has(k));
 
   // Narrow: come back to where you were — once, then the saved position is spent
   useLayoutEffect(() => {
@@ -87,6 +96,7 @@ export function CaseQueue({ selectedId, wide }: { selectedId: number | null; wid
       </div>
 
       <div className="space-y-2">
+        <QuickViews view={view} scope={filters.scope} accountId={accountId} />
         <div role="group" aria-label={t("workitem.filter.scope")} className="flex rounded-md border border-border p-0.5">
           {ISSUE_SCOPES.map((s) => (
             <button key={s} type="button" aria-pressed={filters.scope === s} onClick={() => set("scope", s)}
@@ -127,7 +137,14 @@ export function CaseQueue({ selectedId, wide }: { selectedId: number | null; wid
               <p>{t("cases.empty")}</p>
               {filtered && (
                 <button type="button" className="mt-2 text-primary hover:underline"
-                        onClick={() => { setQ(""); setParams(params.get("scope") ? { scope: params.get("scope")! } : {}, { replace: true }); }}>
+                        onClick={() => {
+                          setQ("");
+                          // clear the filters, not the view (the default view is «在等我», another page entirely)
+                          const keep: Record<string, string> = {};
+                          if (params.get("scope")) keep.scope = params.get("scope")!;
+                          if (view !== defaultView(readOnly)) keep.view = view;
+                          setParams(keep, { replace: true });
+                        }}>
                   {t("cases.clear")}
                 </button>
               )}
@@ -153,7 +170,11 @@ export function CaseQueue({ selectedId, wide }: { selectedId: number | null; wid
                         {[r.subtitle, t(r.statusKey)].filter(Boolean).join(" · ")}
                         {r.recurrence > 1 && ` · ×${r.recurrence}`}
                       </span>
-                      {r.waitKey && <span className="mt-0.5 block text-xs text-primary">{t(r.waitKey)}</span>}
+                      {r.waitKey && (
+                        <span className="mt-0.5 block text-xs text-primary">
+                          {t(r.waitKey)}{r.waitSince && ` · ${waitLabel(r.waitSince, now, t)}`}
+                        </span>
+                      )}
                     </Link>
                   </li>
                 );

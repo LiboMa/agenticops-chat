@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import os
 import re
+import shlex
 from pathlib import Path
 
 # ── Shell Command Classification ─────────────────────────────────────
@@ -151,6 +152,9 @@ KUBECTL_READONLY_SUBCOMMANDS = {
     "auth can-i", "api-resources", "api-versions", "version",
     "config view", "config get-contexts", "config current-context",
     "events", "diff",
+    # rollout's two reads (2.7.0 E2E observation 3: `rollout status` was refused as a write, then retried);
+    # checked before KUBECTL_WRITE_SUBCOMMANDS, so `rollout restart/undo/pause/resume` stay writes
+    "rollout status", "rollout history",
 }
 
 KUBECTL_WRITE_SUBCOMMANDS = {
@@ -172,6 +176,38 @@ KUBECTL_BLOCKED_PATTERNS = [
 ]
 
 
+def kubectl_words(cmd: str) -> list[str] | None:
+    """The words of a kubectl command as run_kubectl hands them to kubectl — split the way the tool splits the line
+    (shlex), in the case they were written, without one leading word `kubectl`. None when the line cannot be split
+    (an unbalanced quote): the tool does not run it, and nothing vouches for it.
+
+    Everything that judges a kubectl command reads these words, never the spelling: `'dump'`, `du\\mp`, `sec''ret`
+    and two spaces between words are what they run as (MVP-2.9.0 N27 for the tier, N29 for the Secret check)."""
+    try:
+        words = shlex.split((cmd or "").strip())
+    except ValueError:
+        return None
+    return words[1:] if words[:1] and words[0].lower() == "kubectl" else words
+
+
+_NAMESPACE_NAME = re.compile(r"[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?")   # a DNS label, as Kubernetes names a namespace
+
+
+def _without_leading_namespace(words: list[str]) -> list[str]:
+    """`words` without ONE namespace flag written before the subcommand — `-n X`, `--namespace X`, `--namespace=X`,
+    in exactly that case, X a namespace's name. Anything else in front is left where it is, and the line then
+    matches no table: an option that says which cluster or as whom (`--context`, `--kubeconfig`, `--server`, `--as`,
+    `--token` …), a second namespace flag, a flag with no name after it, `-N`, `-nX`, `-n=X`."""
+    if not words:
+        return words
+    first = words[0]
+    if first in ("-n", "--namespace"):
+        return words[2:] if len(words) > 1 and _NAMESPACE_NAME.fullmatch(words[1]) else words
+    if first.startswith("--namespace=") and _NAMESPACE_NAME.fullmatch(first[len("--namespace="):]):
+        return words[1:]
+    return words
+
+
 def classify_kubectl_command(cmd: str) -> str:
     """Classify a kubectl command as 'blocked', 'write', 'readonly', or 'unknown'.
 
@@ -181,17 +217,29 @@ def classify_kubectl_command(cmd: str) -> str:
     Returns:
         Security tier: 'blocked', 'write', 'readonly', or 'unknown'.
     """
-    cmd_stripped = cmd.strip()
-    cmd_lower = cmd_stripped.lower()
+    # Judged as it will run (MVP-2.9.0 N27, review): run_kubectl hands the line to shlex, so `'dump'`, `du\\mp` and
+    # two spaces between the words are the same command — the spelling used to decide. A line that cannot be
+    # split (an unbalanced quote) is not run by the tool, and nothing vouches for it.
+    written = kubectl_words(cmd)
+    if written is None:
+        return "unknown"
 
-    # Strip leading 'kubectl' if present
-    if cmd_lower.startswith("kubectl "):
-        cmd_lower = cmd_lower[len("kubectl "):]
-
-    # Check blocked patterns first
+    # Check blocked patterns first — on the whole line, so a namespace flag in front hides nothing
+    whole = " ".join(word.lower() for word in written)
     for pattern in KUBECTL_BLOCKED_PATTERNS:
-        if re.search(pattern, cmd_lower):
+        if re.search(pattern, whole):
             return "blocked"
+
+    # ONE namespace flag before the subcommand is where the command runs, not what it does (N29): the tables below
+    # are matched from the first word, so `-n shop get pods` used to be `unknown` while `get pods -n shop` is a read.
+    words = [word.lower() for word in _without_leading_namespace(written)]
+    cmd_lower = " ".join(words)
+
+    # `cluster-info dump --output-directory=…` writes the dump into a directory on the host AgenticOps runs on:
+    # not a read (MVP-2.9.0 N26). Without the option the dump is the command's answer, and it stays one.
+    positional = [word for word in words if not word.startswith("-")]
+    if positional[:1] == ["cluster-info"] and "dump" in positional and any(w.split("=", 1)[0] == "--output-directory" for w in words):
+        return "write"
 
     # Check readonly subcommands
     for ro_cmd in KUBECTL_READONLY_SUBCOMMANDS:

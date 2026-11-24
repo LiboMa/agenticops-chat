@@ -29,7 +29,7 @@ export function ConnectorsCard() {
   return (
     <Card>
       <CardHeader>
-        <h2 className="text-lg font-semibold text-foreground">{t("connectors.title")}</h2>
+        <h3 className="text-lg font-semibold text-foreground">{t("connectors.title")}</h3>
         <span className="text-xs text-muted-foreground">{t("connectors.subtitle")}</span>
       </CardHeader>
       <CardBody>
@@ -84,6 +84,7 @@ function ConnectorRow({ c }: { c: ConnectorStatus }) {
       {c.recent_runs.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t("connectors.noRuns")}</p>
       ) : (
+        <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead className="text-left text-muted-foreground">
             <tr>
@@ -109,12 +110,13 @@ function ConnectorRow({ c }: { c: ConnectorStatus }) {
                   {countParts(r.counts)
                     .map(([k, n]) => `${KNOWN_COUNTS.includes(k) ? t(`connectors.count.${k}`) : k} ${n}`)
                     .join(" · ") || "—"}
-                  {r.error && <p className="mt-0.5 text-destructive break-words">{r.error}</p>}
+                  {r.error && <p className="mt-0.5 text-destructive [overflow-wrap:anywhere]">{r.error}</p>}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from agenticops.config import settings
 from agenticops.models import SecuritySnapshot, get_db_session
 from agenticops.security.advisor import recommend
-from agenticops.security.collectors import _enabled_regions, collect_posture
+from agenticops.security.collectors import _enabled_regions, collect_posture_checked
 from agenticops.security.reachability import annotate
 from agenticops.security.scoring import score
 
@@ -143,12 +143,14 @@ def _emit_posture_signals(account: str, annotated: list) -> int:
 
 def run_posture_snapshot() -> int:
     """Collect posture + score + persist one SecuritySnapshot per enabled account.
-    Returns the number of snapshots written. Per-account failures are isolated."""
+    Returns the number of snapshots written. Per-account failures are isolated. A snapshot records which
+    collection sources could be read (`collection_health`); when none could, it is written WITHOUT a score."""
     written = 0
     for account in _resolve_security_accounts():
         try:
-            findings = collect_posture(account)
-            result = score(findings)
+            collection = collect_posture_checked(account)
+            findings = collection.findings
+            result = score(findings, collection.failed_sources)   # no score when no source could be read
             annotated: list = []
             try:
                 instances, subnets, sgs, nacls = _aggregate_topology(account)
@@ -165,6 +167,7 @@ def run_posture_snapshot() -> int:
                     metrics=result.metrics,
                     exposure_paths=_build_exposure_paths(annotated),
                     cis_results=result.cis_results,
+                    collection_health={"status": collection.status, "sources": collection.health},
                 )
                 session.add(snap)
                 session.flush()

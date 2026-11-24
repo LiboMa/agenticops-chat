@@ -264,6 +264,7 @@ export function LocalGraph({ subject, path, note, height = 360, compact = false 
 
       <details className="text-xs">
         <summary className="cursor-pointer text-muted-foreground">{t("graph.listView")}</summary>
+        <div className="overflow-x-auto">
         <table className="mt-2 w-full">
           <thead className="text-left text-muted-foreground">
             <tr>
@@ -288,6 +289,7 @@ export function LocalGraph({ subject, path, note, height = 360, compact = false 
             ))}
           </tbody>
         </table>
+        </div>
         <p className="mt-3 font-medium">{t("graph.relations")}</p>
         <ul className="mt-1 space-y-0.5">
           {model.links.filter((l) => l.kind === "structural").map((l) => (

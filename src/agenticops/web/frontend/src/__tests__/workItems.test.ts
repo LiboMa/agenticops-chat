@@ -17,10 +17,34 @@ describe("issueRow (list mode, R2)", () => {
     expect(r.subtitle).toBeNull(); // "unknown" is not a subtitle
     expect(r.dots.map((d) => d.state)).toEqual(["current", "future", "future", "future"]);
   });
+  it("a reopened issue (N26): it stands at the diagnosis — nothing failed there — and waits on a person", () => {
+    const r = issueRow(anomaly({ status: "open", reopened: true }));
+    expect(r.dots.map((d) => d.state)).toEqual(["current", "future", "future", "future"]);
+    expect(r.waitKey).toBe("workitem.wait.you");                       // a server without waiting_on: the list's own reading
+    expect(issueRow(anomaly({ status: "open" })).waitKey).toBe("workitem.wait.rca_agent");
+    expect(issueRow(anomaly({ status: "open", reopened: true, waiting_on: "rca_agent" })).waitKey).toBe("workitem.wait.rca_agent");   // the server's answer wins
+  });
   it("a resolved issue has no wait; a real resource id is the subtitle", () => {
     const r = issueRow(anomaly({ status: "resolved", resource_type: "EC2", resource_id: "i-0abc" }));
     expect(r.waitKey).toBeNull();
     expect(r.subtitle).toBe("EC2 · i-0abc");
+  });
+});
+
+describe("issueRow — who it waits on, from the server (MVP-2.8.0 S2)", () => {
+  it("uses waiting_on / waiting_since when the list sends them; a person's wait has its start, the system's has none", () => {
+    const you = issueRow(anomaly({ status: "fix_planned", waiting_on: "approver", waiting_since: "2026-11-09T09:00:00Z" }));
+    expect(you.waitKey).toBe("workitem.wait.approver");
+    expect(you.waitSince).toBe("2026-11-09T09:00:00Z");
+    const executor = issueRow(anomaly({ status: "fix_approved", waiting_on: "executor", waiting_since: "2026-11-09T09:00:00Z" }));
+    expect(executor.waitKey).toBe("workitem.wait.executor");
+    expect(executor.waitSince).toBeNull();
+    const nobody = issueRow(anomaly({ status: "resolved", waiting_on: null, waiting_since: null }));
+    expect(nobody.waitKey).toBeNull();
+  });
+  it("an older server without the fields still gets the list-mode guess", () => {
+    expect(issueRow(anomaly({})).waitKey).toBe("workitem.wait.you");
+    expect(issueRow(anomaly({})).waitSince).toBeNull();
   });
 });
 
@@ -115,5 +139,39 @@ describe("fixPlanRow — the hub's fix-plan list (MVP-2.7.0 S3)", () => {
     const r = fixPlanRow({ ...base, plan_version: 0, status: "rejected", target: null, issue_title: null } as unknown as FixPlan);
     expect([r.ref, r.emphasis, r.subtitle, r.waitKey]).toEqual(["I#12 v1", "closed", null, null]);
     expect(r.dots.map((d) => d.state)).toEqual(["failed", "future"]);
+  });
+});
+
+describe("changeRow — who it waits on, from the server (MVP-2.9.0 N18)", () => {
+  const cr = (x: Record<string, unknown>) => ({ id: 2, title: "Scale ng-app", status: "planned", review_verdict: "approved_for_planning",
+    requested_by: "user:alice", requested_change_type: "normal", effective_change_type: "normal", risk_level: "L2",
+    created_at: "2026-11-18T08:00:00Z", updated_at: "2026-11-18T09:00:00Z", ...x }) as unknown as ChangeRequest;
+  it("uses waiting_on / waiting_since when the list sends them; a person's wait has its start", () => {
+    const r = changeRow(cr({ waiting_on: "approver", waiting_since: "2026-11-18T09:00:00Z" }));
+    expect(r).toMatchObject({ waitKey: "workitem.wait.approver", waitSince: "2026-11-18T09:00:00Z" });
+  });
+  it("the server's word wins over the page's own reading of the status", () => {
+    // «planned» reads as «waits on the approver» on the page; when the list says otherwise, the list is right
+    expect(changeRow(cr({ status: "planned", waiting_on: "requester", waiting_since: "2026-11-18T09:00:00Z" })))
+      .toMatchObject({ waitKey: "workitem.wait.requester", waitSince: "2026-11-18T09:00:00Z" });
+    expect(changeRow(cr({ status: "planned", waiting_on: "executor", waiting_since: "2026-11-18T09:00:00Z" })))
+      .toMatchObject({ waitKey: "workitem.wait.executor", waitSince: null });
+    expect(changeRow(cr({ status: "planned", waiting_on: null }))).toMatchObject({ waitKey: null, waitSince: null });
+  });
+  it("the system's wait has no clock", () => {
+    const r = changeRow(cr({ status: "under_review", waiting_on: "sre_agent", waiting_since: "2026-11-18T09:00:00Z" }));
+    expect(r).toMatchObject({ waitKey: "workitem.wait.sre_agent", waitSince: null });
+  });
+  it("the server's «nobody» stands — a closed change still says its next step", () => {
+    expect(changeRow(cr({ status: "completed", waiting_on: null }))).toMatchObject({ waitKey: null, waitSince: null });
+    expect(changeRow(cr({ status: "cancelled", waiting_on: null }))).toMatchObject({ waitKey: "workitem.primary.copyAsNew", waitSince: null });
+  });
+  it("a server without the field (the change's own page, an older one) keeps the page's own answer", () => {
+    expect(changeRow(cr({}))).toMatchObject({ waitKey: "workitem.wait.approver", waitSince: null });
+  });
+  it("the row's account is the list's, else the one handed in", () => {
+    expect(changeRow(cr({ account_name: "prod" }), "other").account).toBe("prod");
+    expect(changeRow(cr({ account_name: null }), "other").account).toBe("other");
+    expect(changeRow(cr({})).account).toBeNull();
   });
 });

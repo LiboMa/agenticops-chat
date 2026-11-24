@@ -22,6 +22,12 @@ from agenticops.cost import compute_cost, normalize_model_key
 # is_anthropic_model
 # ---------------------------------------------------------------------------
 
+
+def _sans_client(kwargs: dict) -> dict:
+    """The kwargs without the stream client config every model gets (2026-11-08, test_model_runtime)."""
+    return {k: v for k, v in kwargs.items() if k != "boto_client_config"}
+
+
 class TestIsAnthropicModel:
     @pytest.mark.parametrize("mid", [
         "anthropic.claude-opus-4-6-v1",
@@ -54,7 +60,7 @@ class TestIsAnthropicModel:
 class TestBedrockModelKwargs:
     def test_claude_gets_cache_kwargs(self, monkeypatch):
         monkeypatch.setattr(settings, "bedrock_cache_enabled", True)
-        kw = bedrock_model_kwargs("global.anthropic.claude-opus-4-8")
+        kw = _sans_client(bedrock_model_kwargs("global.anthropic.claude-opus-4-8"))
         cc = kw["cache_config"]  # 1.45 parity: messages + tool definitions, not the system prompt (yet)
         assert (cc.strategy, cc.tools_ttl, cc.system_prompt_ttl) == ("auto", True, False)
         assert "cache_tools" not in kw  # deprecated since Strands 1.55
@@ -62,48 +68,86 @@ class TestBedrockModelKwargs:
     def test_claude_thinking_fields_attached(self, monkeypatch):
         monkeypatch.setattr(settings, "bedrock_cache_enabled", True)
         fields = {"thinking": {"type": "enabled", "budget_tokens": 4096}}
-        kw = bedrock_model_kwargs("global.anthropic.claude-opus-4-6-v1", fields)
+        kw = _sans_client(bedrock_model_kwargs("global.anthropic.claude-opus-4-6-v1", fields))
         assert kw["additional_request_fields"] is fields
 
     def test_claude_cache_disabled_still_gets_thinking(self, monkeypatch):
         monkeypatch.setattr(settings, "bedrock_cache_enabled", False)
         fields = {"thinking": {"type": "enabled", "budget_tokens": 4096}}
-        kw = bedrock_model_kwargs("global.anthropic.claude-opus-4-6-v1", fields)
+        kw = _sans_client(bedrock_model_kwargs("global.anthropic.claude-opus-4-6-v1", fields))
         assert "cache_config" not in kw
         assert kw["additional_request_fields"] is fields
 
     def test_openai_gets_no_cache(self, monkeypatch):
         monkeypatch.setattr(settings, "bedrock_cache_enabled", True)
-        assert bedrock_model_kwargs("openai.gpt-oss-120b-1:0") == {}
+        assert _sans_client(bedrock_model_kwargs("openai.gpt-oss-120b-1:0")) == {}
 
-    def test_openai_thinking_translated_to_reasoning_effort(self, monkeypatch):
+    # Each OpenAI family takes the tier in its own field, up to its own highest tier — measured live on Bedrock,
+    # 2026-11-08 (every tier sent to every model): GPT-5.6 / GPT-6.x answer `reasoning_effort` with "Unknown parameter"
+    # (the whole request fails) and GPT 5.4 / 5.5 accept and ignore it (even "bogus"); all of them take
+    # `reasoning: {effort}`. gpt-oss (and the safeguard models) take `reasoning_effort`. Highest tier: GPT-5.6 /
+    # GPT-6.x max, GPT 5.4 / 5.5 xhigh ("'max' is not supported"), gpt-oss high (xhigh and max fail).
+    @pytest.mark.parametrize("budget,tier", [(2048, "low"), (4096, "medium"), (8192, "high"),
+                                             (12288, "xhigh"), (15360, "max")])
+    @pytest.mark.parametrize("model_id", [
+        "global.openai.gpt-6-astra", "global.openai.gpt-6-sol", "global.openai.gpt-6-luna",
+        "global.openai.gpt-6.1-terra", "global.openai.gpt-6.1-sol",
+        "global.openai.gpt-5.6-terra", "global.openai.gpt-5.6-luna", "global.openai.gpt-5.6-sol",
+    ])
+    def test_gpt56_and_gpt6x_take_a_reasoning_object_up_to_max(self, model_id, budget, tier):
+        fields = {"thinking": {"type": "enabled", "budget_tokens": budget}}
+        kw = _sans_client(bedrock_model_kwargs(model_id, fields))
+        assert kw == {"additional_request_fields": {"reasoning": {"effort": tier}}}
+
+    @pytest.mark.parametrize("budget,tier", [(2048, "low"), (4096, "medium"), (8192, "high"),
+                                             (12288, "xhigh"), (15360, "xhigh")])
+    @pytest.mark.parametrize("model_id", ["global.openai.gpt-5.5", "global.openai.gpt-5.4"])
+    def test_gpt54_and_gpt55_stop_at_xhigh(self, model_id, budget, tier):
+        fields = {"thinking": {"type": "enabled", "budget_tokens": budget}}
+        kw = _sans_client(bedrock_model_kwargs(model_id, fields))
+        assert kw == {"additional_request_fields": {"reasoning": {"effort": tier}}}
+
+    def test_openai_thinking_becomes_the_family_reasoning_field(self, monkeypatch):
         """Anthropic `thinking` field never reaches an OpenAI model — the
-        budget is translated to their native reasoning_effort tier instead."""
+        budget becomes the family's own reasoning field instead."""
         monkeypatch.setattr(settings, "bedrock_cache_enabled", True)
         fields = {"thinking": {"type": "enabled", "budget_tokens": 4096}}
-        kw = bedrock_model_kwargs("global.openai.gpt-5.6-terra", fields)
-        assert kw == {"additional_request_fields": {"reasoning_effort": "medium"}}
+        kw = _sans_client(bedrock_model_kwargs("global.openai.gpt-5.6-terra", fields))
+        assert kw == {"additional_request_fields": {"reasoning": {"effort": "medium"}}}
         assert "cache_config" not in kw
 
     @pytest.mark.parametrize("budget,tier", [
         (2048, "low"),      # low preset
         (4096, "medium"),   # legacy standard
         (8192, "high"),     # high preset
-        (12288, "high"),    # xhigh / legacy deep
+        (12288, "high"),    # xhigh / legacy deep — gpt-oss tops out at high
         (15360, "high"),    # max preset after runtime clamping
     ])
-    def test_reasoning_effort_tiers(self, budget, tier):
+    @pytest.mark.parametrize("model_id", ["openai.gpt-oss-120b-1:0", "openai.gpt-oss-20b-1:0",
+                                          "openai.gpt-oss-safeguard-120b", "openai.gpt-oss-safeguard-20b"])
+    def test_reasoning_effort_tiers(self, model_id, budget, tier):
         fields = {"thinking": {"type": "enabled", "budget_tokens": budget}}
-        kw = bedrock_model_kwargs("openai.gpt-oss-120b-1:0", fields)
-        assert kw["additional_request_fields"]["reasoning_effort"] == tier
+        kw = _sans_client(bedrock_model_kwargs(model_id, fields))
+        assert kw == {"additional_request_fields": {"reasoning_effort": tier}}
+
+    @pytest.mark.parametrize("model_id", ["meta.llama3-70b-instruct-v1:0", "custom.endpoint-model",
+                                          "global.openai.gpt-5.3"])
+    def test_an_unverified_family_gets_no_reasoning_field(self, model_id):
+        """A request without the field is always valid (the model's default); a guessed one can fail it."""
+        fields = {"thinking": {"type": "enabled", "budget_tokens": 8192}}
+        assert _sans_client(bedrock_model_kwargs(model_id, fields)) == {}
+
+    def test_gpt6_zero_budget_sends_nothing(self):
+        fields = {"thinking": {"type": "enabled", "budget_tokens": 0}}
+        assert _sans_client(bedrock_model_kwargs("global.openai.gpt-6-astra", fields)) == {}
 
     def test_openai_zero_budget_sends_nothing(self):
         fields = {"thinking": {"type": "enabled", "budget_tokens": 0}}
-        assert bedrock_model_kwargs("openai.gpt-oss-120b-1:0", fields) == {}
+        assert _sans_client(bedrock_model_kwargs("openai.gpt-oss-120b-1:0", fields)) == {}
 
     def test_none_thinking_fields_omitted_for_claude(self, monkeypatch):
         monkeypatch.setattr(settings, "bedrock_cache_enabled", True)
-        kw = bedrock_model_kwargs("global.anthropic.claude-sonnet-4-6", None)
+        kw = _sans_client(bedrock_model_kwargs("global.anthropic.claude-sonnet-4-6", None))
         assert "additional_request_fields" not in kw
 
 

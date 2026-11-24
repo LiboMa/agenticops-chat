@@ -73,6 +73,7 @@ class Actions:
     PLAN_EDITED = "plan.edited"
     PLAN_EXECUTE_REQUESTED = "plan.execute_requested"
     PLAN_EXECUTION_CANCELLED = "plan.execution_cancelled"
+    PLAN_EXECUTION_STOP_REQUESTED = "plan.execution_stop_requested"   # MVP-2.9.0 N9: a person stopped a run in progress
     EXECUTION_ACCEPTED = "execution.accepted"  # MVP-2.6.1: a human accepted / rejected a fix result
     EXECUTION_REJECTED = "execution.rejected"
     AUTHZ_DENIED = "authz.denied"

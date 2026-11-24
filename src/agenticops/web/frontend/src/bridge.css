@@ -1,0 +1,155 @@
+/* The palette bridge (MVP-2.9.0 round 3). While NewUI's frame is on the page (<html class="nf-on">, components/layout/
+   NewFrame) a classic page sits under NewUI's top bar and command bar, at its own address, as it is. This file gives it
+   NewUI's look without touching one page: it restates the classic design tokens of index.css — which every classic
+   page, and every dialog a page opens on <body>, reads through Tailwind's hsl(var(--x)) — with NewUI's palette.
+   Rules of the file (src/__tests__/newuiBridge.test.ts fails otherwise):
+     · every selector starts with html.nf-on, so the classic interface never sees a rule of it;
+     · day restates every token of :root, night every colour day states (html.nf-on outranks .dark);
+     · a value marked with a NewUI token name IS that token (newui.css), as an HSL triplet;
+     · text is ≥ 4.5 : 1 on every surface it can sit on.
+   It is part of the entry stylesheet (the frame's host is in the entry chunk), not of NewUI's lazy chunk. */
+
+/* ── day ─────────────────────────────────────────────────────────────────── */
+html.nf-on {
+  --background: 0.0 0.0% 100.0%;  /* solid */
+  --foreground: 233.6 37.8% 14.5%;  /* chalk */
+  --card: 0.0 0.0% 100.0%;  /* solid */
+  --card-foreground: 233.6 37.8% 14.5%;  /* chalk */
+  --popover: 0.0 0.0% 100.0%;  /* solid */
+  --popover-foreground: 233.6 37.8% 14.5%;  /* chalk */
+  --primary: 33.1 100.0% 28.0%;  /* amber */
+  --primary-foreground: 0.0 0.0% 100.0%;
+  --primary-50: 42.6 100.0% 93.9%;
+  --primary-100: 40.3 100.0% 88.0%;
+  --primary-200: 40.7 100.0% 78.0%;
+  --primary-300: 40.1 100.0% 68.0%;
+  --primary-400: 38.9 100.0% 57.1%;
+  --primary-500: 35.0 100.0% 32.9%;
+  --primary-600: 33.1 100.0% 28.0%;
+  --primary-700: 33.0 100.0% 23.9%;
+  --primary-800: 32.6 100.0% 18.4%;
+  --secondary: 226.7 47.4% 96.3%;  /* raise */
+  --secondary-foreground: 233.6 37.8% 14.5%;  /* chalk */
+  --muted: 226.7 47.4% 96.3%;  /* raise */
+  --muted-foreground: 231.6 23.2% 36.3%;  /* dim */
+  --accent: 226.7 47.4% 96.3%;  /* raise */
+  --accent-foreground: 233.6 37.8% 14.5%;  /* chalk */
+  --destructive: 0.0 65.0% 42.5%;  /* red */
+  --destructive-foreground: 0.0 0.0% 100.0%;
+  --border: 227.1 32.6% 83.1%;  /* line */
+  --input: 227.1 32.6% 83.1%;  /* line */
+  --ring: 33.1 100.0% 28.0%;  /* amber */
+  --canvas: 226.2 37.1% 93.1%;  /* ink */
+  --selected: 42.6 100.0% 93.9%;
+  --primary-hover: 33.0 100.0% 23.9%;
+  --status-ok: 167.9 86.1% 22.5%;  /* mint */
+  --status-warn: 33.1 100.0% 28.0%;  /* amber */
+  --status-danger: 0.0 65.0% 42.5%;  /* red */
+  --chart-1: 33.1 100.0% 28.0%;  /* amber */
+  --chart-2: 167.9 86.1% 22.5%;  /* mint */
+  --chart-3: 247.0 55.5% 51.6%;  /* violet */
+  --chart-4: 0.0 65.0% 42.5%;  /* red */
+  --chart-5: 231.6 23.2% 36.3%;  /* dim */
+  --radius: 10px;
+  /* the frame: NewUI's top bar (48px) + its command bar (64px) — a page sized to «the viewport minus the top bar»
+     (chat, the classic issue list, the classic map) clears both */
+  --topbar-h: 112px;
+  --side-w: 0px;                         /* there is no sidebar under NewUI's frame */
+  scroll-padding-top: 56px;              /* a card scrolled into view lands below the fixed top bar */
+}
+
+/* ── night ───────────────────────────────────────────────────────────────── */
+html.nf-on.dark {
+  --background: 235.4 43.3% 11.8%;  /* ink */
+  --foreground: 44.0 28.3% 89.6%;  /* chalk */
+  --card: 234.2 36.5% 16.7%;  /* solid */
+  --card-foreground: 44.0 28.3% 89.6%;  /* chalk */
+  --popover: 234.2 36.5% 16.7%;  /* solid */
+  --popover-foreground: 44.0 28.3% 89.6%;  /* chalk */
+  --primary: 38.9 100.0% 57.1%;  /* amber */
+  --primary-foreground: 38.6 100.0% 8.2%;  /* fill-ink */
+  --primary-50: 45.6 41.0% 12.0%;
+  --primary-100: 44.6 50.6% 15.1%;
+  --primary-200: 43.0 63.8% 20.6%;
+  --primary-300: 43.0 79.0% 28.0%;
+  --primary-400: 39.3 83.6% 42.9%;
+  --primary-500: 38.9 100.0% 57.1%;
+  --primary-600: 38.9 100.0% 57.1%;
+  --primary-700: 40.1 100.0% 68.0%;
+  --primary-800: 40.7 100.0% 78.0%;
+  --secondary: 234.5 37.9% 22.7%;  /* raise */
+  --secondary-foreground: 44.0 28.3% 89.6%;  /* chalk */
+  --muted: 234.5 37.9% 22.7%;  /* raise */
+  --muted-foreground: 233.5 25.2% 71.2%;  /* dim */
+  --accent: 234.5 37.9% 22.7%;  /* raise */
+  --accent-foreground: 44.0 28.3% 89.6%;  /* chalk */
+  --destructive: 0.0 100.0% 74.1%;  /* red */
+  --destructive-foreground: 0.0 58.5% 10.4%;
+  --border: 234.7 36.8% 30.4%;  /* line */
+  --input: 234.7 36.8% 30.4%;  /* line */
+  --ring: 38.9 100.0% 57.1%;  /* amber */
+  --canvas: 235.4 43.3% 11.8%;  /* ink */
+  --selected: 38.9 100.0% 57.1% / 0.14;
+  --primary-hover: 39.4 100.0% 65.1%;
+  --status-ok: 166.8 73.1% 63.5%;  /* mint */
+  --status-warn: 38.9 100.0% 57.1%;  /* amber */
+  --status-danger: 0.0 100.0% 74.1%;  /* red */
+  --chart-1: 38.9 100.0% 57.1%;  /* amber */
+  --chart-2: 166.8 73.1% 63.5%;  /* mint */
+  --chart-3: 247.9 100.0% 80.6%;  /* violet */
+  --chart-4: 0.0 100.0% 74.1%;  /* red */
+  --chart-5: 233.5 25.2% 71.2%;  /* dim */
+}
+
+/* The scale's filled steps are bright at night (they are also text on dark surfaces — text-primary-600 is written 24
+   times, without a dark: variant): the «text-white» written beside them becomes the fill's own ink. */
+html.nf-on.dark [class~="bg-primary"].text-white,
+html.nf-on.dark [class~="bg-primary-500"].text-white,
+html.nf-on.dark [class~="bg-primary-600"].text-white,
+html.nf-on.dark [class~="bg-primary-700"].text-white { color: hsl(var(--primary-foreground)); }
+
+/* ── day: the classic pages' own status hues ─────────────────────────────── */
+/* Tailwind's green-600 / emerald-500 / amber-500 … are written into the pages as text colours. On NewUI's day
+   surfaces they fall under 3 : 1 (green-600 on the canvas 2.7, amber-500 on white 2.2). The pages stay as they are:
+   under the frame, by day, these classes take NewUI's status colours. Night is left alone — there they sit on the
+   pages' own light chips, where a bright status colour would not read. */
+html.nf-on:not(.dark) .text-green-500,
+html.nf-on:not(.dark) .text-green-600,
+html.nf-on:not(.dark) .text-emerald-500,
+html.nf-on:not(.dark) .text-emerald-600 { color: hsl(var(--status-ok)); }
+html.nf-on:not(.dark) .text-amber-500,
+html.nf-on:not(.dark) .text-amber-600,
+html.nf-on:not(.dark) .text-orange-500,
+html.nf-on:not(.dark) .text-orange-600 { color: hsl(var(--status-warn)); }
+html.nf-on:not(.dark) .text-red-500,
+html.nf-on:not(.dark) .text-red-600 { color: hsl(var(--status-danger)); }
+
+/* ── the frame's measurements ────────────────────────────────────────────── */
+@media (max-width: 760px) {
+  html.nf-on { --topbar-h: 108px; }     /* NewUI's top bar is 44px there */
+}
+/* a page whose own input takes the command bar's place (chat): only the top bar is over it */
+html.nf-on.nf-nobar { --topbar-h: 48px; }
+@media (max-width: 760px) {
+  html.nf-on.nf-nobar { --topbar-h: 44px; }
+}
+
+/* ── the hosted page ─────────────────────────────────────────────────────── */
+html.nf-on body {
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+}
+/* .cl-host is <main class="cl-host p-6">: the classic shell's own padding (pages cancel it with -m-6), below the top
+   bar, with room for the command bar at the foot */
+html.nf-on .cl-host { margin-top: 48px; padding-bottom: calc(1.5rem + 64px); }
+html.nf-on.nf-nobar .cl-host { padding-bottom: 1.5rem; }
+@media (max-width: 760px) {
+  html.nf-on .cl-host { margin-top: 44px; }
+}
+/* …and there the command bar is out of sight until it is called (Cmd/Ctrl+K puts the focus in it) */
+html.nf-on.nf-nobar .nf .barwrap:not(:focus-within) { opacity: 0; pointer-events: none; }
+
+/* ── print: a hosted page prints its paper, never the frame — a lens is the frame, and prints as it always did ── */
+@media print {
+  html.nf-on .nf.hosting { display: none !important; }
+  html.nf-on .cl-host { margin: 0 !important; padding: 0 !important; }
+}

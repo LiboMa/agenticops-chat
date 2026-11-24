@@ -2,8 +2,12 @@ import { useState } from "react";
 import { Card, CardHeader, CardBody } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
+import { Switch } from "@/components/ui/Switch";
+import { QueryState } from "@/components/ui/QueryState";
+import { useLocale } from "@/i18n/LocaleContext";
 import { ConfigureModal } from "./ConfigureModal";
 import { buildConfigPayload, channelFields, appFields } from "@/lib/messagingFields";
+import { formatFullDate } from "@/lib/formatDate";
 import {
   useMessagingSchema, useMessagingApps, useMessagingChannels, useMessagingLogs,
   useUpsertApp, useDeleteApp, useUpsertChannel, useDeleteChannel, useToggleChannel, useTestChannel,
@@ -20,14 +24,6 @@ function StatusBadge({ on, label }: { on: boolean; label: string }) {
   );
 }
 
-function Switch({ on, onClick }: { on: boolean; onClick: () => void }) {
-  return (
-    <div onClick={onClick} className={`relative w-9 h-5 rounded-full cursor-pointer transition-colors ${on ? "bg-primary-600" : "bg-muted-foreground/30"}`}>
-      <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${on ? "translate-x-[18px]" : "translate-x-0.5"}`} />
-    </div>
-  );
-}
-
 function IconBtn({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) {
   return <button title={title} onClick={onClick} className="w-7 h-7 rounded-lg border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-secondary flex items-center justify-center">{children}</button>;
 }
@@ -41,6 +37,7 @@ interface ModalState {
 }
 
 export function MessagingTab() {
+  const { t } = useLocale();
   const schemaQ = useMessagingSchema();
   const appsQ = useMessagingApps();
   const channelsQ = useMessagingChannels();
@@ -77,19 +74,19 @@ export function MessagingTab() {
       {restartHint && (
         <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 rounded-lg px-3 py-2 text-xs">
           <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h16.9a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" /></svg>
-          Bot credentials saved — restart the service (<code className="font-mono">aiops service restart</code>) for the IM gateway to pick them up.
-          <button onClick={() => setRestartHint(false)} className="ml-auto text-amber-600">Dismiss</button>
+          {t("messaging.restartHint")} <code className="font-mono">aiops service restart</code>
+          <button onClick={() => setRestartHint(false)} className="ml-auto text-amber-600">{t("messaging.dismiss")}</button>
         </div>
       )}
 
       {/* BOT APPS */}
       <Card>
         <CardHeader>
-          <h2 className="text-base font-semibold text-foreground">Bot Apps</h2>
-          <button onClick={() => setModal({ mode: "app" })} className="px-2.5 py-1 text-xs font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">+ Connect Bot</button>
+          <h2 className="text-base font-semibold text-foreground">{t("messaging.apps")}</h2>
+          <button onClick={() => setModal({ mode: "app" })} className="px-2.5 py-1 text-xs font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">{t("messaging.connectBot")}</button>
         </CardHeader>
         <CardBody>
-          {appsQ.isLoading ? <Spinner /> : appsQ.error ? <ErrorBanner message="Failed to load apps" /> : (
+          {appsQ.isLoading ? <Spinner /> : appsQ.error ? <ErrorBanner message={t("messaging.appsFailed")} /> : (
             <div className="space-y-2">
               {APP_PLATFORMS.flatMap((platform) =>
                 Object.entries(appsQ.data?.[platform] ?? {}).map(([name, cfg]) => (
@@ -103,7 +100,7 @@ export function MessagingTab() {
                   </div>
                 ))
               )}
-              {APP_PLATFORMS.every((p) => !Object.keys(appsQ.data?.[p] ?? {}).length) && <p className="text-sm text-muted-foreground">No bot apps configured.</p>}
+              {APP_PLATFORMS.every((p) => !Object.keys(appsQ.data?.[p] ?? {}).length) && <p className="text-sm text-muted-foreground">{t("messaging.noApps")}</p>}
             </div>
           )}
         </CardBody>
@@ -113,14 +110,14 @@ export function MessagingTab() {
       <Card>
         <CardHeader>
           <h2 className="text-base font-semibold text-foreground">Channels</h2>
-          <button onClick={() => setModal({ mode: "channel" })} className="px-2.5 py-1 text-xs font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">+ Add Channel</button>
+          <button onClick={() => setModal({ mode: "channel" })} className="px-2.5 py-1 text-xs font-medium text-white bg-primary-600 rounded-lg hover:bg-primary-700">{t("messaging.addChannel")}</button>
         </CardHeader>
         <CardBody>
-          {channelsQ.isLoading ? <Spinner /> : channelsQ.error ? <ErrorBanner message="Failed to load channels" /> : (
+          {channelsQ.isLoading ? <Spinner /> : channelsQ.error ? <ErrorBanner message={t("messaging.channelsFailed")} /> : (
             <div className="space-y-2">
               {(channelsQ.data ?? []).map((ch: ChannelInfo) => (
                 <div key={ch.name} className="flex items-center gap-3 p-2.5 border border-border rounded-lg">
-                  <Switch on={ch.enabled} onClick={() => toggleChannel.mutate({ name: ch.name, enabled: !ch.enabled })} />
+                  <Switch checked={ch.enabled} label={t("messaging.channelSwitch").replace("{name}", ch.name)} onCheckedChange={(v) => toggleChannel.mutate({ name: ch.name, enabled: v })} />
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-foreground flex items-center gap-2">{ch.name} <StatusBadge on={ch.enabled} label={ch.enabled ? "Enabled" : "Disabled"} /></div>
                     <div className="text-[11px] text-muted-foreground">{ch.type} · role: {ch.role}</div>
@@ -130,7 +127,7 @@ export function MessagingTab() {
                   <button onClick={() => deleteChannel.mutate(ch.name)} className="text-xs text-red-600 hover:underline">Delete</button>
                 </div>
               ))}
-              {!(channelsQ.data ?? []).length && <p className="text-sm text-muted-foreground">No channels configured.</p>}
+              {!(channelsQ.data ?? []).length && <p className="text-sm text-muted-foreground">{t("messaging.noChannels")}</p>}
             </div>
           )}
         </CardBody>
@@ -138,21 +135,22 @@ export function MessagingTab() {
 
       {/* DELIVERY LOGS */}
       <Card>
-        <CardHeader><h2 className="text-base font-semibold text-foreground">Delivery Logs</h2></CardHeader>
+        <CardHeader><h2 className="text-base font-semibold text-foreground">{t("messaging.logs")}</h2></CardHeader>
         <CardBody>
-          {logsQ.isLoading ? <Spinner /> : (
+          <QueryState query={logsQ} isEmpty={(d) => d.length === 0} emptyText={t("messaging.noLogs")} onRetry={() => void logsQ.refetch()}>
+            {(logs) => (
             <div className="space-y-1.5">
-              {(logsQ.data ?? []).slice(0, 20).map((log) => (
+              {logs.slice(0, 20).map((log) => (
                 <div key={log.id} className="flex items-center gap-2 text-xs p-2 border border-border rounded-lg">
                   <span className={`px-1.5 py-0.5 rounded font-semibold ${log.status === "sent" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{log.status}</span>
                   <span className="font-medium text-foreground">{log.channel_name}</span>
                   <span className="text-muted-foreground truncate flex-1">{log.subject}</span>
-                  <span className="text-muted-foreground/60">{new Date(log.sent_at).toLocaleString()}</span>
+                  <span className="text-muted-foreground/60">{formatFullDate(log.sent_at)}</span>
                 </div>
               ))}
-              {!(logsQ.data ?? []).length && <p className="text-sm text-muted-foreground">No delivery logs yet.</p>}
             </div>
-          )}
+            )}
+          </QueryState>
         </CardBody>
       </Card>
 

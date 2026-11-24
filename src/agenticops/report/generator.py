@@ -565,11 +565,24 @@ class ReportGenerator:
                 lines.append("No security snapshot available yet. "
                              "Run the SecurityPostureSnapshot schedule first.")
             for account_id, snap in sorted(latest.items()):
-                lines += [f"## Account: {account_id}",
-                          f"**Overall score**: {snap.overall_score:.1f} / 100", "",
-                          "| Category | Score |", "|---|---|"]
+                # MVP-2.9.0 N20: which collection sources could be read. No score when none could; a source that
+                # failed leaves its controls `undetermined` (counted as not passed) and its category unscored.
+                health = snap.collection_health if isinstance(snap.collection_health, dict) else {}
+                failed = sorted((name, state.get("error") or "failed")
+                                for name, state in (health.get("sources") or {}).items()
+                                if isinstance(state, dict) and not state.get("ok"))
+                if snap.overall_score is None:
+                    overall = "not scored — no collection source could be read"
+                else:
+                    overall = f"{snap.overall_score:.1f} / 100"
+                    if failed:
+                        overall += " (partial collection: a control that could not be read counts as not passed)"
+                lines += [f"## Account: {account_id}", f"**Overall score**: {overall}", ""]
+                if failed:
+                    lines += ["Collection sources that failed:"] + [f"- {name}: {error}" for name, error in failed] + [""]
+                lines += ["| Category | Score |", "|---|---|"]
                 for cat, val in sorted((snap.category_scores or {}).items()):
-                    lines.append(f"| {cat} | {val:.1f} |")
+                    lines.append(f"| {cat} | {'not collected' if val is None else format(val, '.1f')} |")
                 lines += ["", "| CIS Control | Result |", "|---|---|"]
                 for cid, res in sorted((snap.cis_results or {}).items()):
                     lines.append(f"| {cid} | {res} |")

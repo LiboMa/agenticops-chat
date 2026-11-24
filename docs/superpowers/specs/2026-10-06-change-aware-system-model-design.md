@@ -1,6 +1,6 @@
 # 变更感知的系统模型（Change-aware System Model）设计
 
-> **日期**：2026-10-06 · **分支**：`MVP-2.7.0`（主人 2026-10-06 裁定：在 MVP-2.7.0 上实现，并入 2.7.0 的发布规划——`docs/superpowers/plans/2026-10-05-mvp-2.7.0-roadmap.md` 的「核心能力轨 A1–A4」，A1–A4 即本文 §12 的 P1–P4，改名只为避开路线图里设计包的 P0–P6 优先级编号）· **状态**：主人已批准（2026-10-06「请实现在 MVP-2.7.0」）；A1 实施计划待出（预定路径 `docs/superpowers/plans/2026-10-06-change-aware-a1-ledger-minute.md`）
+> **日期**：2026-10-06 · **分支**：`MVP-2.7.1`（主人 10-06 先裁定在 MVP-2.7.0 上实现、并入 2.7.0 规划；10-08 改为「complete the A1–A4's implementation within MVP-2.7.1」——版本说明 `docs/MVP-2.7.1-RELEASE.md`。A1–A4 即本文 §12 的 P1–P4，改名只为避开 2.7.0 路线图里设计包的 P0–P6 优先级编号） · **状态**：主人已批准（2026-10-06）；A1 实施计划待出（预定路径 `docs/superpowers/plans/2026-10-06-change-aware-a1-ledger-minute.md`）
 > **来源**：2026-10-05/06 的架构讨论（brainstorm）。主人提出"系统性加强 RCA、资源构图精确性、实时性、易用性"，讨论收敛为三个子项目：**A' 变更感知的系统模型**（本 spec）→ B RCA 调查运行时 + 评测（已批准的 Harness 计划阶段 1–2）→ C 易用性作为 A/B 的验收要求。本 spec 只覆盖 A'。
 > **参考**：`RAW-Idea-latest-v3.md`（两条流水线一个闭环；Scan/Detect 作为后台数据飞轮；L3–L4 甜蜜点）、`docs/AGENTIC-SRE-READINESS-AUDIT-2026-08-29.md` §3.6（"当前 Graph 是资源图，不是运维知识图"）、`docs/MVP-2.6.1-GRAPH-FACTS-MEASUREMENT.md`、`docs/MVP-2.6.1-LOCATION-EVAL-REPORT.md`。
 

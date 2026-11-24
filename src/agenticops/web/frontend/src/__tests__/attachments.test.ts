@@ -126,3 +126,18 @@ describe("attachmentReasonText", () => {
     expect(attachmentReasonText(undefined, t)).toBe("");
   });
 });
+
+import { attachmentErrorReason, pagesLabel } from "@/lib/attachments";
+describe("composer card copy (2026-11-07)", () => {
+  it("a refused file's reason without its name (the card shows the name)", () => {
+    const en = (k: string) => (k === "chat.attach.type" ? "{name}: this file type cannot be attached" : k);
+    const zh = (k: string) => (k === "chat.attach.type" ? "{name}：不支持这种文件类型" : k);
+    expect(attachmentErrorReason({ kind: "type", name: "setup.exe" }, en)).toBe("this file type cannot be attached");
+    expect(attachmentErrorReason({ kind: "type", name: "setup.exe" }, zh)).toBe("不支持这种文件类型");
+  });
+  it("one page, n pages", () => {
+    const t = (k: string) => (k === "chat.attach.page" ? "1 page" : "{n} pages");
+    expect(pagesLabel(1, t)).toBe("1 page");
+    expect(pagesLabel(12, t)).toBe("12 pages");
+  });
+});

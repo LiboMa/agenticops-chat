@@ -2,10 +2,17 @@
 
 import os
 import subprocess
+import tempfile
 import threading
 import warnings
 
 import pytest
+
+# The service's log handlers write under settings.log_dir (web/app._setup_service_logging). A test that starts the app's
+# lifespan would otherwise attach them to the RUNNING service's logs/backend.log and rotate its history away with DEBUG
+# test output (2026-11-08: five rotations in one full run). Set before anything reads the settings; unconditional, so a
+# developer's shell value can never point the suite back at the real logs.
+os.environ["AIOPS_LOG_DIR"] = tempfile.mkdtemp(prefix="aiops-test-logs-")
 
 
 def _block_live_bedrock_runtime() -> None:
@@ -125,6 +132,19 @@ def _command_ledger_off(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_agent_runs():
+    """The manual RCA / fix-plan triggers claim their issue in this process (services/agent_runs, MVP-2.9.0) and
+    the agent thread releases the claim. A test that stands in for `threading.Thread` never runs that thread, and
+    every test's database restarts ids at 1 — a claim left behind would answer the next test's trigger with 409."""
+    import sys
+
+    mod = sys.modules.get("agenticops.services.agent_runs")
+    if mod is not None:
+        mod.clear()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _fresh_uncovered_refusals():
     """save_execution_result refuses an uncovering result once per (plan, execution) — process-local state.
     Every test's database restarts ids at 1, so a refusal left by one test would change the next one's."""
@@ -134,3 +154,17 @@ def _fresh_uncovered_refusals():
     if mod is not None:
         mod._UNCOVERED_REFUSED.clear()
     yield
+
+
+@pytest.fixture(autouse=True)
+def _fresh_exec_switches():
+    """The four high-impact switches are read from the database and remembered for a second (services/exec_switches,
+    MVP-2.9.0 N25). Tests swap databases and reuse paths: what one test stored must not answer the next one's read."""
+    import sys
+
+    mod = sys.modules.get("agenticops.services.exec_switches")
+    if mod is not None:
+        mod.invalidate()
+    yield
+    if mod is not None:
+        mod.invalidate()

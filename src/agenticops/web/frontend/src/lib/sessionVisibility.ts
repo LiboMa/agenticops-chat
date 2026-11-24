@@ -25,3 +25,12 @@ export function canManage(s: Pick<ChatSession, "can_manage">): boolean {
 export function otherVisibility(s: Pick<ChatSession, "visibility">): SessionVisibility {
   return (s.visibility ?? "workspace") === "private" ? "workspace" : "private";
 }
+
+/** The word a row's third line says about who sees the conversation (MVP-2.9.0 N22): `private` (yours),
+ *  `othersPrivate`, `workspace` (shared). With sign-in off every conversation is shared: nothing is said. */
+export function visibilityWord(s: Pick<ChatSession, "visibility" | "owned_by_me">, authenticated: boolean):
+  "private" | "othersPrivate" | "workspace" | null {
+  if (!authenticated) return null;
+  if ((s.visibility ?? "workspace") === "workspace") return "workspace";
+  return s.owned_by_me ? "private" : "othersPrivate";
+}

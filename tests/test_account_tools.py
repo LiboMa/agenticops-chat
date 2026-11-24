@@ -54,10 +54,9 @@ def _patch_db(db_session, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _patch_credential_store(monkeypatch):
-    """Stub credential store — pass-through encrypt."""
-    store = MagicMock()
-    store.encrypt_credentials.side_effect = lambda c: c
-    store.backend_name = "test-backend"
+    """A real store on the plaintext backend: an edit merges into the stored credentials (decrypt, merge, encrypt)."""
+    from agenticops.credentials.store import CredentialStore, PlaintextBackend
+    store = CredentialStore(PlaintextBackend())
     monkeypatch.setattr(
         "agenticops.credentials.store.get_credential_store",
         lambda: store,
@@ -313,3 +312,80 @@ class TestRemoveCloudAccount:
     def test_remove_not_found(self, db_session):
         result = remove_cloud_account._tool_func(name="ghost")
         assert "not found" in result
+
+
+# ─── An edit keeps the stored secrets; account changes are audited (2026-11-09) ─
+
+
+def _stored_assume_role(store):
+    return store.encrypt_credentials({"role_arn": "arn:aws:iam::1:role/R", "account_id": "1",
+                                      "access_key_id": "AKIAOLD", "secret_access_key": "old-secret"})
+
+
+def _creds(db, name):
+    return db.query(CloudAccount).filter_by(name=name).one().credentials
+
+
+class TestUpdateKeepsStoredSecrets:
+    def test_a_role_only_edit_keeps_the_keys(self, db_session, _patch_credential_store):
+        store = _patch_credential_store
+        _add_account(db_session, "keep", creds=_stored_assume_role(store), source_type="assume_role")
+        result = update_cloud_account._tool_func(name="keep", credentials_json='{"role_arn": "arn:aws:iam::1:role/R2"}')
+        assert "credentials" in result
+        assert store.decrypt_credentials(_creds(db_session, "keep")) == {
+            "role_arn": "arn:aws:iam::1:role/R2", "account_id": "1",
+            "access_key_id": "AKIAOLD", "secret_access_key": "old-secret"}
+
+    def test_clear_secrets_removes_the_keys(self, db_session, _patch_credential_store):
+        _add_account(db_session, "clr", creds=_stored_assume_role(_patch_credential_store), source_type="assume_role")
+        result = update_cloud_account._tool_func(name="clr", clear_secrets="true")
+        assert "credentials" in result
+        assert _creds(db_session, "clr") == {"role_arn": "arn:aws:iam::1:role/R", "account_id": "1"}
+
+    def test_switching_to_access_keys_drops_the_role(self, db_session, _patch_credential_store):
+        store = _patch_credential_store
+        _add_account(db_session, "sw", creds=_stored_assume_role(store), source_type="assume_role")
+        update_cloud_account._tool_func(name="sw", credential_source_type="static_keys")
+        assert store.decrypt_credentials(_creds(db_session, "sw")) == {
+            "account_id": "1", "access_key_id": "AKIAOLD", "secret_access_key": "old-secret"}
+
+    def test_an_invalid_source_type_changes_nothing(self, db_session, _patch_credential_store):
+        stored = _stored_assume_role(_patch_credential_store)
+        _add_account(db_session, "bad-src", creds=dict(stored), source_type="assume_role")
+        result = update_cloud_account._tool_func(name="bad-src", credentials_json='{"external_id": "x"}',
+                                                 credential_source_type="magic")
+        assert "Invalid source type" in result
+        assert _creds(db_session, "bad-src") == stored
+
+
+class TestAccountToolsAudit:
+    def _rows(self, db):
+        from agenticops.audit.models import AuditLog
+        return db.query(AuditLog).filter_by(entity_type="account").order_by(AuditLog.id).all()
+
+    def test_add_update_remove_are_audited_without_a_secret(self, db_session):
+        import json
+        from agenticops.run_context import run_context
+        with run_context(actor="user:alice@example.com", actor_user_id=7):
+            add_cloud_account._tool_func(name="aud", provider="aws", credentials_json=json.dumps(
+                {"role_arn": "arn:aws:iam::1:role/R", "access_key_id": "AKIAAUDIT", "secret_access_key": "audit-secret"}))
+            update_cloud_account._tool_func(name="aud", regions="us-east-1,eu-west-1")
+            remove_cloud_account._tool_func(name="aud")
+        rows = self._rows(db_session)
+        assert [r.action for r in rows] == ["create", "update", "delete"]
+        assert {(r.actor, r.user_id, r.entity_name) for r in rows} == {("user:alice@example.com", 7, "aud")}
+        assert [r.details for r in rows] == [{"via": "agent_tool", "secrets": "added"},
+                                             {"via": "agent_tool", "secrets": "kept"}, {"via": "agent_tool"}]
+        assert rows[1].new_values["regions"] == ["us-east-1", "eu-west-1"]
+        text = json.dumps([[r.old_values, r.new_values, r.details] for r in rows])
+        assert "AKIAAUDIT" not in text and "audit-secret" not in text
+
+    def test_without_a_run_context_the_actor_is_an_agent(self, db_session):
+        add_cloud_account._tool_func(name="no-ctx", provider="aws", credentials_json="{}")
+        assert [r.actor for r in self._rows(db_session)] == ["agent:unattributed"]
+
+    def test_a_refused_update_writes_no_row(self, db_session):
+        _add_account(db_session, "quiet")
+        update_cloud_account._tool_func(name="quiet")
+        update_cloud_account._tool_func(name="quiet", credential_source_type="magic")
+        assert self._rows(db_session) == []

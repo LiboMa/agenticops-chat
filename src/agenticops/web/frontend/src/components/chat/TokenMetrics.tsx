@@ -1,12 +1,16 @@
 import { useState } from "react";
+import { useLocale } from "@/i18n/LocaleContext";
 import { useTraceTimeline } from "@/hooks/useTraceTimeline";
 import type { ChatMessage } from "@/api/types";
 
 interface Props {
   msg: ChatMessage;
+  /** in the answer's action row (2026-11-07): aligned with the row's 32px icons */
+  inline?: boolean;
 }
 
-export function TokenMetrics({ msg }: Props) {
+export function TokenMetrics({ msg, inline }: Props) {
+  const { t } = useLocale();
   const [expanded, setExpanded] = useState(false);
   const tu = msg.token_usage;
   if (!tu) return null;
@@ -20,7 +24,7 @@ export function TokenMetrics({ msg }: Props) {
   const timelineQ = useTraceTimeline(msg.trace_id, expanded);
 
   return (
-    <div className="mt-1">
+    <div className={inline ? "pt-[7px]" : "mt-1"}>
       <button
         onClick={() => setExpanded(!expanded)}
         className="text-xs text-muted-foreground tabular-nums hover:text-foreground transition-colors"
@@ -33,16 +37,17 @@ export function TokenMetrics({ msg }: Props) {
       {expanded && (
         <div className="mt-1 ml-2 text-xs border-l-2 border-muted pl-2">
           {tu.model && (
-            <div className="text-muted-foreground mb-1">Model: {tu.model}</div>
+            <div className="text-muted-foreground mb-1">{t("tokens.model")}{tu.model}</div>
           )}
           {cacheRead > 0 && (
             <div className="text-muted-foreground">
-              Cache read: {cacheRead.toLocaleString()} ({((cacheRead / (input + cacheRead)) * 100).toFixed(0)}%)
+              {t("tokens.cacheRead")}{cacheRead.toLocaleString()} ({((cacheRead / (input + cacheRead)) * 100).toFixed(0)}%)
             </div>
           )}
 
-          {timelineQ.isLoading && <div className="text-muted-foreground">Loading trace...</div>}
+          {timelineQ.isLoading && <div className="text-muted-foreground">{t("tokens.loadingTrace")}</div>}
           {timelineQ.data && timelineQ.data.calls.length > 1 && (
+            <div className="overflow-x-auto">
             <table className="mt-1 w-full text-[11px] tabular-nums">
               <thead>
                 <tr className="text-muted-foreground">
@@ -67,6 +72,7 @@ export function TokenMetrics({ msg }: Props) {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}

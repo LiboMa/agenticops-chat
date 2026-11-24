@@ -286,17 +286,40 @@ class SessionFactory:
         """Test connectivity for an account.
 
         Returns:
-            {"success": bool, "identity": str|None, "error": str|None}
+            {"success": bool, "identity": str|None, "account_id": str|None, "error": str|None,
+             "reason": what may be kept and shown of a failure (an error code and operation — never the sentence,
+             which names roles and account numbers), "untested": True when no test exists for this account}
+
+        What is tested is the credentials stored NOW (MVP-2.9.0 N27, review): the cache — keyed by the account's
+        name, for an hour — is dropped first, so a session built before the account was re-pointed, or for an
+        account that had this name before, never answers. An account that is not registered is not tested with
+        the host's own credentials; an account of another provider gets no AWS verdict; credentials that reach
+        another AWS account than the registered one are a failure, as the provider layer treats them.
         """
         try:
-            # Use the account's first configured region as STS endpoint
             account = self._load_account(account_name)
-            sts_region = (account.regions[0] if account and account.regions else None)
+            if account is None:
+                return {"success": False, "identity": None, "account_id": None,
+                        "error": f"Account '{account_name}' is not registered", "reason": "the account is not registered"}
+            provider = getattr(account, "provider", None) or "aws"
+            if provider != "aws":
+                return {"success": False, "untested": True, "identity": None, "account_id": None,
+                        "error": f"A connection test exists only for AWS accounts; '{account_name}' is a {provider} account",
+                        "reason": "no connection test for this provider"}
+            self.invalidate(account_name)
+            # Use the account's first configured region as STS endpoint
+            sts_region = account.regions[0] if account.regions else None
 
             session = self.get_session(account_name, region=sts_region)
             sts_kwargs: dict[str, str] = {"region_name": sts_region} if sts_region else {}
             sts = session.client("sts", **sts_kwargs)
             identity = sts.get_caller_identity()
+            registered = str((account.credentials or {}).get("account_id") or "").strip()
+            if registered and str(identity["Account"]) != registered:
+                return {"success": False, "identity": identity["Arn"], "account_id": identity["Account"],
+                        "error": (f"The credentials reach AWS account {identity['Account']}, but this account is "
+                                  f"registered as {registered}: scans and commands are refused for it"),
+                        "reason": "the credentials reach another AWS account than the one registered"}
             return {
                 "success": True,
                 "identity": identity["Arn"],
@@ -304,11 +327,13 @@ class SessionFactory:
                 "error": None,
             }
         except Exception as e:
+            from agenticops.security.collectors import failure_reason
             return {
                 "success": False,
                 "identity": None,
                 "account_id": None,
                 "error": str(e),
+                "reason": failure_reason(e),
             }
 
     # ── Private helpers ────────────────────────────────────────────────

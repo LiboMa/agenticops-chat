@@ -65,12 +65,18 @@ def _actions(client, pid):
 @pytest.mark.parametrize("decision,status,risk", [
     ("approve", "pending_approval", "L1"), ("approve", "pending_approval", "L2"), ("approve", "draft", "L1"),
     ("reject", "pending_approval", "L1"), ("reject", "approved", "L1"), ("execute", "approved", "L1"),
+    ("request_changes", "pending_approval", "L2"), ("request_changes", "draft", "L1"),      # MVP-2.9.0 N14
 ])
 def test_fix_plan_actions_match_the_routes(client, monkeypatch, enforce, who, decision, status, risk):
+    import threading
+    import agenticops.web.app as app_mod
     from agenticops.config import settings
+    from agenticops.services import agent_runs
     from agenticops.web import deps
     from agenticops.web.app import app
     monkeypatch.setattr(settings, "rbac_enforce", enforce)
+    monkeypatch.setattr(app_mod, "_invoke_issue_agent", lambda agent_name, issue_id: "done")   # request_changes starts one
+    agent_runs.clear()
     app.dependency_overrides[deps.current_actor] = lambda: ACTORS[who]
     pid, h = _plan(status, risk)
     action = _actions(client, pid)[decision]
@@ -79,6 +85,11 @@ def test_fix_plan_actions_match_the_routes(client, monkeypatch, enforce, who, de
             r = client.put(f"/api/fix-plans/{pid}/approve", json={"content_hash": h})
         elif decision == "reject":
             r = client.post(f"/api/fix-plans/{pid}/reject", json={"reason": "no"})
+        elif decision == "request_changes":
+            r = client.post(f"/api/fix-plans/{pid}/request-changes", json={"reason": "no"})
+            for t in threading.enumerate():
+                if t.name.startswith("fixplan-trigger-"):
+                    t.join(10)
         else:
             r = client.post(f"/api/fix-plans/{pid}/execute")
     assert (200 <= r.status_code < 300) == action["allowed"], (who, enforce, r.status_code, action)

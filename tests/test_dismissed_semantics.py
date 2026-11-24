@@ -69,11 +69,18 @@ def test_a_repeat_of_a_dismissed_alert_is_still_suppressed(session):
 
 
 def test_the_security_open_count_leaves_out_dismissed(session):
+    """Per account since MVP-2.9.0 N20: an account's own open findings, and apart the ones no account holds."""
+    from agenticops.models import CloudAccount
     from agenticops.services import security_service as svc
 
+    session.add(CloudAccount(id=7, name="acct-a", provider="aws"))
     session.add(SecuritySnapshot(account_id="acct-a", provider="aws", overall_score=75.0,
                                  category_scores={}, exposure_paths=[]))
     session.commit()
     for pk, status in ((1, "open"), (2, "dismissed"), (3, "resolved"), (4, "fix_planned")):
+        _seed(session, pk, status, detected_by="security_posture", account_id=7)
+    for pk, status in ((5, "open"), (6, "dismissed")):
         _seed(session, pk, status, detected_by="security_posture")
-    assert svc.security_summary()["accounts"][0]["open_findings"] == 2
+    summary = svc.security_summary()
+    assert summary["accounts"][0]["open_findings"] == 2
+    assert summary["unassigned_open_findings"] == 1

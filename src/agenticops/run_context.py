@@ -16,7 +16,8 @@ from __future__ import annotations
 import contextvars
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
-from typing import Iterator, Optional
+from datetime import datetime
+from typing import Any, Iterator, Optional
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,21 @@ class RunContext:
     execution_id: Optional[int] = None        # the queued FixExecution an ExecutorService run is closing
     bound_account_id: Optional[int] = None     # a change run/review may touch ONLY this account id (resolver fails closed on any other)
     read_only: bool = False                    # a viewer's turn: every CLI tool refuses non-readonly commands (auth/viewer)
+    via_api_key: bool = False                  # the request / chat turn came through an API key (no human decisions)
+    # A diagnosis or a fix-plan run (MVP-2.9.0 N30): "diagnosis" | "plan" while rca_agent / sre_agent call their
+    # model. Every command tool refuses what the code does not know to be read-only, whatever the model confirms
+    # (services/command_audit.change_context_refusal). Not `read_only` above: that is an ACCOUNT's flag — it also
+    # hides Secrets and makes the actor a viewer.
+    read_only_run: Optional[str] = None
+    # Facts the code knows and the model does not (2.7.0 E2E observations 4 / 5): what its save tool records
+    model_id: Optional[str] = None             # the model rca_agent built its agent with → RCAResult.model_id
+    run_started_at: Optional[datetime] = None  # when executor_agent began this run → the run's measured duration_ms
+    # The claim this thread holds on an issue (services/agent_runs, MVP-2.9.0 N11): rca_agent / sre_agent use it as
+    # it is instead of claiming the issue a second time — and refuse when someone else's run is on the issue
+    agent_run: Optional[Any] = None
+    # What a reporter run's tools read (services/report_coverage, MVP-2.9.0 N21): begun by reporter_agent, written by
+    # the tools while they run, stored on the report by save_report. None outside a reporter run.
+    coverage: Optional[Any] = None
 
 
 _run_context_var: contextvars.ContextVar[RunContext] = contextvars.ContextVar(

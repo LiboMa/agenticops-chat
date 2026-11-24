@@ -185,7 +185,11 @@ class TestPipelineServiceTriggers:
 
             trigger_auto_sre(issue_id)
             time.sleep(0.2)  # Let daemon thread start
-            mock_run.assert_called_once_with(issue_id, None)
+            mock_run.assert_called_once()
+            args = mock_run.call_args.args
+            assert args[:2] == (issue_id, None)
+            # MVP-2.9.0: the thread is also handed the pipeline's claim on the issue, to release when it ends
+            assert (args[2].agent, args[2].issue_id, args[2].requested_by) == ("sre", issue_id, "agent:auto-pipeline")
 
     def test_trigger_auto_sre_disabled(self, db_session, disable_pipeline):
         """trigger_auto_sre should be a no-op when pipeline is disabled."""

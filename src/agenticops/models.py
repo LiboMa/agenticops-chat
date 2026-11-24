@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 _engine = None
+# How long an SQLite connection waits for a lock (Python's default is 5 s). With WAL (init_db) readers never wait for
+# a writer; this covers two writers — 2026-11-08 on the dev box a 5706-row prune held the lock longer than 5 s.
+_SQLITE_BUSY_TIMEOUT_S = 30
 
 
 def get_engine():
@@ -38,7 +41,7 @@ def get_engine():
             _engine = create_engine(
                 settings.database_url,
                 echo=False,
-                connect_args={"check_same_thread": False},
+                connect_args={"check_same_thread": False, "timeout": _SQLITE_BUSY_TIMEOUT_S},
                 poolclass=NullPool,
             )
         else:
@@ -790,6 +793,12 @@ class FixExecution(Base):
     accepted_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     acceptance_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # MVP-2.9.0 N9: a person asked for this run to stop (services/run_tickets.request_stop). The record stays
+    # `running` — the agent must still be able to roll back and record — and agents/run_guard lets through only
+    # reads, the recording tools and this plan's own rollback commands. NULL = nobody stopped it.
+    stop_requested_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    stop_requested_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    stop_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
@@ -823,6 +832,63 @@ class PipelineEvent(Base):
     duration_ms: Mapped[Optional[int]] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     trace_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+
+
+# ============================================================================
+# Agent steps (MVP-2.9.0 N10) — what an agent run did, step by step, while it works
+# ============================================================================
+
+
+class AttentionSnooze(Base):
+    """«Later» (MVP-2.9.0 N14): one person put one of their waiting items at the end of its group until `until`.
+    It says nothing about the item itself — it still waits on them and still counts. `situation` is what the item
+    waited for when it was snoozed (services/attention_snooze.situation): once it waits for something else, the
+    snooze no longer applies. One row per person and item."""
+
+    __tablename__ = "attention_snoozes"
+    __table_args__ = (UniqueConstraint("user_id", "item", name="uq_attention_snooze_user_item"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(index=True)                     # users.id — whose list it is
+    item: Mapped[str] = mapped_column(String(16))                        # "I12" | "C3"
+    situation: Mapped[str] = mapped_column(String(255))
+    until: Mapped[datetime] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class AgentStep(Base):
+    """One step of an rca / sre / executor run as the code saw it (agents/step_recorder): a tool call — when it
+    started, when it ended and how —, a line the model said between calls, or a note a person sent the run (N12).
+    Display only: nothing decides on these rows. `summary` and `preview` are redacted for display before they are
+    written (chat/tool_steps)."""
+
+    __tablename__ = "agent_steps"
+    __table_args__ = (
+        Index("idx_agent_step_run", "run_key", "id"),
+        Index("idx_agent_step_item", "item", "agent", "id"),
+        Index("idx_agent_step_execution", "execution_id"),
+        Index("idx_agent_step_started", "started_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_key: Mapped[str] = mapped_column(String(64))                     # one agent run (a uuid made when it is built)
+    agent: Mapped[str] = mapped_column(String(32))                       # rca | sre | executor
+    item: Mapped[str] = mapped_column(String(32))                        # the work item it belongs to: "I12" | "C3"
+    execution_id: Mapped[Optional[int]] = mapped_column(nullable=True)   # an executor run's record (fix_executions.id)
+    kind: Mapped[str] = mapped_column(String(8))                         # tool | say | you
+    tool_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    call_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)   # the model's toolUseId: pairs an end with its start
+    look: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)        # read = a fact the code fetched | act = something the agent did
+    tier: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)       # a command's tier: readonly | write | unknown | blocked
+    # an executor's command against its plan: step:3 | rollback:1 | pre:1 | post:2 | off (not read-only, and none of them)
+    plan_ref: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
+    summary: Mapped[str] = mapped_column(Text, default="")               # one line: the call's input, or what was said
+    preview: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # the start of the result; a refusal's reason
+    outcome: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)     # ok | error | refused; NULL while it runs
+    by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)        # kind "you": who wrote it
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    delivered_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)   # kind "you": the model call that carried it
 
 
 # ============================================================================
@@ -1045,6 +1111,9 @@ class Report(Base):
     source_language: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)   # zh | en
     owner_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     visibility: Mapped[str] = mapped_column(String(16), default="workspace", server_default="workspace")
+    # MVP-2.9.0 N21: what the reporter run that wrote this report read — recorded by code (services/report_coverage),
+    # never by the model. NULL = not saved inside a reporter run (the generator, «save as report», every older report)
+    coverage: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
 
 class ContentRendering(Base):
@@ -1437,7 +1506,7 @@ def _sqlite_rebuild_table(engine, table) -> None:
         conn.execute(text(f"ALTER TABLE {tmp_name} RENAME TO {table.name}"))
         for idx in table.indexes:
             idx.create(conn)
-    logger.info("Rebuilt table %s with relaxed NOT NULL constraints (MVP-2.6.0)", table.name)
+    logger.info("Rebuilt table %s with relaxed NOT NULL constraints", table.name)
 
 
 def _pg_migration_statements(insp, dialect, existing_constraints: set[str]) -> list[str]:
@@ -1699,8 +1768,18 @@ _ADD_COLUMNS_2_7_0: dict[str, dict[str, Optional[str]]] = {
     "chat_messages": {"client_message_id": None, "dispatch_state": None},
     # S6: a report's content identity and visibility; existing rows are workspace, hash / language backfilled
     "reports": {"content_version": "NOT NULL DEFAULT 1", "content_hash": None, "source_language": None,
-                "owner_user_id": None, "visibility": "NOT NULL DEFAULT 'workspace'"},
+                "owner_user_id": None, "visibility": "NOT NULL DEFAULT 'workspace'",
+                # MVP-2.9.0 N21: the reporter run's coverage record (NULL on existing rows = none)
+                "coverage": None},
+    # MVP-2.8.0: soft-deleted users (NULL on existing rows = not deleted)
+    "users": {"deleted_at": None},
+    # MVP-2.9.0 N9: a person's stop request on a run (NULL on existing rows = never stopped)
+    "fix_executions": {"stop_requested_at": None, "stop_requested_by": None, "stop_note": None},
+    # MVP-2.9.0 N20: which collection sources a snapshot could read (NULL on existing rows = not recorded)
+    "security_snapshots": {"collection_health": None},
 }
+# MVP-2.9.0 N20: a snapshot of an account whose every source failed has no score — the column may be NULL.
+_NULLABLE_2_9_0: dict[str, tuple[str, ...]] = {"security_snapshots": ("overall_score",)}
 _migrated_2_7_0_urls: set[str] = set()
 _migrate_2_7_0_lock = threading.Lock()
 
@@ -1720,7 +1799,25 @@ def _statements_2_7_0(insp, dialect) -> list[str]:
             "uq_chat_message_client_id" not in {i["name"] for i in insp.get_indexes("chat_messages")}:
         stmts.append("CREATE UNIQUE INDEX IF NOT EXISTS uq_chat_message_client_id "
                      "ON chat_messages (session_id, client_message_id)")
+    if dialect.name == "postgresql":    # SQLite cannot drop NOT NULL in place: _relax_not_null_2_9_0 rebuilds
+        for tbl, cols in _NULLABLE_2_9_0.items():
+            if not insp.has_table(tbl):
+                continue
+            live = {c["name"]: c for c in insp.get_columns(tbl)}
+            stmts += [f"ALTER TABLE {tbl} ALTER COLUMN {col} DROP NOT NULL"
+                      for col in cols if col in live and not live[col]["nullable"]]
     return stmts
+
+
+def _relax_not_null_2_9_0(engine) -> None:
+    """SQLite: rebuild a table whose live column is still NOT NULL where the model now allows NULL. Runs after the
+    ADD COLUMN statements, so the copy carries every column; nothing to do once relaxed."""
+    if engine.dialect.name != "sqlite":
+        return
+    insp = inspect(engine)
+    for tbl, cols in _NULLABLE_2_9_0.items():
+        if insp.has_table(tbl) and _sqlite_notnull_columns(engine, tbl) & set(cols):
+            _sqlite_rebuild_table(engine, Base.metadata.tables[tbl])
 
 
 def _run_migrate_2_7_0(engine) -> None:
@@ -1729,7 +1826,90 @@ def _run_migrate_2_7_0(engine) -> None:
         with engine.begin() as conn:
             for stmt in stmts:
                 conn.execute(text(stmt))
+    _relax_not_null_2_9_0(engine)
     _backfill_reports_2_7_0(engine)
+    _repair_plan_hashes_2_9_0(engine)
+    _backfill_security_issue_accounts_2_9_0(engine)
+
+
+def _backfill_security_issue_accounts_2_9_0(engine) -> None:
+    """MVP-2.9.0 N20 (2.8.0 S3, the owner's item 8): a security finding with no account takes the account its own
+    Signal rows state — the account the collection job ran with, written on the signal and resolved through the
+    provider layer, not inferred. Only when every row that states an account states the SAME managed account; an
+    issue whose rows are gone (pruned after signal_retention_days), state none, disagree or name an account nobody
+    manages stays empty, and the log says how many. The status is not touched and nothing is written to a timeline.
+    Column-level and fail-soft, like the 2.6.1 backfills; cheap to repeat (it reads only issues still empty)."""
+    try:
+        from agenticops.services.identity_resolver import account_pk
+        from agenticops.services.signal_gate import SECURITY_DETECTORS
+
+        insp = inspect(engine)
+        if not (insp.has_table("health_issues") and insp.has_table("alert_events")):
+            return
+        with Session(engine) as session:
+            empty = [row.id for row in session.query(HealthIssue.id).filter(
+                HealthIssue.detected_by.in_(SECURITY_DETECTORS), HealthIssue.account_id.is_(None))]
+            if not empty:
+                return
+            stated: dict[int, set[str]] = {}
+            for at in range(0, len(empty), 500):
+                for issue_id, account in session.query(AlertEvent.health_issue_id, AlertEvent.account_id).filter(
+                        AlertEvent.health_issue_id.in_(empty[at:at + 500])).distinct():
+                    if (account or "").strip():
+                        stated.setdefault(issue_id, set()).add(account.strip())
+            from agenticops.services.plan_content import restamp_issue_plans
+            filled = 0
+            for issue_id, names in stated.items():
+                pks = {account_pk(session, name) for name in names}
+                if len(pks) != 1 or None in pks:
+                    continue
+                moved = session.query(HealthIssue).filter(
+                    HealthIssue.id == issue_id, HealthIssue.account_id.is_(None)).update(
+                    {"account_id": pks.pop()}, synchronize_session=False)
+                filled += moved
+                if moved:
+                    # the account is plan content: its live plans' hashes follow it, as re-anchoring does
+                    # (N27, review — left behind, the next approval read «changed since it was loaded»)
+                    restamp_issue_plans(session, issue_id)
+            session.commit()
+        logger.info("MVP-2.9.0 security account backfill: %d filled, %d left without an account "
+                    "(no Signal row states one managed account)", filled, len(empty) - filled)
+    except Exception as exc:
+        logger.warning("MVP-2.9.0 security account backfill skipped: %s", exc)
+
+
+def _repair_plan_hashes_2_9_0(engine) -> None:
+    """MVP-2.9.0 N15: a plan that waits for approval whose stored hash is not the hash of its stored content cannot
+    be approved — every approval is answered «changed since it was loaded». It happened to every plan whose step
+    named a secret: the hash was stamped over the step as written, and the flush that followed scrubbed the stored
+    step (services/plan_content.content_hash now hashes the scrubbed form). Restamp those rows — the next version —
+    so the first approval after the upgrade is not a refusal. An approved plan is bound to its approved hash and is
+    left alone. Fail-soft, like the backfills."""
+    try:
+        from agenticops.services.plan_content import content_hash
+        if not inspect(engine).has_table("fix_plans"):
+            return
+        waiting = ("draft", "pending_approval")
+        with Session(engine) as session:
+            rows = (
+                session.query(FixPlan.id, FixPlan.plan_version, FixPlan.content_hash, FixPlan.steps, FixPlan.rollback_plan,
+                              FixPlan.pre_checks, FixPlan.post_checks, FixPlan.risk_level,
+                              HealthIssue.account_id.label("issue_account"),
+                              ChangeRequest.account_id.label("change_account"))
+                .outerjoin(HealthIssue, HealthIssue.id == FixPlan.health_issue_id)
+                .outerjoin(ChangeRequest, ChangeRequest.id == FixPlan.change_request_id)
+                .filter(FixPlan.status.in_(waiting), FixPlan.content_hash.isnot(None)).all()
+            )
+            for row in rows:
+                digest = content_hash(steps=row.steps, rollback_plan=row.rollback_plan, pre_checks=row.pre_checks,
+                                      post_checks=row.post_checks, risk_level=row.risk_level,
+                                      account_id=row.change_account if row.change_account is not None else row.issue_account)
+                if digest != row.content_hash:
+                    session.query(FixPlan).filter(FixPlan.id == row.id, FixPlan.status.in_(waiting)).update(
+                        {"content_hash": digest, "plan_version": (row.plan_version or 1) + 1}, synchronize_session=False)
+            session.commit()
+    except Exception as exc:
+        logger.warning("MVP-2.9.0 plan hash repair skipped: %s", exc)
 
 
 def _backfill_reports_2_7_0(engine) -> None:
@@ -1780,6 +1960,23 @@ def _migrate_2_6_1(engine) -> None:
         _migrated_2_6_1_urls.add(key)
 
 
+def _use_wal(engine) -> None:
+    """Put a file-backed SQLite database in WAL mode (2026-11-08): readers no longer wait for a writer — under the
+    rollback journal a large change blocks every reader until it commits, and a chat turn failed with "database is
+    locked" while the Signal Gate's prune ran. The mode is stored in the database file, so setting it once at startup
+    holds for every later connection. A failure is logged, never fatal. WAL needs a local filesystem (not NFS/EFS);
+    a backup must use the online backup API (or include the -wal file), not a copy of the .db file alone."""
+    if engine.dialect.name != "sqlite" or engine.url.database in (None, "", ":memory:"):
+        return
+    try:
+        with engine.connect() as conn:
+            mode = conn.exec_driver_sql("PRAGMA journal_mode=WAL").scalar()
+        if str(mode).lower() != "wal":
+            logger.warning("SQLite journal mode is %s, not WAL — readers may wait for writers", mode)
+    except OperationalError:
+        logger.warning("Could not switch SQLite to WAL — readers may wait for writers", exc_info=True)
+
+
 def init_db(engine=None):
     """Initialize database and create all tables.
 
@@ -1792,6 +1989,8 @@ def init_db(engine=None):
     """
     if engine is None:
         engine = get_engine()
+
+    _use_wal(engine)
 
     # Migration: detect old rca_results schema and recreate
     insp = inspect(engine)
@@ -2310,11 +2509,32 @@ class SecuritySnapshot(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc), index=True
     )
-    overall_score: Mapped[float] = mapped_column(Float, default=0.0)  # 0-100
-    category_scores: Mapped[dict] = mapped_column(JSON, default=dict)
+    # 0-100; NULL = no source of this account could be read, so there is nothing to score (MVP-2.9.0 N20)
+    overall_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    category_scores: Mapped[dict] = mapped_column(JSON, default=dict)   # a category nobody could read is null
     metrics: Mapped[dict] = mapped_column(JSON, default=dict)
     exposure_paths: Mapped[list] = mapped_column(JSON, default=list)
-    cis_results: Mapped[dict] = mapped_column(JSON, default=dict)
+    cis_results: Mapped[dict] = mapped_column(JSON, default=dict)       # control -> pass | fail | undetermined
+    # MVP-2.9.0 N20: {"status": complete|partial|failed, "sources": {source: {"ok", "error"}}} — which collection
+    # sources could be read (security/collectors). NULL on a snapshot written before: its score is shown as it was.
+    collection_health: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+
+class ReadinessCheck(Base):
+    """One time a cloud account's connection or the main model was actually checked (MVP-2.9.0 N23, the 2.8.0
+    spec's S6; services/readiness). `subject` names WHAT was checked — an account with its credential fingerprint, a
+    model id with its region — so a check counts only for the credentials / model it was made with. Append-only."""
+
+    __tablename__ = "readiness_checks"
+    __table_args__ = (Index("idx_readiness_checks_subject", "kind", "subject", "checked_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20))                # account | model
+    subject: Mapped[str] = mapped_column(String(255))
+    ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    detail: Mapped[str] = mapped_column(Text, default="")        # ≤ 500 characters, secrets masked
+    checked_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    checked_by: Mapped[str] = mapped_column(String(255), default="")
 
 
 class SecurityRecommendation(Base):

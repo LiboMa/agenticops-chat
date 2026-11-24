@@ -23,3 +23,15 @@ export function legacyIssuesViewRedirect(search: string): string | null {
   const rest = q.toString();
   return `/app/${v}${rest ? `?${rest}` : ""}`;
 }
+
+/** The old to-do workbench address (/app/inbox, MVP-2.8.0 S2) → Issues · «在等我»: the search and a valid selected
+ *  item come along; the workbench's own tab (`decision`) and layout do not exist any more. */
+export function legacyInboxRedirect(search: string): string {
+  const old = new URLSearchParams(search);
+  const next = new URLSearchParams({ view: "waiting" });
+  const q = (old.get("q") ?? "").trim().slice(0, 200);
+  if (q) next.set("q", q);
+  const item = old.get("item");
+  if (item && /^[IC][1-9]\d{0,8}$/.test(item)) next.set("item", item);
+  return `/app/issues?${next.toString()}`;
+}

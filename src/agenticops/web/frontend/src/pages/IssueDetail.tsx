@@ -50,9 +50,13 @@ import { ISSUE_PHASES, type IssuePhaseId, type IssuePrimary } from "@/lib/issueP
 import { ISSUE_HASHES, legacyIssueTabHash } from "@/lib/workitemRoutes";
 import { toActivity } from "@/lib/activity";
 import { apiFetch } from "@/api/client";
-import type { FixExecution, HealthIssue, IssueStatus, MergedAlert } from "@/api/types";
+import type { FixExecution, FixPlan, HealthIssue, IssueStatus, MergedAlert } from "@/api/types";
 import { useReadOnly } from "@/hooks/useBootstrap";
 import { viewerActions } from "@/lib/permissions";
+import { DiagnosisEvidence, RunSummaryBlock, WorkSummary } from "@/components/workitem/WorkSummary";
+import { AcceptDialog } from "@/components/workitem/AcceptDialog";
+import { runSummary as summarizeRun } from "@/lib/runSummary";
+import { waitFact } from "@/lib/inbox";
 
 /* ================================================================== */
 /*  Main component                                                     */
@@ -60,11 +64,13 @@ import { viewerActions } from "@/lib/permissions";
 
 /** `embedded`: the Cases split view's reading pane (one column, no way back — the queue is beside it). `back`: how
  *  a full-screen case returns to the queue (history back, or a link to the list under the same query). */
-export default function IssueDetail({ embedded = false, back }: {
-  embedded?: boolean; back?: { onBack?: () => void; to?: string };
+export default function IssueDetail({ embedded = false, back, issueId: givenId }: {
+  embedded?: boolean; back?: { onBack?: () => void; to?: string; label?: string };
+  /** the issue to show when it is not the route's :id (the workbench, MVP-2.8.0 S2) */
+  issueId?: number;
 } = {}) {
   const { id } = useParams<{ id: string }>();
-  const issueId = Number(id);
+  const issueId = givenId ?? Number(id);
   const { t } = useLocale();
   const readOnly = useReadOnly();  // a viewer account: no write actions
   const { isAuthenticated } = useAuth();
@@ -333,7 +339,7 @@ export default function IssueDetail({ embedded = false, back }: {
           errorActionLabel={actionError ? undefined : t("common.retry")}
           backTo={embedded ? undefined : back?.to ?? (back?.onBack ? undefined : "/app/issues")}
           onBack={embedded ? undefined : back?.onBack}
-          backLabel={t("nav.issues")}
+          backLabel={back?.label ?? t("nav.issues")}
         />
         {actionInfo && (
           <div className="flex items-start gap-3 p-3 rounded-lg bg-primary/10 border border-primary/20 text-sm text-primary">
@@ -342,6 +348,34 @@ export default function IssueDetail({ embedded = false, back }: {
                     className="shrink-0 leading-none hover:opacity-70">×</button>
           </div>
         )}
+
+        <WorkSummary
+          steps={m.phase.phases.map((p) => ({ id: p.id, label: t(`workitem.phase.${p.id}`), state: p.state }))}
+          facts={{ owner: m.waitingKey ? t(m.waitingKey) : null,
+                   waiting: waitFact(a.waiting_on, a.waiting_since, Date.now(), t),
+                   plan: m.plan ? planLabel(m.plan, t) : null }}
+          expand={{ label: t("workitem.summary.expand"), onClick: () => {
+            const target = m.latestRun ? (m.phase.current === "accept" ? "accept" : "run") : "diagnose";
+            cards.openCard(target); cards.scrollTo(target);
+          } }}
+          t={t}>
+          {/* runs still loading or failed: say so — an issue waiting for acceptance must not show the
+              diagnosis block as if it had no run (S2 review) */}
+          {executions.isPending
+            ? <p className="text-sm text-muted-foreground">{t("workitem.summary.runsLoading")}</p>
+            : executions.isError && executions.data === undefined
+            ? <p role="alert" className="text-sm text-status-danger">
+                {t("workitem.summary.runsFailed")}
+                <button type="button" onClick={() => void executions.refetch()} className="ml-2 text-primary hover:underline">
+                  {t("common.retry")}
+                </button>
+              </p>
+            : m.latestRun
+            ? <RunSummaryBlock t={t} summary={summarizeRun(m.latestRun,
+                (fixPlans.data ?? []).find((p) => p.id === m.latestRun!.fix_plan_id) ?? null)} />
+            : <DiagnosisEvidence t={t} anchorStatus={a.anchor_status} rca={rca.data}
+                                 rcaState={rca.isPending ? "loading" : rca.isError && rca.data === undefined ? "failed" : "ready"} />}
+        </WorkSummary>
 
         {cards.openable.length > 0 && (
           <div className="flex justify-end">
@@ -496,7 +530,8 @@ export default function IssueDetail({ embedded = false, back }: {
         </ReasonDialog>
       )}
       {m.pendingRun && acceptDecision && (
-        <AcceptanceDialog execution={m.pendingRun} decision={acceptDecision} onClose={() => setAcceptDecision(null)} />
+        <AcceptanceDialog execution={m.pendingRun} decision={acceptDecision} onClose={() => setAcceptDecision(null)}
+                          runPlan={(fixPlans.data ?? []).find((p) => p.id === m.pendingRun!.fix_plan_id) ?? null} />
       )}
       {dialog}
     </div>
@@ -508,19 +543,29 @@ export default function IssueDetail({ embedded = false, back }: {
 /* ================================================================== */
 
 /** Accept / reject a run pending acceptance; both need a reason, and the identity is the session's. */
-function AcceptanceDialog({ execution, decision, onClose }: {
+function AcceptanceDialog({ execution, runPlan, decision, onClose }: {
   execution: FixExecution;
+  runPlan: FixPlan | null;
   decision: "accepted" | "rejected";
   onClose: () => void;
 }) {
   const { t } = useLocale();
   const accept = useAcceptExecution();
+  // MVP-2.8.0 S2: accepting = ticking what you checked; rejecting keeps its required reason
+  if (decision === "accepted") {
+    return (
+      <AcceptDialog summary={summarizeRun(execution, runPlan)} busy={accept.isPending} error={accept.error?.message ?? null}
+                    onClose={onClose}
+                    onConfirm={({ reason, confirmedChecks }) => accept.mutate(
+                      { id: execution.id, decision, reason, confirmed_checks: confirmedChecks }, { onSuccess: onClose })} />
+    );
+  }
   return (
     <ReasonDialog
-      title={`${t(decision === "accepted" ? "verification.acceptTitle" : "verification.rejectTitle")} #${execution.id}`}
-      description={t(decision === "accepted" ? "verification.acceptHint" : "verification.rejectHint")}
-      confirmText={t(decision === "accepted" ? "workitem.primary.acceptResult" : "verification.reject")}
-      variant={decision === "rejected" ? "destructive" : "default"}
+      title={`${t("verification.rejectTitle")} #${execution.id}`}
+      description={t("verification.rejectHint")}
+      confirmText={t("verification.reject")}
+      variant="destructive"
       required
       busy={accept.isPending}
       error={accept.error?.message ?? null}
@@ -600,7 +645,7 @@ function MergedAlertsSection({
           {displayed.map((alert, i) => (
             <div key={i} className="flex flex-wrap items-center gap-2 text-sm py-1.5 px-2 rounded bg-secondary">
               <span className="text-xs text-muted-foreground whitespace-nowrap font-mono">
-                {new Date(alert.timestamp).toLocaleString()}
+                {formatFullDate(alert.timestamp)}
               </span>
               <span className="text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded">
                 {alert.source}

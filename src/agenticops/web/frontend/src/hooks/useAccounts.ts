@@ -59,8 +59,11 @@ export function useEnvironmentInfo() {
 }
 
 export function useTestConnection() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (accountId: number) =>
       apiFetch<ConnectionTestResult>(`/accounts/${accountId}/test`, { method: "POST" }),
+    // each test is recorded (MVP-2.9.0 N23): the setup overview's «connected / verification failed» follows it
+    onSettled: () => qc.invalidateQueries({ queryKey: ["setup-readiness"] }),
   });
 }
