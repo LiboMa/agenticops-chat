@@ -155,16 +155,21 @@ HIGH_RISK_EVENTS = frozenset({
 def poll_cloudtrail(account: str, region: str, since_iso: str) -> list[SecurityEvent]:
     """High-risk CloudTrail management events since the cursor. Raises on API error.
 
-    lookup_events supports only one LookupAttribute per call, so we pull the
-    window and filter client-side against HIGH_RISK_EVENTS."""
+    One query per high-risk event name (lookup_events takes one LookupAttribute per call) — N33: paging EVERY event
+    of the window and filtering here read a busy region's whole day at CloudTrail's rate limit, and its pagination
+    tokens live one hour: a paging that took longer failed, kept nothing and wrote no cursor, poll after poll.
+    An event a query returns under another name is dropped."""
     ct = _get_client("cloudtrail", region, account)
     start = datetime.fromisoformat(since_iso.replace("Z", "+00:00"))
     out: list[SecurityEvent] = []
     paginator = ct.get_paginator("lookup_events")
-    for page in paginator.paginate(StartTime=start):
+    pages = ((wanted, page) for wanted in sorted(HIGH_RISK_EVENTS)
+             for page in paginator.paginate(
+                 StartTime=start, LookupAttributes=[{"AttributeKey": "EventName", "AttributeValue": wanted}]))
+    for wanted, page in pages:
         for e in page.get("Events", []):
             name = e.get("EventName", "")
-            if name not in HIGH_RISK_EVENTS:
+            if name != wanted:
                 continue
             res = (e.get("Resources") or [{}])[0]
             user = e.get("Username", "unknown")

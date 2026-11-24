@@ -196,6 +196,51 @@ class TestCloudTrailPoller:
             out = poll_cloudtrail("acct-a", "us-east-1", "2026-08-31T00:00:00+00:00")
         assert out[0].resource_id == "alice"
 
+    # N33 (MVP-2.9.0): one query per high-risk event name. Paging EVERY management event of the window and keeping
+    # the 17 names here made a first poll read a busy region's whole day (~300k events) at CloudTrail's rate limit;
+    # its pagination tokens live one hour, so a slower paging (the issue reset, 2026-11-23: over two hours) failed
+    # with InvalidNextTokenException, kept nothing and wrote no cursor — and every later poll started over.
+
+    def _by_name(self):
+        ct = MagicMock()
+        paginator = MagicMock()
+
+        def paginate(**kw):
+            name = kw["LookupAttributes"][0]["AttributeValue"] if kw.get("LookupAttributes") else None
+            return [{"Events": ([_ct_event(name)] if name else []) + [_ct_event("DescribeInstances")]}]
+
+        paginator.paginate.side_effect = paginate
+        ct.get_paginator.return_value = paginator
+        return ct, paginator
+
+    def test_each_high_risk_name_is_queried_once_with_its_name_and_the_cursor(self):
+        from agenticops.security.incremental_poll import HIGH_RISK_EVENTS, poll_cloudtrail
+        ct, paginator = self._by_name()
+        with patch("agenticops.security.incremental_poll._get_client", return_value=ct):
+            poll_cloudtrail("acct-a", "us-east-1", "2026-08-31T00:00:00+00:00")
+        calls = [c.kwargs for c in paginator.paginate.call_args_list]
+        names = [c["LookupAttributes"][0]["AttributeValue"] for c in calls]
+        assert sorted(names) == sorted(HIGH_RISK_EVENTS) and len(names) == len(HIGH_RISK_EVENTS)
+        assert all(c["LookupAttributes"] == [{"AttributeKey": "EventName", "AttributeValue": n}]
+                   for c, n in zip(calls, names))
+        assert all(c["StartTime"] == datetime(2026, 8, 31, tzinfo=timezone.utc) for c in calls)
+
+    def test_no_query_reads_every_event(self):
+        from agenticops.security.incremental_poll import poll_cloudtrail
+        ct, paginator = self._by_name()
+        with patch("agenticops.security.incremental_poll._get_client", return_value=ct):
+            poll_cloudtrail("acct-a", "us-east-1", "2026-08-31T00:00:00+00:00")
+        assert paginator.paginate.call_args_list and all(c.kwargs.get("LookupAttributes")
+                                                         for c in paginator.paginate.call_args_list)
+
+    def test_each_name_comes_back_once_and_any_other_name_a_query_returns_is_dropped(self):
+        from agenticops.security.incremental_poll import HIGH_RISK_EVENTS, poll_cloudtrail
+        ct, _ = self._by_name()
+        with patch("agenticops.security.incremental_poll._get_client", return_value=ct):
+            out = poll_cloudtrail("acct-a", "us-east-1", "2026-08-31T00:00:00+00:00")
+        titles = sorted(e.title for e in out)
+        assert titles == sorted(f"High-risk API call: {n}" for n in HIGH_RISK_EVENTS)
+
 
 class TestRunIncrementalPoll:
     def _setup(self, monkeypatch, sess_factory, pollers):
