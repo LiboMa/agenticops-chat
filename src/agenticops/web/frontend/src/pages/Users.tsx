@@ -7,7 +7,7 @@ import { useCreateUser, useDeleteUser, useResetPassword, useUpdateUser, useUsers
 import { QueryState } from "@/components/ui/QueryState";
 import { StatusText } from "@/components/ui/StatusText";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
-import { DeleteUserDialog, PasswordOnceDialog, RoleDialog } from "@/components/users/UserDialogs";
+import { DeleteUserDialog, PasswordOnceDialog, ResetPasswordDialog, RoleDialog } from "@/components/users/UserDialogs";
 import { IssueKeyFlow, UserKeysDialog } from "@/components/users/UserKeysDialog";
 import { IconButton } from "@/components/ui/IconButton";
 import { KeyPlusIcon } from "@/components/apikeys/KeyPlusIcon";
@@ -37,6 +37,10 @@ export default function Users() {
   const [editing, setEditing] = useState<UserRow | "new" | null>(null);
   const [shown, setShown] = useState<{ email: string; password: string; kind: "created" | "reset" } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // N34: the reset dialog (generate or type), its own refusal, and the line that says a typed password was set
+  const [resetting, setResetting] = useState<UserRow | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [keysOf, setKeysOf] = useState<UserRow | null>(null);
   const [keyFlow, setKeyFlow] = useState<UserRow | null>(null);
   const [deleting, setDeleting] = useState<UserRow | null>(null);
@@ -73,12 +77,17 @@ export default function Users() {
       update.mutate({ id: u.id, is_active: false }, { onError: (e) => setError(say(e)) });
       return;
     }
-    const own = u.id === meId;
-    if (!(await confirm(own ? t("users.confirm.resetSelf") : t("users.confirm.reset").replace("{email}", u.email),
-                        { confirmText: t("users.confirm.resetOk") }))) return;
-    reset.mutate(u.id, {
-      onSuccess: (r) => setShown({ email: u.email, password: r.password, kind: "reset" }),
-      onError: (e) => setError(say(e)),
+    setNotice(null); setResetError(null); reset.reset(); setResetting(u);
+  };
+
+  const submitReset = (u: UserRow, body: { password?: string }) => {
+    reset.mutate({ id: u.id, body }, {
+      onSuccess: (r) => {
+        setResetting(null);
+        if (r.password) setShown({ email: u.email, password: r.password, kind: "reset" });
+        else setNotice(t("users.reset.done").replace("{email}", u.email));
+      },
+      onError: (e) => setResetError(say(e)),
     });
   };
 
@@ -142,6 +151,7 @@ export default function Users() {
         <p role="status" className="rounded-md border border-status-warn/40 bg-status-warn/5 px-3 py-2 text-sm text-status-warn">{t("users.authOff")}</p>
       )}
       {error && editing === null && <p role="alert" className="rounded-md border border-status-danger/40 bg-status-danger/5 px-3 py-2 text-sm text-status-danger">{error}</p>}
+      {notice && <p role="status" className="rounded-md border border-status-ok/40 bg-status-ok/5 px-3 py-2 text-sm text-foreground">{notice}</p>}
 
       <div className="flex flex-wrap gap-2">
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("users.search")} aria-label={t("users.search")}
@@ -226,6 +236,10 @@ export default function Users() {
                     }} />
       )}
       {/* closing forgets the password: the dialog's state and the mutations' cached results (S2 rework review) */}
+      {resetting && <ResetPasswordDialog user={resetting} own={resetting.id === meId} busy={reset.isPending}
+                                         error={resetError} returnTo={flowOpener.current}
+                                         onSubmit={(body) => submitReset(resetting, body)}
+                                         onClose={() => { setResetting(null); setResetError(null); reset.reset(); }} />}
       {shown && <PasswordOnceDialog {...shown} returnTo={flowOpener.current}
                                     onClose={() => { setShown(null); create.reset(); reset.reset(); }} />}
       {keysOf && <UserKeysDialog user={keysOf} onClose={() => setKeysOf(null)} />}

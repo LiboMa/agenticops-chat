@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useLocale } from "@/i18n/LocaleContext";
 import type { UserRole, UserRow } from "@/api/types";
 import { copyText } from "@/lib/clipboard";
+import { resetPayload, type ResetMode } from "@/lib/users";
 import { ModalFrame as Frame } from "@/components/ui/ModalFrame";
 
 /** The user management page's dialogs (MVP-2.8.0 S2 rework). Radix: slide-in, ESC, focus kept inside; mounted on
@@ -126,6 +127,74 @@ export function DeleteUserDialog({ user, busy, error, returnTo, onConfirm, onClo
           {t("users.delete.ok")}
         </button>
       </div>
+    </Frame>
+  );
+}
+
+/** Reset a password (MVP-2.9.0 N34, owner 2026-11-24): generate one (shown once, as before) or type one — twice, with
+ *  the rule in view; «重置密码» stays off until what was typed meets the rule and both entries agree. The server checks
+ *  the same rule and words its own refusal (`error`). */
+export function ResetPasswordDialog({ user, own, busy, error, returnTo, onSubmit, onClose }: {
+  user: UserRow; own: boolean; busy: boolean; error: string | null; returnTo?: HTMLElement | null;
+  onSubmit: (body: { password?: string }) => void; onClose: () => void;
+}) {
+  const { t } = useLocale();
+  const [mode, setMode] = useState<ResetMode>("generate");
+  const [pw, setPw] = useState("");
+  const [again, setAgain] = useState("");
+  const [visible, setVisible] = useState(false);
+  const payload = resetPayload(mode, pw, again);
+  // the reason shows once something was typed (an empty form is not yet wrong)
+  const reason = !payload.ok && (pw.length > 0 || again.length > 0) ? t(`users.reset.reason.${payload.reason}`) : null;
+  const option = (m: ResetMode, label: string, hint: string) => (
+    <label className="flex items-start gap-2 text-sm">
+      <input type="radio" name="reset-mode" value={m} checked={mode === m} onChange={() => setMode(m)}
+             className="mt-0.5 accent-[hsl(var(--primary))]" />
+      <span><span className="font-medium text-foreground">{label}</span>
+        <span className="block text-xs text-muted-foreground">{hint}</span></span>
+    </label>
+  );
+  return (
+    <Frame title={own ? t("users.reset.titleSelf") : t("users.reset.title").replace("{email}", user.email)}
+           onClose={onClose} returnTo={returnTo}>
+      <form className="mt-3 space-y-3" onSubmit={(e) => {
+        e.preventDefault();
+        if (payload.ok && !busy) onSubmit(payload.body);
+      }}>
+        <fieldset className="space-y-2">
+          {option("generate", t("users.reset.generate"), t("users.reset.generateHint"))}
+          {option("typed", t("users.reset.typed"), t("users.reset.typedHint"))}
+        </fieldset>
+        {mode === "typed" && (
+          <div className="space-y-2 rounded-md border border-border p-3">
+            <label className="block text-sm">{t("users.reset.new")}
+              <input type={visible ? "text" : "password"} value={pw} onChange={(e) => setPw(e.target.value)}
+                     autoComplete="new-password" maxLength={1024} autoFocus className={field} />
+            </label>
+            <label className="block text-sm">{t("users.reset.confirm")}
+              <input type={visible ? "text" : "password"} value={again} onChange={(e) => setAgain(e.target.value)}
+                     autoComplete="new-password" maxLength={1024} className={field} />
+            </label>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground">{t("users.reset.rule")}</p>
+              <button type="button" onClick={() => setVisible((v) => !v)} aria-pressed={visible}
+                      className="shrink-0 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
+                {visible ? t("users.reset.hide") : t("users.reset.show")}
+              </button>
+            </div>
+            {reason && <p role="status" className="text-xs text-status-warn">{reason}</p>}
+          </div>
+        )}
+        <p className="text-sm text-muted-foreground">{own ? t("users.reset.signOutSelf") : t("users.reset.signOut")}</p>
+        {error && <p role="alert" className="rounded-md border border-status-danger/40 bg-status-danger/5 px-3 py-2 text-sm text-status-danger">{error}</p>}
+        <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-3">
+          <button type="button" onClick={onClose} className="min-h-[40px] rounded-lg border border-border px-4 text-sm hover:bg-accent">{t("common.cancel")}</button>
+          <button type="submit" disabled={busy || !payload.ok}
+                  className="min-h-[40px] rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-50">
+            {t("users.reset.submit")}
+          </button>
+        </div>
+      </form>
     </Frame>
   );
 }
