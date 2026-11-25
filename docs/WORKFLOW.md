@@ -897,6 +897,10 @@ connection test decide), images, documents, reasoning (none / OpenAI effort / An
 tokens. A field set by hand is marked and survives a refresh. Nothing Bedrock-only (prompt-cache points, thinking or
 reasoning fields) is ever sent to another provider: the request carries what the model's attributes allow.
 
+**Where the data goes**: everything an agent sends to a model — the conversation, tool results, resource names and
+configuration — goes to that model's provider; a third-party platform (OpenRouter, a Sub2API gateway) sees it all. The
+page says so. At startup the enabled providers' model lists are read again in the background.
+
 **Keys**: stored encrypted when `AIOPS_MASTER_KEY` or a KMS key is configured (the page warns when they would be
 stored in plain text), never returned, logged or audited; editing keeps the stored key unless a new one is typed,
 «Remove the saved key» clears it. Header values are stored the same way.
