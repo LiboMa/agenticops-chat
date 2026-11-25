@@ -215,12 +215,27 @@ def _get_fallback_presets() -> list[dict[str, Any]]:
     return presets
 
 
-def get_model_presets(region: str = "us-east-1") -> list[dict[str, Any]]:
-    """Return model presets for UI/CLI — cached, with Bedrock API + fallback.
+BEDROCK_LABEL = "Amazon Bedrock"
 
-    Returns list of:
-        {"label": "Opus 4.6 (1M)", "value": "global.anthropic.claude-opus-4-6-v1[1m]", "context_window": 1000000}
-    """
+
+def _bedrock_entry(p: dict[str, Any]) -> dict[str, Any]:
+    """A Bedrock preset with where it comes from and what it can do (MVP-2.9.0 N35) — the same keys a provider's
+    model has (llm/catalog.all_presets). Capabilities by the model id, as the request builders read it."""
+    from agenticops.agents.preamble import _OPENAI_REASONING, media_capabilities
+    from agenticops.config import settings
+    from agenticops.cost import normalize_model_key
+    value = p["value"]
+    caps = media_capabilities(value)
+    reasoning = ("anthropic_thinking" if "anthropic.claude" in value
+                 else "openai_effort" if any(needle in value for needle, _f, _t in _OPENAI_REASONING) else "none")
+    return {**p, "provider": "bedrock", "provider_label": BEDROCK_LABEL, "purpose": "chat",
+            "capabilities": {"tools": True, "images": bool(caps.images), "documents": bool(caps.documents),
+                             "reasoning": reasoning},
+            "priced": normalize_model_key(value) in (settings.token_cost_table or {})}
+
+
+def _bedrock_presets(region: str) -> list[dict[str, Any]]:
+    """Bedrock's models — cached for _CACHE_TTL, from the Bedrock API with the fallback list — + custom_models."""
     global _models_cache
 
     now = time.time()
@@ -257,10 +272,29 @@ def get_model_presets(region: str = "us-east-1") -> list[dict[str, Any]]:
     for p in presets:
         if p["value"] not in seen:
             seen.add(p["value"])
-            deduped.append(p)
+            deduped.append(_bedrock_entry(p))
 
     _models_cache = (now, deduped)
     return deduped
+
+
+def get_model_presets(region: str = "us-east-1") -> list[dict[str, Any]]:
+    """Return model presets for UI/CLI: Bedrock's (cached, with Bedrock API + fallback) while Bedrock is on, then
+    every enabled chat model of an enabled provider (MVP-2.9.0 N35; read each time — it is the database's).
+
+    Returns list of:
+        {"label": "Opus 4.6 (1M)", "value": "global.anthropic.claude-opus-4-6-v1[1m]", "context_window": 1000000,
+         "provider": "bedrock" | <name>, "provider_label", "purpose": "chat",
+         "capabilities": {"tools": bool | None, "images", "documents", "reasoning"}, "priced": bool}
+    """
+    from agenticops.llm import catalog, registry
+
+    presets = list(_bedrock_presets(region)) if registry.bedrock_enabled() else []
+    try:
+        presets += catalog.all_presets()
+    except Exception:
+        logger.warning("Could not list the model providers' models", exc_info=True)
+    return presets
 
 
 def invalidate_cache() -> None:

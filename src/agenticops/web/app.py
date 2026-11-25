@@ -438,9 +438,13 @@ from agenticops.services.model_service import get_model_presets  # noqa: E402
 
 
 def _allowed_model_ids() -> set[str]:
-    """Valid per-session model ids: cached presets ∪ alias targets (no live call beyond preset cache)."""
+    """Valid per-session model ids: cached presets ∪ alias targets (no live call beyond preset cache). The presets hold
+    the providers' chat models (MVP-2.9.0 N35); while Bedrock is off they hold no Bedrock model, and the aliases —
+    Bedrock ids — are not added."""
     from agenticops.config import MODEL_ALIASES
-    return {p["value"] for p in get_model_presets()} | set(MODEL_ALIASES.values())
+    from agenticops.llm import registry
+    aliases = set(MODEL_ALIASES.values()) if registry.bedrock_enabled() else set()
+    return {p["value"] for p in get_model_presets()} | aliases
 
 
 def _effective_main_model(session_id: str) -> str:
@@ -692,16 +696,18 @@ def api_get_settings():  # plain def: model presets may list Bedrock models sync
             "window_mode": "full" if ws == FULL_CONTEXT else "sliding",
         }
 
-    # Model presets — dynamic from Bedrock API + custom_models (cached)
+    # Model presets — dynamic from Bedrock API + custom_models (cached), and the providers' chat models (N35)
+    from agenticops.llm import model_settings as model_settings_mod
+    from agenticops.llm import registry as provider_registry
     try:
         from agenticops.services.model_service import get_model_presets
         model_presets = get_model_presets()
     except Exception:
-        # Fallback to static aliases
+        # Fallback to static aliases (Bedrock ids: none while Bedrock is off)
         model_presets = [
             {"label": alias.capitalize() + " " + _model_version_label(model_id), "value": model_id}
             for alias, model_id in MODEL_ALIASES.items()
-        ]
+        ] if provider_registry.bedrock_enabled() else []
 
     # IM WS auto-detect status from channels.yaml
     try:
@@ -732,6 +738,10 @@ def api_get_settings():  # plain def: model presets may list Bedrock models sync
         "skills_improvement_notify": settings.skills_improvement_notify,
         "agent_models": agent_models,
         "model_presets": model_presets,
+        # MVP-2.9.0 N35: the model settings beside the agents' own ({value, effective, default}) and every setting in
+        # force whose model cannot be used ({setting, value, reason, inherited})
+        "model_settings": model_settings_mod.view(),
+        "model_issues": model_settings_mod.issues(),
         # Galaxy build model override — "" means use bedrock_model_id_cheap
         "galaxy_model_id": settings.galaxy_model_id,
         # IM WebSocket status (read-only, derived from channels.yaml)
@@ -772,8 +782,14 @@ _AGENT_MODEL_FIELDS = ("model_id", "max_tokens", "window_size")
 
 
 def _low_impact_values(body: dict) -> dict:
-    """The current value of every low-impact setting the request names (an agent's model settings by attribute)."""
+    """The current value of every low-impact setting the request names (an agent's model settings by attribute, a
+    model setting by its settings field — N35)."""
+    from agenticops.llm.model_settings import SETTINGS as MODEL_SETTINGS
     out = {key: getattr(settings, key, None) for key in _LOW_IMPACT_SETTINGS if key in body}
+    named = body.get("model_settings")
+    for name in (named if isinstance(named, dict) else ()):
+        if name in MODEL_SETTINGS:
+            out[MODEL_SETTINGS[name]] = getattr(settings, MODEL_SETTINGS[name], None)
     models = body.get("agent_models")
     for name, cfg in (models.items() if isinstance(models, dict) else ()):
         for field in (_AGENT_MODEL_FIELDS if isinstance(cfg, dict) else ()):
@@ -792,6 +808,56 @@ def _audit_low_impact(before: dict, after: dict, actor: Actor) -> None:
             AuditService.log(Actions.UPDATE, EntityTypes.SYSTEM, key, entity_name="settings", actor=actor.key,
                              user_id=actor.user_id, old_values={key: before[key]}, new_values={key: after.get(key)},
                              session=s)
+
+
+def _model_refusal(setting: str, reason: str, detail: str) -> JSONResponse:
+    code = "bedrock_off" if reason == "bedrock_off" else "unknown_model"
+    return JSONResponse(status_code=400, content={"detail": f"{setting}: {detail}", "code": code, "setting": setting,
+                                                  "reason": reason})
+
+
+def _checked_model_updates(body: dict):
+    """The settings fields `model_settings` changes ({field: value}), after checking every model value the request
+    names — those and each agent's `model_id` (MVP-2.9.0 N35: an agent's model was not checked before). A value that
+    cannot be used is a 400 JSONResponse (`unknown_model` / `bedrock_off`, the setting, the reason); an empty value
+    is allowed where it means a fallback (an agent → its tier, a direct caller → the cheap tier)."""
+    from agenticops.config import AGENT_NAMES
+    from agenticops.llm import model_settings
+    named = body.get("model_settings", {})
+    if not isinstance(named, dict):
+        raise HTTPException(400, "model_settings must be a dict")
+    unknown = set(named) - set(model_settings.SETTINGS)
+    if unknown:
+        raise HTTPException(400, f"Unknown model settings: {', '.join(sorted(unknown))}")
+    updates: dict[str, str] = {}
+    for name in model_settings.SETTINGS:                     # a fixed order: the first refusal is always the same
+        if name not in named:
+            continue
+        field = model_settings.SETTINGS[name]
+        val = named[name]
+        if not isinstance(val, str):
+            raise HTTPException(400, f"model_settings.{name} must be a string")
+        val = val.strip()
+        if not val:
+            if field in model_settings.NEVER_EMPTY:
+                return _model_refusal(name, "empty", "a tier must name a model")
+        else:
+            found = model_settings.problem(val)
+            if found:
+                return _model_refusal(name, *found)
+        updates[field] = val
+    am = body.get("agent_models")
+    for name, cfg in (am.items() if isinstance(am, dict) else ()):
+        if name in AGENT_NAMES and isinstance(cfg, dict) and cfg.get("model_id"):
+            found = model_settings.problem(str(cfg["model_id"]).strip())
+            if found:
+                return _model_refusal(f"agent_models.{name}", *found)
+    galaxy = body.get("galaxy_model_id")
+    if galaxy:
+        found = model_settings.problem(str(galaxy).strip())
+        if found:
+            return _model_refusal("galaxy_model_id", *found)
+    return updates
 
 
 @app.patch("/api/settings")
@@ -847,8 +913,11 @@ async def _apply_settings(request: Request, body: dict, current: Actor):
     # The high-impact switches — stored in the DB (services/exec_switches), never set on the process's settings
     EXEC_KEYS = set(exec_switches.FIELDS)
 
-    ALL_KEYS = (BOOL_KEYS | REPORT_STR_KEYS | REPORT_INT_KEYS | ACP_KEYS | CHANGE_KEYS | EXEC_KEYS
-                | {"scan_focus", "agent_models", "galaxy_model_id"})
+    # Which model each setting uses (MVP-2.9.0 N35): an administrator's, like the security toggles
+    MODEL_KEYS = {"agent_models", "model_settings", "galaxy_model_id"}
+
+    ALL_KEYS = (BOOL_KEYS | REPORT_STR_KEYS | REPORT_INT_KEYS | ACP_KEYS | CHANGE_KEYS | EXEC_KEYS | MODEL_KEYS
+                | {"scan_focus"})
     unknown = set(body.keys()) - ALL_KEYS
     if unknown:
         raise HTTPException(400, f"Unknown settings: {', '.join(sorted(unknown))}")
@@ -859,8 +928,12 @@ async def _apply_settings(request: Request, body: dict, current: Actor):
     for key in sorted({**change_updates, **exec_updates}):
         if not isinstance(body[key], bool):
             raise HTTPException(400, f"{key} must be a boolean")
-    if (change_updates or exec_updates) and settings.api_auth_enabled:
+    if (change_updates or exec_updates or MODEL_KEYS & set(body)) and settings.api_auth_enabled:
         await require_authenticated_user(request, admin=True)
+    # Every model value is checked BEFORE anything is applied: a refused one changes nothing (N35)
+    model_updates = await asyncio.to_thread(_checked_model_updates, body)
+    if isinstance(model_updates, JSONResponse):
+        return model_updates
     # a switch this process's environment holds at its strict value cannot be changed here (review, N27)
     held = exec_switches.held(exec_updates)
     if held:
@@ -943,6 +1016,13 @@ async def _apply_settings(request: Request, body: dict, current: Actor):
         acp_yaml["acp_enhanced_backend"] = val
     if acp_yaml:
         save_to_yaml(acp_yaml)
+        _chat_sessions.clear()
+
+    # The model settings beside the agents' own (N35) — checked above; in memory, then the yaml
+    if model_updates:
+        for field, val in model_updates.items():
+            setattr(settings, field, val)
+        save_to_yaml(model_updates)
         _chat_sessions.clear()
 
     # Galaxy build model override — persist to YAML. "" = use bedrock_model_id_cheap.

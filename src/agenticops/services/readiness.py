@@ -103,12 +103,35 @@ def _accounts(session) -> dict:
     return {"state": state, "enabled": len(items), "regions": len({r for a in rows for r in (a.regions or [])}), "items": items}
 
 
+def _where(model_id: str) -> tuple[str, Optional[str], Optional[str]]:
+    """Where Main's model is called: (provider, Bedrock region, provider endpoint). A Bedrock model is called in
+    bedrock_region; another provider's (MVP-2.9.0 N35) at its base URL — so pointing the provider elsewhere voids
+    the old check, as a new region does."""
+    from agenticops.llm import registry
+    from agenticops.llm.refs import parse_ref
+    try:
+        ref = parse_ref(model_id)
+    except ValueError:
+        return "bedrock", settings.bedrock_region, None
+    if ref.is_bedrock:
+        return "bedrock", settings.bedrock_region, None
+    cfg = registry.get(ref.provider)
+    return ref.provider, None, (cfg.base_url if cfg else "")
+
+
+def _model_subject_of(model_id: str) -> tuple[str, Optional[str], Optional[str], str]:
+    provider, region, endpoint = _where(model_id)
+    return provider, region, endpoint, model_subject(model_id, region if region is not None else endpoint or "")
+
+
 def _model(session) -> dict:
     model_id, _max_tokens = get_agent_model_config("main")
-    region = settings.bedrock_region            # where the model is CALLED — not where resources are scanned
-    check = _view(_latest(session, "model", model_subject(model_id, region)))
+    # where the model is CALLED — not where resources are scanned
+    provider, region, endpoint, subject = _model_subject_of(model_id)
+    check = _view(_latest(session, "model", subject))
     state = "configured" if check is None else "verified" if check["ok"] else "failed"
-    return {"state": state, "model_id": model_id, "region": region, "check": check}
+    return {"state": state, "model_id": model_id, "provider": provider, "region": region, "endpoint": endpoint,
+            "check": check}
 
 
 def _execution(actor) -> dict:
@@ -147,6 +170,19 @@ def readiness(actor, *, can_verify: bool) -> dict:
             "can_verify": bool(can_verify), "generated_at": _iso(datetime.now(timezone.utc))}
 
 
+def _model_failure(exc: BaseException, failure_reason) -> str:
+    """What is kept of a failed verification: for another provider's model (N35) the SDK error's class and HTTP
+    status, or why the model cannot be built — never the provider's sentence (an authentication failure can quote
+    the key it was given); for Bedrock the error's code and operation (failure_reason)."""
+    from agenticops.llm.factory import ModelProviderUnavailable
+    if isinstance(exc, ModelProviderUnavailable):
+        return exc.reason
+    if (type(exc).__module__ or "").split(".")[0] in ("openai", "anthropic"):
+        status = getattr(exc, "status_code", None)
+        return f"{type(exc).__name__} ({status})" if status else type(exc).__name__
+    return failure_reason(exc)
+
+
 def verify_model(actor) -> dict:
     """One tiny call to Main's model (at most VERIFY_MAX_TOKENS of output), recorded and audited. A reply that stops
     at that limit — a model that thinks first can spend it all — is still an answer: the model was reached with
@@ -157,17 +193,18 @@ def verify_model(actor) -> dict:
     from agenticops.security.collectors import failure_reason
 
     model_id, _max_tokens = get_agent_model_config("main")
-    region = settings.bedrock_region
+    provider, region, endpoint, subject = _model_subject_of(model_id)
     try:
         converse_text(model_id, "Reply with the single word: pong", max_tokens=VERIFY_MAX_TOKENS, read_timeout=60, total_attempts=1)
         ok, detail = True, ""
     except ModelReplyError:
         ok, detail = True, CUT_AT_LIMIT
     except Exception as exc:
-        ok, detail = False, failure_reason(exc)
+        ok, detail = False, _model_failure(exc, failure_reason)
     with get_db_session() as session:
-        row = record_check(session, "model", model_subject(model_id, region), ok, detail, actor.key)
+        row = record_check(session, "model", subject, ok, detail, actor.key)
         AuditService.log("verify_model", "readiness_check", str(row.id), entity_name=model_id, actor=actor.key,
-                         user_id=actor.user_id, new_values={"ok": ok, "region": region}, session=session)
+                         user_id=actor.user_id, new_values={"ok": ok, "region": region, "provider": provider},
+                         session=session)
         view = _view(row)
-    return {**view, "model_id": model_id, "region": region}
+    return {**view, "model_id": model_id, "provider": provider, "region": region, "endpoint": endpoint}
