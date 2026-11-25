@@ -2731,7 +2731,8 @@ N30 之后，诊断和出方案在代码里只读；检测 agent 还不是：它
 
 - 后端新加：`tests/test_llm_registry.py`、`test_llm_factory.py`、`test_llm_catalog.py`、`test_model_providers_api.py`、`test_llm_call_sites.py`、`test_settings_model_refs.py`、`test_llm_embeddings.py`，加上一台本机的假服务（`tests/llm_fake_server.py`：两种协议、可以设延迟、可以不调工具、可以要求 Key）。每项先写测试、看着失败，再实现；每项都故意改错检查过，有测试变红。
 - 前端新加：`__tests__/providerForm.test.ts`、`providerModels.test.ts`、`modelRefs.test.ts`，`permissions.test.ts` / `setup.test.ts` 跟着加了。
-- 在 `/tmp` 的干净副本里 `npm ci`、`tsc`、`build`、vitest（141 个文件，1,931 条）都通过。
+- 在 `/tmp` 的干净副本里 `npm ci`、`tsc`、`build`、vitest（141 个文件，1,934 条）都通过，跑在评审修复之后的 `7587290` 上。
+- 后端全量 `pytest tests/`：9,747 个通过、99 个跳过、1 个失败（已知的本机 DNS 假失败），跑在 `7587290` 上。第一次全量跑出过 15 个失败：新的设置测试改了共享的设置对象没有还原，后面的文件都看到 Main 在一个不存在的提供方上——修了（见「评审之后的修复」那次提交）。
 
 ## 已知的缺口（照实列出，这一轮没有做）
 
