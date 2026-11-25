@@ -7,16 +7,22 @@ annotated-doc==0.0.4
     #   typer
 annotated-types==0.7.0
     # via pydantic
+anthropic==0.125.0
+    # via strands-agents
 anyio==4.12.1
     # via
+    #   anthropic
     #   httpx
     #   mcp
+    #   openai
     #   sse-starlette
     #   starlette
 attrs==25.4.0
     # via
     #   jsonschema
     #   referencing
+aws-bedrock-token-generator==1.1.0
+    # via strands-agents
 boto3==1.42.49
     # via
     #   agenticops
@@ -26,6 +32,7 @@ boto3-stubs==1.42.49
     # via agenticops
 botocore==1.42.49
     # via
+    #   aws-bedrock-token-generator
     #   boto3
     #   s3transfer
     #   strands-agents
@@ -55,14 +62,21 @@ colorama==0.4.6 ; sys_platform == 'win32'
     # via
     #   click
     #   pytest
+    #   tqdm
 cryptography==46.0.5
     # via pyjwt
 cssselect2==0.9.0
     # via weasyprint
 defusedxml==0.7.1
     # via agenticops
+distro==1.9.0
+    # via
+    #   anthropic
+    #   openai
 docstring-parser==0.17.0
-    # via strands-agents
+    # via
+    #   anthropic
+    #   strands-agents
 et-xmlfile==2.0.0
     # via openpyxl
 fastapi==0.129.0
@@ -80,9 +94,11 @@ httpcore==1.0.9
 httpx==0.28.1
     # via
     #   agenticops
+    #   anthropic
     #   langsmith
     #   lark-oapi
     #   mcp
+    #   openai
     #   strands-agents
 httpx-sse==0.4.3
     # via mcp
@@ -99,6 +115,10 @@ iniconfig==2.3.0
     # via pytest
 jinja2==3.1.6
     # via agenticops
+jiter==0.19.0
+    # via
+    #   anthropic
+    #   openai
 jmespath==1.1.0
     # via
     #   boto3
@@ -165,6 +185,8 @@ numpy==2.4.2
     #   langchain-aws
     #   pandas
     #   pgvector
+openai==2.54.0
+    # via strands-agents
 openpyxl==3.1.5
     # via agenticops
 opentelemetry-api==1.39.1
@@ -219,11 +241,13 @@ pycryptodome==3.23.0
 pydantic==2.12.5
     # via
     #   agenticops
+    #   anthropic
     #   fastapi
     #   langchain-aws
     #   langchain-core
     #   langsmith
     #   mcp
+    #   openai
     #   pydantic-settings
     #   strands-agents
 pydantic-core==2.41.5
@@ -304,6 +328,10 @@ six==1.17.0
     # via python-dateutil
 slack-sdk==3.40.1
     # via agenticops
+sniffio==1.3.1
+    # via
+    #   anthropic
+    #   openai
 sortedcontainers==2.4.0
     # via hypothesis
 sqlalchemy==2.0.46
@@ -327,6 +355,8 @@ tinycss2==1.5.1
     #   weasyprint
 tinyhtml5==2.1.0
     # via weasyprint
+tqdm==4.70.1
+    # via openai
 typer==0.23.1
     # via agenticops
 types-awscrt==0.31.1
@@ -335,6 +365,7 @@ types-s3transfer==0.16.0
     # via boto3-stubs
 typing-extensions==4.15.0
     # via
+    #   anthropic
     #   anyio
     #   boto3-stubs
     #   fastapi
@@ -348,6 +379,7 @@ typing-extensions==4.15.0
     #   mypy-boto3-rds
     #   mypy-boto3-s3
     #   mypy-boto3-sqs
+    #   openai
     #   opentelemetry-api
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions

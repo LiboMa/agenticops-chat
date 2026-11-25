@@ -33,6 +33,8 @@ from agenticops.security.redaction import redact_obj
 # authenticates with; redacting it would break every cross-account call.
 _EXCLUDED_COLUMNS: set[tuple[str, str]] = {
     ("CloudAccount", "credentials"),
+    # a model provider's API key + extra headers (MVP-2.9.0 N35): encrypted by the credential store like the above
+    ("ModelProvider", "secrets"),
 }
 
 # Only these column types can carry a secret-bearing string. Integer / Float /

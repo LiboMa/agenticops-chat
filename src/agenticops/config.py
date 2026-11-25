@@ -39,6 +39,16 @@ class ModelRuntimeSettings(BaseModel):
         description="How long a model stream may send nothing before it is cut (the botocore read timeout), seconds")
 
 
+class ModelProvidersSettings(BaseModel):
+    """Model providers beyond Bedrock (MVP-2.9.0 N35). The values live in settings.yaml `model_providers:`; these
+    defaults only let the app start without that block. Admins turn Bedrock off and on at runtime (DB
+    `runtime_settings`, key `model_providers`, through `llm/registry`); the providers themselves are rows of
+    `model_providers` (llm/models)."""
+    bedrock_enabled: bool = Field(default=True, description="Whether Amazon Bedrock is one of the model providers")
+    test_timeout_seconds: int = Field(default=30, ge=5, le=300,
+                                      description="How long each step of a provider's connection test may take, s")
+
+
 class ChatUploadSettings(BaseModel):
     """Chat attachment limits (2026-11-07). The values live in settings.yaml `chat_upload:`; these defaults only let
     the app start without that block. Admins override fields at runtime (DB `runtime_settings`, key `chat_upload`,
@@ -1146,6 +1156,7 @@ class Settings(BaseSettings):
     # Chat attachments (2026-11-07): limits (runtime-overridable by admins) and where the files live (yaml only)
     chat_upload: ChatUploadSettings = Field(default_factory=ChatUploadSettings)
     model_runtime: ModelRuntimeSettings = Field(default_factory=ModelRuntimeSettings)
+    model_providers: ModelProvidersSettings = Field(default_factory=ModelProvidersSettings)
     chat_attachments_dir: str = Field(
         default="",
         description="Directory for chat attachment files; empty = <data_dir>/chat_attachments. Not changeable at runtime",
