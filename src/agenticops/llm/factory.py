@@ -67,16 +67,19 @@ def client_args(cfg, *, timeout=None, max_retries: int = 2) -> dict:
     return args
 
 
-def build_model(ref: str, *, max_tokens: int, thinking_budget: int = 0):
+def build_model(ref: str, *, max_tokens: int, thinking_budget: int = 0, bedrock_cls=None):
+    """`bedrock_cls` is the BedrockModel class the caller's module imported (the agent modules pass theirs, so a
+    test that patches `<agent module>.BedrockModel` still stands in for the Bedrock build); default Strands' own."""
     r = parse_ref(ref)
     if r.is_bedrock:
         require_bedrock(ref)
-        from strands.models.bedrock import BedrockModel
+        if bedrock_cls is None:
+            from strands.models.bedrock import BedrockModel as bedrock_cls
         from agenticops.agents.preamble import bedrock_model_kwargs, thinking_fields_for_budget
         from agenticops.config import get_bedrock_boto_session
         thinking = thinking_fields_for_budget(thinking_budget, max_tokens, ref) if thinking_budget > 0 else None
-        model = BedrockModel(model_id=ref, boto_session=get_bedrock_boto_session(), max_tokens=max_tokens,
-                             **bedrock_model_kwargs(ref, thinking))
+        model = bedrock_cls(model_id=ref, boto_session=get_bedrock_boto_session(), max_tokens=max_tokens,
+                            **bedrock_model_kwargs(ref, thinking))
     else:
         cfg, row = resolve(ref)
         extra: dict[str, Any] = {"context_window_limit": row.context_window} if row.context_window else {}

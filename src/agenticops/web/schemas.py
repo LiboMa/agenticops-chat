@@ -219,7 +219,7 @@ class ReportGenerateRequest(BaseModel):
 
 class HealthCheckResult(BaseModel):
     """Result of a single health check."""
-    status: str  # "ok", "error", "warning"
+    status: str  # "ok", "error", "warning", "skipped" (a check that does not apply — N35)
     latency_ms: Optional[int] = None
     error: Optional[str] = None
     details: Optional[dict] = None

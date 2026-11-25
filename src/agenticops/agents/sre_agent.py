@@ -310,17 +310,11 @@ def _create_sre_agent(cli_tool=None, cli_tools: list | None = None, *, change_re
     fix_plan=True is the build of a fix-plan run (sre_agent, Mode A): a run that only reads (N30), so it does not
     carry enhanced_task either. The default build (sre_query, the chat's catch-all) is unchanged.
     """
-    from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_bedrock_boto_session
+    from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins
 
     model_id, max_tokens = get_agent_model_config("sre")
-    from agenticops.agents.preamble import bedrock_model_kwargs
-    cache_kwargs = bedrock_model_kwargs(model_id)
-    model = BedrockModel(
-        model_id=model_id,
-        boto_session=get_bedrock_boto_session(),
-        max_tokens=max_tokens,
-        **cache_kwargs,
-    )
+    from agenticops.llm.factory import build_model    # Bedrock or another provider (MVP-2.9.0 N35)
+    model = build_model(model_id, max_tokens=max_tokens, bedrock_cls=BedrockModel)
     _tools = [
         assume_role,
         get_active_account,

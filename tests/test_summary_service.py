@@ -1,6 +1,5 @@
 """Unit tests for SummaryService — generate_summary and get_summaries."""
 
-import json
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
@@ -55,12 +54,13 @@ def chat_session(db_session) -> ChatSession:
 
 @pytest.fixture()
 def service():
-    """Return a SummaryService with a mocked Bedrock client."""
+    """Return a SummaryService whose model call (converse_text, since MVP-2.9.0 N35) is a mock: `_converse`."""
     svc = SummaryService.__new__(SummaryService)
     svc.region = "us-east-1"
     svc.model_id = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-    svc._client = MagicMock()
-    return svc
+    svc._converse = MagicMock()
+    with patch("agenticops.agents.preamble.converse_text", svc._converse):
+        yield svc
 
 
 # ---------------------------------------------------------------------------
@@ -107,15 +107,12 @@ class TestFormatMessages:
 # ---------------------------------------------------------------------------
 
 class TestGenerateSummary:
-    def _mock_bedrock_response(self, mock_client, text="This is a summary."):
-        body_bytes = json.dumps({"content": [{"text": text}]}).encode()
-        mock_body = MagicMock()
-        mock_body.read.return_value = body_bytes
-        mock_client.invoke_model.return_value = {"body": mock_body}
+    def _mock_bedrock_response(self, mock_converse, text="This is a summary."):
+        mock_converse.return_value = (text, {"input": 10, "output": 5}, "end_turn")
 
     @patch("agenticops.web.summary_service.get_db_session")
     def test_generates_and_stores_summary(self, mock_get_db, service):
-        self._mock_bedrock_response(service._client, "Summary of conversation.")
+        self._mock_bedrock_response(service._converse, "Summary of conversation.")
         mock_db = MagicMock()
         mock_get_db.return_value.__enter__ = MagicMock(return_value=mock_db)
         mock_get_db.return_value.__exit__ = MagicMock(return_value=False)
@@ -127,10 +124,9 @@ class TestGenerateSummary:
         result = service.generate_summary(messages, session_id=1)
 
         assert result == "Summary of conversation."
-        # Verify invoke_model was called
-        service._client.invoke_model.assert_called_once()
-        call_kwargs = service._client.invoke_model.call_args[1]
-        assert call_kwargs["modelId"] == service.model_id
+        # Verify the model was called, on the service's model
+        service._converse.assert_called_once()
+        assert service._converse.call_args.args[0] == service.model_id
         # Verify DB add was called
         mock_db.add.assert_called_once()
         added = mock_db.add.call_args[0][0]
@@ -143,13 +139,13 @@ class TestGenerateSummary:
     def test_returns_none_for_empty_messages(self, service):
         result = service.generate_summary([], session_id=1)
         assert result is None
-        service._client.invoke_model.assert_not_called()
+        service._converse.assert_not_called()
 
     @patch("agenticops.web.summary_service.get_db_session")
     def test_returns_none_on_bedrock_error(self, mock_get_db, service):
         from botocore.exceptions import ClientError
 
-        service._client.invoke_model.side_effect = ClientError(
+        service._converse.side_effect = ClientError(
             {"Error": {"Code": "ThrottlingException", "Message": "Rate exceeded"}},
             "InvokeModel",
         )
@@ -162,7 +158,7 @@ class TestGenerateSummary:
 
     @patch("agenticops.web.summary_service.get_db_session")
     def test_max_tokens_in_request(self, mock_get_db, service):
-        self._mock_bedrock_response(service._client)
+        self._mock_bedrock_response(service._converse)
         mock_db = MagicMock()
         mock_get_db.return_value.__enter__ = MagicMock(return_value=mock_db)
         mock_get_db.return_value.__exit__ = MagicMock(return_value=False)
@@ -170,9 +166,7 @@ class TestGenerateSummary:
         messages = [{"role": "user", "content": "hi", "_db_id": 1}]
         service.generate_summary(messages, session_id=1)
 
-        call_kwargs = service._client.invoke_model.call_args[1]
-        body = json.loads(call_kwargs["body"])
-        assert body["max_tokens"] == 500
+        assert service._converse.call_args.kwargs["max_tokens"] == 500
 
 
 # ---------------------------------------------------------------------------

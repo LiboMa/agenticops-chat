@@ -158,17 +158,18 @@ class FakeLLMServer:
 # ── the database helpers the provider tests share ────────────────────────────
 
 def llm_db(tmp_path, monkeypatch, name: str = "llm.db"):
-    """A temp database with the provider tables, a master key for the credential store, fresh caches."""
-    from agenticops.credentials.store import reset_credential_store
+    """A temp database with the provider tables, a master key for the credential store, fresh caches — swapped in
+    through monkeypatch, so what a test caches (Bedrock turned off, a provider, the test's key) ends with it."""
+    from agenticops.credentials import store
     from agenticops.llm import registry
     from agenticops.services import runtime_settings
     from tests.test_viewer_role import _temp_db
     settings = _temp_db(tmp_path, monkeypatch, name)
     monkeypatch.delenv("AIOPS_KMS_KEY_ID", raising=False)
     monkeypatch.setenv("AIOPS_MASTER_KEY", "n35-test-master-key-0123456789abcdef")
-    reset_credential_store()
-    runtime_settings.reset_cache()
-    registry.reset_cache()
+    monkeypatch.setattr(store, "_store_instance", None)
+    monkeypatch.setattr(runtime_settings, "_cache", {})
+    monkeypatch.setattr(registry, "_cache", {})
     return settings
 
 

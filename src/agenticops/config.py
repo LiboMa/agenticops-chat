@@ -1364,6 +1364,8 @@ def validate_agent_model_ids() -> list[str]:
     warnings: list[str] = []
     for agent_name in AGENT_NAMES:
         model_id, _ = get_agent_model_config(agent_name)
+        if "::" in model_id:   # a provider's model takes the plain window by design (N35) — not drift
+            continue
         if not any(family in model_id for family in MODEL_WINDOW_DEFAULTS):
             msg = (
                 f"agent_{agent_name}_model_id={model_id!r} matches no known model "
@@ -1405,6 +1407,8 @@ def get_agent_window_size(agent_name: str) -> int:
 
     # Auto mode: resolve from model family defaults
     model_id, _ = get_agent_model_config(agent_name)
+    if "::" in model_id:   # another provider's model (MVP-2.9.0 N35): the plain window, never a Bedrock family's
+        return settings.bedrock_window_size
     for family, defaults in MODEL_WINDOW_DEFAULTS.items():
         if family in model_id:
             return defaults.get(agent_name, settings.bedrock_window_size)

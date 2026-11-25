@@ -165,17 +165,11 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
         Discovered resource counts per account, region, and type.
     """
     try:
-        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_bedrock_boto_session
+        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins
 
         model_id, max_tokens = get_agent_model_config("scan")
-        from agenticops.agents.preamble import bedrock_model_kwargs
-        cache_kwargs = bedrock_model_kwargs(model_id)
-        bedrock_model = BedrockModel(
-            model_id=model_id,
-            boto_session=get_bedrock_boto_session(),
-            max_tokens=max_tokens,
-            **cache_kwargs,
-        )
+        from agenticops.llm.factory import build_model    # Bedrock or another provider (MVP-2.9.0 N35)
+        bedrock_model = build_model(model_id, max_tokens=max_tokens, bedrock_cls=BedrockModel)
 
         # Build dynamic tool list from enabled accounts
         tools: list = [

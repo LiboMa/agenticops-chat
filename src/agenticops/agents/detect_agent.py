@@ -215,17 +215,11 @@ def _build_detect_agent_for_account(
     Returns:
         Agent instance pre-configured for the given account
     """
-    from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_bedrock_boto_session
+    from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins
 
     model_id, max_tokens = get_agent_model_config("detect")
-    from agenticops.agents.preamble import bedrock_model_kwargs
-    cache_kwargs = bedrock_model_kwargs(model_id)
-    model = BedrockModel(
-        model_id=model_id,
-        boto_session=get_bedrock_boto_session(),
-        max_tokens=max_tokens,
-        **cache_kwargs,
-    )
+    from agenticops.llm.factory import build_model    # Bedrock or another provider (MVP-2.9.0 N35)
+    model = build_model(model_id, max_tokens=max_tokens, bedrock_cls=BedrockModel)
 
     # Account-scoped system prompt preamble
     account_context = (
@@ -290,7 +284,7 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
         Health summary: issues found, severity breakdown, security findings.
     """
     try:
-        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_bedrock_boto_session
+        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins
         from agenticops.services.notification_service import batch_mode
         with batch_mode():
             # Check account count to decide parallel vs single-agent mode.
@@ -341,14 +335,8 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                 cli_tools = get_all_cli_tools() or [run_aws_cli_readonly]
 
                 model_id, max_tokens = get_agent_model_config("detect")
-                from agenticops.agents.preamble import bedrock_model_kwargs
-                cache_kwargs = bedrock_model_kwargs(model_id)
-                model = BedrockModel(
-                    model_id=model_id,
-                    boto_session=get_bedrock_boto_session(),
-                    max_tokens=max_tokens,
-                    **cache_kwargs,
-                )
+                from agenticops.llm.factory import build_model    # Bedrock or another provider (N35)
+                model = build_model(model_id, max_tokens=max_tokens, bedrock_cls=BedrockModel)
 
                 from agenticops.agents.preamble import build_system_prompt as _bsp
                 agent = Agent(

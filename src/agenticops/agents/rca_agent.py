@@ -408,7 +408,7 @@ def rca_agent(issue_id: int) -> str:
         return agent_runs.refusal(issue_id)
     recorder = None      # the run's step record — and where a person's note reaches it (N10, N12)
     try:
-        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_bedrock_boto_session
+        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins
         from agenticops.services.notification_service import batch_mode
         with batch_mode():
             # Resolve provider CLI tool from issue's account (+ incident memory)
@@ -426,21 +426,15 @@ def rca_agent(issue_id: int) -> str:
                 pass
 
             model_id, max_tokens = get_agent_model_config("rca")
-            from agenticops.agents.preamble import bedrock_model_kwargs, thinking_fields_for_budget
+            from agenticops.llm.factory import build_model    # Bedrock or another provider (MVP-2.9.0 N35)
             thinking_budget, escalate_reason = resolve_rca_effort(issue_id)
-            thinking_fields = thinking_fields_for_budget(thinking_budget, max_tokens, model_id)
-            cache_kwargs = bedrock_model_kwargs(model_id, thinking_fields)
-            if thinking_fields and escalate_reason:
+            if thinking_budget and escalate_reason:
                 logger.info(
                     "RCA #%d effort escalated to %d tokens (%s)",
                     issue_id, thinking_budget, escalate_reason,
                 )
-            model = BedrockModel(
-                model_id=model_id,
-                boto_session=get_bedrock_boto_session(),
-                max_tokens=max_tokens,
-                **cache_kwargs,
-            )
+            model = build_model(model_id, max_tokens=max_tokens, thinking_budget=thinking_budget,
+                                bedrock_cls=BedrockModel)
 
             from agenticops.agents.step_recorder import StepRecorder
             recorder = StepRecorder("rca", f"I{issue_id}")

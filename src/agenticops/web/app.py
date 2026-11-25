@@ -1501,6 +1501,10 @@ async def api_update_exclude_patterns(body: dict):
     return {"patterns": settings.issue_exclude_patterns}
 
 
+class _HealthSkip(Exception):
+    """A health check that does not apply (MVP-2.9.0 N35: the Bedrock identity while Bedrock is turned off)."""
+
+
 @app.get("/api/health", response_model=HealthResponse)
 def api_health():
     """Health check endpoint."""
@@ -1526,9 +1530,13 @@ def api_health():
             error=str(e),
         )
 
-    # 2. AWS credentials check
+    # 2. AWS credentials check — the Bedrock identity; skipped while Bedrock is turned off (MVP-2.9.0 N35: the models
+    # are another provider's, and the box may have no AWS identity at all)
     aws_start = time.time()
+    from agenticops.llm import registry as provider_registry
     try:
+        if not provider_registry.bedrock_enabled():
+            raise _HealthSkip
         from agenticops.config import get_bedrock_boto_session
         sts = get_bedrock_boto_session().client("sts")
         identity = sts.get_caller_identity()
@@ -1537,6 +1545,8 @@ def api_health():
             latency_ms=int((time.time() - aws_start) * 1000),
             details={"account_id": identity.get("Account")},
         )
+    except _HealthSkip:
+        checks["aws"] = HealthCheckResult(status="skipped", details={"reason": "bedrock_off"})
     except Exception as e:
         checks["aws"] = HealthCheckResult(
             status="error",
@@ -4749,27 +4759,16 @@ async def api_rename_chat_session(session_id: str, payload: ChatSessionUpdate, b
 
 
 def _generate_session_title(user_msg: str, assistant_msg: str) -> str | None:
-    """Generate a concise session title using the cheap LLM. Returns None on failure."""
+    """Generate a concise session title using the cheap LLM. Returns None on failure (an empty or cut reply too).
+    Through converse_text since MVP-2.9.0 N35: the cheap tier may be any model, of Bedrock or another provider."""
     try:
-        from agenticops.config import get_bedrock_boto_session
+        from agenticops.agents.preamble import converse_text
 
-        client = get_bedrock_boto_session().client("bedrock-runtime")
-        body = json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 30,
-            "messages": [{"role": "user", "content": (
-                "Generate a concise title (max 6 words) for this conversation. "
-                "Reply with ONLY the title, no quotes.\n\n"
-                f"User: {user_msg[:500]}\nAssistant: {assistant_msg[:500]}"
-            )}],
-        })
-        resp = client.invoke_model(
-            modelId=settings.bedrock_model_id_cheap,
-            contentType="application/json",
-            accept="application/json",
-            body=body,
-        )
-        title = json.loads(resp["body"].read()).get("content", [{}])[0].get("text", "").strip()
+        prompt = ("Generate a concise title (max 6 words) for this conversation. "
+                  "Reply with ONLY the title, no quotes.\n\n"
+                  f"User: {user_msg[:500]}\nAssistant: {assistant_msg[:500]}")
+        title, _, _ = converse_text(settings.bedrock_model_id_cheap, prompt, max_tokens=30)
+        title = title.strip()
         return title if title else None
     except Exception as e:
         logger.warning("Session title generation failed: %s", e)

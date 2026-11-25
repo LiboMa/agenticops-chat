@@ -150,17 +150,12 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
         Report summary with ID and file path.
     """
     try:
-        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_bedrock_boto_session
+        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins
 
         model_id, max_tokens = get_agent_model_config("reporter")
-        from agenticops.agents.preamble import bedrock_model_kwargs
-        cache_kwargs = bedrock_model_kwargs(model_id)
-        model = BedrockModel(
-            model_id=model_id,
-            boto_session=get_bedrock_boto_session(),
-            max_tokens=max_tokens,
-            **cache_kwargs,   # carries the stream read timeout (model connection settings, ≥ the 300 s it had)
-        )
+        from agenticops.llm.factory import build_model    # Bedrock or another provider (MVP-2.9.0 N35)
+        # carries the stream read timeout on Bedrock (model connection settings, ≥ the 300 s it had)
+        model = build_model(model_id, max_tokens=max_tokens, bedrock_cls=BedrockModel)
 
         # What this run reads is recorded by the code (services/report_coverage): the record rides on the run's
         # context, the tools and the hook below write into it, save_report stores it on the report.
