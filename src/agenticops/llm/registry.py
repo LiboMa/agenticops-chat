@@ -338,7 +338,10 @@ def _refuse_in_use(provider: str, model_id: Optional[str] = None) -> None:
 def bedrock_enabled() -> bool:
     from agenticops.config import settings
     from agenticops.services import runtime_settings
-    stored = runtime_settings.get(RUNTIME_KEY)
+    try:
+        stored = runtime_settings.get(RUNTIME_KEY)
+    except Exception:       # a database without the table (an old copy before init_db): the yaml default stands
+        stored = None
     if isinstance(stored, dict) and isinstance(stored.get("bedrock_enabled"), bool):
         return stored["bedrock_enabled"]
     return bool(settings.model_providers.bedrock_enabled)

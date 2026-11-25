@@ -246,6 +246,17 @@ def media_capabilities(model_id: str) -> MediaCaps:
     """Native media per model family (measured on Bedrock 2026-11-07): Claude reads images and documents (a
     scanned PDF too); GPT-6 reads images only; gpt-oss neither. Every other id — gpt-5.6, a custom endpoint, an
     unknown family — is treated as text-only: sending media a model refuses fails the whole request."""
+    if "::" in (model_id or ""):
+        # a provider's model (MVP-2.9.0 N35): what its own attributes say — never guessed from the name
+        # (OpenRouter's «anthropic/claude-…» is not «a Claude on Bedrock»); not on the list = text only
+        from agenticops.llm.catalog import model_row
+        from agenticops.llm.refs import parse_ref
+        try:
+            ref = parse_ref(model_id)
+            row = model_row(ref.provider, ref.model_id)
+        except Exception:
+            row = None
+        return MediaCaps(images=bool(row and row.supports_images), documents=bool(row and row.supports_documents))
     mid = (model_id or "").lower()
     if is_anthropic_model(mid):
         return MediaCaps(images=True, documents=True)
@@ -303,7 +314,23 @@ _TEMPERATURE_REMOVED_FROM = (4, 7)
 
 def accepts_temperature(model_id: str) -> bool:
     """True when a request to this model may carry `temperature`: a Claude model before 4.7, including the ids that
-    predate the `claude-<family>-<n>` shape (Claude 3.x, claude-v2)."""
+    predate the `claude-<family>-<n>` shape (Claude 3.x, claude-v2). A provider's model (MVP-2.9.0 N35): an
+    OpenAI-compatible server takes it; an Anthropic-compatible one by the same Claude rule on its own model id."""
+    if "::" in (model_id or ""):
+        from agenticops.llm import registry
+        from agenticops.llm.refs import parse_ref
+        try:
+            ref = parse_ref(model_id)
+            cfg = registry.get(ref.provider)
+        except Exception:
+            return False
+        if cfg is None:
+            return False
+        if cfg.kind != "anthropic_compatible":
+            return True
+        model_id = ref.model_id
+        if "claude" not in model_id.lower():
+            return False
     if not is_anthropic_model(model_id):
         return False
     version = _claude_version(model_id)
@@ -344,7 +371,16 @@ def converse_text(model_id: str, prompt: str, *, max_tokens: int, temperature: O
 
     Callers import this inside their functions: the agents package's __init__ imports every agent, and that chain
     reaches back to signal_gate and galaxy.builder, so a module-level import there would be circular.
+
+    A `<provider>::<model>` reference (MVP-2.9.0 N35) goes to that provider under the same contract
+    (`llm.direct.complete_text`); a Bedrock id while Bedrock is turned off raises ModelProviderUnavailable.
     """
+    if "::" in (model_id or ""):
+        from agenticops.llm.direct import complete_text
+        return complete_text(model_id, prompt, max_tokens=max_tokens, temperature=temperature,
+                             read_timeout=read_timeout, total_attempts=total_attempts)
+    from agenticops.llm.factory import require_bedrock
+    require_bedrock(model_id)
     from agenticops.config import get_bedrock_boto_session
 
     client_kwargs: dict = {}
