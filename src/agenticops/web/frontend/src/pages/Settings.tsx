@@ -24,6 +24,7 @@ import { useExcludePatterns, useUpdateExcludePatterns } from "@/hooks/useExclude
 import { MessagingTab } from "@/components/settings/MessagingTab";
 import { AuditTab } from "@/components/settings/AuditTab";
 import { KBTab } from "@/components/settings/KBTab";
+import { ModelProvidersTab } from "@/components/settings/ModelProvidersTab";
 import { SkillsTab } from "@/components/settings/SkillsTab";
 import { ConnectorsCard } from "@/components/settings/ConnectorsCard";
 import { ChatUploadCard } from "@/components/settings/ChatUploadCard";
@@ -1316,6 +1317,7 @@ export default function Settings() {
         <Tabs.List className="flex border-b border-border mb-6 gap-0 overflow-x-auto">
           <Tabs.Trigger value="general" className={tabTriggerClass}>{t("settings.general")}</Tabs.Trigger>
           <Tabs.Trigger value="accounts" className={tabTriggerClass}>{t("settings.accounts")}</Tabs.Trigger>
+          <Tabs.Trigger value="providers" className={tabTriggerClass}>{t("settings.providers")}</Tabs.Trigger>
           <Tabs.Trigger value="messaging" className={tabTriggerClass}>{t("settings.messaging")}</Tabs.Trigger>
           {auditOn && <Tabs.Trigger value="audit" className={tabTriggerClass}>{t("settings.audit")}</Tabs.Trigger>}
           <Tabs.Trigger value="kb" className={tabTriggerClass}>{t("settings.kb")}</Tabs.Trigger>
@@ -1543,6 +1545,11 @@ export default function Settings() {
       </Card>
 
           </fieldset>
+        </Tabs.Content>
+
+        {/* ── Model providers Tab (MVP-2.9.0 N35) ─────────────── */}
+        <Tabs.Content value="providers">
+          <ModelProvidersTab />
         </Tabs.Content>
 
         {/* ── Messaging Tab ────────────────────────────────────── */}
