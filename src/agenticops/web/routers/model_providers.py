@@ -10,6 +10,9 @@
     GET    /api/model-providers/{name}/models?purpose=       the models
     POST   /api/model-providers/{name}/models                add a model by hand
     PATCH  /api/model-providers/{name}/models/{model_id}     attributes, enabled
+    GET    /api/kb/embedding                                 the knowledge base's embedding model, its vectors
+    PUT    /api/kb/embedding                                 {model_ref} — "" = Titan on Bedrock
+    POST   /api/kb/reembed                                   rebuild every vector with the model in use (SQLite)
 
 With sign-in on, every write needs an admin (an API key's scopes cap it); a read is what Settings is — writers and
 admins, a read-only account only holding `settings_read`. Refusals are `{"detail": {"detail", "code", ...}}`. Blocking work (the database, the
@@ -28,7 +31,7 @@ from fastapi.responses import JSONResponse, Response
 from agenticops.auth.actor import Actor
 from agenticops.auth.viewer import can_view_settings, read_only_detail
 from agenticops.config import settings
-from agenticops.llm import catalog, presets, probe, registry
+from agenticops.llm import catalog, embeddings, presets, probe, registry
 from agenticops.web.deps import current_actor, require_authenticated_user
 from agenticops.web.routers.upload_settings import _can_edit
 
@@ -188,3 +191,34 @@ async def patch_model(name: str, model_id: str, request: Request, actor: Actor =
         return _bad_body("send a JSON object")
     result = await _write(lambda: catalog.patch_model(name, model_id, body, actor))
     return result if isinstance(result, JSONResponse) else _view(result)
+
+
+# ── the knowledge base's embedding model ──────────────────────────────────────
+
+@router.get("/api/kb/embedding")
+async def kb_embedding(request: Request):
+    refused = await _reader(request)
+    if refused is not None:
+        return refused
+    return await asyncio.to_thread(embeddings.status)
+
+
+@router.put("/api/kb/embedding")
+async def set_kb_embedding(request: Request, actor: Actor = Depends(current_actor)):
+    await _admin(request)
+    body = await _json(request)
+    if not isinstance(body, dict) or not isinstance(body.get("model_ref", ""), str):
+        return _bad_body("send {\"model_ref\": \"<provider>::<model>\" | \"\"}")
+    try:
+        return await asyncio.to_thread(embeddings.set_model, body.get("model_ref", ""), actor)
+    except registry.ProviderError as e:
+        return _refused(e)
+
+
+@router.post("/api/kb/reembed")
+async def kb_reembed(request: Request, actor: Actor = Depends(current_actor)):
+    await _admin(request)
+    try:
+        return await asyncio.to_thread(embeddings.reembed, actor)
+    except registry.ProviderError as e:
+        return _refused(e)

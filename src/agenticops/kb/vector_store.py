@@ -174,6 +174,31 @@ class SQLiteVectorStore(VectorStore):
         finally:
             conn.close()
 
+    def replace_all(self, records: list[VectorRecord]) -> int:
+        """Every stored vector replaced by `records`, in ONE transaction (a rebuild with another embedding model —
+        MVP-2.9.0 N35): a failure leaves the old vectors as they were."""
+        conn = self._get_conn()
+        try:
+            with conn:
+                conn.execute("DELETE FROM case_vectors")
+                conn.executemany(
+                    """INSERT OR REPLACE INTO case_vectors
+                       (case_id, field_name, vector, resource_type, metadata_json) VALUES (?, ?, ?, ?, ?)""",
+                    [(r.case_id, r.field_name, r.vector.astype(np.float32).tobytes(), r.resource_type,
+                      json.dumps(r.metadata or {})) for r in records])
+            return len(records)
+        finally:
+            conn.close()
+
+    def stored_dimension(self) -> Optional[int]:
+        """The length of the stored vectors (one row read), or None when there are none."""
+        conn = self._get_conn()
+        try:
+            row = conn.execute("SELECT vector FROM case_vectors LIMIT 1").fetchone()
+            return len(row[0]) // 4 if row and row[0] else None
+        finally:
+            conn.close()
+
     def delete(self, case_id: str) -> int:
         conn = self._get_conn()
         try:

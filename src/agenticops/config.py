@@ -281,6 +281,12 @@ class Settings(BaseSettings):
         default=True,
         description="Enable vector embeddings (set AIOPS_EMBEDDING_ENABLED=false to disable)",
     )
+    embedding_model_ref: str = Field(
+        default="",
+        description="Embedding model of a model provider (<provider>::<model>, OpenAI-compatible); empty = Titan "
+                    "on Bedrock while Bedrock is on. An administrator's choice is stored in runtime_settings "
+                    "(MVP-2.9.0 N35)",
+    )
 
     # Monitoring
     default_metrics_period: int = Field(

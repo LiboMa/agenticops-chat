@@ -29,6 +29,7 @@ class FakeLLMServer:
         self.list_shape = "plain"                 # plain | openrouter | vllm
         self.models = ["fake-chat-1", "fake-embed-1"]
         self.embedding_dim = 8
+        self.embed_fail_on: Optional[str] = None    # an embeddings input holding this text is answered 500
         self.requests: list[dict] = []
         outer = self
 
@@ -83,6 +84,8 @@ class FakeLLMServer:
                 if self.path.startswith("/v1/embeddings"):
                     items = body.get("input")
                     items = items if isinstance(items, list) else [items]
+                    if outer.embed_fail_on and any(outer.embed_fail_on in str(i) for i in items):
+                        return self._send(500, {"error": {"message": "embedding backend failed"}})
                     return self._send(200, {"object": "list", "data": [
                         {"object": "embedding", "index": i, "embedding": [0.1 * (i + 1)] * outer.embedding_dim}
                         for i, _ in enumerate(items)], "usage": {"prompt_tokens": 3, "total_tokens": 3}})
