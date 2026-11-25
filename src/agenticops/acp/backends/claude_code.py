@@ -23,7 +23,9 @@ class ClaudeCodeBackend:
             from agenticops.agents.preamble import is_anthropic_model
             from agenticops.config import get_agent_model_config
             main_model_id = get_agent_model_config("main")[0]
-            if is_anthropic_model(main_model_id):
+            from agenticops.llm.refs import is_ref
+            # a provider's model (MVP-2.9.0 N35) is no Bedrock model name, «claude» in it or not: Claude Code keeps its own
+            if is_anthropic_model(main_model_id) and not is_ref(main_model_id):
                 env_extra["ANTHROPIC_MODEL"] = main_model_id
         self._client = AcpClient(
             command=settings.acp_claude_command,

@@ -2,9 +2,12 @@
 task 3 on, reading a provider's list, adding by hand and editing a model's attributes."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -152,6 +155,29 @@ def describe_error(exc: Exception, cfg=None) -> str:
     return redact_secrets(text)
 
 
+def refresh_enabled() -> dict:
+    """Read every ENABLED provider's model list again — at startup, in a background thread (the spec: «启动时只刷新开着的
+    提供方的模型列表»). A turned-off provider is not contacted; one that cannot be read keeps its models (refresh says
+    why) and stops nothing. {name: refresh's answer}; never raises."""
+    from types import SimpleNamespace
+    from agenticops.llm import registry
+    actor = SimpleNamespace(key="system:startup", user_id=None)
+    out: dict = {}
+    try:
+        names = [p["name"] for p in registry.list_public() if p.get("enabled")]
+    except Exception:
+        logger.warning("model providers: could not list them for the startup refresh", exc_info=True)
+        return out
+    for name in names:
+        try:
+            out[name] = refresh(name, actor)
+        except Exception as e:  # noqa: BLE001 — one provider never stops the others
+            out[name] = {"error": type(e).__name__}
+        if out[name].get("error"):
+            logger.warning("model providers: «%s» model list not read at startup: %s", name, out[name]["error"])
+    return out
+
+
 def refresh(provider: str, actor) -> dict:
     from agenticops.config import settings
     from agenticops.llm import registry
@@ -168,7 +194,11 @@ def refresh(provider: str, actor) -> dict:
     now = datetime.now(timezone.utc)
     with get_db_session() as s:
         rows = {r.model_id: r for r in s.query(ProviderModel).filter_by(provider=provider)}
+        seen: set[str] = set()
         for item in listing:
+            if str(item["id"]) in seen:   # a list that names a model twice: the first one counts
+                continue
+            seen.add(str(item["id"]))
             facts = parse_listing(item)
             row = rows.get(str(item["id"]))
             if row is None:

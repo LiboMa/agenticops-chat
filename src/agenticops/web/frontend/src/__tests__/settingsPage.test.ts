@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  HIGH_IMPACT, SECTIONS, canEditHigh, highKeys, modelAvailability, heldVar, pending, sectionAnchor, sectionOfHash, shown, shownTab, sourceOf, stage,
+  HIGH_IMPACT, SECTIONS, canEditHigh, highKeys, modelAvailability, modelListOrFallback, heldVar, pending, sectionAnchor, sectionOfHash, shown, shownTab, sourceOf, stage,
   type HighKey,
 } from "@/lib/settingsPage";
 
@@ -134,5 +134,16 @@ describe("the confirmation switch says what it does today (MVP-2.9.0 N27, review
     expect(en["settings.high.executor_hitl_enabled.onMeans"]).toMatch(/ends as failed/i);
     expect(zh["settings.high.executor_hitl_enabled.desc"]).toContain("还没有");
     expect(zh["settings.high.executor_hitl_enabled.onMeans"]).toContain("以失败结束");
+  });
+});
+
+describe("modelListOrFallback (N35: the fallback offered Bedrock models while Bedrock was off)", () => {
+  const fallback = [{ label: "Opus", value: "global.anthropic.claude-opus-5-5" }];
+  it("a server that sent a list — even an empty one — is believed", () => {
+    expect(modelListOrFallback([], fallback)).toEqual([]);
+    expect(modelListOrFallback([{ label: "x", value: "p1::x" }], fallback)).toEqual([{ label: "x", value: "p1::x" }]);
+  });
+  it("only an older server that sent no list gets the fallback", () => {
+    expect(modelListOrFallback(undefined, fallback)).toBe(fallback);
   });
 });

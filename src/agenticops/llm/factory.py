@@ -19,7 +19,8 @@ from typing import Any
 from agenticops.llm.refs import parse_ref
 
 REASONS = ("bedrock_off", "unknown_provider", "provider_disabled", "model_disabled", "unknown_model")
-_OPENAI_EFFORT_TOP = "high"     # Chat Completions' reasoning_effort: low | medium | high
+_OPENAI_EFFORT_TOP = "high"
+_AGENT_RETRIES = 1   # an agent's model: one retry — a provider that does not answer fails after two tries, not three     # Chat Completions' reasoning_effort: low | medium | high
 
 
 class ModelProviderUnavailable(RuntimeError):
@@ -93,14 +94,14 @@ def build_model(ref: str, *, max_tokens: int, thinking_budget: int = 0, bedrock_
             if settings.bedrock_cache_enabled and "claude" in r.model_id.lower():
                 from strands.models.model import CacheConfig
                 extra["cache_config"] = CacheConfig(strategy="auto", tools_ttl=True, system_prompt_ttl=False)
-            model = AnthropicModel(client_args=client_args(cfg), model_id=r.model_id, max_tokens=max_tokens,
+            model = AnthropicModel(client_args=client_args(cfg, max_retries=_AGENT_RETRIES), model_id=r.model_id, max_tokens=max_tokens,
                                    **({"params": params} if params else {}), **extra)
         else:
             from strands.models.openai import OpenAIModel
             params = {"max_tokens": max_tokens}
             if row.reasoning == "openai_effort" and thinking_budget > 0:
                 params["reasoning_effort"] = openai_effort(thinking_budget)
-            model = OpenAIModel(client_args=client_args(cfg), model_id=r.model_id, params=params, **extra)
+            model = OpenAIModel(client_args=client_args(cfg, max_retries=_AGENT_RETRIES), model_id=r.model_id, params=params, **extra)
     model.aiops_ref = ref
     return model
 

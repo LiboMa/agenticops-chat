@@ -200,3 +200,26 @@ def test_media_capabilities_and_temperature_for_refs(db):
     assert media_capabilities("global.anthropic.claude-opus-5-5") == (True, True)   # Bedrock unchanged
     assert accepts_temperature("openrouter::meta/llama") is True
     assert accepts_temperature("global.anthropic.claude-opus-5-5") is False
+
+
+# ── follow-ups (N35, after the review) ───────────────────────────────────────
+
+def test_an_agents_model_retries_a_stuck_provider_once(db):
+    """A provider that does not answer: the chat gives up after two tries (it was three, at 3× the timeout)."""
+    from agenticops.llm.factory import build_model
+    add_provider("p4", "http://h/v1")
+    add_model("p4", "m")
+    assert build_model("p4::m", max_tokens=10).client_args["max_retries"] == 1
+
+
+def test_no_temperature_for_a_new_claude_behind_an_openai_proxy(db):
+    """OpenRouter's «anthropic/claude-opus-4.8» refuses temperature as Bedrock's Claude 4.7+ does; a proxy alias with
+    no version (LiteLLM's «claude-sonnet») and another family keep it."""
+    from agenticops.agents.preamble import accepts_temperature
+    add_provider("openrouter", "https://openrouter.ai/api/v1", api_key="k")
+    for mid in ("anthropic/claude-opus-4.8", "anthropic/claude-sonnet-4.5", "claude-sonnet", "meta/llama-3"):
+        add_model("openrouter", mid)
+    assert accepts_temperature("openrouter::anthropic/claude-opus-4.8") is False
+    assert accepts_temperature("openrouter::anthropic/claude-sonnet-4.5") is True
+    assert accepts_temperature("openrouter::claude-sonnet") is True
+    assert accepts_temperature("openrouter::meta/llama-3") is True

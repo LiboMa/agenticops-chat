@@ -55,6 +55,7 @@ export function ProviderDialog({ presets, row, onClose }: {
     return (
       <ModalFrame title={title} onClose={onClose} width="w-[min(720px,100%)]">
         <p className="mt-2 text-sm text-muted-foreground">{t("settings.providers.pickPlatform")}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{t("settings.providers.dataNotice")}</p>
         <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {presets.map((p) => (
             <li key={p.preset}>

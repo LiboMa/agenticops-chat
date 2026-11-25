@@ -163,3 +163,18 @@ describe("a writer's agent model controls (final review: they stayed enabled and
     for (const d of disabled) expect(d).toMatch(/!canChange/);
   });
 });
+
+describe("the page says where conversations go (the spec: «页面上写明数据会发给这家»)", () => {
+  it("the providers tab and the add dialog carry the notice, in both languages", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const tab = readFileSync(resolve(__dirname, "../components/settings/ModelProvidersTab.tsx"), "utf8");
+    const dialog = readFileSync(resolve(__dirname, "../components/settings/ProviderDialog.tsx"), "utf8");
+    expect(tab).toMatch(/settings\.providers\.dataNotice/);
+    expect(dialog).toMatch(/settings\.providers\.dataNotice/);
+    for (const lang of ["en", "zh"]) {
+      const words = JSON.parse(readFileSync(resolve(__dirname, `../locales/${lang}.json`), "utf8"));
+      expect(words["settings.providers.dataNotice"]).toBeTruthy();
+    }
+  });
+});

@@ -212,3 +212,46 @@ def test_an_unclassified_error_says_its_kind_not_its_text():
     exc = ValueError("Illegal header value b'Bearer sk-live-SECRET-9999'")
     text = catalog.describe_error(exc, SimpleNamespace(api_key="other"))
     assert "SECRET" not in text and "ValueError" in text
+
+
+# ── follow-ups (N35, after the review) ───────────────────────────────────────
+
+def test_the_tool_step_has_room_and_says_when_it_was_cut(fake):
+    """A think-first model spends tokens before it calls the tool: the step gives it room, and an answer cut at the
+    limit is said as such — not «the model answered in text»."""
+    from agenticops.llm import catalog, probe
+    add_provider("plain", f"{fake.base}/v1")
+    catalog.refresh("plain", ADMIN)
+    probe.test("plain", "fake-chat-1")
+    tool_request = [r["body"] for r in fake.requests if r["body"] and r["body"].get("tools")][-1]
+    assert tool_request["max_tokens"] >= 512
+    fake.tools_supported, fake.stop = False, "length"
+    out = probe.test("plain", "fake-chat-1")
+    assert not out["tools"]["ok"] and "output limit" in out["tools"]["error"]
+
+
+def test_a_listing_with_a_repeated_id_reads_it_once(fake):
+    from agenticops.llm import catalog
+    fake.models = ["fake-chat-1", "fake-chat-1", "fake-embed-1"]
+    add_provider("plain", f"{fake.base}/v1")
+    assert catalog.refresh("plain", ADMIN) == {"added": 2, "updated": 0, "unchanged": 0, "error": None}
+
+
+def test_startup_refreshes_the_enabled_providers_only(fake):
+    """At startup the enabled providers' model lists are read again (the spec); a turned-off one is not contacted, and
+    one that cannot be read keeps its models and stops nothing."""
+    from agenticops.llm import catalog
+    add_provider("on", f"{fake.base}/v1")
+    add_provider("off", "http://127.0.0.1:9/v1", enabled=False)
+    add_provider("down", "http://127.0.0.1:9/v1", timeout_seconds=5)
+    out = catalog.refresh_enabled()
+    assert set(out) == {"on", "down"} and out["on"]["added"] == 2 and out["down"]["error"]
+    assert {r["path"] for r in fake.requests} == {"/v1/models"}
+
+
+def test_the_app_starts_the_refresh_in_the_background():
+    import inspect
+    from agenticops.web import app as webapp
+    source = inspect.getsource(webapp.lifespan)
+    import re
+    assert re.search(r"Thread\(target=refresh_enabled[^)]*daemon=True", source)

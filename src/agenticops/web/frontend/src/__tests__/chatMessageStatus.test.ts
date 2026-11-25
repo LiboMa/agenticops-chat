@@ -19,6 +19,12 @@ describe("chat message status (MVP-2.7.0 S5)", () => {
     expect(messageStatusKey(rejected)).toBe("chat.error.request_rejected");
     expect(messageErrorDetail(rejected)).toBe("Unknown parameter: 'reasoning_effort'.");
   });
+  it("a model that cannot be used says which and why, after a reload too (N35)", () => {
+    const gone = m({ dispatch_state: "failed", token_usage: { input: 0, output: 0, error: "x", error_code: "model_unavailable",
+      error_detail: "the model «p1::m» of this conversation is not available: the provider «p1» is turned off" } });
+    expect(messageStatusKey(gone)).toBe("chat.error.model_unavailable");
+    expect(messageErrorDetail(gone)).toMatch(/p1::m.*turned off/);
+  });
   it("no other failure shows a reason — never the raw exception", () => {
     expect(messageErrorDetail(m({ dispatch_state: "failed", token_usage: { input: 0, output: 0, error: "boto: x",
       error_code: "internal", error_detail: "x" } }))).toBeNull();

@@ -12,7 +12,7 @@ import { buildAccountCredentials, hasStoredSecrets } from "@/lib/accountForm";
 import { useLocale } from "@/i18n/LocaleContext";
 import { useCloseOnEscape } from "@/hooks/useCloseOnEscape";
 import { itemViews, settingsTab } from "@/lib/setup";
-import { SECTIONS, modelAvailability, sectionAnchor, sectionOfHash, shownTab, type SectionId } from "@/lib/settingsPage";
+import { SECTIONS, modelAvailability, modelListOrFallback, sectionAnchor, sectionOfHash, shownTab, type SectionId } from "@/lib/settingsPage";
 import { auditTabVisible } from "@/lib/plans";
 import { AutomationCard } from "@/components/settings/AutomationCard";
 import { StatusText } from "@/components/ui/StatusText";
@@ -941,7 +941,7 @@ function AgentModelsCard() {
   if (!s) return null;
 
   const agents = s.agent_models ?? {};
-  const presets = s.model_presets?.length ? s.model_presets : MODEL_PRESETS_FALLBACK;
+  const presets = modelListOrFallback(s.model_presets, MODEL_PRESETS_FALLBACK);   // N35: an empty list is believed
   const canChange = canChangeModels(boot.data);   // an administrator's with sign-in on (N35)
 
   return (
@@ -1058,7 +1058,7 @@ function GalaxyModelCard() {
   if (settingsQ.error) return <Card><CardBody><ErrorBanner message={settingsQ.error.message} onRetry={() => settingsQ.refetch()} /></CardBody></Card>;
   if (!s) return null;
 
-  const presets = s.model_presets?.length ? s.model_presets : MODEL_PRESETS_FALLBACK;
+  const presets = modelListOrFallback(s.model_presets, MODEL_PRESETS_FALLBACK);   // N35: an empty list is believed
   const current = s.galaxy_model_id ?? "";
 
   return (

@@ -246,6 +246,11 @@ async def lifespan(app: FastAPI):
             seed_scan_schedule()   # no-op when the row exists
         except Exception:
             logger.debug("scan: resource-scan schedule seed skipped", exc_info=True)
+        try:   # MVP-2.9.0 N35: the enabled model providers' lists, read again — in the background, never blocking startup
+            from agenticops.llm.catalog import refresh_enabled
+            threading.Thread(target=refresh_enabled, daemon=True, name="model-provider-refresh").start()
+        except Exception:
+            logger.debug("model providers: startup refresh not started", exc_info=True)
         if settings.security_review_enabled:
             try:
                 from agenticops.scheduler.scheduler import Scheduler as _SSched, Schedule as _SSchedule

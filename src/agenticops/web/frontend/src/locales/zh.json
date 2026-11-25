@@ -2445,5 +2445,6 @@
   "settings.providers.preset.custom_openai.notes": "任何支持 OpenAI Chat Completions 接口的服务。",
   "settings.providers.preset.custom_anthropic.notes": "任何支持 Anthropic Messages 接口的服务。",
   "settings.providers.preset.custom_openai.label": "其他（OpenAI 兼容）",
-  "settings.providers.preset.custom_anthropic.label": "其他（Anthropic 兼容）"
+  "settings.providers.preset.custom_anthropic.label": "其他（Anthropic 兼容）",
+  "settings.providers.dataNotice": "agent 发给模型的一切——对话、工具结果、资源名和配置——都会发到这个模型所在的提供方。第三方平台（OpenRouter、Sub2API 网关）能看到全部内容。"
 }

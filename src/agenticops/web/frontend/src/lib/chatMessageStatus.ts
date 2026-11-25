@@ -17,10 +17,13 @@ export function messageStatusKey(m: Pick<ChatMessage, "role" | "dispatch_state" 
   return null;
 }
 
-/** Bedrock's reason for a rejected request (2026-11-08) — shown under the failure label; every other failure shows
- *  no detail (never the raw exception). */
+/** The model's own reason for a rejected request (2026-11-08), or which model could not be used and why (MVP-2.9.0
+ *  N35) — the server's `error_detail`, shown under the failure label; every other failure shows no detail (never the
+ *  raw exception). */
+const DETAILED = new Set(["request_rejected", "model_unavailable"]);
+
 export function messageErrorDetail(m: Pick<ChatMessage, "role" | "token_usage">): string | null {
-  if (m.role !== "assistant" || m.token_usage?.error_code !== "request_rejected") return null;
+  if (m.role !== "assistant" || !DETAILED.has(m.token_usage?.error_code ?? "")) return null;
   const detail = m.token_usage?.error_detail;
   return typeof detail === "string" && detail ? detail : null;
 }

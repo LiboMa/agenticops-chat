@@ -19,6 +19,7 @@ from typing import Optional
 from agenticops.llm import catalog
 
 TOOL_NAME = "report_ready"
+_MAX_TOKENS = 512   # room for a model that thinks before it answers or calls the tool (64 cut qwen3-style models off)
 _TOOL_DESCRIPTION = "Call this to report that you are ready."
 
 
@@ -41,7 +42,7 @@ def _chat(cfg, model_id: str, timeout: int, *, with_tool: bool) -> dict:
     args = client_args(cfg, timeout=timeout, max_retries=0)
     if cfg.kind == "anthropic_compatible":
         import anthropic
-        kwargs: dict = {"model": model_id, "max_tokens": 64,
+        kwargs: dict = {"model": model_id, "max_tokens": _MAX_TOKENS,
                         "messages": [{"role": "user", "content": f"Call the {TOOL_NAME} tool now." if with_tool
                                       else "Reply with the single word: ok"}]}
         if with_tool:
@@ -49,9 +50,10 @@ def _chat(cfg, model_id: str, timeout: int, *, with_tool: bool) -> dict:
                                 "input_schema": {"type": "object", "properties": {}}}]
         resp = anthropic.Anthropic(**args).messages.create(**kwargs)
         called = any(getattr(b, "type", "") == "tool_use" for b in resp.content)
+        cut = getattr(resp, "stop_reason", None) == "max_tokens"
     else:
         import openai
-        kwargs = {"model": model_id, "max_tokens": 64,
+        kwargs = {"model": model_id, "max_tokens": _MAX_TOKENS,
                   "messages": [{"role": "user", "content": f"Call the {TOOL_NAME} tool now." if with_tool
                                 else "Reply with the single word: ok"}]}
         if with_tool:
@@ -60,6 +62,10 @@ def _chat(cfg, model_id: str, timeout: int, *, with_tool: bool) -> dict:
             kwargs["tool_choice"] = "auto"
         resp = openai.OpenAI(**args).chat.completions.create(**kwargs)
         called = bool(resp.choices and resp.choices[0].message.tool_calls)
+        cut = bool(resp.choices) and resp.choices[0].finish_reason == "length"
+    if with_tool and not called and cut:
+        raise catalog.OwnMessage(f"cut at the output limit ({_MAX_TOKENS} tokens) before it called the tool — a model "
+                                 "that thinks first may need more: test again, or set «calls tools» by hand")
     if with_tool and not called:
         raise catalog.OwnMessage("no tool call — the model answered in text: agents cannot use this model")
     return {}

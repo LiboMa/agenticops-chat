@@ -173,7 +173,7 @@ async def list_models(name: str, request: Request, purpose: Optional[str] = None
     refused = await _reader(request)
     if refused is not None:
         return refused
-    if registry.get(name) is None:
+    if await asyncio.to_thread(registry.get, name) is None:   # a KMS decrypt is a network call: off the event loop
         return _refused(registry.ProviderError(404, "not_found", f"no provider «{name}»"))
     views = await asyncio.to_thread(catalog.list_models, name, purpose=purpose)
     return [_view(v) for v in views]

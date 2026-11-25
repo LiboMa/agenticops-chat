@@ -329,7 +329,10 @@ def accepts_temperature(model_id: str) -> bool:
         if cfg is None:
             return False
         if cfg.kind != "anthropic_compatible":
-            return True
+            # an OpenAI-compatible server takes it — unless the model behind it is a Claude 4.7+ by its own id
+            # (OpenRouter's «anthropic/claude-opus-4.8»: dots for hyphens), which refuses it as on Bedrock
+            version = _claude_version(ref.model_id.replace(".", "-"))
+            return version is None or version < _TEMPERATURE_REMOVED_FROM
         model_id = ref.model_id
         if "claude" not in model_id.lower():
             return False

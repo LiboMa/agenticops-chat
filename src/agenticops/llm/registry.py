@@ -247,7 +247,7 @@ def update(name: str, data: dict, actor, *, clear_api_key: bool = False) -> dict
                 _refuse_in_use(name)
             row.enabled = bool(data["enabled"])
         new_key = data.get("api_key")
-        replaced = isinstance(new_key, str) and bool(new_key.strip()) and not new_key.startswith(_MASK_PREFIX)
+        replaced = isinstance(new_key, str) and bool(new_key.strip()) and not new_key.strip().startswith(_MASK_PREFIX)
         if clear_api_key:
             secrets["api_key"] = ""
         elif replaced:
@@ -255,8 +255,11 @@ def update(name: str, data: dict, actor, *, clear_api_key: bool = False) -> dict
         if "extra_headers" in data and data["extra_headers"] is not None:
             old_headers = secrets.get(_HEADERS) or {}
             incoming = _check_headers(data["extra_headers"])
-            # a header value echoed as a mask keeps the stored value of that header
-            secrets[_HEADERS] = {k: (old_headers.get(k, "") if v.startswith(_MASK_PREFIX) else v)
+            # a header value echoed as a mask keeps the stored value of that header; a NEW header needs a value
+            fresh = [k for k, v in incoming.items() if v.strip().startswith(_MASK_PREFIX) and k not in old_headers]
+            if fresh:
+                raise ProviderError(422, "invalid_headers", f"a new header needs its value: {', '.join(sorted(fresh))}")
+            secrets[_HEADERS] = {k: (old_headers[k] if v.strip().startswith(_MASK_PREFIX) else v)
                                         for k, v in incoming.items()}
         row.secrets = _store().encrypt_credentials(secrets)
         row.updated_at = datetime.now(timezone.utc)

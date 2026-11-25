@@ -217,3 +217,16 @@ def test_every_preset_has_its_words_in_both_languages():
             assert words.get(f"settings.providers.preset.{key}.notes"), (lang, key)
         for key in ("custom_openai", "custom_anthropic"):
             assert words.get(f"settings.providers.preset.{key}.label"), (lang, key)
+
+
+def test_a_mask_with_spaces_keeps_the_key_and_a_new_header_needs_a_value(db):
+    from agenticops.llm import registry
+    from tests.llm_fake_server import ADMIN, add_provider
+    add_provider("p5", "http://h/v1", api_key="sk-kept-0001", extra_headers={"X-A": "one"})
+    registry.update("p5", {"api_key": "  ****0001  "}, ADMIN)
+    assert registry.get("p5").api_key == "sk-kept-0001"
+    with pytest.raises(registry.ProviderError) as e:
+        registry.update("p5", {"extra_headers": {"X-A": "****", "X-New": "****"}}, ADMIN)
+    assert e.value.code == "invalid_headers"
+    registry.update("p5", {"extra_headers": {"X-A": "****", "X-New": "two"}}, ADMIN)
+    assert registry.get("p5").extra_headers == {"X-A": "one", "X-New": "two"}

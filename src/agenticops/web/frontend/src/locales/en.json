@@ -2445,5 +2445,6 @@
   "settings.providers.preset.custom_openai.notes": "Any server that speaks the OpenAI Chat Completions API.",
   "settings.providers.preset.custom_anthropic.notes": "Any server that speaks the Anthropic Messages API.",
   "settings.providers.preset.custom_openai.label": "Other (OpenAI-compatible)",
-  "settings.providers.preset.custom_anthropic.label": "Other (Anthropic-compatible)"
+  "settings.providers.preset.custom_anthropic.label": "Other (Anthropic-compatible)",
+  "settings.providers.dataNotice": "Whatever the agents send to a model — the conversation, tool results, resource names and configuration — goes to that model's provider. A third-party platform (OpenRouter, a Sub2API gateway) sees it all."
 }
