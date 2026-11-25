@@ -18,6 +18,7 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { formatShortDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 import { useReadOnly } from "@/hooks/useBootstrap";
+import { KbEmbeddingCard } from "./KbEmbeddingCard";
 
 type Tab = "review" | "active" | "cases";
 
@@ -292,6 +293,9 @@ export function KBTab() {
           colorClass="text-muted-foreground"
         />
       </div>
+
+      {/* Which model makes the vectors (MVP-2.9.0 N35) */}
+      <KbEmbeddingCard />
 
       {/* Tab Switcher */}
       <div className="flex gap-1 bg-secondary p-1 rounded-lg w-fit">

@@ -180,3 +180,41 @@ export function usePatchModel(name: string) {
 }
 
 export type { ProviderKind };
+
+// ── the knowledge base's embedding model (GET / PUT /api/kb/embedding, POST /api/kb/reembed) ─────────────────────
+
+export interface KbEmbedding {
+  model_ref: string;
+  model: string;
+  source: "provider" | "bedrock" | "none";
+  dimension: number | null;
+  vectors: number | null;
+  indexed_with: string;
+  needs_reembed: boolean;
+  store: string;
+  can_reembed: boolean;
+  presets: import("@/lib/modelRefs").ModelPreset[];
+}
+
+const kbKey = ["kb-embedding"] as const;
+
+export function useKbEmbedding() {
+  return useQuery({ queryKey: kbKey, queryFn: () => apiFetch<KbEmbedding>("/kb/embedding") });
+}
+
+export function useSetKbEmbedding() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (modelRef: string) =>
+      apiFetch<KbEmbedding>("/kb/embedding", { method: "PUT", body: JSON.stringify({ model_ref: modelRef }) }),
+    onSuccess: (data) => { qc.setQueryData(kbKey, data); qc.invalidateQueries({ queryKey: providersKey }); },
+  });
+}
+
+export function useReembed() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch<{ cases: number; vectors: number; failed: number }>("/kb/reembed", { method: "POST" }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: kbKey }); qc.invalidateQueries({ queryKey: ["kb-stats"] }); },
+  });
+}

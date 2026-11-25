@@ -4,6 +4,8 @@ import { useSettings } from "@/hooks/useSettings";
 import { useUpdateChatSession } from "@/hooks/useChatSessions";
 import { useChatSession } from "@/hooks/useChatSession";
 import { useLocale } from "@/i18n/LocaleContext";
+import { Badges } from "@/components/models/ModelPicker";
+import { groupPresets } from "@/lib/modelRefs";
 
 /** Effort levels; "" = Auto (follow the agent's configured thinking budget).
  *  off/standard/deep remain valid backend aliases for pre-2.5.x sessions. */
@@ -34,6 +36,7 @@ export function ModelSelector({ sessionId, disabled }: { sessionId: string | nul
   const session = sessionQ.data?.session_id === sessionId ? sessionQ.data : undefined;
   const locked = session?.can_manage === false;  // a session shared with you: its owner picks the model
   const presets = settingsQ.data?.model_presets ?? [];
+  const groups = groupPresets(presets, { query: "" });   // by provider, Bedrock first (MVP-2.9.0 N35)
   const globalMain = settingsQ.data?.agent_models?.["main"]?.model_id ?? "";
 
   const labelFor = (id: string) => presets.find((p) => p.value === id)?.label ?? shortName(id);
@@ -115,20 +118,28 @@ export function ModelSelector({ sessionId, disabled }: { sessionId: string | nul
               </span>
             </button>
           )}
-          {presets.map((p) => (
-            <button
-              key={p.value}
-              onClick={() => select(p.value)}
-              className="w-full flex items-start gap-2 px-2.5 py-1.5 rounded-lg text-left hover:bg-muted focus:bg-muted focus:outline-none transition-colors"
-            >
-              {current === p.value ? <CheckIcon /> : <span className="w-3.5 shrink-0" />}
-              <span className="min-w-0">
-                <span className={`block text-xs text-foreground break-words ${current === p.value ? "font-medium" : ""}`}>
-                  {p.label}
-                </span>
-                <span className="block font-mono text-[10px] text-muted-foreground/50 break-all">{p.value}</span>
-              </span>
-            </button>
+          {groups.map((g) => (
+            <div key={g.provider} role="group" aria-label={g.label}>
+              {groups.length > 1 && (
+                <div className="px-2.5 pb-0.5 pt-1.5 text-[10px] uppercase tracking-wide text-muted-foreground/60 break-words">{g.label}</div>
+              )}
+              {g.items.map((p) => (
+                <button
+                  key={p.value}
+                  onClick={() => select(p.value)}
+                  className="w-full flex items-start gap-2 px-2.5 py-1.5 rounded-lg text-left hover:bg-muted focus:bg-muted focus:outline-none transition-colors"
+                >
+                  {current === p.value ? <CheckIcon /> : <span className="w-3.5 shrink-0" />}
+                  <span className="min-w-0">
+                    <span className={`block text-xs text-foreground break-words ${current === p.value ? "font-medium" : ""}`}>
+                      {p.label}
+                    </span>
+                    <span className="block font-mono text-[10px] text-muted-foreground/50 break-all">{p.value}</span>
+                    <Badges p={p} />
+                  </span>
+                </button>
+              ))}
+            </div>
           ))}
 
           {/* ── Effort (extended thinking) ─────────────────────────── */}

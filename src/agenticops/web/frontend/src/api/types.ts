@@ -1203,8 +1203,11 @@ export interface Readiness {
   model: {
     state: "verified" | "configured" | "failed";
     model_id: string;
-    /** where the model is called — not where resources are scanned */
-    region: string;
+    /** where the model is called — not where resources are scanned; null for another provider's model (N35) */
+    region: string | null;
+    /** "bedrock", or the model provider's name (MVP-2.9.0 N35) and the address it is called at */
+    provider?: string;
+    endpoint?: string | null;
     check: ReadinessCheckView | null;
   };
   execution: {

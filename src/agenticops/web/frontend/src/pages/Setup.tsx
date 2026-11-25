@@ -52,7 +52,9 @@ function Facts({ id, r, t }: { id: SetupItemId; r: Readiness; t: T }) {
     return (
       <>
         <p className="[overflow-wrap:anywhere]">{t("setup.model.id")}: <span className="font-mono text-foreground">{r.model.model_id}</span></p>
-        <p>{fill(t("setup.model.region"), { region: r.model.region })}</p>
+        {r.model.provider && r.model.provider !== "bedrock"
+          ? <p className="[overflow-wrap:anywhere]">{fill(t("setup.model.provider"), { provider: r.model.provider, endpoint: r.model.endpoint ?? "" })}</p>
+          : <p>{fill(t("setup.model.region"), { region: r.model.region ?? "" })}</p>}
         <p><CheckLine check={r.model.check} t={t} /></p>
       </>
     );

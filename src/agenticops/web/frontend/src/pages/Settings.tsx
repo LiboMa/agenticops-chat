@@ -25,6 +25,9 @@ import { MessagingTab } from "@/components/settings/MessagingTab";
 import { AuditTab } from "@/components/settings/AuditTab";
 import { KBTab } from "@/components/settings/KBTab";
 import { ModelProvidersTab } from "@/components/settings/ModelProvidersTab";
+import { OtherModelsCard } from "@/components/settings/OtherModelsCard";
+import { ModelPicker } from "@/components/models/ModelPicker";
+import { canChangeModels } from "@/lib/permissions";
 import { SkillsTab } from "@/components/settings/SkillsTab";
 import { ConnectorsCard } from "@/components/settings/ConnectorsCard";
 import { ChatUploadCard } from "@/components/settings/ChatUploadCard";
@@ -102,8 +105,13 @@ function ModelFactsCard() {
           : !model || !view ? <ErrorBanner message={t("settings.loadFailed")} onRetry={() => void readiness.refetch()} actionLabel={t("common.retry")} />
           : (
             <dl className="grid gap-x-6 gap-y-1.5 text-sm sm:grid-cols-[auto_minmax(0,1fr)]">
-              <dt className="text-muted-foreground">{t("settings.models.region")}</dt>
-              <dd><span className="font-mono text-foreground">{model.region}</span> <span className="text-xs text-muted-foreground">· {t("settings.models.regionNote")}</span></dd>
+              {model.provider && model.provider !== "bedrock" ? (<>
+                <dt className="text-muted-foreground">{t("settings.models.provider")}</dt>
+                <dd className="[overflow-wrap:anywhere]"><span className="text-foreground">{model.provider}</span> <span className="font-mono text-xs text-muted-foreground">{model.endpoint}</span></dd>
+              </>) : (<>
+                <dt className="text-muted-foreground">{t("settings.models.region")}</dt>
+                <dd><span className="font-mono text-foreground">{model.region}</span> <span className="text-xs text-muted-foreground">· {t("settings.models.regionNote")}</span></dd>
+              </>)}
               <dt className="text-muted-foreground">{t("settings.models.main")}</dt>
               <dd className="font-mono text-foreground [overflow-wrap:anywhere]">{model.model_id}</dd>
               <dt className="text-muted-foreground">{t("settings.models.verified")}</dt>
@@ -907,6 +915,7 @@ const TIER_COLORS: Record<string, string> = {
 
 function AgentModelsCard() {
   const { t } = useLocale();
+  const boot = useBootstrap();
   const settingsQ = useSettings();
   const updateMut = useUpdateSettings();
   const s = settingsQ.data;
@@ -933,6 +942,7 @@ function AgentModelsCard() {
 
   const agents = s.agent_models ?? {};
   const presets = s.model_presets?.length ? s.model_presets : MODEL_PRESETS_FALLBACK;
+  const canChange = canChangeModels(boot.data);   // an administrator's with sign-in on (N35)
 
   return (
     <Card>
@@ -956,7 +966,6 @@ function AgentModelsCard() {
             <tbody>
               {Object.entries(agents).map(([name, cfg]: [string, AgentModelConfig]) => {
                 const meta = AGENT_LABELS[name] ?? { label: name, tier: "default" };
-                const currentPreset = presets.find((p) => p.value === cfg.model_id);
                 // availability is read from the list of available models — no model is called (MVP-2.9.0 N25)
                 const availability = modelAvailability(cfg.model_id, s.model_presets);
                 return (
@@ -968,21 +977,14 @@ function AgentModelsCard() {
                       </Badge>
                     </td>
                     <td className="py-2.5 pr-4">
-                      <select
-                        value={cfg.model_id}
-                        onChange={(e) => handleModelChange(name, e.target.value)}
-                        disabled={updateMut.isPending}
-                        className="px-2 py-1 border border-border rounded text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 max-w-[260px]"
-                      >
-                        {presets.map((p) => (
-                          <option key={p.value} value={p.value}>{p.label}</option>
-                        ))}
-                        {!currentPreset && <option value={cfg.model_id}>{cfg.model_id}</option>}
-                      </select>
-                      <div className="mt-1 max-w-[260px] font-mono text-[11px] text-muted-foreground [overflow-wrap:anywhere]">{cfg.model_id}</div>
-                      <StatusText tone={availability === "listed" ? "ok" : availability === "unlisted" ? "warn" : "neutral"} className="whitespace-normal text-[11px]">
-                        {t(`settings.models.availability.${availability}`)}
-                      </StatusText>
+                      {/* MVP-2.9.0 N35: the one model picker — grouped by provider, with what each model can do; it
+                          says under itself when the model is not available, calls no tools, or is not on the list */}
+                      <ModelPicker value={cfg.model_id} presets={presets} onChange={(v) => handleModelChange(name, v)}
+                                   ariaLabel={meta.label} setting={`agent_${name}_model_id`} modelIssues={s.model_issues}
+                                   requireTools disabled={updateMut.isPending || !canChange} />
+                      {availability === "listed" && (
+                        <StatusText tone="ok" className="whitespace-normal text-[11px]">{t("settings.models.availability.listed")}</StatusText>
+                      )}
                     </td>
                     <td className="py-2.5 pr-4">
                       <input
@@ -1047,6 +1049,7 @@ function AgentModelsCard() {
 
 function GalaxyModelCard() {
   const { t } = useLocale();
+  const boot = useBootstrap();
   const settingsQ = useSettings();
   const updateMut = useUpdateSettings();
   const s = settingsQ.data;
@@ -1057,7 +1060,6 @@ function GalaxyModelCard() {
 
   const presets = s.model_presets?.length ? s.model_presets : MODEL_PRESETS_FALLBACK;
   const current = s.galaxy_model_id ?? "";
-  const currentPreset = presets.find((p) => p.value === current);
 
   return (
     <Card>
@@ -1072,18 +1074,10 @@ function GalaxyModelCard() {
             <p className="text-xs text-muted-foreground mt-0.5">{t("settings.galaxyModel.note")}</p>
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <select
-              value={current}
-              onChange={(e) => updateMut.mutate({ galaxy_model_id: e.target.value })}
-              disabled={updateMut.isPending}
-              className="px-2 py-1 border border-border rounded text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50 min-w-0 max-w-full sm:max-w-[280px]"
-            >
-              <option value="">{t("settings.galaxyModel.default")}</option>
-              {presets.map((p) => (
-                <option key={p.value} value={p.value}>{p.label}</option>
-              ))}
-              {current && !currentPreset && <option value={current}>{current}</option>}
-            </select>
+            <ModelPicker value={current} presets={presets} onChange={(v) => updateMut.mutate({ galaxy_model_id: v })}
+                         ariaLabel={t("settings.galaxyModel.title")} setting="galaxy_model_id" modelIssues={s.model_issues}
+                         emptyOption={{ label: t("settings.galaxyModel.default") }}
+                         disabled={updateMut.isPending || !canChangeModels(boot.data)} />
             <Badge className="bg-violet-100 text-violet-700">{t("settings.galaxyModel.experimental")}</Badge>
           </div>
         </div>
@@ -1473,6 +1467,7 @@ export default function Settings() {
       <SectionHead id="models" t={t} />
       <ModelFactsCard />
       <AgentModelsCard />
+      <OtherModelsCard />
       <GalaxyModelCard />
       <ModelRuntimeCard />
           </fieldset>
