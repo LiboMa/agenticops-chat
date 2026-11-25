@@ -2434,5 +2434,16 @@
   "kb.embedding.rebuildConfirm": "每个案例都会用 «{model}» 重新生成向量，然后一次性替换掉所有旧向量。只要有一个失败，旧的就都保留。",
   "kb.embedding.rebuilt": "重建完成：{cases} 个案例，{vectors} 个向量。",
   "setup.model.provider": "模型提供方：{provider}（{endpoint}）",
-  "settings.models.provider": "模型提供方"
+  "settings.models.provider": "模型提供方",
+  "settings.providers.preset.litellm_proxy.notes": "填代理的虚拟 Key 或主 Key；模型 id 就是代理里配置的模型名。",
+  "settings.providers.preset.openrouter.notes": "填 OpenRouter 的 Key；它的模型列表带价格、上下文长度和是否支持工具。",
+  "settings.providers.preset.vllm.notes": "vLLM 的 OpenAI 兼容服务；只有用 --api-key 启动时才要 Key。要调用工具，需要 --enable-auto-tool-choice 和一个工具解析器。",
+  "settings.providers.preset.ollama.notes": "Ollama 的 OpenAI 兼容接口，不要 Key。只有支持工具的模型才能跑 agent。",
+  "settings.providers.preset.lmstudio.notes": "LM Studio 的本地服务，不要 Key。",
+  "settings.providers.preset.sub2api.notes": "填网关的地址（它的 Anthropic Messages 接口）和它发的 Key。",
+  "settings.providers.preset.anthropic.notes": "填 Anthropic 的 API Key。",
+  "settings.providers.preset.custom_openai.notes": "任何支持 OpenAI Chat Completions 接口的服务。",
+  "settings.providers.preset.custom_anthropic.notes": "任何支持 Anthropic Messages 接口的服务。",
+  "settings.providers.preset.custom_openai.label": "其他（OpenAI 兼容）",
+  "settings.providers.preset.custom_anthropic.label": "其他（Anthropic 兼容）"
 }

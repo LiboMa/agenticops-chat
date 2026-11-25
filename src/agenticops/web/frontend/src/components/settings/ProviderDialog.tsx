@@ -12,6 +12,13 @@ import {
 } from "@/lib/providerForm";
 import { ProbeSteps } from "./ProbeSteps";
 
+/** A preset's words in the page's language; the server's English when there is no translation. */
+function presetText(t: (k: string) => string, p: PlatformPreset, what: "label" | "notes"): string {
+  const key = `settings.providers.preset.${p.preset}.${what}`;
+  const text = t(key);
+  return text === key ? p[what] : text;
+}
+
 const input = "w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60";
 const label = "mb-1 block text-sm font-medium text-foreground";
 const hint = "mt-1 text-xs text-muted-foreground";
@@ -40,7 +47,7 @@ export function ProviderDialog({ presets, row, onClose }: {
   const create = useCreateProvider();
   const update = useUpdateProvider();
   const test = useTestProvider();
-  const refresh = useRefreshModels(saved ?? row?.name ?? "");
+  const refresh = useRefreshModels(row?.name ?? "");
   const busy = create.isPending || update.isPending || test.isPending || refresh.isPending;
   const title = row ? t("settings.providers.editTitle").replace("{name}", row.name) : t("settings.providers.addTitle");
 
@@ -53,11 +60,11 @@ export function ProviderDialog({ presets, row, onClose }: {
             <li key={p.preset}>
               <button type="button" onClick={() => { setPreset(p); setForm(emptyForm(p)); }}
                       className="h-full w-full rounded-lg border border-border bg-background p-3 text-left hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-                <span className="block text-sm font-semibold text-foreground">{p.label}</span>
+                <span className="block text-sm font-semibold text-foreground">{presetText(t, p, "label")}</span>
                 <span className="mt-0.5 block text-xs text-muted-foreground">
                   {t(`settings.providers.kind.${p.kind}`)}{p.needs_key ? ` · ${t("settings.providers.needsKey")}` : ""}
                 </span>
-                <span className="mt-2 block text-xs text-muted-foreground">{p.notes}</span>
+                <span className="mt-2 block text-xs text-muted-foreground">{presetText(t, p, "notes")}</span>
               </button>
             </li>
           ))}
@@ -93,7 +100,7 @@ export function ProviderDialog({ presets, row, onClose }: {
 
   async function runTest(name: string) {
     // the model list first (a fresh provider has none): the test then names its first chat model, or the one typed
-    const listed = await refresh.mutateAsync().catch(() => null);
+    const listed = await refresh.mutateAsync(name).catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }));
     if (listed?.error) setNote(t("settings.providers.listFailed").replace("{error}", listed.error));
     try {
       setResult(await test.mutateAsync({ name, modelId: testModel.trim() || undefined }));
@@ -128,7 +135,7 @@ export function ProviderDialog({ presets, row, onClose }: {
       <form className="mt-4 space-y-4" onSubmit={(e) => { e.preventDefault(); void save(); }} noValidate>
         {!row && preset && (
           <p className="text-sm text-muted-foreground">
-            {preset.label}
+            {presetText(t, preset, "label")}
             <button type="button" onClick={() => { setForm(null); setPreset(null); }} className="ml-2 text-primary hover:underline">
               {t("settings.providers.changePlatform")}
             </button>
@@ -145,7 +152,7 @@ export function ProviderDialog({ presets, row, onClose }: {
           <div>
             <label htmlFor="pv-display" className={label}>{t("settings.providers.field.displayName")}</label>
             <input id="pv-display" className={input} value={form.displayName} onChange={(e) => set({ displayName: e.target.value })}
-                   placeholder={preset?.label ?? ""} />
+                   placeholder={preset ? presetText(t, preset, "label") : ""} />
           </div>
         </div>
         <div>

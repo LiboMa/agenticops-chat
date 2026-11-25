@@ -2434,5 +2434,16 @@
   "kb.embedding.rebuildConfirm": "Every case is embedded again with «{model}», then all stored vectors are replaced at once. If one fails, the old ones stay.",
   "kb.embedding.rebuilt": "Rebuilt: {cases} cases, {vectors} vectors.",
   "setup.model.provider": "Model provider: {provider} ({endpoint})",
-  "settings.models.provider": "Model provider"
+  "settings.models.provider": "Model provider",
+  "settings.providers.preset.litellm_proxy.notes": "The proxy's virtual or master key; model ids are the proxy's model names.",
+  "settings.providers.preset.openrouter.notes": "An OpenRouter key; its model list carries prices, context lengths and tool support.",
+  "settings.providers.preset.vllm.notes": "vLLM's OpenAI-compatible server; a key only if it was started with --api-key. Tool calls need --enable-auto-tool-choice and a tool parser.",
+  "settings.providers.preset.ollama.notes": "Ollama's OpenAI-compatible endpoint; no key. Only models with tool support can run agents.",
+  "settings.providers.preset.lmstudio.notes": "LM Studio's local server; no key.",
+  "settings.providers.preset.sub2api.notes": "The gateway's address (its Anthropic Messages endpoint) and a key it issued.",
+  "settings.providers.preset.anthropic.notes": "An Anthropic API key.",
+  "settings.providers.preset.custom_openai.notes": "Any server that speaks the OpenAI Chat Completions API.",
+  "settings.providers.preset.custom_anthropic.notes": "Any server that speaks the Anthropic Messages API.",
+  "settings.providers.preset.custom_openai.label": "Other (OpenAI-compatible)",
+  "settings.providers.preset.custom_anthropic.label": "Other (Anthropic-compatible)"
 }

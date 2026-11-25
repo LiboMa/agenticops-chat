@@ -74,8 +74,10 @@ export function ModelProvidersTab() {
       {dialog}
       <Card>
         <CardHeader>
-          <h2 className="text-lg font-semibold text-foreground">{t("settings.providers.title")}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{t("settings.providers.subtitle")}</p>
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold text-foreground">{t("settings.providers.title")}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{t("settings.providers.subtitle")}</p>
+          </div>
         </CardHeader>
         <CardBody className="space-y-4">
           {!canEdit && <p className="text-sm text-muted-foreground">{t("settings.providers.adminOnly")}</p>}
@@ -115,22 +117,24 @@ export function ModelProvidersTab() {
           {page.providers.length === 0 ? (
             <p className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">{t("settings.providers.none")}</p>
           ) : (
-            <div className="overflow-x-auto">
+            // relative: the screen-reader-only labels inside are absolutely placed — without a positioned box they
+            // escape the scroll box and widen the whole page on a phone (N35 E2E: 634 px in a 390 px window)
+            <div className="relative overflow-x-auto">
               <table className="w-full min-w-[760px] text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                    <th className="py-2 pr-3 font-medium">{t("settings.providers.col.name")}</th>
-                    <th className="py-2 pr-3 font-medium">{t("settings.providers.col.address")}</th>
-                    <th className="py-2 pr-3 font-medium">{t("settings.providers.col.models")}</th>
-                    <th className="py-2 pr-3 font-medium">{t("settings.providers.col.lastTest")}</th>
-                    <th className="py-2 pr-3 font-medium">{t("settings.providers.col.enabled")}</th>
+                    <th className="whitespace-nowrap py-2 pr-3 font-medium">{t("settings.providers.col.name")}</th>
+                    <th className="whitespace-nowrap py-2 pr-3 font-medium">{t("settings.providers.col.address")}</th>
+                    <th className="whitespace-nowrap py-2 pr-3 font-medium">{t("settings.providers.col.models")}</th>
+                    <th className="whitespace-nowrap py-2 pr-3 font-medium">{t("settings.providers.col.lastTest")}</th>
+                    <th className="whitespace-nowrap py-2 pr-3 font-medium">{t("settings.providers.col.enabled")}</th>
                     <th className="py-2 font-medium"><span className="sr-only">{t("settings.providers.col.actions")}</span></th>
                   </tr>
                 </thead>
                 <tbody>
                   {page.providers.map((row) => (
                     <tr key={row.name} className={`border-b border-border align-top ${row.enabled ? "" : "opacity-60"}`}>
-                      <td className="py-2 pr-3">
+                      <td className="max-w-[16rem] py-2 pr-3">
                         <span className="block font-medium text-foreground">{row.display_name || row.name}</span>
                         <span className="block font-mono text-xs text-muted-foreground">{row.name}</span>
                         <span className="block text-xs text-muted-foreground">{t(`settings.providers.kind.${row.kind}`)}{row.has_api_key ? ` · ${t("settings.providers.hasKey")}` : ""}</span>
@@ -138,11 +142,11 @@ export function ModelProvidersTab() {
                           <span className="mt-0.5 block text-xs text-muted-foreground">{t("settings.providers.usedBy").replace("{refs}", names(row.references))}</span>
                         )}
                       </td>
-                      <td className="max-w-[16rem] py-2 pr-3 font-mono text-xs text-foreground [overflow-wrap:anywhere]">{row.base_url}</td>
+                      <td className="min-w-[13rem] max-w-[18rem] py-2 pr-3 font-mono text-xs text-foreground [overflow-wrap:anywhere]">{row.base_url}</td>
                       <td className="py-2 pr-3">
                         <button type="button" onClick={() => setModels(row)} className="text-primary hover:underline">{row.models_count}</button>
                       </td>
-                      <td className="py-2 pr-3">
+                      <td className="min-w-[11rem] py-2 pr-3">
                         {testing === row.name ? <span className="text-xs text-muted-foreground">{t("settings.providers.testing")}</span>
                           : row.last_test ? (
                             <div>

@@ -12,7 +12,8 @@ import {
 import { draftOf, filterModels, modelPatch, priceLabel, toolsState, type ModelDraft } from "@/lib/providerModels";
 import { refusalText } from "@/lib/modelRefs";
 
-const input = "w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary";
+const control = "rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary";
+const input = `w-full ${control}`;
 const chip = "rounded px-1.5 py-0.5 text-[11px] font-medium";
 
 /** Settings → Model providers → a provider's models (MVP-2.9.0 N35): search, filter by use, read the provider's list
@@ -36,7 +37,7 @@ export function ProviderModelsDialog({ provider, canEdit, onClose }: { provider:
   async function doRefresh() {
     setError(null); setMessage(null);
     try {
-      const r = await refresh.mutateAsync();
+      const r = await refresh.mutateAsync(provider.name);
       setMessage(r.error ? t("settings.providers.listFailed").replace("{error}", r.error)
         : t("settings.providers.refreshed").replace("{added}", String(r.added)).replace("{updated}", String(r.updated))
             .replace("{unchanged}", String(r.unchanged)));
@@ -63,8 +64,8 @@ export function ProviderModelsDialog({ provider, canEdit, onClose }: { provider:
                 onClose={onClose} width="w-[min(860px,100%)]">
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t("settings.providers.searchModels")}
-               placeholder={t("settings.providers.searchModels")} className={`${input} max-w-xs flex-1`} />
-        <select value={purpose} onChange={(e) => setPurpose(e.target.value as "all" | Purpose)} className={`${input} w-auto`}
+               placeholder={t("settings.providers.searchModels")} className={`${control} min-w-0 flex-1 basis-48`} />
+        <select value={purpose} onChange={(e) => setPurpose(e.target.value as "all" | Purpose)} className={control}
                 aria-label={t("settings.providers.purposeFilter")}>
           <option value="all">{t("settings.providers.purpose.all")}</option>
           <option value="chat">{t("settings.providers.purpose.chat")}</option>
@@ -80,8 +81,8 @@ export function ProviderModelsDialog({ provider, canEdit, onClose }: { provider:
       {canEdit && (
         <form className="mt-3 flex flex-wrap items-center gap-2" onSubmit={(e) => { e.preventDefault(); void doAdd(); }}>
           <input value={newId} onChange={(e) => setNewId(e.target.value)} aria-label={t("settings.providers.addModelId")}
-                 placeholder={t("settings.providers.addModelId")} className={`${input} max-w-xs flex-1 font-mono`} />
-          <select value={newPurpose} onChange={(e) => setNewPurpose(e.target.value as Purpose)} className={`${input} w-auto`}
+                 placeholder={t("settings.providers.addModelId")} className={`${control} min-w-0 flex-1 basis-48 font-mono`} />
+          <select value={newPurpose} onChange={(e) => setNewPurpose(e.target.value as Purpose)} className={control}
                   aria-label={t("settings.providers.field.purpose")}>
             <option value="chat">{t("settings.providers.purpose.chat")}</option>
             <option value="embedding">{t("settings.providers.purpose.embedding")}</option>
@@ -153,7 +154,9 @@ function ModelRow({ m, canEdit, open, onToggleOpen, onEnabled, onSave }: {
         <button type="button" onClick={onToggleOpen} aria-expanded={open} aria-controls={id}
                 className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded">
           <span className="block truncate text-sm font-medium text-foreground">{m.label}</span>
-          <span className="block font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">{m.model_id}{m.source === "manual" ? ` · ${t("settings.providers.manual")}` : ""}</span>
+          {(m.label !== m.model_id || m.source === "manual") && (
+            <span className="block font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">{m.model_id}{m.source === "manual" ? ` · ${t("settings.providers.manual")}` : ""}</span>
+          )}
           <span className="mt-1 block"><Badges m={m} /></span>
         </button>
       </div>

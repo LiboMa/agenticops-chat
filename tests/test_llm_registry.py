@@ -202,3 +202,18 @@ def test_bedrock_switch(db):
     assert registry.bedrock_enabled() is False
     registry.set_bedrock_enabled(True, ADMIN)
     assert registry.bedrock_enabled() is True
+
+
+def test_every_preset_has_its_words_in_both_languages():
+    """The platform cards are the server's presets; their words are the page's (N35 E2E: the Chinese page showed the
+    English notes) — every preset has notes in en and zh, and the two «Other» ones a label."""
+    import json
+    import pathlib
+    from agenticops.llm.presets import PRESETS
+    root = pathlib.Path(__file__).resolve().parents[1] / "src/agenticops/web/frontend/src/locales"
+    for lang in ("en", "zh"):
+        words = json.loads((root / f"{lang}.json").read_text(encoding="utf-8"))
+        for key in PRESETS:
+            assert words.get(f"settings.providers.preset.{key}.notes"), (lang, key)
+        for key in ("custom_openai", "custom_anthropic"):
+            assert words.get(f"settings.providers.preset.{key}.label"), (lang, key)

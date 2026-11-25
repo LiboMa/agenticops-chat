@@ -39,7 +39,8 @@ export function OtherModelsCard() {
   const editable = canChangeModels(boot.data);
   const views = s.model_settings;
   const presets = s.model_presets ?? [];
-  const labelOf = (v: string) => presets.find((p) => p.value === v)?.label ?? v;
+  // the model's name and its reference: two providers can list a model of the same name
+  const labelOf = (v: string) => { const label = presets.find((p) => p.value === v)?.label; return label && label !== v ? `${label} · ${v}` : v; };
 
   function change(key: string, value: string) {
     setError(null);
@@ -49,8 +50,10 @@ export function OtherModelsCard() {
   return (
     <Card>
       <CardHeader>
-        <h3 className="text-lg font-semibold text-foreground">{t("settings.models.other.title")}</h3>
-        <span className="text-xs text-muted-foreground">{t("settings.models.other.subtitle")}</span>
+        <div className="min-w-0">
+          <h3 className="text-lg font-semibold text-foreground">{t("settings.models.other.title")}</h3>
+          <p className="text-xs text-muted-foreground">{t("settings.models.other.subtitle")}</p>
+        </div>
       </CardHeader>
       <CardBody className="space-y-3">
         {!editable && <p className="text-xs text-muted-foreground">{t("settings.providers.adminOnly")}</p>}

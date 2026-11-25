@@ -80,6 +80,13 @@ export const providersKey = ["model-providers"] as const;
 const modelsKey = (name: string) => ["model-providers", name, "models"] as const;
 const enc = encodeURIComponent;
 
+/** `/model-providers/<name>/<what>` — refused for an empty name: the server would answer a different route (404),
+ *  as «Save and test» did when it read the list of a provider not yet named (N35 E2E). */
+export function modelsPath(name: string, what: "models" | "refresh-models"): string {
+  if (!name.trim()) throw new Error("no provider name");
+  return `/model-providers/${enc(name)}/${what}`;
+}
+
 function useRefresh() {
   const qc = useQueryClient();
   return () => {
@@ -143,17 +150,19 @@ export function useTestProvider() {
 export function useProviderModels(name: string | null) {
   return useQuery({
     queryKey: modelsKey(name ?? ""),
-    queryFn: () => apiFetch<ProviderModel[]>(`/model-providers/${enc(name ?? "")}/models`),
+    queryFn: () => apiFetch<ProviderModel[]>(modelsPath(name ?? "", "models")),
     enabled: !!name,
   });
 }
 
+/** Read a provider's model list again. `mutate(name)` names the provider at the call (a provider saved a moment ago
+ *  has no name yet when the dialog renders); without one, the provider the hook was made for. */
 export function useRefreshModels(name: string) {
   const qc = useQueryClient();
   const refresh = useRefresh();
   return useMutation({
-    mutationFn: () => apiFetch<RefreshResult>(`/model-providers/${enc(name)}/refresh-models`, { method: "POST" }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: modelsKey(name) }); refresh(); },
+    mutationFn: (which?: string) => apiFetch<RefreshResult>(modelsPath(which ?? name, "refresh-models"), { method: "POST" }),
+    onSuccess: (_r, which) => { qc.invalidateQueries({ queryKey: modelsKey(which ?? name) }); refresh(); },
   });
 }
 

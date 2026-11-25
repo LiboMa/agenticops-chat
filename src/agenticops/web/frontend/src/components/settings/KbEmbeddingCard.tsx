@@ -28,7 +28,7 @@ export function KbEmbeddingCard() {
   if (!q.data) return null;
   const e = q.data;
   const editable = canChangeModels(boot.data) && !readOnly;
-  const labelOf = (v: string) => e.presets.find((p) => p.value === v)?.label ?? v;
+  const labelOf = (v: string) => { const label = e.presets.find((p) => p.value === v)?.label; return label && label !== v ? `${label} · ${v}` : v; };
 
   function change(ref: string) {
     setError(null); setMessage(null);
@@ -50,8 +50,10 @@ export function KbEmbeddingCard() {
     <Card>
       {dialog}
       <CardHeader>
-        <h3 className="text-lg font-semibold text-foreground">{t("kb.embedding.title")}</h3>
-        <span className="text-xs text-muted-foreground">{t("kb.embedding.subtitle")}</span>
+        <div className="min-w-0">
+          <h3 className="text-lg font-semibold text-foreground">{t("kb.embedding.title")}</h3>
+          <p className="text-xs text-muted-foreground">{t("kb.embedding.subtitle")}</p>
+        </div>
       </CardHeader>
       <CardBody className="space-y-3">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_320px]">

@@ -1293,7 +1293,7 @@ export default function Settings() {
     if (value === "general") next.delete("tab"); else next.set("tab", value);
     setParams(next, { replace: true });
   };
-  const tabTriggerClass = "px-4 py-2 text-sm font-medium border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:text-primary text-muted-foreground hover:text-foreground transition-colors";
+  const tabTriggerClass = "shrink-0 whitespace-nowrap px-4 py-2 text-sm font-medium border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:text-primary text-muted-foreground hover:text-foreground transition-colors";
 
   return (
     <div className="max-w-5xl">

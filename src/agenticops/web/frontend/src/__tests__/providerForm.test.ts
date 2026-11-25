@@ -111,3 +111,31 @@ describe("patchFromForm", () => {
     expect(patchFromForm(row, formFromRow(row), { clearKey: true })).toEqual({ clear_api_key: true });
   });
 });
+
+describe("the model list of a provider just saved (N35 E2E: «Save and test» read the list of provider «»)", () => {
+  it("a request path never names an empty provider", async () => {
+    const { modelsPath } = await import("@/hooks/useModelProviders");
+    expect(modelsPath("litellm-openai", "refresh-models")).toBe("/model-providers/litellm-openai/refresh-models");
+    expect(() => modelsPath("", "refresh-models")).toThrow();
+    expect(() => modelsPath("  ", "models")).toThrow();
+  });
+  it("the dialog hands the saved name to the refresh, not the name it was opened with", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const dialog = readFileSync(resolve(__dirname, "../components/settings/ProviderDialog.tsx"), "utf8");
+    expect(dialog).toMatch(/refresh\.mutateAsync\(name\)/);
+    expect(dialog).not.toMatch(/refresh\.mutateAsync\(\)/);
+  });
+});
+
+describe("the providers table on a phone (N35 E2E: the page was 634 px wide in a 390 px window)", () => {
+  it("its scroll box is a positioned box, so the screen-reader-only labels inside cannot widen the page", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const tab = readFileSync(resolve(__dirname, "../components/settings/ModelProvidersTab.tsx"), "utf8");
+    const wrapper = /<div className="([^"]*)">\s*<table/.exec(tab)?.[1] ?? "";
+    expect(wrapper).toMatch(/\boverflow-x-auto\b/);
+    expect(wrapper).toMatch(/\brelative\b/);
+    expect(tab).toMatch(/sr-only/);                      // the reason it must be positioned
+  });
+});
