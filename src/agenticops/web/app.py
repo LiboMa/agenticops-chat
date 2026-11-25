@@ -411,6 +411,8 @@ from agenticops.web.routers import model_runtime_settings as _model_runtime_rout
 app.include_router(_model_runtime_router.router)
 from agenticops.web.routers import users as _users_router  # MVP-2.8.0 S2 rework: admins manage web accounts
 app.include_router(_users_router.router)
+from agenticops.web.routers import model_providers as _model_providers_router  # MVP-2.9.0 N35: providers beyond Bedrock
+app.include_router(_model_providers_router.router)
 
 # Chat session manager
 _chat_sessions = ChatSessionManager()
