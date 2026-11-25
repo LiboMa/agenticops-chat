@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  MASK, createBody, emptyForm, formFromRow, headersFromText, headersToText, patchFromForm, validateProviderForm,
+  MASK, createBody, emptyForm, testNotes, formFromRow, headersFromText, headersToText, patchFromForm, validateProviderForm,
   type ProviderForm, type ProviderRowLike,
 } from "@/lib/providerForm";
 
@@ -137,5 +137,29 @@ describe("the providers table on a phone (N35 E2E: the page was 634 px wide in a
     expect(wrapper).toMatch(/\boverflow-x-auto\b/);
     expect(wrapper).toMatch(/\brelative\b/);
     expect(tab).toMatch(/sr-only/);                      // the reason it must be positioned
+  });
+});
+
+describe("testNotes (final review: «no model yet» hid why the list could not be read)", () => {
+  it("keeps the list's failure beside the test's", () => {
+    expect(testNotes("authentication failed (401)", { code: "no_model", message: "x" })).toEqual([
+      { key: "settings.providers.listFailed", error: "authentication failed (401)" },
+      { key: "settings.providers.noModelYet" }]);
+    expect(testNotes(null, { code: "no_model", message: "x" })).toEqual([{ key: "settings.providers.noModelYet" }]);
+    expect(testNotes(null, { code: "boom", message: "it broke" })).toEqual([{ text: "it broke" }]);
+    expect(testNotes("timed out", null)).toEqual([{ key: "settings.providers.listFailed", error: "timed out" }]);
+    expect(testNotes(null, null)).toEqual([]);
+  });
+});
+
+describe("a writer's agent model controls (final review: they stayed enabled and every change was a 403)", () => {
+  it("max tokens, the window and reset are an administrator's, like the model", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const page = readFileSync(resolve(__dirname, "../pages/Settings.tsx"), "utf8");
+    const card = page.slice(page.indexOf("function AgentModelsCard"), page.indexOf("function GalaxyModelCard"));
+    const disabled = card.match(/disabled=\{[^}]*\}/g) ?? [];
+    expect(disabled.length).toBeGreaterThanOrEqual(5);
+    for (const d of disabled) expect(d).toMatch(/!canChange/);
   });
 });

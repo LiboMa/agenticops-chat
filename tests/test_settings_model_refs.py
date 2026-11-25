@@ -28,7 +28,12 @@ def env(tmp_path, monkeypatch):
     from agenticops.auth.service import AuthService
     from agenticops.services import model_service
     from agenticops.web.app import APIAuthMiddleware, app
+    from agenticops.llm.registry import MODEL_SETTING_FIELDS
     settings = llm_db(tmp_path, monkeypatch, "n35-settings.db")
+    # PATCH /api/settings sets these on the shared settings object: put each back after the test (they leaked into
+    # every later file — a skill generation then asked for «local-llm», a provider only this test had)
+    for field in MODEL_SETTING_FIELDS:
+        monkeypatch.setattr(settings, field, getattr(settings, field))
     monkeypatch.setattr(settings, "api_auth_enabled", True)
     monkeypatch.setattr(settings, "rbac_enforce", False)
     written = []

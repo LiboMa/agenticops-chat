@@ -135,3 +135,14 @@ export function patchFromForm(before: ProviderRowLike, form: ProviderForm, opts:
   }
   return body;
 }
+
+export type TestNote = { key: string; error?: string } | { text: string };
+
+/** What «Save and test» says after the list read and the test: the list's failure is kept beside the test's — a
+ *  wrong address or key fails the list first, and the test then has no model to try (`no_model`). */
+export function testNotes(listError: string | null, test: { code?: string; message: string } | null): TestNote[] {
+  const out: TestNote[] = [];
+  if (listError) out.push({ key: "settings.providers.listFailed", error: listError });
+  if (test) out.push(test.code === "no_model" ? { key: "settings.providers.noModelYet" } : { text: test.message });
+  return out;
+}

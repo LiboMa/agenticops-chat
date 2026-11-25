@@ -441,7 +441,8 @@ def _fail_build(build_id: int, exc: Exception) -> int:
         if b:
             b.status = "failed"
             b.finished_at = datetime.now(timezone.utc)
-            b.error = str(exc)[:2000]
+            from agenticops.llm.errors import safe_error_text   # an SDK error's sentence can quote a key (N35)
+            b.error = safe_error_text(exc, 2000)
     return build_id
 
 

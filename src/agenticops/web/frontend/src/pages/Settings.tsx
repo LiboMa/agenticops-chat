@@ -991,7 +991,7 @@ function AgentModelsCard() {
                         type="number"
                         value={cfg.max_tokens}
                         onChange={(e) => handleMaxTokensChange(name, parseInt(e.target.value) || 0)}
-                        disabled={updateMut.isPending}
+                        disabled={updateMut.isPending || !canChange}
                         className="w-24 px-2 py-1 border border-border rounded text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
                       />
                     </td>
@@ -1004,7 +1004,7 @@ function AgentModelsCard() {
                             if (v === "-1" || v === "0") handleWindowSizeChange(name, parseInt(v));
                             else if (v === "custom") handleWindowSizeChange(name, 20);
                           }}
-                          disabled={updateMut.isPending}
+                          disabled={updateMut.isPending || !canChange}
                           className="px-2 py-1 border border-border rounded text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
                         >
                           <option value="0">{t("settings.agentModels.auto")}</option>
@@ -1016,7 +1016,7 @@ function AgentModelsCard() {
                             type="number"
                             value={cfg.window_size}
                             onChange={(e) => handleWindowSizeChange(name, Math.max(1, parseInt(e.target.value) || 1))}
-                            disabled={updateMut.isPending}
+                            disabled={updateMut.isPending || !canChange}
                             className="w-20 px-2 py-1 border border-border rounded text-xs font-mono focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
                           />
                         )}
@@ -1028,7 +1028,7 @@ function AgentModelsCard() {
                     <td className="py-2.5">
                       <button
                         onClick={() => handleReset(name)}
-                        disabled={updateMut.isPending}
+                        disabled={updateMut.isPending || !canChange}
                         className="text-xs text-muted-foreground hover:text-red-600 disabled:opacity-50"
                         title={t("settings.agentModels.resetHint")}
                       >{t("settings.agentModels.reset")}</button>

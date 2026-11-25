@@ -89,6 +89,9 @@ def _vector_search(
         from agenticops.kb.embeddings import get_embedding_client
         from agenticops.kb.vector_store import get_vector_store
 
+        from agenticops.llm.embeddings import vectors_current
+        if not vectors_current():   # another model's vectors (MVP-2.9.0 N35): keywords only until the rebuild
+            return []
         client = get_embedding_client()
         query_vec = client.embed(query_text)
         if query_vec is None:

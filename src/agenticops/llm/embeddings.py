@@ -89,6 +89,13 @@ def current_model() -> str:
     return settings.embedding_model_id if registry.bedrock_enabled() else ""
 
 
+def vectors_current() -> bool:
+    """Whether the stored vectors are the model in use's — vectors of two models are not comparable, even when their
+    dimensions match (Titan's 1024 is also bge-m3's), so until a rebuild the case search answers from keywords."""
+    current = current_model()
+    return bool(current) and _indexed_with() == current
+
+
 def _indexed_with() -> str:
     from agenticops.config import settings
     return _stored().get("indexed_with") or settings.embedding_model_id     # before N35 only Titan made vectors
@@ -149,7 +156,8 @@ def set_model(ref: str, actor) -> dict:
         if found:
             raise registry.ProviderError(422, "unknown_model", f"«{ref}» cannot embed: {found[1]}",
                                          extra={"reason": found[0]})
-        cfg = registry.get(ref.split("::", 1)[0])
+        from agenticops.llm.refs import parse_ref
+        cfg = registry.get(parse_ref(ref).provider)
         if cfg is None or cfg.kind != "openai_compatible":
             raise registry.ProviderError(422, "unsupported_kind",
                                          f"«{ref}»: only an OpenAI-compatible provider serves embeddings")
@@ -167,7 +175,7 @@ def set_model(ref: str, actor) -> dict:
 
 
 def reembed(actor) -> dict:
-    """Embed every case of the knowledge base with the model in use and replace all stored vectors with them.
+    """Embed every case and SOP of the knowledge base with the model in use and replace all stored vectors with them.
     All or nothing: a case that cannot be embedded leaves every old vector in place (502 embedding_failed).
     SQLite vector store only (409 unsupported_store); one at a time (409 reembed_running)."""
     from pathlib import Path
@@ -211,7 +219,15 @@ def reembed(actor) -> dict:
                     continue
                 records.append(VectorRecord(case_id=case.case_id or path.stem, field_name=field, vector=vec,
                                             resource_type=case.meta.resource_type.upper(), metadata=meta))
-        if failed or (cases and not records):
+        # the SOPs' vectors are in the same table (pipeline/rag_pipeline._embed_sop): they are rebuilt too, never dropped
+        from agenticops.pipeline.rag_pipeline import sop_vector_records
+        sops = 0
+        for path in sorted(Path(settings.sops_dir).glob("*.md")):
+            sops += 1
+            sop_records, sop_failed = sop_vector_records(path.read_text(encoding="utf-8"), path.name, client)
+            records += sop_records
+            failed += sop_failed
+        if failed or ((cases or sops) and not records):
             raise registry.ProviderError(502, "embedding_failed",
                                          f"{failed or 'every'} text(s) could not be embedded with {current}; "
                                          "the stored vectors were kept")
@@ -221,7 +237,7 @@ def reembed(actor) -> dict:
                                  getattr(actor, "key", str(actor)), session=s)
             AuditService.log("reembed", "kb_vectors", "case_vectors", entity_name=current,
                              actor=getattr(actor, "key", str(actor)), user_id=getattr(actor, "user_id", None),
-                             new_values={"cases": cases, "vectors": len(records)}, session=s)
-        return {"cases": cases, "vectors": len(records), "failed": 0}
+                             new_values={"cases": cases, "sops": sops, "vectors": len(records)}, session=s)
+        return {"cases": cases, "sops": sops, "vectors": len(records), "failed": 0}
     finally:
         _reembed_lock.release()

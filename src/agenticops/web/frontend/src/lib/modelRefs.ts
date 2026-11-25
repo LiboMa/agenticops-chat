@@ -52,7 +52,8 @@ export function parseRef(value: string): { provider: string | null; model: strin
   const v = (value ?? "").trim();
   if (!v) return null;
   const at = v.indexOf(REF_SEP);
-  if (at === -1) return { provider: null, model: v };
+  // a Bedrock ARN holds «::» (a foundation-model ARN's account field is empty): always a Bedrock id
+  if (at === -1 || v.startsWith("arn:")) return { provider: null, model: v };
   const provider = v.slice(0, at);
   const model = v.slice(at + REF_SEP.length);
   if (!NAME_RE.test(provider) || RESERVED.has(provider) || !model.trim()) return null;

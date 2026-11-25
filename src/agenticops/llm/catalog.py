@@ -121,9 +121,16 @@ def parse_listing(item: dict) -> dict:
     return out
 
 
+class OwnMessage(RuntimeError):
+    """An error whose text is ours, never a provider's or a library's — shown as it is (the connection test's
+    «no tool call — …»)."""
+
+
 def describe_error(exc: Exception, cfg=None) -> str:
     """A short, key-free sentence for an HTTP / SDK error."""
     import httpx
+    if isinstance(exc, OwnMessage):
+        return str(exc)
     status = getattr(getattr(exc, "response", None), "status_code", None) or getattr(exc, "status_code", None)
     name = type(exc).__name__
     if status in (401, 403) or "Authentication" in name or "PermissionDenied" in name:
@@ -137,7 +144,7 @@ def describe_error(exc: Exception, cfg=None) -> str:
     elif status:
         text = f"the server answered {status}"
     else:
-        text = f"{name}: {str(exc)[:200]}"
+        text = name   # never the error's own text: it can quote a key or header value (final review)
     key = getattr(cfg, "api_key", "") if cfg is not None else ""
     if key:
         text = text.replace(key, "****")

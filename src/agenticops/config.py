@@ -1370,7 +1370,7 @@ def validate_agent_model_ids() -> list[str]:
     warnings: list[str] = []
     for agent_name in AGENT_NAMES:
         model_id, _ = get_agent_model_config(agent_name)
-        if "::" in model_id:   # a provider's model takes the plain window by design (N35) — not drift
+        if _is_ref(model_id):   # a provider's model takes the plain window by design (N35) — not drift
             continue
         if not any(family in model_id for family in MODEL_WINDOW_DEFAULTS):
             msg = (
@@ -1397,6 +1397,11 @@ def get_bedrock_boto_session():
     return get_session_factory().get_bedrock_session()
 
 
+def _is_ref(model_id: str) -> bool:
+    from agenticops.llm.refs import is_ref   # inside: llm imports config
+    return is_ref(model_id)
+
+
 def get_agent_window_size(agent_name: str) -> int:
     """Return the window size for a given agent.
 
@@ -1413,7 +1418,7 @@ def get_agent_window_size(agent_name: str) -> int:
 
     # Auto mode: resolve from model family defaults
     model_id, _ = get_agent_model_config(agent_name)
-    if "::" in model_id:   # another provider's model (MVP-2.9.0 N35): the plain window, never a Bedrock family's
+    if _is_ref(model_id):   # another provider's model (MVP-2.9.0 N35): the plain window, never a Bedrock family's
         return settings.bedrock_window_size
     for family, defaults in MODEL_WINDOW_DEFAULTS.items():
         if family in model_id:

@@ -213,6 +213,33 @@ def _extract_case_data(health_issue_id: int) -> Optional[dict]:
         return case_data
 
 
+def sop_vector_records(sop_content: str, filename: str, client) -> tuple[list, int]:
+    """The vectors of one SOP with `client`: its issue pattern + opening as «symptom», its root-cause section as
+    «root_cause» (case_id = the file's stem, metadata type «sop»). Returns (records, texts that could not be embedded) —
+    shared by the indexer below and the knowledge base's rebuild (llm/embeddings.reembed, MVP-2.9.0 N35)."""
+    from agenticops.kb.vector_store import VectorRecord
+    from agenticops.tools.kb_tools import _parse_frontmatter
+
+    metadata, body = _parse_frontmatter(sop_content)
+    resource_type = str(metadata.get("resource_type", "Unknown")).upper()
+    issue_pattern = str(metadata.get("issue_pattern", ""))
+    case_id = Path(filename).stem
+    meta = {"type": "sop", "filename": filename}
+    records, failed = [], 0
+    texts = [("symptom", (issue_pattern + " " + body[:500]).strip()),
+             ("root_cause", (_extract_section(body, "Root Cause", "Diagnosis") or "").strip())]
+    for field, text in texts:
+        if not text:
+            continue
+        vec = client.embed(text)
+        if vec is None:
+            failed += 1
+            continue
+        records.append(VectorRecord(case_id=case_id, field_name=field, vector=vec, resource_type=resource_type,
+                                    metadata=meta))
+    return records, failed
+
+
 def _embed_sop(sop_content: str, filename: str) -> str:
     """Embed the SOP content and index for vector search.
 
@@ -220,49 +247,17 @@ def _embed_sop(sop_content: str, filename: str) -> str:
     """
     try:
         from agenticops.kb.embeddings import get_embedding_client
-        from agenticops.kb.vector_store import VectorRecord, get_vector_store
-        from agenticops.tools.kb_tools import _parse_frontmatter
-
-        metadata, body = _parse_frontmatter(sop_content)
-        resource_type = str(metadata.get("resource_type", "Unknown")).upper()
-        issue_pattern = str(metadata.get("issue_pattern", ""))
+        from agenticops.kb.vector_store import get_vector_store
 
         client = get_embedding_client()
         if client.dimension == 0:
             return "Embeddings disabled."
 
         store = get_vector_store()
-        case_id = Path(filename).stem
-        indexed = 0
-
-        # Embed the symptoms/issue pattern as "symptom" field
-        symptom_text = issue_pattern + " " + body[:500]
-        vec = client.embed(symptom_text.strip())
-        if vec is not None:
-            store.upsert(VectorRecord(
-                case_id=case_id,
-                field_name="symptom",
-                vector=vec,
-                resource_type=resource_type,
-                metadata={"type": "sop", "filename": filename},
-            ))
-            indexed += 1
-
-        # Embed root_cause section for cross-field search
-        root_cause_text = _extract_section(body, "Root Cause", "Diagnosis")
-        if root_cause_text:
-            rc_vec = client.embed(root_cause_text.strip())
-            if rc_vec is not None:
-                store.upsert(VectorRecord(
-                    case_id=case_id,
-                    field_name="root_cause",
-                    vector=rc_vec,
-                    resource_type=resource_type,
-                    metadata={"type": "sop", "filename": filename},
-                ))
-                indexed += 1
-
-        return f"Indexed {indexed} vector(s) for SOP '{filename}'."
+        records, _failed = sop_vector_records(sop_content, filename, client)
+        for record in records:
+            store.upsert(record)
+        return f"Indexed {len(records)} vector(s) for SOP '{filename}'."
     except Exception as e:
         logger.warning("SOP embedding failed for %s: %s", filename, e)
         return f"Embedding skipped: {e}"

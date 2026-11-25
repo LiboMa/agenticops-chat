@@ -16,6 +16,8 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 
+from agenticops.llm import catalog
+
 TOOL_NAME = "report_ready"
 _TOOL_DESCRIPTION = "Call this to report that you are ready."
 
@@ -59,7 +61,7 @@ def _chat(cfg, model_id: str, timeout: int, *, with_tool: bool) -> dict:
         resp = openai.OpenAI(**args).chat.completions.create(**kwargs)
         called = bool(resp.choices and resp.choices[0].message.tool_calls)
     if with_tool and not called:
-        raise RuntimeError("no tool call — the model answered in text: agents cannot use this model")
+        raise catalog.OwnMessage("no tool call — the model answered in text: agents cannot use this model")
     return {}
 
 

@@ -280,3 +280,37 @@ def test_health_skips_bedrock_when_it_is_off(db):
         body = TestClient(app).get("/api/health").json()
     assert body["checks"]["aws"]["status"] == "skipped"
     assert body["status"] != "degraded" or body["checks"]["disk"]["status"] != "ok"
+
+
+# ── review fixes (N35 final review) ──────────────────────────────────────────
+
+ARN = "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0"
+
+
+def test_a_bedrock_arn_is_a_bedrock_id(db):
+    """A foundation-model ARN holds «::» (its account field is empty): it is a Bedrock id, never a provider reference."""
+    from strands.models.bedrock import BedrockModel
+    from agenticops.agents.preamble import media_capabilities
+    from agenticops.config import get_agent_window_size, settings
+    from agenticops.cost import compute_cost
+    from agenticops.llm.factory import build_model
+    from agenticops.llm.refs import is_ref, parse_ref
+    assert parse_ref(ARN).is_bedrock and not is_ref(ARN)
+    with patch("agenticops.config.get_bedrock_boto_session"):
+        assert isinstance(build_model(ARN, max_tokens=100), BedrockModel)
+    assert media_capabilities(ARN).images is True
+    assert compute_cost(ARN, {"input": 1000}) >= 0
+    from agenticops.llm.model_settings import problem
+    assert problem(ARN) is None
+
+
+def test_a_stored_model_error_never_carries_the_providers_sentence():
+    """What is stored and returned of a failed turn / build: the SDK error's kind and status, not the provider's
+    sentence (an authentication failure quotes part of the key it was given)."""
+    from agenticops.llm.errors import safe_error_text
+    err = _openai_error("AuthenticationError", 401, "Incorrect API key provided: sk-abc123SECRET")
+    assert safe_error_text(err) == "AuthenticationError (401)"
+    assert safe_error_text(RuntimeError("boom")) == "boom"
+    from agenticops.llm.factory import ModelProviderUnavailable
+    gone = ModelProviderUnavailable("p1::m", "provider_disabled", "the provider «p1» is turned off")
+    assert "turned off" in safe_error_text(gone)

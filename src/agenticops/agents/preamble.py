@@ -246,7 +246,8 @@ def media_capabilities(model_id: str) -> MediaCaps:
     """Native media per model family (measured on Bedrock 2026-11-07): Claude reads images and documents (a
     scanned PDF too); GPT-6 reads images only; gpt-oss neither. Every other id — gpt-5.6, a custom endpoint, an
     unknown family — is treated as text-only: sending media a model refuses fails the whole request."""
-    if "::" in (model_id or ""):
+    from agenticops.llm.refs import is_ref
+    if is_ref(model_id or ""):
         # a provider's model (MVP-2.9.0 N35): what its own attributes say — never guessed from the name
         # (OpenRouter's «anthropic/claude-…» is not «a Claude on Bedrock»); not on the list = text only
         from agenticops.llm.catalog import model_row
@@ -316,7 +317,8 @@ def accepts_temperature(model_id: str) -> bool:
     """True when a request to this model may carry `temperature`: a Claude model before 4.7, including the ids that
     predate the `claude-<family>-<n>` shape (Claude 3.x, claude-v2). A provider's model (MVP-2.9.0 N35): an
     OpenAI-compatible server takes it; an Anthropic-compatible one by the same Claude rule on its own model id."""
-    if "::" in (model_id or ""):
+    from agenticops.llm.refs import is_ref
+    if is_ref(model_id or ""):
         from agenticops.llm import registry
         from agenticops.llm.refs import parse_ref
         try:
@@ -375,7 +377,8 @@ def converse_text(model_id: str, prompt: str, *, max_tokens: int, temperature: O
     A `<provider>::<model>` reference (MVP-2.9.0 N35) goes to that provider under the same contract
     (`llm.direct.complete_text`); a Bedrock id while Bedrock is turned off raises ModelProviderUnavailable.
     """
-    if "::" in (model_id or ""):
+    from agenticops.llm.refs import is_ref
+    if is_ref(model_id or ""):
         from agenticops.llm.direct import complete_text
         return complete_text(model_id, prompt, max_tokens=max_tokens, temperature=temperature,
                              read_timeout=read_timeout, total_attempts=total_attempts)

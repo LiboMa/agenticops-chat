@@ -16,7 +16,7 @@
 
 With sign-in on, every write needs an admin (an API key's scopes cap it); a read is what Settings is — writers and
 admins, a read-only account only holding `settings_read`. Refusals are `{"detail": {"detail", "code", ...}}`. Blocking work (the database, the
-provider's own HTTP) runs in a worker thread. A write clears the cached chat agents.
+provider's own HTTP) runs in a worker thread. A write clears the cached chat agents (web and IM) and the embedding client.
 """
 from __future__ import annotations
 
@@ -71,8 +71,14 @@ async def _json(request: Request):
 
 
 def _rebuild_chat_agents() -> None:
+    """Drop every model built on the old answer: the web chats' and the IM chats' cached agents, and the knowledge
+    base's embedding client (a cached Titan client kept calling Bedrock after it was turned off — final review)."""
+    from agenticops.im.session_manager import clear_all_agents
+    from agenticops.kb.embeddings import reset_embedding_client
     from agenticops.web.app import _chat_sessions   # import here: app imports this router
     _chat_sessions.clear()
+    clear_all_agents()
+    reset_embedding_client()
 
 
 def _view(v: catalog.ProviderModelView) -> dict:

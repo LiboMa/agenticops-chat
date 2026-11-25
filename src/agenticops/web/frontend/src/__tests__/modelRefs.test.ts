@@ -24,6 +24,10 @@ describe("parseRef", () => {
     expect(parseRef("ollama-local::qwen3:32b")).toEqual({ provider: "ollama-local", model: "qwen3:32b" });
     expect(parseRef("p1::a::b")).toEqual({ provider: "p1", model: "a::b" });       // the server's own example
   });
+  it("reads a Bedrock ARN as a Bedrock id: its empty account field makes a «::» (final review)", () => {
+    const arn = "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-haiku-20241022-v1:0";
+    expect(parseRef(arn)).toEqual({ provider: null, model: arn });
+  });
   it("refuses what the server refuses", () => {
     for (const bad of ["::x", "P!::x", "p1::", "p::a::b", "bedrock::x", ""]) expect(parseRef(bad)).toBeNull();   // one letter is no name
   });

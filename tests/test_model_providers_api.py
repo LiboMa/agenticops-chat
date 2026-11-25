@@ -144,3 +144,30 @@ def test_cli_list_and_test(env):
     assert out.exit_code == 1 and "no tool call" in out.output
     out = runner.invoke(cli, ["providers", "test", "nope"])
     assert out.exit_code == 1
+
+
+def test_a_model_write_drops_every_cached_model(env):
+    """Turning Bedrock off (or editing a provider) drops what was built with the old answer: the chat agents of the IM
+    bots and the knowledge base's embedding client — the cached Titan client kept calling Bedrock (final review)."""
+    import agenticops.kb.embeddings as kb_emb
+    from agenticops.im.session_manager import IMChatSessionManager
+    _, tok = _user("root", "admin")
+    im = IMChatSessionManager()
+    im._agents["feishu:chat-1"] = object()
+    kb_emb._embedding_client, kb_emb._client_initialized = object(), True
+    assert env.client.put("/api/model-providers/bedrock", headers=H(tok), json={"enabled": False}).status_code == 200
+    assert im._agents == {} and kb_emb._client_initialized is False
+    kb_emb._client_initialized = True
+    _new(env, tok)
+    env.client.patch("/api/model-providers/local-llm", headers=H(tok), json={"timeout_seconds": 45})
+    assert kb_emb._client_initialized is False
+
+
+def test_keys_and_header_values_are_printable(env):
+    """A key or header value with a control character is refused when written: the HTTP library's error would quote
+    it whole (final review)."""
+    _, tok = _user("root", "admin")
+    r = _new(env, tok, api_key="sk-live\n0001")
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "invalid_key"
+    r = _new(env, tok, extra_headers={"X-Token": "abc\tdef"})
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "invalid_headers"

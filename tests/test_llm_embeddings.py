@@ -42,6 +42,8 @@ def kb(tmp_path, monkeypatch):
     (cases / "c1.md").write_text(_case("case_1", "disk full on web host"), encoding="utf-8")
     (cases / "c2.md").write_text(_case("case_2", "cpu spike after deploy"), encoding="utf-8")
     monkeypatch.setattr(settings, "cases_dir", cases)
+    (tmp_path / "sops").mkdir()
+    monkeypatch.setattr(settings, "sops_dir", tmp_path / "sops")      # never the worktree's own SOPs
     monkeypatch.setattr(settings, "vector_storage", "sqlite")
     monkeypatch.setattr(settings, "embedding_enabled", True)
     monkeypatch.setattr(emb, "_embedding_client", None)
@@ -98,7 +100,7 @@ def test_switching_needs_a_reembed_and_the_reembed_replaces_every_vector(kb):
     after = embeddings.status()
     assert after["model_ref"] == REF and after["source"] == "provider" and after["needs_reembed"] is True
     out = embeddings.reembed(ADMIN)
-    assert out == {"cases": 2, "vectors": 4, "failed": 0}
+    assert out == {"cases": 2, "sops": 0, "vectors": 4, "failed": 0}
     done = embeddings.status()
     assert done["needs_reembed"] is False and done["dimension"] == 8 and done["indexed_with"] == REF
     assert _case_ids(store) == ["case_1", "case_2"]                   # one entry per case, both fields
@@ -222,5 +224,37 @@ def test_the_api(kb, monkeypatch):
     r = client.put("/api/kb/embedding", headers=admin, json={"model_ref": REF})
     assert r.status_code == 200 and r.json()["needs_reembed"] is True
     r = client.post("/api/kb/reembed", headers=admin)
-    assert r.status_code == 200 and r.json() == {"cases": 2, "vectors": 4, "failed": 0}
+    assert r.status_code == 200 and r.json() == {"cases": 2, "sops": 0, "vectors": 4, "failed": 0}
     assert client.get("/api/kb/embedding", headers=admin).json()["needs_reembed"] is False
+
+
+# ── review fixes (N35 final review) ──────────────────────────────────────────
+
+def _sop(name: str) -> str:
+    return ("---\nresource_type: EC2\nissue_pattern: disk_full\nstatus: active\n---\n\n# SOP " + name +
+            "\n\n## Symptoms\nThe disk fills up.\n\n## Root Cause\nLogs are never rotated.\n")
+
+
+def test_the_rebuild_keeps_the_sops(kb):
+    """SOP vectors live in the same table as the cases': a rebuild re-embeds them too, it never just drops them."""
+    from agenticops.llm import embeddings
+    (kb.settings.sops_dir / "disk-full.md").write_text(_sop("disk"), encoding="utf-8")
+    store = _legacy_vectors()
+    embeddings.set_model(REF, ADMIN)
+    out = embeddings.reembed(ADMIN)
+    assert out == {"cases": 2, "sops": 1, "vectors": 6, "failed": 0}
+    assert "disk-full" in _case_ids(store) and store.stored_dimension() == 8
+
+
+def test_vector_search_skips_another_models_vectors(kb):
+    """Vectors of the old model are not compared with the new one's — even when the dimensions match (Titan's 1024 is
+    also bge-m3's): until the rebuild, the search answers from keywords."""
+    from agenticops.kb.search import hybrid_search
+    from agenticops.llm import embeddings
+    _legacy_vectors(dim=8)                                        # the fake model's dimension
+    embeddings.set_model(REF, ADMIN)
+    hits = hybrid_search(query_text="disk full on web host", resource_type="EC2", search_dir=kb.cases, top_k=3)
+    assert hits and all(h.source == "keyword" for h in hits)
+    embeddings.reembed(ADMIN)
+    hits = hybrid_search(query_text="disk full on web host", resource_type="EC2", search_dir=kb.cases, top_k=3)
+    assert any(h.source == "vector" for h in hits)

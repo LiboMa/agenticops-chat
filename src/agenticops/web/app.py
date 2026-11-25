@@ -5384,7 +5384,8 @@ async def _dispatch_chat_message(session_id: str, request: Request, actor: Actor
             # message stays for retry. ChatMessage has no status column, so the
             # marker rides in the token_usage JSON.
             _code = classify_stream_error(e)
-            err_meta = {"input": input_tokens, "output": output_tokens, "error": str(e)[:500], "error_code": _code}
+            from agenticops.llm.errors import safe_error_text   # an SDK error's sentence can quote a key (N35)
+            err_meta = {"input": input_tokens, "output": output_tokens, "error": safe_error_text(e, 500), "error_code": _code}
             _detail = stream_rejection_detail(e)   # 2026-11-08: Bedrock's reason when it rejected the request
             if _detail:
                 err_meta["error_detail"] = _detail

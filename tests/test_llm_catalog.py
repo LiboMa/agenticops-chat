@@ -203,3 +203,12 @@ def test_probe_needs_a_model(fake):
     with pytest.raises(registry.ProviderError) as e:
         probe.test("empty", None)
     assert e.value.code == "no_model"
+
+
+def test_an_unclassified_error_says_its_kind_not_its_text():
+    """An error the classifier does not know is named by its class — its text can quote a key or header value."""
+    from types import SimpleNamespace
+    from agenticops.llm import catalog
+    exc = ValueError("Illegal header value b'Bearer sk-live-SECRET-9999'")
+    text = catalog.describe_error(exc, SimpleNamespace(api_key="other"))
+    assert "SECRET" not in text and "ValueError" in text

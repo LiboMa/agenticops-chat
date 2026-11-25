@@ -1,7 +1,9 @@
 """Model references: `<provider>::<model id>`, or a bare Bedrock model id (MVP-2.9.0 N35).
 
-`::` because Bedrock ids and ARNs hold single colons only (as does Ollama's `qwen3:32b`) and `/` appears in OpenRouter
-ids and in ARNs. The value is split at the FIRST `::`: a provider's own model id may contain one.
+`::` because Bedrock ids hold single colons only (as does Ollama's `qwen3:32b`) and `/` appears in OpenRouter ids and in
+ARNs. The value is split at the FIRST `::`: a provider's own model id may contain one. A Bedrock ARN is the one Bedrock
+id that holds `::` — a foundation-model ARN's account field is empty (`arn:aws:bedrock:us-east-1::foundation-model/…`)
+— so a value starting with `arn:` is always a Bedrock id (`is_ref` is the one test of «a provider reference»).
 """
 from __future__ import annotations
 
@@ -30,7 +32,7 @@ def parse_ref(ref: str) -> ModelRef:
     value = (ref or "").strip()
     if not value:
         raise ValueError("empty model reference")
-    if REF_SEP not in value:
+    if not is_ref(value):
         return ModelRef(None, value)
     provider, model_id = value.split(REF_SEP, 1)
     if not NAME_RE.match(provider) or provider in RESERVED:
@@ -45,5 +47,6 @@ def format_ref(provider: str, model_id: str) -> str:
 
 
 def is_ref(value: str) -> bool:
-    """True when the value names a non-Bedrock provider (it holds the separator)."""
-    return REF_SEP in (value or "")
+    """True when the value names a non-Bedrock provider: it holds the separator and is not a Bedrock ARN."""
+    v = (value or "").strip()
+    return REF_SEP in v and not v.startswith("arn:")

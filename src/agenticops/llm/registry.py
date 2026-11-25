@@ -88,12 +88,24 @@ def _check_timeout(value: Any) -> int:
     return n
 
 
+def _printable(text: str) -> bool:
+    """Printable ASCII only: an HTTP header can carry nothing else, and the HTTP library's refusal of anything else
+    quotes the whole value — a key — in its error (final review)."""
+    return all(" " <= ch <= "~" for ch in text)
+
+
+def _check_key(value: str) -> str:
+    if not _printable(value):
+        raise ProviderError(422, "invalid_key", "an API key is printable ASCII only — no spaces inside, line breaks or tabs")
+    return value
+
+
 def _check_headers(value: Any) -> dict:
     if value is None:
         return {}
     if not isinstance(value, dict) or not all(isinstance(k, str) and k.strip() and isinstance(v, str)
-                                              for k, v in value.items()):
-        raise ProviderError(422, "invalid_headers", "extra headers are name → text pairs")
+                                              and _printable(k) and _printable(v) for k, v in value.items()):
+        raise ProviderError(422, "invalid_headers", "extra headers are name → text pairs of printable ASCII")
     return {k.strip(): v for k, v in value.items()}
 
 
@@ -189,7 +201,7 @@ def create(data: dict, actor) -> dict:
     base_url = _check_base_url(data.get("base_url") if data.get("base_url") is not None else preset.base_url)
     timeout = _check_timeout(data.get("timeout_seconds", 60))
     headers = _check_headers(data.get("extra_headers"))
-    api_key = (data.get("api_key") or "").strip()
+    api_key = _check_key((data.get("api_key") or "").strip())
     if api_key.startswith(_MASK_PREFIX):
         api_key = ""
     with get_db_session() as s:
@@ -239,7 +251,7 @@ def update(name: str, data: dict, actor, *, clear_api_key: bool = False) -> dict
         if clear_api_key:
             secrets["api_key"] = ""
         elif replaced:
-            secrets["api_key"] = new_key.strip()
+            secrets["api_key"] = _check_key(new_key.strip())
         if "extra_headers" in data and data["extra_headers"] is not None:
             old_headers = secrets.get(_HEADERS) or {}
             incoming = _check_headers(data["extra_headers"])

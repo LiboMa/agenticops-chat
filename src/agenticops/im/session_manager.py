@@ -3,6 +3,7 @@
 import logging
 import threading
 import time
+import weakref
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
 
@@ -22,6 +23,17 @@ _NOTIFIER_MAP = {
 }
 
 
+_MANAGERS: "weakref.WeakSet[IMChatSessionManager]" = weakref.WeakSet()
+
+
+def clear_all_agents() -> None:
+    """Drop the cached agent of every IM chat in this process: built on the models as they were, they keep them
+    (MVP-2.9.0 N35 — a provider edited or Bedrock turned off). The next message builds a new one."""
+    for manager in list(_MANAGERS):
+        with manager._lock:
+            manager._agents.clear()
+
+
 class IMChatSessionManager:
     """Per IM chat_id agent session manager with TTL cleanup.
 
@@ -37,6 +49,7 @@ class IMChatSessionManager:
         self._ttl = timedelta(minutes=ttl_minutes)
         self._cleanup_thread: Optional[threading.Thread] = None
         self._shutdown = False
+        _MANAGERS.add(self)
 
     def start_cleanup(self) -> None:
         if self._cleanup_thread is None:

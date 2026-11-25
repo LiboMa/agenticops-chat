@@ -7,8 +7,8 @@ import {
   type PlatformPreset, type ProbeResult, type ProviderRow,
 } from "@/hooks/useModelProviders";
 import {
-  createBody, emptyForm, formFromRow, patchFromForm, validateProviderForm,
-  type FormProblem, type ProviderForm, type ProviderKind,
+  createBody, emptyForm, formFromRow, patchFromForm, testNotes, validateProviderForm,
+  type FormProblem, type ProviderForm, type ProviderKind, type TestNote,
 } from "@/lib/providerForm";
 import { ProbeSteps } from "./ProbeSteps";
 
@@ -42,7 +42,7 @@ export function ProviderDialog({ presets, row, onClose }: {
   const [testModel, setTestModel] = useState("");
   const [saved, setSaved] = useState<string | null>(null);   // the name, once a new provider is stored
   const [result, setResult] = useState<ProbeResult | null>(null);
-  const [note, setNote] = useState<string | null>(null);
+  const [notes, setNotes] = useState<TestNote[]>([]);
   const [error, setError] = useState<string | null>(null);
   const create = useCreateProvider();
   const update = useUpdateProvider();
@@ -82,7 +82,7 @@ export function ProviderDialog({ presets, row, onClose }: {
     if (!form) return;
     const found = validateProviderForm(form, { isNew: !row, needsKey, hasStoredKey: !!row?.has_api_key && !clearKey });
     if (found) { setProblem(found); return; }
-    setError(null); setNote(null); setResult(null);
+    setError(null); setNotes([]); setResult(null);
     try {
       if (row) {
         const body = patchFromForm(row, form, { clearKey });
@@ -101,13 +101,13 @@ export function ProviderDialog({ presets, row, onClose }: {
   async function runTest(name: string) {
     // the model list first (a fresh provider has none): the test then names its first chat model, or the one typed
     const listed = await refresh.mutateAsync(name).catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }));
-    if (listed?.error) setNote(t("settings.providers.listFailed").replace("{error}", listed.error));
+    let failure: { code?: string; message: string } | null = null;
     try {
       setResult(await test.mutateAsync({ name, modelId: testModel.trim() || undefined }));
     } catch (e) {
-      setNote(e instanceof ApiError && e.code === "no_model" ? t("settings.providers.noModelYet")
-        : e instanceof Error ? e.message : String(e));
+      failure = { code: e instanceof ApiError ? e.code : undefined, message: e instanceof Error ? e.message : String(e) };
     }
+    setNotes(testNotes(listed?.error ?? null, failure));   // both, when the list failed and the test had no model
   }
 
   if (saved) {
@@ -116,9 +116,13 @@ export function ProviderDialog({ presets, row, onClose }: {
         <p role="status" className="mt-3 text-sm text-foreground">{t("settings.providers.savedTesting").replace("{name}", saved)}</p>
         {busy && <p className="mt-2 text-sm text-muted-foreground">{t("settings.providers.testing")}</p>}
         {result && <ProbeSteps result={result} />}
-        {note && <p className="mt-3 text-sm text-amber-700 dark:text-amber-300">{note}</p>}
+        {notes.map((n, i) => (
+          <p key={i} className="mt-3 text-sm text-amber-700 dark:text-amber-300 [overflow-wrap:anywhere]">
+            {"text" in n ? n.text : t(n.key).replace("{error}", n.error ?? "")}
+          </p>
+        ))}
         <div className="mt-5 flex justify-end gap-2">
-          <button type="button" disabled={busy} onClick={() => { setResult(null); setNote(null); void runTest(saved); }}
+          <button type="button" disabled={busy} onClick={() => { setResult(null); setNotes([]); void runTest(saved); }}
                   className="rounded-md border border-border px-3 py-2 text-sm hover:bg-muted disabled:opacity-50">
             {t("settings.providers.testAgain")}
           </button>
