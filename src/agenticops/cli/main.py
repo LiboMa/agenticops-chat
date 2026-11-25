@@ -239,6 +239,7 @@ service_app = typer.Typer(help="Manage background services (web dashboard + IM W
 skills_app = typer.Typer(help="Manage Agent Skills (import from URL / git repo / zip)")
 connectors_app = typer.Typer(help="Pull connectors (K8s discovery): recent runs, run now")
 users_app = typer.Typer(help="Web sign-in accounts: create (incl. read-only viewers), list, disable")
+providers_app = typer.Typer(help="Model providers beyond Bedrock: list, test (MVP-2.9.0 N35; add / edit in Settings)")
 
 app.add_typer(get_app, name="get")
 app.add_typer(describe_app, name="describe")
@@ -251,6 +252,7 @@ app.add_typer(service_app, name="service")
 app.add_typer(skills_app, name="skills")
 app.add_typer(connectors_app, name="connectors")
 app.add_typer(users_app, name="users")
+app.add_typer(providers_app, name="providers")
 
 
 # ============================================================================
@@ -5558,6 +5560,51 @@ def _print_connector_run(status: str, where: str, run_id: int, counts: dict, err
                   f"updated {counts.get('updated', 0)}, absent {counts.get('absent', 0)}[/dim]")
     if error:
         console.print(f"    [dim]{_safe_text(error)}[/dim]")
+
+
+@providers_app.command("list")
+def providers_list():
+    """Every model provider: Bedrock (on / off), then each added one — protocol, address, models, last test. Never a key."""
+    from agenticops.llm import registry
+    from agenticops.models import init_db
+
+    init_db()
+    state = "[green]on[/green]" if registry.bedrock_enabled() else "[yellow]off[/yellow]"
+    console.print(f"[bold]bedrock[/bold]  {state}  [dim]built in · region {settings.bedrock_region}[/dim]")
+    for p in registry.list_public():
+        on = "[green]on[/green]" if p["enabled"] else "[yellow]off[/yellow]"
+        test = p.get("last_test") or {}
+        verdict = ("never tested" if not test else
+                   "test passed" if all((test.get(k) or {}).get("ok") for k in ("list", "chat", "tools"))
+                   else "test failed")
+        key = "key stored" if p["has_api_key"] else "no key"
+        console.print(f"[bold]{p['name']}[/bold]  {on}  {p['kind']}  {p['base_url']}  "
+                      f"[dim]{p['models_count']} models · {key} · {verdict}[/dim]")
+
+
+@providers_app.command("test")
+def providers_test(
+    name: str = typer.Argument(..., help="Provider name"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="Model id (default: its first chat model)"),
+):
+    """Test a provider: read its model list, send one short message, ask for one tool call. Exit 1 when a step fails."""
+    from agenticops.llm import probe, registry
+    from agenticops.models import init_db
+
+    init_db()
+    try:
+        result = probe.test(name, model)
+    except registry.ProviderError as e:
+        console.print(f"[red]{e.detail}[/red]")
+        raise typer.Exit(1)
+    console.print(f"[bold]{name}[/bold] · {result['model_id']}")
+    for step in ("list", "chat", "tools"):
+        r = result[step]
+        mark = "[green]ok[/green]" if r["ok"] else "[red]failed[/red]"
+        extra = f" · {r['count']} models" if step == "list" and r.get("count") is not None else ""
+        console.print(f"  {step:<5} {mark}  [dim]{r['ms']} ms{extra}[/dim]" + (f"  {r['error']}" if r["error"] else ""))
+    if not all(result[k]["ok"] for k in ("list", "chat", "tools")):
+        raise typer.Exit(1)
 
 
 @connectors_app.command("list")

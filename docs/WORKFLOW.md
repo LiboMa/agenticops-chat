@@ -853,6 +853,71 @@ EnhancedBackend abstraction + registry  (protocol-agnostic core)
 
 ---
 
+## Model Providers — Beyond Bedrock (MVP-2.9.0 N35)
+
+Every model call can go to a provider other than Amazon Bedrock, and the whole system can run with Bedrock turned off.
+A model setting holds either a Bedrock model id (as before — every existing setting stays valid) or a **reference**
+`<provider>::<model id>` (split at the first `::`; Ollama's `qwen3:32b` and OpenRouter's `vendor/model` ids are fine).
+
+```mermaid
+flowchart LR
+    S["a model setting<br/>agent_main_model_id, tiers, galaxy, …"] --> F{"llm/factory.build_model"}
+    F -- "no ::" --> B["BedrockModel<br/>(exactly as before)"]
+    F -- "openai_compatible" --> O["OpenAIModel<br/>LiteLLM proxy · OpenRouter · vLLM · Ollama · LM Studio"]
+    F -- "anthropic_compatible" --> A["AnthropicModel<br/>Anthropic · Sub2API"]
+    F -- "Bedrock off / provider or model off / not listed" --> X["ModelProviderUnavailable<br/>(which model, why — never a silent fallback)"]
+```
+
+**Add a provider** (Settings → Model providers, an administrator): «Add provider» → pick the platform (its usual
+address and protocol are filled in) → name (lowercase, it is how settings refer to it: `name::model`), key, optional
+extra headers → «Save and test». The dialog stores it, reads its model list and runs a three-step test (list, one
+chat, one tool call). Then give the models to the settings: Settings → General → «Agent models» and «Other places that
+use a model» (the three tiers, the executor's model for L0 / L1 plans, the security advisor, report translation, the
+Signal Gate's merge judge, the RCA critic, Galaxy). Every picker is the same: grouped by provider, searchable, arrow keys
+and Enter work, each model with what it can do.
+
+| Platform | Address | Key | Notes |
+|---|---|---|---|
+| LiteLLM proxy | `http://localhost:4000/v1` | the proxy's key | model ids are the proxy's model names |
+| OpenRouter | `https://openrouter.ai/api/v1` | yes | its list carries prices, context lengths, tool support |
+| vLLM | `http://localhost:8000/v1` | only with `--api-key` | tool calls need `--enable-auto-tool-choice` and a parser |
+| Ollama | `http://localhost:11434/v1` | no | only models with tool support can run agents |
+| LM Studio | `http://localhost:1234/v1` | no | |
+| Sub2API / any Anthropic-compatible gateway | the gateway's base (no `/v1`) | yes | Anthropic Messages API |
+| Anthropic | `https://api.anthropic.com` | yes | |
+
+**Run without Bedrock**: point every agent, the three tiers and (optionally) the knowledge base's vector model at
+providers, then turn the «Amazon Bedrock» switch off. With it off no Bedrock model is listed or called, `/api/health`
+skips the Bedrock identity, and any setting still naming a Bedrock model is shown in red with the reason
+(`model_issues` of `GET /api/settings`) — and fails explicitly when used.
+
+**Models**: a provider's «Models» dialog searches, filters by use (chat / embedding), refreshes the list, adds a model
+by id, turns one on or off, and corrects what it can do — context window, max output, tools (yes / no / let the
+connection test decide), images, documents, reasoning (none / OpenAI effort / Anthropic thinking), prices per million
+tokens. A field set by hand is marked and survives a refresh. Nothing Bedrock-only (prompt-cache points, thinking or
+reasoning fields) is ever sent to another provider: the request carries what the model's attributes allow.
+
+**Keys**: stored encrypted when `AIOPS_MASTER_KEY` or a KMS key is configured (the page warns when they would be
+stored in plain text), never returned, logged or audited; editing keeps the stored key unless a new one is typed,
+«Remove the saved key» clears it. Header values are stored the same way.
+
+**Knowledge base vectors** (Settings → Knowledge base → «Vector model»): a provider's embedding model
+(OpenAI-compatible only), else Titan while Bedrock is on, else keyword search only. After a change the card says the
+stored vectors need a rebuild; «Rebuild the vectors» embeds every case first and replaces all vectors at once — if one
+fails the old ones stay (SQLite vector store only).
+
+```bash
+aiops providers list                              # name, protocol, address, models, last test — never a key
+aiops providers test local-llm --model qwen3:32b  # list / chat / tool call; exit 1 when a step fails
+```
+
+API: `GET/POST /api/model-providers`, `PATCH/DELETE /api/model-providers/{name}` (409 `in_use` names the settings that
+use it), `PUT /api/model-providers/bedrock {enabled}`, `POST …/{name}/test`, `POST …/{name}/refresh-models`,
+`GET/POST …/{name}/models`, `PATCH …/{name}/models/{model_id}`, `GET/PUT /api/kb/embedding`, `POST /api/kb/reembed`;
+`PATCH /api/settings` takes `model_settings`. With sign-in on, changing any model or provider needs an administrator.
+
+---
+
 ## Cloud Security Review (MVP-2.5.0)
 
 A dedicated posture engine (`security/`) that runs on **two independent cadences** and turns raw cloud config into scored, reachability-annotated, deduplicated, and (optionally) LLM-advised findings. Everything is deterministic where it counts and fail-safe where it can't be.
@@ -1397,6 +1462,14 @@ aiops users disable demo                         # its sessions and API keys sto
 | Own password, UI preferences | yes | yes | yes |
 | Any other write (approve, change, run, settings, …) | yes (RBAC rules apply) | 403 `read_only` | 403 `read_only` |
 | Settings page | yes | hidden | read-only |
+
+**Resetting a password** (admins, User management → the reset icon on a row; `POST /api/users/{id}/reset-password`):
+«Generate a random password» shows a new one once (as before); «Set a password» (MVP-2.9.0 N34) takes the one the admin
+types twice and never shows it back (`{"password": null, "generated": false}`). Either way the user's signed-in
+browsers sign out (yours stays when you reset yourself) and one `user.reset_password` audit row records the method —
+never the password. **The password rule** — for a typed reset and for a user's own change (`PUT /api/users/me/password`):
+8–128 characters, not only spaces, no control characters; otherwise 422 `weak_password` and nothing changes. Stored
+passwords are never re-checked. New users still get a generated one-time password.
 
 A viewer's chat has no sub-agents, approvals, changes or configuration; CLI tools refuse write commands and Kubernetes secret
 reads. It still reads everything a reader sees, and its turns spend tokens on the main agent's model.

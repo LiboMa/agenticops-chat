@@ -164,6 +164,7 @@ context_offload_preview_tokens: 750
 embedding_model_id: amazon.titan-embed-text-v2:0
 embedding_dimension: 1024
 embedding_enabled: true
+embedding_model_ref: ""          # a provider's embedding model (<provider>::<model>); "" = Titan on Bedrock (N35)
 auto_rca_enabled: true
 auto_fix_enabled: true
 patrol_graph_checks_enabled: true
@@ -271,6 +272,9 @@ chat_upload:                  # chat attachment limits; admins override fields a
 chat_attachments_dir: ''      # empty = <data_dir>/chat_attachments
 model_runtime:                # model connection; admins override at runtime (Settings → Model connection)
   stream_read_timeout_seconds: 600  # a model stream may send nothing this long before it is cut (60–3600)
+model_providers:              # model providers beyond Bedrock (N35); admins turn Bedrock off/on at runtime
+  bedrock_enabled: true
+  test_timeout_seconds: 30     # each step of a provider's connection test (5–300 s)
 default_regions:
   aws:
   - us-east-1

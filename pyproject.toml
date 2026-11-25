@@ -23,7 +23,7 @@ dependencies = [
     "jinja2>=3.1.0",
     "httpx>=0.24.0",
     # Agent/LLM
-    "strands-agents>=1.64.0,<2.0.0",
+    "strands-agents[openai,anthropic]>=1.64.0,<2.0.0",  # model providers beyond Bedrock (2026-11-25)
     "langchain-aws>=0.1.0",
     "langchain-core>=0.1.0",
     # Utils

@@ -48,17 +48,10 @@ class ChatContext:
             return False
         if self.agent is None:
             return False
-        from strands.models.bedrock import BedrockModel
-        from agenticops.config import settings, get_bedrock_boto_session
-        from agenticops.agents.preamble import bedrock_model_kwargs
+        from agenticops.config import settings
+        from agenticops.llm.factory import build_model    # Bedrock or another provider (MVP-2.9.0 N35)
         model_id = MODEL_ALIASES[alias]
-        cache_kwargs = bedrock_model_kwargs(model_id)
-        self.agent.model = BedrockModel(
-            model_id=model_id,
-            boto_session=get_bedrock_boto_session(),
-            max_tokens=settings.bedrock_max_tokens,
-            **cache_kwargs,
-        )
+        self.agent.model = build_model(model_id, max_tokens=settings.bedrock_max_tokens)
         # Also update settings so get_agent_model_config("main") reflects the change
         settings.agent_main_model_id = model_id
         self.current_model = alias

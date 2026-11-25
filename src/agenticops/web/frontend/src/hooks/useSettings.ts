@@ -1,6 +1,15 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import type { AgentModelConfig } from "@/api/types";
+import type { ModelIssue, ModelPreset } from "@/lib/modelRefs";
+
+/** The model settings beside the agents' own (MVP-2.9.0 N35): the setting's own value, the model in force, and
+ *  what an empty value means (null: it cannot be empty — a tier). */
+export interface ModelSettingView {
+  value: string;
+  effective: string;
+  default: string | null;
+}
 
 export interface AppSettings {
   scan_focus: string;
@@ -19,7 +28,11 @@ export interface AppSettings {
   skills_post_resolution_review: boolean;
   skills_improvement_notify: boolean;
   agent_models: Record<string, AgentModelConfig>;
-  model_presets: { label: string; value: string; context_window?: number }[];
+  /** Bedrock's models (while Bedrock is on) and every enabled chat model of an enabled provider (N35) */
+  model_presets: ModelPreset[];
+  model_settings?: Record<string, ModelSettingView>;
+  /** the settings in force whose model cannot be used, and why (N35) */
+  model_issues?: ModelIssue[];
   // Galaxy build model override — "" = use cheap tier (bedrock_model_id_cheap)
   galaxy_model_id: string;
   // IM WebSocket status (read-only, auto-detected from channels.yaml)
@@ -49,8 +62,9 @@ type AgentModelPatch = { model_id?: string; max_tokens?: number; window_size?: n
 // acp_available_backends are read-only: PATCH /api/settings rejects them as unknown keys (400), so they are
 // dropped from the patch shape (they stay readable on AppSettings).
 type SettingsPatch = Partial<Omit<AppSettings, "agent_models" | "change_management_enabled" | "execution_switches"
-  | "policy_graph_impact_enforce" | "rca_min_confidence_for_autofix" | "executor_total_timeout" | "acp_available_backends">>
-  & { agent_models?: Record<string, AgentModelPatch> };
+  | "policy_graph_impact_enforce" | "rca_min_confidence_for_autofix" | "executor_total_timeout" | "acp_available_backends"
+  | "model_presets" | "model_settings" | "model_issues">>
+  & { agent_models?: Record<string, AgentModelPatch>; model_settings?: Record<string, string> };
 
 export function useSettings() {
   return useQuery<AppSettings>({

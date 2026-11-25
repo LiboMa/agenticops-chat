@@ -2,6 +2,7 @@
 
 import hashlib
 import secrets
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from typing import Optional, Tuple, Callable
@@ -26,6 +27,27 @@ def hash_password(password: str) -> str:
     salt = secrets.token_hex(16)
     hashed = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
     return f"{salt}${hashed}"
+
+
+PASSWORD_MIN_CHARS, PASSWORD_MAX_CHARS = 8, 128
+
+
+def password_problem(password: str) -> Optional[str]:
+    """Why a NEW password is refused, or None (MVP-2.9.0 N34, owner 2026-11-24): 8–128 characters, not only
+    whitespace, no control characters. Checked wherever a person sets one (an admin's typed reset, a user's own
+    change); passwords already stored are never re-checked."""
+    if not isinstance(password, str) or len(password) < PASSWORD_MIN_CHARS:
+        return "too_short"
+    if len(password) > PASSWORD_MAX_CHARS:
+        return "too_long"
+    if not password.strip():
+        return "blank"
+    if any(unicodedata.category(c) == "Cc" for c in password):
+        return "control_character"
+    return None
+
+
+PASSWORD_RULE = f"{PASSWORD_MIN_CHARS}–{PASSWORD_MAX_CHARS} characters, not only spaces, no control characters"
 
 
 def verify_password(password: str, password_hash: str) -> bool:

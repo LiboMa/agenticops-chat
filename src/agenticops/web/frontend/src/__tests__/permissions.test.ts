@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canManageUsers, canViewSettings, isReadOnly, navItemVisible, settingsGate, viewerActions } from "@/lib/permissions";
+import { canChangeModels, canManageUsers, canViewSettings, isReadOnly, navItemVisible, settingsGate, viewerActions } from "@/lib/permissions";
 
 describe("isReadOnly", () => {
   it("is a signed-in viewer only", () => {
@@ -71,5 +71,15 @@ describe("settingsGate (MVP-2.9.0 N27)", () => {
   it("a refresh in the background does not blank the page", () => {
     expect(settingsGate({ data: viewer, isLoading: false })).toBe("notFound");
     expect(settingsGate({ data: { auth_enabled: true, user: { read_only: false } }, isLoading: false })).toBe("open");
+  });
+});
+
+describe("canChangeModels (MVP-2.9.0 N35)", () => {
+  it("is an administrator's with sign-in on, anyone's with it off", () => {
+    expect(canChangeModels({ auth_enabled: true, user: { is_admin: true } })).toBe(true);
+    expect(canChangeModels({ auth_enabled: true, user: { is_admin: false } })).toBe(false);
+    expect(canChangeModels({ auth_enabled: true, user: null })).toBe(false);
+    expect(canChangeModels({ auth_enabled: false, user: null })).toBe(true);
+    expect(canChangeModels(undefined)).toBe(true);
   });
 });

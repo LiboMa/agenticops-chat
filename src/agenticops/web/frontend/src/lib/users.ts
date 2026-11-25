@@ -49,3 +49,35 @@ export function fillRefusal(text: string, data: Record<string, unknown> | undefi
   const refs = data?.refs;
   return Array.isArray(refs) ? text.replace("{refs}", refs.map(String).join(", ")) : text;
 }
+
+/** Why a password the admin typed would be refused, or null (MVP-2.9.0 N34). The same rule as the server's
+ *  auth.service.password_problem — 8–128 characters (code points, as Python counts them), not only whitespace, no
+ *  control characters — only to word it before sending; the server decides. */
+export type PasswordProblem = "too_short" | "too_long" | "blank" | "control_character";
+export const PASSWORD_MIN_CHARS = 8;
+export const PASSWORD_MAX_CHARS = 128;
+
+export function passwordProblem(pw: string): PasswordProblem | null {
+  const chars = [...pw].length;
+  if (chars < PASSWORD_MIN_CHARS) return "too_short";
+  if (chars > PASSWORD_MAX_CHARS) return "too_long";
+  if (!pw.trim()) return "blank";
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(pw)) return "control_character";
+  return null;
+}
+
+/** What a reset sends: nothing for a generated password; the typed one once it meets the rule and both entries
+ *  agree (the rule is worded first). */
+export type ResetMode = "generate" | "typed";
+export type ResetPayload =
+  | { ok: true; body: { password?: string } }
+  | { ok: false; reason: PasswordProblem | "mismatch" };
+
+export function resetPayload(mode: ResetMode, pw: string, confirm: string): ResetPayload {
+  if (mode === "generate") return { ok: true, body: {} };
+  const problem = passwordProblem(pw);
+  if (problem) return { ok: false, reason: problem };
+  if (pw !== confirm) return { ok: false, reason: "mismatch" };
+  return { ok: true, body: { password: pw } };
+}

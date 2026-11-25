@@ -274,7 +274,7 @@ def test_the_reporter_run_carries_a_record_and_ends_it(monkeypatch):
         seen["record"] = get_run_context().coverage
         return "saved"
     monkeypatch.setattr(ra, "Agent", FakeAgent)
-    monkeypatch.setattr(ra, "BedrockModel", lambda **kw: object())
+    monkeypatch.setattr(ra, "BedrockModel", lambda **kw: SimpleNamespace(config=kw))   # takes the factory's aiops_ref
     monkeypatch.setattr("agenticops.agents.preamble.invoke_with_retry", fake_invoke)
     before = datetime.now(timezone.utc)
     assert ra.reporter_agent(report_type="daily") == "saved"

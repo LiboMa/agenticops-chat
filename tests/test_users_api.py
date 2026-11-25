@@ -223,6 +223,118 @@ def test_reset_ends_the_users_sessions_but_keeps_the_callers_own(env):
     assert AuthService.validate_session(other_tab) is None        # their other browsers sign out
 
 
+
+# ── a password the admin types (MVP-2.9.0 N34, owner 2026-11-24) ───────────────────────────────────────────
+
+
+def test_an_admin_can_set_the_password_they_type(env):
+    from agenticops.auth import AuthService
+    root, tok = _user("root", "admin")
+    ops, ops_tok = _user("ops", "writer")
+    r = env.client.post(f"/api/users/{ops.id}/reset-password", headers=H(tok), json={"password": "Correct-horse-9"})
+    assert r.status_code == 200
+    assert r.json() == {"password": None, "generated": False}          # what the admin typed is never sent back
+    assert AuthService.authenticate("ops", "Correct-horse-9") is not None
+    assert AuthService.authenticate("ops", "pw-ops-0") is None
+    assert AuthService.validate_session(ops_tok) is None                # their browsers sign out, as with a generated one
+
+
+def test_without_a_password_one_is_generated_as_before(env):
+    from agenticops.auth import AuthService
+    root, tok = _user("root", "admin")
+    ops, _ = _user("ops", "writer")
+    for body in (None, {}, {"password": None}):
+        r = env.client.post(f"/api/users/{ops.id}/reset-password", headers=H(tok), **({"json": body} if body is not None else {}))
+        assert r.status_code == 200 and r.json()["generated"] is True
+        assert AuthService.authenticate("ops", r.json()["password"]) is not None
+
+
+@pytest.mark.parametrize("bad", ["short-7", "        ", "x" * 129, "bad\npassword", "tab\there!", "nul\x00rest!", ""])
+def test_a_typed_password_that_breaks_the_rule_changes_nothing(env, bad):
+    from agenticops.audit.models import AuditLog
+    from agenticops.auth import AuthService
+    from agenticops.models import get_db_session
+    root, tok = _user("root", "admin")
+    ops, ops_tok = _user("ops", "writer")
+    r = env.client.post(f"/api/users/{ops.id}/reset-password", headers=H(tok), json={"password": bad})
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "weak_password"
+    assert AuthService.authenticate("ops", "pw-ops-0") is not None      # the old password still works
+    assert AuthService.validate_session(ops_tok) is not None            # nobody was signed out
+    with get_db_session() as s:
+        assert s.query(AuditLog).filter_by(action="user.reset_password").count() == 0
+
+
+@pytest.mark.parametrize("good", ["12345678", "x" * 128, "pass phrase with spaces", "密码要八个字符以上"])
+def test_a_typed_password_that_meets_the_rule_is_taken(env, good):
+    from agenticops.auth import AuthService
+    root, tok = _user("root", "admin")
+    ops, _ = _user("ops", "writer")
+    r = env.client.post(f"/api/users/{ops.id}/reset-password", headers=H(tok), json={"password": good})
+    assert r.status_code == 200 and AuthService.authenticate("ops", good) is not None
+
+
+def test_a_huge_password_body_is_refused_before_anything_is_hashed(env):
+    root, tok = _user("root", "admin")
+    ops, _ = _user("ops", "writer")
+    r = env.client.post(f"/api/users/{ops.id}/reset-password", headers=H(tok), json={"password": "x" * 5000})
+    assert r.status_code == 422 and isinstance(r.json()["detail"], list)    # the request schema refuses it, not the rule
+
+
+def test_the_audit_row_says_how_the_password_was_set_and_never_what(env):
+    from agenticops.audit.models import AuditLog
+    from agenticops.models import get_db_session
+    root, tok = _user("root", "admin")
+    ops, _ = _user("ops", "writer")
+    env.client.post(f"/api/users/{ops.id}/reset-password", headers=H(tok), json={"password": "Correct-horse-9"})
+    generated = env.client.post(f"/api/users/{ops.id}/reset-password", headers=H(tok)).json()["password"]
+    with get_db_session() as s:
+        rows = s.query(AuditLog).filter_by(action="user.reset_password").order_by(AuditLog.id).all()
+        assert [r.new_values for r in rows] == [{"method": "typed"}, {"method": "generated"}]
+        text = json.dumps([[r.old_values, r.new_values, r.details if hasattr(r, "details") else None] for r in rows], default=str)
+    assert "Correct-horse-9" not in text and generated not in text
+
+
+def test_a_typed_reset_is_refused_to_a_non_admin_and_an_api_key_as_before(env):
+    from agenticops.auth import AuthService
+    root, tok = _user("root", "admin")
+    ops, ops_tok = _user("ops", "writer")
+    r = env.client.post(f"/api/users/{root.id}/reset-password", headers=H(ops_tok), json={"password": "Correct-horse-9"})
+    assert r.status_code == 403
+    admin_key = AuthService.create_api_key(user_id=root.id, name="admin", permissions=["read", "write", "admin"])
+    r = env.client.post(f"/api/users/{ops.id}/reset-password", headers=H(admin_key), json={"password": "Correct-horse-9"})
+    assert (r.status_code, r.json()["detail"].get("code")) == (403, "session_required")
+    assert AuthService.authenticate("root", "pw-root-0") is not None and AuthService.authenticate("ops", "pw-ops-0") is not None
+
+
+# ── a user's own password change follows the same rule (N34) ───────────────────────────────────────────────
+
+
+def test_an_own_change_to_a_password_that_breaks_the_rule_is_refused(env):
+    from agenticops.auth import AuthService
+    ops, ops_tok = _user("ops", "writer")
+    for bad in ("", "short", "        "):
+        r = env.client.put("/api/users/me/password", headers=H(ops_tok), json={"old_password": "pw-ops-0", "new_password": bad})
+        assert r.status_code == 422 and r.json()["detail"]["code"] == "weak_password"
+    assert AuthService.authenticate("ops", "pw-ops-0") is not None
+
+
+def test_an_own_change_that_meets_the_rule_works_as_before(env):
+    from agenticops.auth import AuthService
+    ops, ops_tok = _user("ops", "writer")
+    r = env.client.put("/api/users/me/password", headers=H(ops_tok), json={"old_password": "wrong", "new_password": "Correct-horse-9"})
+    assert r.status_code == 400                                          # the current password is still checked
+    r = env.client.put("/api/users/me/password", headers=H(ops_tok), json={"old_password": "pw-ops-0", "new_password": "Correct-horse-9"})
+    assert r.status_code == 200 and AuthService.authenticate("ops", "Correct-horse-9") is not None
+
+
+def test_the_rule_itself():
+    from agenticops.auth.service import password_problem
+    assert password_problem("12345678") is None and password_problem("x" * 128) is None
+    assert password_problem("1234567") == "too_short" and password_problem("x" * 129) == "too_long"
+    assert password_problem("         ") == "blank" and password_problem("") == "too_short"
+    assert password_problem("abc\x7fdefgh") == "control_character" and password_problem("abc\u200bdefgh") is None
+
+
 # ── audit ───────────────────────────────────────────────────────────────────────────────────────────────────
 
 

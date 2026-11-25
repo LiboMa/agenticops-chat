@@ -1,6 +1,5 @@
 """Tests for chat session rename (PATCH) endpoint and auto-naming logic."""
 
-import json
 import re
 from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock
@@ -63,20 +62,15 @@ class TestPatchRename:
 
 
 class TestGenerateSessionTitle:
+    """The title is one converse_text call on the cheap tier (MVP-2.9.0 N35; it was the Anthropic-only InvokeModel)."""
 
-    @patch("agenticops.config.get_bedrock_boto_session")
-    def test_returns_title(self, mock_get_session):
-        mock_client = MagicMock()
-        mock_get_session.return_value.client.return_value = mock_client
-        mock_client.invoke_model.return_value = {
-            "body": MagicMock(
-                read=MagicMock(return_value=json.dumps({
-                    "content": [{"text": "AWS Health Check Setup"}]
-                }).encode())
-            )
-        }
+    @patch("agenticops.agents.preamble.converse_text", return_value=("AWS Health Check Setup", {}, "end_turn"))
+    def test_returns_title(self, converse):
+        from agenticops.config import settings
         title = _generate_session_title("check my aws health", "I found 3 issues in us-east-1")
         assert title == "AWS Health Check Setup"
+        assert converse.call_args.args[0] == settings.bedrock_model_id_cheap
+        assert converse.call_args.kwargs["max_tokens"] == 30
 
     @patch("agenticops.config.get_bedrock_boto_session", side_effect=Exception("No credentials"))
     def test_returns_none_on_failure(self, mock_get_session):
@@ -87,11 +81,8 @@ class TestGenerateSessionTitle:
     def test_returns_none_on_empty_response(self, mock_get_session):
         mock_client = MagicMock()
         mock_get_session.return_value.client.return_value = mock_client
-        mock_client.invoke_model.return_value = {
-            "body": MagicMock(
-                read=MagicMock(return_value=json.dumps({"content": [{"text": ""}]}).encode())
-            )
-        }
+        mock_client.converse.return_value = {"output": {"message": {"content": [{"text": ""}]}},
+                                             "stopReason": "end_turn", "usage": {}}
         result = _generate_session_title("hi", "hello")
         assert result is None
 

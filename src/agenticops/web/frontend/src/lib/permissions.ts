@@ -29,6 +29,12 @@ export function canManageUsers(boot: BootLike): boolean {
   return !!boot?.user?.is_admin;
 }
 
+/** Which model each setting uses, and the model providers (MVP-2.9.0 N35): an administrator's when sign-in is on —
+ *  the server's own rule (PATCH /api/settings model keys, /api/model-providers writes); anyone's when it is off. */
+export function canChangeModels(boot: BootLike): boolean {
+  return !boot?.auth_enabled || !!boot.user?.is_admin;
+}
+
 /** The only navigation entries ever hidden: Settings and Users, each by who may open it. */
 export function navItemVisible(id: string, can: { settings: boolean; users: boolean }): boolean {
   if (id === "settings") return can.settings;

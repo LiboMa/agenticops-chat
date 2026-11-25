@@ -1,7 +1,8 @@
 """Embedding client abstraction for KB vector search.
 
 Provides BedrockTitanEmbedding (Titan V2, 1024 dims) with NullEmbeddingClient
-fallback when Bedrock is unavailable.
+fallback when Bedrock is unavailable. MVP-2.9.0 N35: an administrator's embedding model of a model provider
+(`embedding_model_ref`, llm/embeddings.OpenAICompatibleEmbedding) comes first; Titan only while Bedrock is on.
 """
 
 from __future__ import annotations
@@ -58,9 +59,9 @@ class BedrockTitanEmbedding(EmbeddingClient):
 
     def _get_client(self):
         if self._client is None:
-            import boto3
+            from agenticops.config import get_bedrock_boto_session   # the Bedrock session, as every model call (N35)
 
-            self._client = boto3.client(
+            self._client = get_bedrock_boto_session().client(
                 "bedrock-runtime", region_name=self._region
             )
         return self._client
@@ -107,8 +108,10 @@ _client_initialized = False
 def get_embedding_client() -> EmbeddingClient:
     """Return a singleton EmbeddingClient.
 
-    On first call, tests Bedrock connectivity. Falls back to NullEmbeddingClient
-    if Bedrock is unreachable or embedding is disabled.
+    Which one, in this order (MVP-2.9.0 N35): the provider embedding model an administrator chose
+    (`embedding_model_ref`); else Titan while Bedrock is on; else none. On first call, tests the chosen one's
+    connectivity. Falls back to NullEmbeddingClient (keyword search only) when it is unreachable or embedding is
+    disabled — never to another model.
     """
     global _embedding_client, _client_initialized
     if _client_initialized:
@@ -122,23 +125,33 @@ def get_embedding_client() -> EmbeddingClient:
         _client_initialized = True
         return _embedding_client
 
-    model_id = getattr(settings, "embedding_model_id", "amazon.titan-embed-text-v2:0")
-    dim = getattr(settings, "embedding_dimension", 1024)
-    region = settings.bedrock_region
-
-    candidate = BedrockTitanEmbedding(model_id=model_id, region=region, dim=dim)
+    from agenticops.llm import embeddings as provider_embeddings
+    from agenticops.llm import registry
+    ref = provider_embeddings.model_ref()
+    if ref:
+        candidate: EmbeddingClient = provider_embeddings.OpenAICompatibleEmbedding(ref)
+        model_id = ref
+    elif registry.bedrock_enabled():
+        model_id = getattr(settings, "embedding_model_id", "amazon.titan-embed-text-v2:0")
+        dim = getattr(settings, "embedding_dimension", 1024)
+        candidate = BedrockTitanEmbedding(model_id=model_id, region=settings.bedrock_region, dim=dim)
+    else:
+        logger.info("No embedding model (Bedrock is off, none chosen) — using NullEmbeddingClient")
+        _embedding_client = NullEmbeddingClient()
+        _client_initialized = True
+        return _embedding_client
 
     # Connectivity test with a short string
     try:
         test_vec = candidate.embed("connectivity test")
         if test_vec is not None:
-            logger.info("Bedrock Titan embedding available (%s, %d dims)", model_id, dim)
+            logger.info("Embedding model available (%s, %d dims)", model_id, candidate.dimension)
             _embedding_client = candidate
         else:
-            logger.warning("Bedrock Titan returned None — falling back to NullEmbeddingClient")
+            logger.warning("Embedding model %s returned None — falling back to NullEmbeddingClient", model_id)
             _embedding_client = NullEmbeddingClient()
     except Exception as e:
-        logger.warning("Bedrock Titan unavailable (%s) — falling back to NullEmbeddingClient", e)
+        logger.warning("Embedding model %s unavailable (%s) — falling back to NullEmbeddingClient", model_id, e)
         _embedding_client = NullEmbeddingClient()
 
     _client_initialized = True

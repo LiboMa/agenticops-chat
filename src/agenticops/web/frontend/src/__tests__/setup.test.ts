@@ -91,6 +91,7 @@ describe("the Settings tab named in an address", () => {
   it("is one of the page's tabs, else the first", () => {
     expect(settingsTab("accounts")).toBe("accounts");
     expect(settingsTab("messaging")).toBe("messaging");
+    expect(settingsTab("providers")).toBe("providers");                // MVP-2.9.0 N35
     expect(settingsTab("nope")).toBe("general");
     expect(settingsTab(null)).toBe("general");
   });

@@ -2313,6 +2313,7 @@ def init_db(engine=None):
     # Ensure all ORM models are registered in metadata before create_all
     import agenticops.auth.models  # noqa: F401
     import agenticops.audit.models  # noqa: F401
+    import agenticops.llm.models  # noqa: F401  (model_providers / provider_models — N35)
     import agenticops.scheduler.scheduler  # noqa: F401
     import agenticops.notify.notifier  # noqa: F401
     import agenticops.galaxy.models  # noqa: F401 — register galaxy_* tables in Base metadata
@@ -2583,3 +2584,7 @@ class SecurityPollCursor(Base):
 from agenticops.services import report_content as _report_content  # noqa: E402
 
 _report_content.register()
+
+# Register the model-provider tables (MVP-2.9.0 N35) with Base whenever the models are loaded, so every
+# create_all — init_db and the tests' own — has them. At the bottom: llm.models imports Base from here.
+import agenticops.llm.models  # noqa: E402,F401

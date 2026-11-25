@@ -357,25 +357,18 @@ def create_main_agent(model_id_override: str = "", effort_override: str = "", re
             logger.debug("Skills Curator run skipped", exc_info=True)
 
     from agenticops.config import get_scan_focus, resolve_scan_services
-    from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_bedrock_boto_session
+    from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins
 
     from agenticops.chat.attachments.budget_hook import AttachmentBudgetHook
 
     model_id, max_tokens = get_agent_model_config("main")
     if model_id_override:
         model_id = model_id_override
-    from agenticops.agents.preamble import bedrock_model_kwargs, resolve_thinking_budget, thinking_fields_for_budget
-    thinking_fields = thinking_fields_for_budget(
-        resolve_thinking_budget("main", max_tokens, override=effort_override),
-        max_tokens, model_id,
-    )
-    cache_kwargs = bedrock_model_kwargs(model_id, thinking_fields)
-    model = BedrockModel(
-        model_id=model_id,
-        boto_session=get_bedrock_boto_session(),
-        max_tokens=max_tokens,
-        **cache_kwargs,
-    )
+    from agenticops.agents.preamble import resolve_thinking_budget
+    from agenticops.llm.factory import build_model    # Bedrock or another provider (MVP-2.9.0 N35)
+    model = build_model(model_id, max_tokens=max_tokens,
+                        thinking_budget=resolve_thinking_budget("main", max_tokens, override=effort_override),
+                        bedrock_cls=BedrockModel)
 
     if read_only:
         return Agent(

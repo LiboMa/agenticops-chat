@@ -191,7 +191,8 @@ class AttachmentBudgetHook(HookProvider):
         from agenticops.agents.preamble import media_capabilities
         from agenticops.chat import upload_config
         try:
-            model_id = (getattr(event.agent.model, "config", None) or {}).get("model_id", "")
+            from agenticops.llm.factory import ref_of     # a provider's model by its reference (MVP-2.9.0 N35)
+            model_id = ref_of(event.agent.model) or ""
             changed = enforce_history_budget(event.agent.messages, media_capabilities(model_id),
                                              upload_config.effective())
             if changed:

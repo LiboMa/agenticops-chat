@@ -76,7 +76,7 @@ export function patrolDraft(draft: Draft, request: string): Draft {
 
 // ── Settings ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-export const SETTINGS_TABS = ["general", "accounts", "messaging", "audit", "kb", "skills", "mcp", "memory"] as const;
+export const SETTINGS_TABS = ["general", "accounts", "providers", "messaging", "audit", "kb", "skills", "mcp", "memory"] as const;
 export type SettingsTab = (typeof SETTINGS_TABS)[number];
 
 /** The Settings tab an address names (`?tab=`), else the first. */

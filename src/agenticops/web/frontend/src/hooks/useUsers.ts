@@ -42,7 +42,10 @@ export function resetPasswordOptions(qc: QueryClient) {
   return {
     // a secret shown once: dropped from the mutation cache as soon as the page resets it (closing its dialog)
     gcTime: 0,
-    mutationFn: (id: number) => apiFetch<{ password: string }>(`/users/${id}/reset-password`, { method: "POST" }),
+    // body {} = generate one (shown once); {password} = the one the admin typed (N34: never sent back — password null)
+    mutationFn: ({ id, body }: { id: number; body: { password?: string } }) =>
+      apiFetch<{ password: string | null; generated: boolean }>(`/users/${id}/reset-password`,
+                                                                { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
   };
 }

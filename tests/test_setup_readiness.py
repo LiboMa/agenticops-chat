@@ -71,7 +71,8 @@ def test_it_needs_a_signed_in_person(env):
 def test_an_empty_installation(env):
     body = env.client.get(URL, headers=env.login("root@x", is_admin=True)).json()
     assert body["accounts"] == {"state": "missing", "enabled": 0, "regions": 0, "items": []}
-    assert body["model"] == {"state": "configured", "model_id": "global.anthropic.claude-opus-5-5", "region": "us-east-1", "check": None}
+    assert body["model"] == {"state": "configured", "model_id": "global.anthropic.claude-opus-5-5", "provider": "bedrock",
+                             "region": "us-east-1", "endpoint": None, "check": None}   # provider / endpoint: N35
     assert body["notifications"] == {"state": "optional", "channels": 1}          # the enabled ones
     assert body["can_verify"] is True and body["generated_at"].endswith("Z")
 
@@ -180,7 +181,7 @@ def test_an_admin_verifies_the_model_with_one_tiny_call(env):
     assert model["state"] == "verified" and model["check"]["checked_at"] == body["checked_at"]
     with get_db_session() as s:
         rows = [(a.action, a.entity_type, a.entity_name, a.actor, a.new_values) for a in s.query(AuditLog).filter(AuditLog.entity_type == "readiness_check")]
-    assert rows == [("verify_model", "readiness_check", "global.anthropic.claude-opus-5-5", "user:root@x", {"ok": True, "region": "us-east-1"})]
+    assert rows == [("verify_model", "readiness_check", "global.anthropic.claude-opus-5-5", "user:root@x", {"ok": True, "region": "us-east-1", "provider": "bedrock"})]
 
 
 def test_a_reply_cut_at_the_limit_is_still_an_answer(env):

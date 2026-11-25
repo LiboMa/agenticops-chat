@@ -278,9 +278,12 @@ def _kind_label(item: Prepared) -> str:
 
 
 def agent_model_id(agent) -> str:
-    """The model an agent actually runs on (attachments are delivered for it); empty when unknown."""
+    """The model an agent actually runs on (attachments are delivered for it): the reference it was built from — a
+    provider's model is `<provider>::<model>`, whose capabilities are its catalog row's (MVP-2.9.0 N35); empty when
+    unknown."""
+    from agenticops.llm.factory import ref_of
     try:
-        return str((agent.model.config or {}).get("model_id") or "")
+        return str(ref_of(agent.model) or "")
     except AttributeError:
         return ""
 

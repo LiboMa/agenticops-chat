@@ -1,11 +1,10 @@
-"""Conversation summary service using Haiku model for lightweight summarization."""
+"""Conversation summary service using the cheap model for lightweight summarization.
 
-import json
+MVP-2.9.0 N35: the call goes through `agents/preamble.converse_text`, like every direct model call — the cheap tier
+may be any model, of Bedrock or of another provider (it used to send the Anthropic-only InvokeModel body)."""
+
 import logging
 from typing import Optional
-
-import boto3
-from botocore.exceptions import ClientError
 
 from agenticops.config import settings
 from agenticops.models import SessionSummary, get_db_session
@@ -30,17 +29,6 @@ class SummaryService:
     def __init__(self, region: str | None = None, model_id: str | None = None):
         self.region = region or settings.bedrock_region
         self.model_id = model_id or settings.bedrock_model_id_cheap
-        self._client = None
-
-    @property
-    def client(self):
-        """Lazy-init Bedrock runtime client."""
-        if self._client is None:
-            self._client = boto3.client(
-                "bedrock-runtime",
-                region_name=self.region,
-            )
-        return self._client
 
     def _format_messages(self, messages: list[dict]) -> str:
         """Format Strands-format messages into a readable conversation string."""
@@ -86,21 +74,8 @@ class SummaryService:
             conversation_text = self._format_messages(messages)
             prompt = self.SUMMARY_PROMPT_TEMPLATE.format(conversation=conversation_text)
 
-            body = json.dumps({
-                "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": self.SUMMARY_MAX_TOKENS,
-                "messages": [{"role": "user", "content": prompt}],
-            })
-
-            response = self.client.invoke_model(
-                modelId=self.model_id,
-                body=body,
-                contentType="application/json",
-                accept="application/json",
-            )
-
-            response_body = json.loads(response["body"].read())
-            summary_text = response_body["content"][0]["text"]
+            from agenticops.agents.preamble import converse_text
+            summary_text, _, _ = converse_text(self.model_id, prompt, max_tokens=self.SUMMARY_MAX_TOKENS)
 
             # Determine message range from the input messages
             # Use first and last message positions as range markers
@@ -120,7 +95,7 @@ class SummaryService:
 
             return summary_text
 
-        except (ClientError, KeyError, IndexError, Exception) as exc:
+        except Exception as exc:   # a model error, an empty or cut reply (ModelReplyError), the database
             logger.error("Failed to generate summary for session %s: %s", session_id, exc)
             return None
 

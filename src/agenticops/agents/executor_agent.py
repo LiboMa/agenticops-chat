@@ -220,7 +220,7 @@ def executor_agent(fix_plan_id: int) -> str:
     opened = watchdog = None     # the run record this call opened itself, and the timer that times it out
     outcome = ""
     try:
-        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_executor_interventions, get_bedrock_boto_session
+        from agenticops.config import get_agent_model_config, get_agent_conversation_manager, get_agent_context_plugins, get_executor_interventions
         from agenticops.models import get_db_session, FixPlan, HealthIssue
         from agenticops.services.change_service import change_execution_refusal
         with get_db_session() as db:
@@ -312,14 +312,8 @@ def executor_agent(fix_plan_id: int) -> str:
             except Exception as e:
                 logger.warning("Smart model lookup failed, using default: %s", e)
 
-        from agenticops.agents.preamble import bedrock_model_kwargs
-        cache_kwargs = bedrock_model_kwargs(model_id)
-        model = BedrockModel(
-            model_id=model_id,
-            boto_session=get_bedrock_boto_session(),
-            max_tokens=max_tokens,
-            **cache_kwargs,
-        )
+        from agenticops.llm.factory import build_model    # Bedrock or another provider (MVP-2.9.0 N35)
+        model = build_model(model_id, max_tokens=max_tokens, bedrock_cls=BedrockModel)
 
         from strands.tools.executors import SequentialToolExecutor
         from agenticops.agents.run_guard import RunGuard

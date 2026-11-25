@@ -39,6 +39,16 @@ class ModelRuntimeSettings(BaseModel):
         description="How long a model stream may send nothing before it is cut (the botocore read timeout), seconds")
 
 
+class ModelProvidersSettings(BaseModel):
+    """Model providers beyond Bedrock (MVP-2.9.0 N35). The values live in settings.yaml `model_providers:`; these
+    defaults only let the app start without that block. Admins turn Bedrock off and on at runtime (DB
+    `runtime_settings`, key `model_providers`, through `llm/registry`); the providers themselves are rows of
+    `model_providers` (llm/models)."""
+    bedrock_enabled: bool = Field(default=True, description="Whether Amazon Bedrock is one of the model providers")
+    test_timeout_seconds: int = Field(default=30, ge=5, le=300,
+                                      description="How long each step of a provider's connection test may take, s")
+
+
 class ChatUploadSettings(BaseModel):
     """Chat attachment limits (2026-11-07). The values live in settings.yaml `chat_upload:`; these defaults only let
     the app start without that block. Admins override fields at runtime (DB `runtime_settings`, key `chat_upload`,
@@ -270,6 +280,12 @@ class Settings(BaseSettings):
     embedding_enabled: bool = Field(
         default=True,
         description="Enable vector embeddings (set AIOPS_EMBEDDING_ENABLED=false to disable)",
+    )
+    embedding_model_ref: str = Field(
+        default="",
+        description="Embedding model of a model provider (<provider>::<model>, OpenAI-compatible); empty = Titan "
+                    "on Bedrock while Bedrock is on. An administrator's choice is stored in runtime_settings "
+                    "(MVP-2.9.0 N35)",
     )
 
     # Monitoring
@@ -1146,6 +1162,7 @@ class Settings(BaseSettings):
     # Chat attachments (2026-11-07): limits (runtime-overridable by admins) and where the files live (yaml only)
     chat_upload: ChatUploadSettings = Field(default_factory=ChatUploadSettings)
     model_runtime: ModelRuntimeSettings = Field(default_factory=ModelRuntimeSettings)
+    model_providers: ModelProvidersSettings = Field(default_factory=ModelProvidersSettings)
     chat_attachments_dir: str = Field(
         default="",
         description="Directory for chat attachment files; empty = <data_dir>/chat_attachments. Not changeable at runtime",
@@ -1353,6 +1370,8 @@ def validate_agent_model_ids() -> list[str]:
     warnings: list[str] = []
     for agent_name in AGENT_NAMES:
         model_id, _ = get_agent_model_config(agent_name)
+        if _is_ref(model_id):   # a provider's model takes the plain window by design (N35) — not drift
+            continue
         if not any(family in model_id for family in MODEL_WINDOW_DEFAULTS):
             msg = (
                 f"agent_{agent_name}_model_id={model_id!r} matches no known model "
@@ -1378,6 +1397,11 @@ def get_bedrock_boto_session():
     return get_session_factory().get_bedrock_session()
 
 
+def _is_ref(model_id: str) -> bool:
+    from agenticops.llm.refs import is_ref   # inside: llm imports config
+    return is_ref(model_id)
+
+
 def get_agent_window_size(agent_name: str) -> int:
     """Return the window size for a given agent.
 
@@ -1394,6 +1418,8 @@ def get_agent_window_size(agent_name: str) -> int:
 
     # Auto mode: resolve from model family defaults
     model_id, _ = get_agent_model_config(agent_name)
+    if _is_ref(model_id):   # another provider's model (MVP-2.9.0 N35): the plain window, never a Bedrock family's
+        return settings.bedrock_window_size
     for family, defaults in MODEL_WINDOW_DEFAULTS.items():
         if family in model_id:
             return defaults.get(agent_name, settings.bedrock_window_size)

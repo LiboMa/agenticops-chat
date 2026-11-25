@@ -38,8 +38,27 @@ def normalize_model_key(model_id: str) -> str:
     return re.sub(r"-\d+:\d+$", "", key)
 
 
+def _provider_rates(ref: str) -> dict:
+    """A provider model's prices (USD per 1M tokens) from its catalog row; a price not listed is 0 — a local model
+    costs nothing, so an unpriced one is no fault and logs nothing. Never raises."""
+    try:
+        from agenticops.llm.catalog import model_row
+        from agenticops.llm.refs import parse_ref
+        r = parse_ref(ref)
+        row = model_row(r.provider, r.model_id)
+    except Exception:
+        logger.debug("No provider row for '%s'; cost=0", ref, exc_info=True)
+        row = None
+    names = {"input": "price_input", "output": "price_output", "cache_read": "price_cache_read",
+             "cache_write": "price_cache_write"}
+    return {k: float(getattr(row, f, None) or 0.0) for k, f in names.items()}
+
+
 def _rates(model_id: str) -> dict | None:
     from agenticops.config import settings
+    from agenticops.llm.refs import is_ref
+    if is_ref(model_id or ""):
+        return _provider_rates(model_id)
     table = settings.token_cost_table or {}
     key = normalize_model_key(model_id)
     rates = table.get(key)

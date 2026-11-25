@@ -9,12 +9,12 @@ in every Bedrock API call.
 **Validates: Requirements 5.4**
 """
 
-import json
 from unittest.mock import MagicMock, patch
 
 from hypothesis import given, settings as h_settings
 from hypothesis import strategies as st
 
+import agenticops.agents.preamble  # noqa: F401 — imported here, not inside the first example (hypothesis' 200 ms deadline)
 from agenticops.web.summary_service import SummaryService
 
 
@@ -51,20 +51,22 @@ _summary_text_st = st.text(
 
 
 def _make_service() -> SummaryService:
-    """Create a SummaryService with a mocked Bedrock client."""
+    """Create a SummaryService; its model call (converse_text, since MVP-2.9.0 N35) is the mock `_converse`."""
     svc = SummaryService.__new__(SummaryService)
     svc.region = "us-east-1"
     svc.model_id = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-    svc._client = MagicMock()
+    svc._converse = MagicMock()
     return svc
 
 
-def _mock_bedrock_response(mock_client: MagicMock, text: str) -> None:
-    """Configure the mock Bedrock client to return the given text."""
-    body_bytes = json.dumps({"content": [{"text": text}]}).encode()
-    mock_body = MagicMock()
-    mock_body.read.return_value = body_bytes
-    mock_client.invoke_model.return_value = {"body": mock_body}
+def _mock_bedrock_response(mock_converse: MagicMock, text: str) -> None:
+    """Configure the mock model call to return the given text."""
+    mock_converse.return_value = (text, {"input": 10, "output": 5}, "end_turn")
+
+
+def _summarize(svc: SummaryService, messages) -> None:
+    with patch("agenticops.agents.preamble.converse_text", svc._converse):
+        svc.generate_summary(messages, session_id=1)
 
 
 def _count_tokens(text: str) -> int:
@@ -93,26 +95,23 @@ class TestSummaryLengthConstraint:
     def test_max_tokens_constraint_in_api_call(
         self, mock_get_db, messages, summary_text
     ):
-        """The Bedrock invoke_model call always sets max_tokens <= 500."""
+        """The model call always sets max_tokens <= 500."""
         svc = _make_service()
-        _mock_bedrock_response(svc._client, summary_text)
+        _mock_bedrock_response(svc._converse, summary_text)
 
         # Mock DB session
         mock_db = MagicMock()
         mock_get_db.return_value.__enter__ = MagicMock(return_value=mock_db)
         mock_get_db.return_value.__exit__ = MagicMock(return_value=False)
 
-        svc.generate_summary(messages, session_id=1)
+        _summarize(svc, messages)
 
-        # Verify the API was called
-        svc._client.invoke_model.assert_called_once()
-        call_kwargs = svc._client.invoke_model.call_args[1]
-        body = json.loads(call_kwargs["body"])
+        # Verify the model was called
+        svc._converse.assert_called_once()
+        max_tokens = svc._converse.call_args.kwargs.get("max_tokens")
 
-        assert "max_tokens" in body, "max_tokens must be present in the API request body"
-        assert body["max_tokens"] <= 500, (
-            f"max_tokens should be <= 500, got {body['max_tokens']}"
-        )
+        assert max_tokens is not None, "max_tokens must be sent with the model call"
+        assert max_tokens <= 500, f"max_tokens should be <= 500, got {max_tokens}"
 
     @given(messages=_messages_st, summary_text=_summary_text_st)
     @h_settings(max_examples=150)
@@ -122,20 +121,18 @@ class TestSummaryLengthConstraint:
     ):
         """The max_tokens in the API call matches SummaryService.SUMMARY_MAX_TOKENS."""
         svc = _make_service()
-        _mock_bedrock_response(svc._client, summary_text)
+        _mock_bedrock_response(svc._converse, summary_text)
 
         mock_db = MagicMock()
         mock_get_db.return_value.__enter__ = MagicMock(return_value=mock_db)
         mock_get_db.return_value.__exit__ = MagicMock(return_value=False)
 
-        svc.generate_summary(messages, session_id=1)
+        _summarize(svc, messages)
 
-        call_kwargs = svc._client.invoke_model.call_args[1]
-        body = json.loads(call_kwargs["body"])
+        max_tokens = svc._converse.call_args.kwargs["max_tokens"]
 
-        assert body["max_tokens"] == SummaryService.SUMMARY_MAX_TOKENS, (
-            f"max_tokens should equal SUMMARY_MAX_TOKENS ({SummaryService.SUMMARY_MAX_TOKENS}), "
-            f"got {body['max_tokens']}"
+        assert max_tokens == SummaryService.SUMMARY_MAX_TOKENS, (
+            f"max_tokens should equal SUMMARY_MAX_TOKENS ({SummaryService.SUMMARY_MAX_TOKENS}), got {max_tokens}"
         )
 
     @given(messages=_messages_st, summary_text=_summary_text_st)
@@ -146,17 +143,15 @@ class TestSummaryLengthConstraint:
     ):
         """The prompt sent to the LLM contains an instruction about the 500 token limit."""
         svc = _make_service()
-        _mock_bedrock_response(svc._client, summary_text)
+        _mock_bedrock_response(svc._converse, summary_text)
 
         mock_db = MagicMock()
         mock_get_db.return_value.__enter__ = MagicMock(return_value=mock_db)
         mock_get_db.return_value.__exit__ = MagicMock(return_value=False)
 
-        svc.generate_summary(messages, session_id=1)
+        _summarize(svc, messages)
 
-        call_kwargs = svc._client.invoke_model.call_args[1]
-        body = json.loads(call_kwargs["body"])
-        prompt_content = body["messages"][0]["content"]
+        prompt_content = svc._converse.call_args.args[1]
 
         assert "500" in prompt_content, (
             "The prompt should mention the 500 token limit to instruct the LLM"
