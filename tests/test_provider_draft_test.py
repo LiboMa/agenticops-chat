@@ -92,3 +92,16 @@ def test_no_model_to_try_is_said(env):
 def test_only_an_administrator_tests_a_draft(env):
     _, writer = _user("writer@x", "writer")
     assert _draft(env, writer, **_form(env)).status_code == 403
+
+
+def test_the_tool_step_reads_an_anthropic_reply_too(env):
+    """The connection test on an Anthropic-compatible provider: a tool_use block is a tool call, a text answer is not
+    (both protocols go through llm/direct.send — review of 2.9.0, Standards 2)."""
+    _, tok = _user("root", "admin")
+    body = {"name": "gateway", "preset": "custom_anthropic", "kind": "anthropic_compatible", "base_url": env.fake.base,
+            "api_key": SECRET, "model_id": "claude-x"}
+    ok = _draft(env, tok, **body).json()
+    assert ok["chat"]["ok"] is True and ok["tools"]["ok"] is True
+    env.fake.tools_supported = False
+    no = _draft(env, tok, **body).json()
+    assert no["chat"]["ok"] is True and no["tools"]["ok"] is False and "no tool call" in no["tools"]["error"]
