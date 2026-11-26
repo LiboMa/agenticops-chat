@@ -811,7 +811,7 @@ EnhancedBackend abstraction + registry  (protocol-agnostic core)
 - **End-to-end streaming, no buffering.** `session/update` notifications → `AcpClient` (async generator) → `backend.run()` yields `EnhancedEvent`s → `enhanced_task` is an **async-generator `@tool`** (each yield a Strands `ToolStreamEvent`) → the web stream maps them to SSE (`tool_stream_to_sse`). Claude Code's own tool calls show as live steps, so a long task shows its progress; no chunk is held back.
 - **Three providers, pluggable**: `claude-code` (Bedrock), `kiro-cli` (`kiro-cli acp`, kiro's own login) and `codex` (`@zed-industries/codex-acp`, needs `OPENAI_API_KEY`) share the one `AcpClient` (`protocol_version` per provider). Another provider = one class + `register_backend()`.
 - **Choose in the UI**: **Settings → General → Enhanced Backend** — a toggle (`acp_enhanced_enabled`) and a provider; both persist to `settings.yaml` and rebuild the chat agents on the next message.
-- **Graceful**: if the backend is unavailable (no `npx`, not logged in, no key, launch fails, disabled), `enhanced_task` returns a clear message and the calling agent continues with normal handling — the turn never crashes. With Bedrock turned off, Claude Code on Bedrock (`acp_use_bedrock`) is not offered and a call naming it is refused; the Enhanced Backend card says why.
+- **Graceful**: if the backend is unavailable (no `npx`, not logged in, no key, launch fails, disabled), `enhanced_task` returns a clear message and the calling agent continues with normal handling — the turn never crashes. With Bedrock turned off, Claude Code on Bedrock is not offered and a call naming it is refused; Settings says why.
 - **Enable**: toggle it in Settings, or set `acp_enhanced_enabled: true` in `config/settings.yaml` (config keys: `acp_enhanced_backend`, `acp_use_bedrock`, `acp_timeout_seconds`, `acp_auto_approve_permissions`, `acp_kiro_command`/`acp_kiro_args`, `acp_codex_command`/`acp_codex_args`).
 
 ---
@@ -856,7 +856,7 @@ providers, then turn the «Amazon Bedrock» switch off. With it off no Bedrock m
 skips the Bedrock identity, and any setting still naming a Bedrock model is shown in red with the reason
 (`model_issues` of `GET /api/settings`) — and fails explicitly when used.
 
-**Models**: a provider's «Models» dialog searches, filters by use (chat / embedding), refreshes the list, adds a model by id, turns one on or off and corrects what it can do (context window, max output, tools, images, documents, reasoning, prices); a field set by hand survives a refresh. Nothing Bedrock-only (cache points, thinking or reasoning fields) is sent to another provider.
+**Models**: the «Models» dialog searches, filters, refreshes, adds a model by id, turns one on / off and sets window, max output, tools, images, documents, reasoning, takes temperature (not known = not sent), prompt cache (Anthropic-compatible; by default on for Anthropic and Sub2API), prices; a hand-set field survives a refresh. Nothing is read off a model's name: a new model is chat until marked as embedding. Nothing Bedrock-only is sent there.
 
 **Where the data goes**: everything an agent sends to a model — conversation, tool results, resource names, configuration — goes to that model's provider; a third-party platform sees it all, and the page says so. The enabled providers' model lists are read again at startup, in the background.
 
