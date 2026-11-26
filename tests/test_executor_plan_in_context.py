@@ -6,15 +6,11 @@ thread (`pipeline_service`) set it around the call, so their runs had it; a run 
 change», and its ledger rows named no plan."""
 from unittest.mock import patch
 
-import pytest
-
 from agenticops.models import get_session
 from agenticops.run_context import get_run_context, run_context
 from tests.test_viewer_role import _temp_db
 
 
-@pytest.mark.xfail(strict=True, reason="the finding is pinned; the fix (executor_agent's run_context gets fix_plan_id) "
-                                     "is the next step of the plan — remove this mark with it")
 def test_a_run_started_without_a_plan_in_its_callers_context_carries_its_own(tmp_path, monkeypatch):
     from agenticops.config import settings
     from agenticops.services.command_audit import approved_plan_in_context
