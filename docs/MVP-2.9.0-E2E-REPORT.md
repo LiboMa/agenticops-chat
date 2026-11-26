@@ -1504,6 +1504,27 @@
 - 值里带 `$&` 的填词、两次出现的占位：副本里没有这样的数据，看的是测试（`placeholders.test.ts`）。
 - Bedrock 开着时 `model_settings.galaxy` 写一个列表里没有的 Bedrock id：副本关着 Bedrock，任何 Bedrock id 都先被「Bedrock 已关」拦下；这一条看的是测试（`tests/test_model_settings_lists.py`）。
 
+## 「之后」第 13 条 + 第 22 条第一步（2026-11-26）
+
+同一个独立实例、同一份副本库。工具在进程里直接对副本库调用，结果和 SQL、和接口对照；任何一个 AWS 请求都会让脚本出错（一个也没有）。审计页用浏览器看。用完的登录已作废，实例已停。
+
+| # | 检查 | 结果 |
+|---|---|---|
+| R.1 | `get_inventory_summary` 和 SQL（启用的账户、托管的、还在的资源）比每个账户的数 | 一样：两个账户，共 1,701 个 |
+| R.2 | 按类型的数和 SQL 比 | 一样：22 种类型 |
+| R.3 | `get_security_summary` 的分数和 `security_summary`（接口用的那一个）比 | 一样：两个账户；读不到分数的那一行写明了「没有分，不是干净」 |
+| R.4 | `get_managed_resources`（不加条件） | 31 个完整的行，能整个解析；最后一行「[showing 31 of 1701 managed resources — by type: IAMRole 630, SecurityGroup 236, S3 174, …]」；报告的覆盖记录里截断记 1 次 |
+| R.5 | `list_health_issues`（所有状态，20 条） | 「[showing 20 of 565 issues; …]」 |
+| R.6 | 绑定一个账户的运行：列问题；要另一个账户的汇总 | 19 件，全是这个账户的；另一个账户被拒绝，写明绑定的是哪个 |
+| H.1 | `run_on_host`：`cat /etc/hosts && touch /tmp/e2e-marker`；确认之后的 `cat /etc/hosts && systemctl restart nginx` | 第一行先要确认，说明「开头像读、后面还有一条不是读的命令」；第二行确认了也被拒绝：没有批准的方案 |
+| H.2 | SSH 账户工具（一个假的主机，什么都没发出去）：`touch /tmp/e2e-marker` | 先要确认 |
+| H.3 | 账上的三行；审计页 | `run_on_host unknown refused second_command`、`run_on_host unknown refused change_required`、`provider_ssh write refused confirmation`；审计页的命令表里结果一栏是「refused · second_command」等；浏览器控制台 0 个错误 |
+
+### 没有在实例上看过的
+
+- 确认之后真的在主机上跑、记 `executed · second_command`：要连真主机（SSM / SSH），看的是测试（`tests/test_host_second_command.py`，传输层是替身）。
+- 从对话里起的执行带上方案编号：看的是测试（`tests/test_executor_plan_in_context.py`），没有真的执行。
+
 ## 性能（真实的图：1,928 个资源、1,526 条资源之间的关系）
 
 | 项目 | 数字 | 怎么量的 |
