@@ -67,8 +67,11 @@ def test_no_route_calls_a_handler_and_leaves_its_depends_parameter_unfilled():
     aliases 500'd that way (actor = a Depends placeholder). Any direct call must pass every Depends parameter."""
     import ast
     from pathlib import Path
-    src = (Path(__file__).resolve().parents[1] / "src/agenticops/web/app.py").read_text(encoding="utf-8")
-    funcs = {n.name: n for n in ast.walk(ast.parse(src)) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    web = Path(__file__).resolve().parents[1] / "src/agenticops/web"
+    funcs = {}                              # app.py and the routers its code moved to call each other's handlers
+    for path in [web / "app.py", *sorted((web / "routers").glob("*.py"))]:
+        funcs.update({n.name: n for n in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+                      if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))})
     bad = []
     for name, fn in funcs.items():
         for call in ast.walk(fn):
