@@ -320,8 +320,8 @@ def test_an_older_database_gets_the_column_and_its_reports_have_no_coverage(tmp_
                           "report_metadata JSON, created_at DATETIME)"))
         c.execute(sa.text("INSERT INTO reports (report_type, title, summary, content_markdown, report_metadata, created_at) "
                           "VALUES ('daily', 'old', 's', 'body', '{}', '2026-09-01 00:00:00')"))
-    models._run_migrate_2_7_0(eng)
+    models._run_add_columns(eng)
     assert "coverage" in {col["name"] for col in sa.inspect(eng).get_columns("reports")}
     with eng.connect() as c:
         assert c.execute(sa.text("SELECT coverage FROM reports")).one() == (None,)
-    assert models._statements_2_7_0(sa.inspect(eng), eng.dialect) == []
+    assert models._add_column_statements(sa.inspect(eng), eng.dialect) == []

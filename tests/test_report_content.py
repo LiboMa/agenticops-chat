@@ -46,7 +46,7 @@ def test_the_migration_backfills_old_reports(tmp_path):
                           "summary TEXT, content_markdown TEXT, content_html TEXT, file_path VARCHAR(500), "
                           "report_metadata JSON, created_at DATETIME)"))
         c.execute(sa.text("INSERT INTO reports (report_type,title,summary,content_markdown) VALUES ('daily','t','s','all fine')"))
-    models_mod._run_migrate_2_7_0(eng)
+    models_mod._run_add_columns(eng)
     with eng.begin() as c:
         row = c.execute(sa.text("SELECT content_version, content_hash, source_language, visibility FROM reports")).one()
     assert row == (1, content_hash("all fine"), "en", "workspace")

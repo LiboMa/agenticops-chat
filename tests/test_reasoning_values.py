@@ -70,6 +70,6 @@ def test_init_db_runs_it(db, monkeypatch):
     from agenticops import models
     add_provider("relay", "https://relay.example.com/", kind="anthropic_compatible", api_key="k")
     add_model("relay", "claude-sonnet-4-6", reasoning="anthropic_thinking")
-    monkeypatch.setattr(models, "_migrated_2_7_0_urls", set())          # this process migrated it already
+    monkeypatch.setattr(models, "_migrated_urls", set())          # this process migrated it already
     models.init_db()
     assert _reasoning() == {"claude-sonnet-4-6": "anthropic_adaptive"}

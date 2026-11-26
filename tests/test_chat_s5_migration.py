@@ -16,7 +16,7 @@ def _old_db(tmp_path):
 
 def test_migration_adds_the_columns_and_the_unique_index(tmp_path):
     eng = _old_db(tmp_path)
-    models._run_migrate_2_7_0(eng)
+    models._run_add_columns(eng)
     insp = inspect(eng)
     sess = {c["name"] for c in insp.get_columns("chat_sessions")}
     assert {"context_entity_type", "context_entity_id", "context_account_id", "context_region", "context_locked_at"} <= sess
@@ -30,13 +30,13 @@ def test_migration_adds_the_columns_and_the_unique_index(tmp_path):
 
 def test_migration_is_idempotent(tmp_path):
     eng = _old_db(tmp_path)
-    models._run_migrate_2_7_0(eng)
-    assert models._statements_2_7_0(inspect(eng), eng.dialect) == []
+    models._run_add_columns(eng)
+    assert models._add_column_statements(inspect(eng), eng.dialect) == []
 
 
 def test_two_null_client_ids_are_allowed_but_not_two_equal_ones(tmp_path):
     eng = _old_db(tmp_path)
-    models._run_migrate_2_7_0(eng)
+    models._run_add_columns(eng)
     with eng.begin() as c:
         c.execute(sa.text("INSERT INTO chat_messages (session_id, role, content) VALUES (1, 'user', 'b')"))
         c.execute(sa.text("INSERT INTO chat_messages (session_id, role, content, client_message_id) VALUES (1,'user','c','x')"))

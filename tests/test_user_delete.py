@@ -53,11 +53,11 @@ def test_the_migration_adds_users_deleted_at_once(tmp_path):
                        " is_admin BOOLEAN, is_active BOOLEAN, permissions JSON)"))
         c.execute(text("INSERT INTO users (email, password_hash, is_admin, is_active, permissions) "
                        "VALUES ('old', 'x', 0, 1, '[\"read\"]')"))
-    models_mod._run_migrate_2_7_0(engine)
+    models_mod._run_add_columns(engine)
     assert "deleted_at" in {c["name"] for c in inspect(engine).get_columns("users")}
     with engine.connect() as c:
         assert c.execute(text("SELECT deleted_at FROM users")).one() == (None,)
-    assert models_mod._statements_2_7_0(inspect(engine), engine.dialect) == []   # once
+    assert models_mod._add_column_statements(inspect(engine), engine.dialect) == []   # once
 
 
 def test_a_deleted_user_never_signs_in_even_if_reactivated_by_hand(env):
