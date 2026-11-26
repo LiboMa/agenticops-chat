@@ -96,7 +96,8 @@ def test_an_im_agent_turn_runs_off_the_event_loop(app_db):
 
 
 @pytest.mark.parametrize("module,names", [
-    ("agenticops.web.app", ["api_health", "api_create_health_issue", "api_run_rag_pipeline", "api_generate_report",
+    ("agenticops.web.routers.health", ["api_health"]),
+    ("agenticops.web.app", ["api_create_health_issue", "api_run_rag_pipeline", "api_generate_report",
                             "api_get_settings"]),
     ("agenticops.web.routers.skills", ["api_generate_skill"]),
     ("agenticops.web.routers.accounts", ["api_test_account_connection", "api_create_account", "api_update_account",
