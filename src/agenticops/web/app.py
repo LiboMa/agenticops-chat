@@ -893,77 +893,16 @@ async def api_update_settings(request: Request, body: dict = Body(...), current:
         await asyncio.to_thread(_audit_low_impact, before, _low_impact_values(body), current)
 
 
-async def _apply_settings(request: Request, body: dict, current: Actor):
-    """Update runtime settings. Agent models + report config persist to settings.yaml;
-    boolean toggles and scan_focus are session-level (reset on restart).
-
-    The four high-impact switches (EXEC_KEYS: the executor, auto-fix, L0 / L1 auto-approval, the executor's HITL
-    gate — MVP-2.9.0 N25) are stored in the database (services/exec_switches), so they survive a restart; like the
-    security toggles below they need an admin when api_auth_enabled, write one audit row per changed value in the
-    transaction that stores them, and a request refused by their checks applies nothing.
-
-    The security toggles (CHANGE_KEYS: change_auto_approve_standard, rbac_enforce) persist to settings.yaml,
-    need an admin when api_auth_enabled, write one audit row per changed value, and are applied last — a
-    request refused by the security-toggle checks (400/401/403) applies nothing; the other keys keep their own,
-    non-atomic validation. A changed toggle's audit rows are written, then the yaml, then the rows commit — all
-    BEFORE the value goes live in memory. A failed yaml write rolls the rows back; a commit that fails after the
-    write restores the old values in the yaml (best effort: a failed restore is logged). Either way the old value
-    stays in force and an identical retry redoes it all."""
+def _apply_validated_settings(body: dict, current: Actor, model_updates: dict, galaxy_val: Optional[str],
+                              change_updates: dict, exec_updates: dict, keys: dict) -> None:
+    """The half of PATCH /api/settings that reads and writes storage — settings.yaml, the audit rows, the stored
+    switches. A plain function: `_apply_settings` runs it in a worker thread, so the ONE process's event loop (every
+    chat stream) never waits on a file or the database (review of MVP-2.9.0, Standards 3). The order, the
+    transactions and the errors (an HTTPException raised here reaches the client) are what they were inline."""
     from agenticops.audit.service import Actions, AuditService, EntityTypes
     from agenticops.config import AGENT_NAMES, VALID_SCAN_FOCUS, set_scan_focus, save_to_yaml
-
     from agenticops.services import exec_switches
-
-    BOOL_KEYS = {
-        "auto_rca_enabled", "notifications_enabled",
-        "notifications_consolidated", "bedrock_cache_enabled",
-        "skills_auto_improve_enabled", "skills_post_resolution_review",
-        "skills_improvement_notify",
-    }
-    # Report S3 config (persisted to settings.yaml)
-    REPORT_STR_KEYS = {"report_storage", "report_s3_bucket", "report_s3_prefix", "report_s3_region"}
-    REPORT_INT_KEYS = {"report_presigned_url_expiry"}
-
-    # ACP enhanced backend — persisted to settings.yaml (controls tool registration)
-    ACP_KEYS = {"acp_enhanced_enabled", "acp_enhanced_backend"}
-
-    # Change-management security toggles — persisted to settings.yaml (must survive a restart)
-    CHANGE_KEYS = {"change_auto_approve_standard", "rbac_enforce"}
-
-    # The high-impact switches — stored in the DB (services/exec_switches), never set on the process's settings
-    EXEC_KEYS = set(exec_switches.FIELDS)
-
-    # Which model each setting uses (MVP-2.9.0 N35): an administrator's, like the security toggles
-    MODEL_KEYS = {"agent_models", "model_settings", "galaxy_model_id"}
-
-    ALL_KEYS = (BOOL_KEYS | REPORT_STR_KEYS | REPORT_INT_KEYS | ACP_KEYS | CHANGE_KEYS | EXEC_KEYS | MODEL_KEYS
-                | {"scan_focus"})
-    unknown = set(body.keys()) - ALL_KEYS
-    if unknown:
-        raise HTTPException(400, f"Unknown settings: {', '.join(sorted(unknown))}")
-
-    # Security toggles are validated and authorized BEFORE anything is applied
-    change_updates = {k: body[k] for k in CHANGE_KEYS if k in body}
-    exec_updates = {k: body[k] for k in EXEC_KEYS if k in body}
-    for key in sorted({**change_updates, **exec_updates}):
-        if not isinstance(body[key], bool):
-            raise HTTPException(400, f"{key} must be a boolean")
-    if (change_updates or exec_updates or MODEL_KEYS & set(body)) and settings.api_auth_enabled:
-        await require_authenticated_user(request, admin=True)
-    # Every model value is checked BEFORE anything is applied: a refused one changes nothing (N35)
-    model_updates = await asyncio.to_thread(_checked_model_updates, body)
-    if isinstance(model_updates, JSONResponse):
-        return model_updates
-    # … and the Galaxy model's own, stricter check (one of the listed models) too — it used to run after the other
-    # model settings had been written, so a request refused here had already changed them (review of 2.9.0, Spec ⑥)
-    galaxy_val = str(body.get("galaxy_model_id") or "") if "galaxy_model_id" in body else None
-    if galaxy_val and galaxy_val not in await asyncio.to_thread(_allowed_model_ids):  # may list Bedrock models
-        raise HTTPException(400, f"Unknown galaxy_model_id: {galaxy_val}")
-    # a switch this process's environment holds at its strict value cannot be changed here (review, N27)
-    held = exec_switches.held(exec_updates)
-    if held:
-        return JSONResponse(status_code=409, content={
-            "detail": exec_switches.held_message(held), "code": "held_by_environment", "fields": held})
+    BOOL_KEYS, REPORT_STR_KEYS, REPORT_INT_KEYS = keys["bool"], keys["report_str"], keys["report_int"]
 
     for key in BOOL_KEYS:
         if key in body:
@@ -1095,12 +1034,86 @@ async def _apply_settings(request: Request, body: dict, current: Actor):
                                      actor=current.key, user_id=current.user_id,
                                      old_values={key: getattr(in_force, key)}, new_values={key: new}, session=s)
                 exec_switches.save(switched, current.key, session=s)
-        await asyncio.to_thread(_store)
+        _store()                                     # already off the event loop
         if switched.get("executor_enabled"):
             # The queue's poller is started at boot only when the executor is on: switched on at runtime, the
             # tickets queued from then on waited for the next restart (MVP-2.9.0 N8). start() is idempotent.
             _executor_service.start()
 
+
+
+async def _apply_settings(request: Request, body: dict, current: Actor):
+    """Update runtime settings. Agent models + report config persist to settings.yaml;
+    boolean toggles and scan_focus are session-level (reset on restart).
+
+    The four high-impact switches (EXEC_KEYS: the executor, auto-fix, L0 / L1 auto-approval, the executor's HITL
+    gate — MVP-2.9.0 N25) are stored in the database (services/exec_switches), so they survive a restart; like the
+    security toggles below they need an admin when api_auth_enabled, write one audit row per changed value in the
+    transaction that stores them, and a request refused by their checks applies nothing.
+
+    The security toggles (CHANGE_KEYS: change_auto_approve_standard, rbac_enforce) persist to settings.yaml,
+    need an admin when api_auth_enabled, write one audit row per changed value, and are applied last — a
+    request refused by the security-toggle checks (400/401/403) applies nothing; the other keys keep their own,
+    non-atomic validation. A changed toggle's audit rows are written, then the yaml, then the rows commit — all
+    BEFORE the value goes live in memory. A failed yaml write rolls the rows back; a commit that fails after the
+    write restores the old values in the yaml (best effort: a failed restore is logged). Either way the old value
+    stays in force and an identical retry redoes it all."""
+    from agenticops.services import exec_switches
+
+    BOOL_KEYS = {
+        "auto_rca_enabled", "notifications_enabled",
+        "notifications_consolidated", "bedrock_cache_enabled",
+        "skills_auto_improve_enabled", "skills_post_resolution_review",
+        "skills_improvement_notify",
+    }
+    # Report S3 config (persisted to settings.yaml)
+    REPORT_STR_KEYS = {"report_storage", "report_s3_bucket", "report_s3_prefix", "report_s3_region"}
+    REPORT_INT_KEYS = {"report_presigned_url_expiry"}
+
+    # ACP enhanced backend — persisted to settings.yaml (controls tool registration)
+    ACP_KEYS = {"acp_enhanced_enabled", "acp_enhanced_backend"}
+
+    # Change-management security toggles — persisted to settings.yaml (must survive a restart)
+    CHANGE_KEYS = {"change_auto_approve_standard", "rbac_enforce"}
+
+    # The high-impact switches — stored in the DB (services/exec_switches), never set on the process's settings
+    EXEC_KEYS = set(exec_switches.FIELDS)
+
+    # Which model each setting uses (MVP-2.9.0 N35): an administrator's, like the security toggles
+    MODEL_KEYS = {"agent_models", "model_settings", "galaxy_model_id"}
+
+    ALL_KEYS = (BOOL_KEYS | REPORT_STR_KEYS | REPORT_INT_KEYS | ACP_KEYS | CHANGE_KEYS | EXEC_KEYS | MODEL_KEYS
+                | {"scan_focus"})
+    unknown = set(body.keys()) - ALL_KEYS
+    if unknown:
+        raise HTTPException(400, f"Unknown settings: {', '.join(sorted(unknown))}")
+
+    # Security toggles are validated and authorized BEFORE anything is applied
+    change_updates = {k: body[k] for k in CHANGE_KEYS if k in body}
+    exec_updates = {k: body[k] for k in EXEC_KEYS if k in body}
+    for key in sorted({**change_updates, **exec_updates}):
+        if not isinstance(body[key], bool):
+            raise HTTPException(400, f"{key} must be a boolean")
+    if (change_updates or exec_updates or MODEL_KEYS & set(body)) and settings.api_auth_enabled:
+        await require_authenticated_user(request, admin=True)
+    # Every model value is checked BEFORE anything is applied: a refused one changes nothing (N35)
+    model_updates = await asyncio.to_thread(_checked_model_updates, body)
+    if isinstance(model_updates, JSONResponse):
+        return model_updates
+    # … and the Galaxy model's own, stricter check (one of the listed models) too — it used to run after the other
+    # model settings had been written, so a request refused here had already changed them (review of 2.9.0, Spec ⑥)
+    galaxy_val = str(body.get("galaxy_model_id") or "") if "galaxy_model_id" in body else None
+    if galaxy_val and galaxy_val not in await asyncio.to_thread(_allowed_model_ids):  # may list Bedrock models
+        raise HTTPException(400, f"Unknown galaxy_model_id: {galaxy_val}")
+    # a switch this process's environment holds at its strict value cannot be changed here (review, N27)
+    held = exec_switches.held(exec_updates)
+    if held:
+        return JSONResponse(status_code=409, content={
+            "detail": exec_switches.held_message(held), "code": "held_by_environment", "fields": held})
+
+    await asyncio.to_thread(_apply_validated_settings, body, current, model_updates or {}, galaxy_val,
+                            change_updates, exec_updates,
+                            {"bool": BOOL_KEYS, "report_str": REPORT_STR_KEYS, "report_int": REPORT_INT_KEYS})
     return await asyncio.to_thread(api_get_settings)  # it may list Bedrock models
 
 
