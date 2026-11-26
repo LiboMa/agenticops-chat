@@ -396,7 +396,7 @@ flowchart TD
     style RESOLVE fill:#6f6
 ```
 
-**Code path**: `app.py:_process_webhook_alert()` → `rca_service.trigger_auto_rca()` → `pipeline_service.trigger_auto_sre()` → `trigger_auto_approve()` → `trigger_auto_execute()` → `save_execution_result()` → `verification.evaluate()` → resolved (passed) / fix_executed (pending acceptance) / root_cause_identified (failed).
+**Code path**: `webhooks._process_webhook_alert()` → `rca_service.trigger_auto_rca()` → `pipeline_service.trigger_auto_sre()` → `trigger_auto_approve()` → `trigger_auto_execute()` → `save_execution_result()` → `verification.evaluate()` → resolved (passed) / fix_executed (pending acceptance) / root_cause_identified (failed).
 
 **Prevention hooks (graph engine, zero LLM)**:
 

@@ -2865,6 +2865,57 @@ Standards 方向十条里，四条是明确违反项目自己的规矩的；主�
 - 全量：后端 9,793 个通过、99 个跳过、1 个失败——`test_web_tools` 那条已知的假失败；前端 `tsc` 0 个错误，vitest 141 个文件、1,951 个通过；构建通过。
 - 真跑：同一个独立实例（N35 那份 E2E 副本库的在线备份）和本机的假模型服务，不连云、不花模型的钱。见 E2E 报告「Standards 三条」。
 
+## 整条分支评审之后的修复：思考请求的形状 + 坏味道六条（2026-11-26）
+
+主人 11-26 定：上一节「顺带看到」的第一条要改——「推理」多一个取值；思考时「边想边给摘要」也是那一行自己的取值（主人选的，不按名字猜）；坏味道六条全部做，包括把 `web/app.py` 拆开。除了「行为上的变化」里列的几处，都是不改行为的整理：先有测试钉住，再挪；改了行为的先写会失败的测试。
+
+| # | 原来 | 现在 | 提交 |
+|---|---|---|---|
+| A | Anthropic 兼容的提供方上，「推理」只有一个「Anthropic 思考」：用自适应还是 `budget_tokens`、带不带 `display: summarized`，看模型 id 里的 Claude 版本 | 「推理」有三个 Anthropic 取值——自适应、边想边给摘要（Claude 4.7 起）／自适应（4.6）／按 token 预算（4.6 之前），那一行说哪个就发哪个。已经存着「Anthropic 思考」的行，启动时迁移一次，成为它到现在为止被发的那种形状（最后一次读名字），请求一个字也不变。Bedrock 上模型 id 就是模型本身，照旧按 id（`preamble.claude_reasoning`） | `a2ae72c` |
+| ① | 协议的字符串在四个模块里各写一遍；新加提供方时的默认预设写了三遍、「协议不对」的 422 写了四遍；新建和「先测再存」重复一整段检查 | `presets.ANTHROPIC` / `OPENAI` / `default_preset`、`registry._check_kind`、`registry._new_provider_fields`、`embeddings.serves_embeddings`。建模型、发请求、读列表这三处按协议分开的地方留着：是三件不同的事 | `78a0119` |
+| ② | 九个模型设置写了两份（报告顺序一份、接口名字一份），空值落到哪个模型也写了两份；Galaxy 模型两个键、两种检查，一个请求带两个键 yaml 写两次；别的模块调用 `_raw` / `_audit` / `_refuse_in_use` / `_effort_tier` / `_can_edit` 这些内部函数 | `registry.MODEL_SETTINGS` 一份（其余几份由它推出来，agent 那七个由 `config.AGENT_NAMES` 推），`registry.fallback` 一条规则；Galaxy 的老键并进同一次检查、同一次写；那几个函数换成公开的名字（`raw_value` / `audit` / `refuse_in_use` / `effort_tier` / `can_edit`） | `cc8e074` |
+| ③ | 工作项编号 `I12` / `C3`：`web/routers/ui.py` 里两种正则（`\d{0,8}` 和 `\d*`），另有手写的拆法 | `services/listing.ITEM_PATTERN`（最多 9 位、不为 0、只认 ASCII 数字——和 `ref_number` 同一条）、`parse_item` | `dd98374` |
+| ④ | 时间：2.9.0 在十个模块里各写了「当成 UTC」「带 Z」。前端：75 个文件里 186 处 `t(…).replace("{名字}", 值)`，另有 4 份本地的 `fill`。NewUI 的「重新诊断」「出方案」两个 brief 是同一个身子的两份 | `utils/timeutils.as_utc` / `iso_z`；`lib/placeholders.fillPlaceholders`（也收数字），一个测试按 TypeScript 语法树守着不许再手写；`briefs/AgentAskBrief` 一份身子、两个薄的 brief。「只读名单」查过：五份名单回答五个不同的问题，`src/` 里没有重复，没改 | `53da3c9`、`20a6442`、`d864fc4` |
+| ⑤ | `_ADD_COLUMNS_2_7_0` 装着 2.7.0、2.8.0、2.9.0 的列 | 不带版本号的名字（`_ADD_COLUMNS`、`_migrate_columns` 等），每一条自己写着哪个版本加的；2.9.0 的几个修复保留原名 | `d8e541a` |
+| ⑥ | `web/app.py` 6,415 行 | 七个路由文件（`health`、`resource_detail`、`settings`、`issue_agents`、`fix_plans`、`runs`、`rca_feedback`），`app.py` 剩 4,666 行。每一个都原样挪，在原来的位置挂上；每挪一个，路由表（方法、路径、处理函数、返回模型、状态码、依赖）和 OpenAPI 前后逐字比较，都一样 | `c4cb6b3` `db607a6` `74d5f36` `9755e2b` `6985775` `13bef5b` `b8d02cb` |
+
+### 行为上的变化
+
+1. **Anthropic 兼容提供方上，思考请求的形状由那一行定**：迁移过的行发的和原来一样；之后新加的 Claude 模型，要在「模型」对话框的「推理」里选三种之一（新行默认「无」，不发思考字段——和原来一样）。
+2. `PATCH /api/model-providers/{name}/models/{id}` 不再收 `anthropic_thinking`（422）。
+3. **`model_settings.galaxy` 也必须是列表里的模型**（原来只查顶层的 `galaxy_model_id`）。页面只给列表里的选，只有直接调接口才会碰到。从「常规」的 Galaxy 卡片改模型，也会丢掉缓存着的对话 agent（和别的模型设置一样；下一条消息时重建，什么都不丢）。
+4. 「在用」和「模型有问题的设置」两个清单里，Galaxy 排在评审之后（原来排第一）。
+5. `/api/ui/activity/steps` 和给 agent 留话的 lane：10 位以上或带非 ASCII 数字的编号是 422（和别的编号路由一样；原来放进去了）。
+6. 前端填词：值里带 `$&` / `$1` 不再被当成替换模式；值里带另一个 `{名字}` 不再被填第二次；一个占位写了两次，两次都填（原来只填第一个）。
+7. 挪出去的代码写的日志，记录器名字从 `agenticops.web.app` 变成 `agenticops.web.routers.<名字>`。
+
+### 六个面（A）
+
+| 面 | 这一次 |
+|---|---|
+| CLI | 非目标：`aiops providers list` 不列每个模型的字段 |
+| Web API | 做：`PATCH /api/model-providers/{name}/models/{id}` 的 `reasoning` 收三个新值、不收旧值；模型列表和 Bedrock 的预设都按新值返回 |
+| Web UI | 做：设置 →「模型提供方」→「模型」→ 一个模型的「推理」下拉多三项（中 / 英） |
+| Agent 工具 / 定时任务 / 通知 | 非目标 |
+
+### 顺带看到、没有改的
+
+- 早于 2.9.0 的同类写法没动：路由之间的内部函数（`audit._require_audit_reader`、`session_manager._trigger_memory_extraction`）、更早的时间副本、`attention._matches` 搜编号时不分 I / C。
+- 路由要用 `app.py` 自己的对象（`_chat_sessions`、`_executor_service`、`_allowed_model_ids`）时在函数里 import：很多测试按这个名字打补丁，没改名字；`routers/__init__.py` 原来写「经 `request.app.state`」，没有任何地方设它，已改成实际的做法。
+- `app._like` 是 `services/listing.like_pattern` 的一行包装，两处调用直接用 `like_pattern`，包装删了。
+- 没有加 `parse_iso`：只有 Galaxy 的回放时间一处用。
+- `OtherModelsCard.tsx` 自己的九个名字没去掉：它带着页面上的说明文字。
+- 老的 `/api/health-issues/{id}/feedback` 和它的请求模型留在 `app.py`，和 agent 记忆那几条路由在一起。
+- 前端全量跑了四次，其中一次（后端全量同时在跑）有一条测试失败，没留下输出；之后连跑三次都通过。没查出是哪一条。
+
+### 测试
+
+- 新测试，先红后绿：`tests/test_reasoning_values.py` 10 条（迁移、迁移前后请求一样、启动时会跑）、`tests/test_llm_kinds.py` 3 条、`tests/test_model_settings_lists.py` 4 条、`tests/test_listing_refs.py` 15 条、`tests/test_timeutils.py` 12 条（旧副本逐字放在测试里对照）；`test_llm_factory`、`test_llm_catalog`、`test_settings_model_refs`、`test_step_recorder`、`test_run_notes` 各改写或加了几条；vitest：`noReplaceFill`（2 条）、`placeholders`（1 条）、`agentAskBriefs`（7 条、21 个快照——合并之前录下，合并之后不变）。
+- 把规则故意改坏 11 处（A 四处、② 三处、③ 两处、① 一处、brief 合并一处），每一处都有测试变红。
+- 拆 `app.py`：每个提交前后比路由表和 OpenAPI（固定 hash 种子；挪走的返回模型只比类名），七次都一样；`ruff` 的未用 / 未定义检查在 `app.py` 和路由里没有新增。
+- 全量（全部提交加上这份文档）：后端 9,841 个通过、99 个跳过、1 个失败——`test_web_tools` 那条已知的假失败；前端 `tsc` 0 个错误，vitest 143 个文件、1,961 个通过；构建通过。
+- 真跑：同一个独立实例和副本库，本机的假模型服务（这次 Anthropic 接口能流式回答），不连云、不花模型的钱。见 E2E 报告「思考请求的形状 + 坏味道六条」。
+
 ## 已知的缺口（照实列出，这一轮没有做）
 
 第三轮之后的样子。编号沿用前两轮的（别处按编号引用它们）；第三轮做掉的划掉，写明在哪一阶段；18 之后是第三轮新列的。27 之后是 N28–N30 新列的。35 之后是问题清零时看到的。

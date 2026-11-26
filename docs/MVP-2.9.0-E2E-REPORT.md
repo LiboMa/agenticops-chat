@@ -1483,6 +1483,27 @@
 - `temperature` 真的有没有发出去、提示缓存真的有没有打上：模型是假的，看的是测试里发出去的请求体（`tests/test_llm_factory.py`）。
 - 写 settings.yaml 很慢时事件循环还能不能接别的请求：实例上写得很快，看不出来；测试里让写变慢、记下每一次读写在哪个线程上（`tests/test_settings_off_loop.py`）。
 
+## 整条分支评审之后的修复：思考请求的形状 + 坏味道六条（2026-11-26）
+
+同一个独立实例、同一份副本库；本机的假模型服务这次多了两样（脚本在副本目录里，不在仓库里）：Anthropic 接口要流式回答时真的按流式回答（Strands 的 Anthropic 模型是流式的），每一个 `/v1/messages` 请求的思考字段记到一个文件里（模型名、`thinking`、`output_config`、`max_tokens`——不记请求头和 Key）。前端是这份代码构建到 `/tmp` 的。不连云：启动器记下的 AWS 请求是 0 个。用完的登录已作废，实例和假模型服务都已停。
+
+| # | 检查 | 结果 |
+|---|---|---|
+| T.1 | 启动前把三行设成旧值「Anthropic 思考」（`e2e-anthro` 的 `claude-opus-5-5`、`claude-sonnet-4-6`，`litellm-anthropic` 的 `claude-haiku`），启动 | 日志一行「3 «anthropic_thinking» rows given their request shape」；三行变成「自适应、边想边给摘要」「自适应」「按 token 预算」——各自到现在为止被发的那种（`claude-haiku` 名字里没有版本，原来就是按预算发） |
+| T.2 | 接口：把旧值写回去；读模型列表 | 写旧值 422；列表按新值返回 |
+| T.3 | 设置 →「模型提供方」→「模型」→ `claude-opus-5-5`（中文） | 「推理」下拉五项：无、OpenAI 推理档位、三种 Anthropic 的（带说明：4.7 起 / 4.6 / 4.6 之前）；改成「自适应、边想边给摘要」保存——库里是它，`manual_fields` 里有 `reasoning`；刷新页面重新打开，还是它 |
+| T.4 | 一个对话用 `e2e-anthro::claude-opus-5-5`、投入「高」，把这一行依次设成三个值，各发一条消息 | 三次都流式回完。假模型服务记下的请求：`{"type":"adaptive","display":"summarized"}` + `effort: high`；`{"type":"adaptive"}` + `effort: high`；`{"type":"enabled","budget_tokens":8192}`、没有 `output_config`——同一个模型名，那一行说什么就发什么 |
+| T.5 | Galaxy 模型：顶层的 `galaxy_model_id` 写一个提供方的模型；`model_settings.galaxy` 写一个列表里没有的；再把 `model_settings.galaxy` 清空 | 第一次 200，两个读法都是它，settings.yaml 里一行；第二次 400（`unknown_model`），什么都没改；第三次 200，两个读法都清空，回到便宜档 |
+| T.6 | 「先测再存」（拆出来的新建检查）：一个新的 Anthropic 兼容表单、一个已存提供方原样的编辑、协议写成 `grpc` | 前两个读列表、对话、工具调用三步都通过（新建的用了 Anthropic 的默认预设）；`grpc` 422 `invalid_kind`；库里没有多出提供方 |
+| T.7 | 挪到路由文件里的接口，用副本库里真实的编号各调一次：`/api/health`、`/api/settings`、扫描范围、修复方案列表 / 一个方案 / 上一版的差异、运行列表 / 一次运行、问题的运行 / 时间线、trace、执行器状态、资源的问题 / 方案 / 相关资源、定位统计 | 16 个都是 200 |
+| T.8 | 给副本里两件问题加上一条人判过的诊断（一件「不对」、一件「对」），打开 NewUI 的「待决」 | 两件都进了队列：I#564「需要你：让 agent 按这个诊断出修复方案」，按钮 生成方案 A / 重新诊断 M / 忽略 D；I#565「需要你：让 agent 重新诊断」，人的判断、提示、「被否定的诊断」，按钮 重新诊断 A / 忽略 D——合并之后两个 brief 各说各的 |
+| T.9 | 中文和英文各走一遍：设置（常规、模型提供方）、问题列表和一件问题、一个方案、资源、Agent 指标、定时任务、用户、安全、配置总览、报告、技能、对话、运行总览、Galaxy、两个 brief | 每一页都等数据到了再看：没有一处留下没填的 `{名字}`；填进去的话都对（「已等 1 分钟」「共 16 条 · 第 1 / 2 页」「第 1–50 条，共 1701 条」「3 个模型」）；浏览器控制台 0 个错误、0 个警告 |
+
+### 没有在实例上看过的
+
+- 值里带 `$&` 的填词、两次出现的占位：副本里没有这样的数据，看的是测试（`placeholders.test.ts`）。
+- Bedrock 开着时 `model_settings.galaxy` 写一个列表里没有的 Bedrock id：副本关着 Bedrock，任何 Bedrock id 都先被「Bedrock 已关」拦下；这一条看的是测试（`tests/test_model_settings_lists.py`）。
+
 ## 性能（真实的图：1,928 个资源、1,526 条资源之间的关系）
 
 | 项目 | 数字 | 怎么量的 |
