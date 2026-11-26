@@ -1,0 +1,109 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`generate brief > plan_stopped reads as before 1`] = `"<section data-ask="ask.generate.stopped"><nav><button type="button" class="btn primary"><span class="t">act.generate</span><kbd>A</kbd></button><button type="button" class="btn"><span class="t">act.rediagnose</span><kbd>M</kbd></button><span class="spacer"></span><button type="button" class="btn quiet"><span class="t">act.close</span><kbd>D</kbd></button></nav><div data-agent-at-work=""></div><div class="sec"><h2>sec.stoppedPlan</h2><p><i data-prov="code"></i>generate.stopped{&quot;t&quot;:&quot;T(2026-11-26T09:00:00Z)&quot;}</p></div><div data-steps="{&quot;item&quot;:&quot;I12&quot;,&quot;agent&quot;:&quot;sre&quot;,&quot;before&quot;:&quot;2026-11-26T09:00:00Z&quot;}" data-heading="steps.title.stopped"></div><div data-cause="sec.standingRca"></div></section>"`;
+
+exports[`generate brief > plan_stopped reads as before 2`] = `
+[
+  "plan",
+  "rca",
+  "",
+]
+`;
+
+exports[`generate brief > plan_stopped reads as before 3`] = `
+[
+  "(read-only)",
+]
+`;
+
+exports[`generate brief > rca_confirmed reads as before 1`] = `"<section data-ask="ask.generate"><nav><button type="button" class="btn primary"><span class="t">act.generate</span><kbd>A</kbd></button><button type="button" class="btn"><span class="t">act.rediagnose</span><kbd>M</kbd></button><span class="spacer"></span><button type="button" class="btn quiet"><span class="t">act.close</span><kbd>D</kbd></button></nav><div data-agent-at-work=""></div><div data-cause="sec.confirmedRca"></div><div class="sec"><h2>sec.humanVerdict</h2><q data-issue="12" data-rca="7"></q></div></section>"`;
+
+exports[`generate brief > rca_confirmed reads as before 2`] = `
+[
+  "plan",
+  "rca",
+  "",
+]
+`;
+
+exports[`generate brief > rca_confirmed reads as before 3`] = `
+[
+  "(read-only)",
+]
+`;
+
+exports[`generate brief > rca_ready reads as before 1`] = `"<section data-ask="ask.generate"><nav><button type="button" class="btn primary"><span class="t">act.generate</span><kbd>A</kbd></button><button type="button" class="btn"><span class="t">act.rediagnose</span><kbd>M</kbd></button><span class="spacer"></span><button type="button" class="btn quiet"><span class="t">act.close</span><kbd>D</kbd></button></nav><div data-agent-at-work=""></div><div data-cause="sec.readyRca"><p class="note"><i data-prov="code"></i>generate.ready</p></div></section>"`;
+
+exports[`generate brief > rca_ready reads as before 2`] = `
+[
+  "plan",
+  "rca",
+  "",
+]
+`;
+
+exports[`generate brief > rca_ready reads as before 3`] = `
+[
+  "(read-only)",
+]
+`;
+
+exports[`rerun brief > rca_missing reads as before 1`] = `"<section data-ask="ask.rerun.missing"><nav><button type="button" class="btn primary"><span class="t">act.rediagnose</span><kbd>A</kbd></button><span class="spacer"></span><button type="button" class="btn quiet"><span class="t">act.close</span><kbd>D</kbd></button></nav><div data-agent-at-work=""></div><div data-cause="sec.rejectedRca"></div></section>"`;
+
+exports[`rerun brief > rca_missing reads as before 2`] = `
+[
+  "rca",
+  "",
+]
+`;
+
+exports[`rerun brief > rca_missing reads as before 3`] = `
+[
+  "(read-only)",
+]
+`;
+
+exports[`rerun brief > rca_rejected reads as before 1`] = `"<section data-ask="ask.rerun"><nav><button type="button" class="btn primary"><span class="t">act.rediagnose</span><kbd>A</kbd></button><span class="spacer"></span><button type="button" class="btn quiet"><span class="t">act.close</span><kbd>D</kbd></button></nav><div data-agent-at-work=""></div><div class="sec"><h2>sec.humanVerdict</h2><q data-issue="12" data-rca="7"></q><p class="note">rerun.note</p></div><div data-cause="sec.rejectedRca"></div></section>"`;
+
+exports[`rerun brief > rca_rejected reads as before 2`] = `
+[
+  "rca",
+  "",
+]
+`;
+
+exports[`rerun brief > rca_rejected reads as before 3`] = `
+[
+  "(read-only)",
+]
+`;
+
+exports[`rerun brief > rca_stopped reads as before 1`] = `"<section data-ask="ask.rerun.stopped"><nav><button type="button" class="btn primary"><span class="t">act.rediagnose</span><kbd>A</kbd></button><span class="spacer"></span><button type="button" class="btn quiet"><span class="t">act.close</span><kbd>D</kbd></button></nav><div data-agent-at-work=""></div><div class="sec"><h2>sec.stoppedRca</h2><p><i data-prov="code"></i>rerun.stopped{&quot;t&quot;:&quot;T(2026-11-26T09:00:00Z)&quot;}</p></div><div data-steps="{&quot;item&quot;:&quot;I12&quot;,&quot;agent&quot;:&quot;rca&quot;,&quot;before&quot;:&quot;2026-11-26T09:00:00Z&quot;}" data-heading="steps.title.stopped"></div></section>"`;
+
+exports[`rerun brief > rca_stopped reads as before 2`] = `
+[
+  "rca",
+  "",
+]
+`;
+
+exports[`rerun brief > rca_stopped reads as before 3`] = `
+[
+  "(read-only)",
+]
+`;
+
+exports[`rerun brief > reopened reads as before 1`] = `"<section data-ask="ask.rerun.reopened"><nav><button type="button" class="btn primary"><span class="t">act.rediagnose</span><kbd>A</kbd></button><span class="spacer"></span><button type="button" class="btn quiet"><span class="t">act.close</span><kbd>D</kbd></button></nav><div data-agent-at-work=""></div><div class="sec"><h2>sec.reopened</h2><p><i data-prov="code"></i>rerun.reopened{&quot;t&quot;:&quot;T(2026-11-26T09:00:00Z)&quot;}</p></div><div data-cause="sec.earlierRca"></div></section>"`;
+
+exports[`rerun brief > reopened reads as before 2`] = `
+[
+  "rca",
+  "",
+]
+`;
+
+exports[`rerun brief > reopened reads as before 3`] = `
+[
+  "(read-only)",
+]
+`;
