@@ -119,7 +119,7 @@ def test_neither_agent_is_offered_the_tool_while_bedrock_is_off(acp):
 
 def test_settings_say_why_the_backend_is_not_offered(acp):
     from agenticops.agents.enhanced import blocked_reason
-    from agenticops.web.app import api_get_settings
+    from agenticops.web.routers.settings import api_get_settings
     assert api_get_settings()["acp_enhanced_blocked"] == "bedrock_off"   # Bedrock off: nothing is listed from it
     acp["bedrock"] = True
     assert blocked_reason() is None

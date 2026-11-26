@@ -606,7 +606,7 @@ def test_settings_toggle_commit_failure_restores_the_yaml_and_a_retry_heals(clie
     live, and no toggle in settings.yaml that a restart would turn on."""
     from agenticops.config import settings
     from agenticops.web.app import app
-    with patch("agenticops.web.app.get_db_session", _commit_fails):
+    with patch("agenticops.web.routers.settings.get_db_session", _commit_fails):
         r = TestClient(app, raise_server_exceptions=False).patch("/api/settings", json={"rbac_enforce": True})
     assert r.status_code == 500
     assert settings_io.call_args_list == [call({"rbac_enforce": True}), call({"rbac_enforce": False})]
@@ -625,15 +625,15 @@ def test_settings_toggle_failed_restore_is_logged_and_the_commit_error_stands(cl
     from agenticops.config import settings
     from agenticops.web.app import app
     settings_io.side_effect = [None, OSError("read-only config mount")]
-    with patch("agenticops.web.app.get_db_session", _commit_fails), \
-         caplog.at_level(logging.ERROR, logger="agenticops.web.app"):
+    with patch("agenticops.web.routers.settings.get_db_session", _commit_fails), \
+         caplog.at_level(logging.ERROR, logger="agenticops.web.routers.settings"):
         r = TestClient(app, raise_server_exceptions=False).patch("/api/settings", json={"rbac_enforce": True})
     assert r.status_code == 500
-    [rec] = [rec for rec in caplog.records if rec.name == "agenticops.web.app" and rec.levelno == logging.ERROR]
+    [rec] = [rec for rec in caplog.records if rec.name == "agenticops.web.routers.settings" and rec.levelno == logging.ERROR]
     assert "rbac_enforce" in rec.getMessage() and isinstance(rec.exc_info[1], OSError)
     assert settings.rbac_enforce is False and _settings_audits() == []
     settings_io.side_effect = [None, OSError("read-only config mount")]
-    with patch("agenticops.web.app.get_db_session", _commit_fails), pytest.raises(OperationalError):
+    with patch("agenticops.web.routers.settings.get_db_session", _commit_fails), pytest.raises(OperationalError):
         client.patch("/api/settings", json={"rbac_enforce": True})  # the fixture's client re-raises the app's error
 
 

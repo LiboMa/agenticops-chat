@@ -14,12 +14,12 @@ import pytest
 
 from tests.llm_fake_server import llm_db
 
-APP = pathlib.Path(__file__).resolve().parents[1] / "src" / "agenticops" / "web" / "app.py"
+SETTINGS = pathlib.Path(__file__).resolve().parents[1] / "src" / "agenticops" / "web" / "routers" / "settings.py"
 BLOCKING = {"save_to_yaml", "get_db_session", "effective", "save", "log"}
 
 
 def test_the_async_handler_itself_reads_and_writes_nothing():
-    tree = ast.parse(APP.read_text())
+    tree = ast.parse(SETTINGS.read_text())
     handler = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "_apply_settings")
     calls = []
     for node in ast.walk(handler):
@@ -48,6 +48,7 @@ def env(tmp_path, monkeypatch):
 def test_a_settings_change_writes_on_a_worker_thread(env, monkeypatch):
     import agenticops.audit.service as audit_mod
     import agenticops.web.app as webapp
+    import agenticops.web.routers.settings as settings_router
     from agenticops.services import exec_switches
     seen: list[tuple[str, int]] = []
 
@@ -57,10 +58,10 @@ def test_a_settings_change_writes_on_a_worker_thread(env, monkeypatch):
             return fn(*a, **kw)
         return wrapper
     monkeypatch.setattr("agenticops.config.save_to_yaml", spy("save_to_yaml", lambda updates: None))
-    monkeypatch.setattr(webapp, "get_db_session", spy("get_db_session", webapp.get_db_session))
+    monkeypatch.setattr(settings_router, "get_db_session", spy("get_db_session", settings_router.get_db_session))
     monkeypatch.setattr(exec_switches, "effective", spy("exec_switches.effective", exec_switches.effective))
     monkeypatch.setattr(audit_mod.AuditService, "log", staticmethod(spy("AuditService.log", audit_mod.AuditService.log)))
-    backend = (webapp._acp_available_backends() or ["claude-code"])[0]
+    backend = (settings_router._acp_available_backends() or ["claude-code"])[0]
 
     async def go():
         loop_thread = threading.get_ident()
