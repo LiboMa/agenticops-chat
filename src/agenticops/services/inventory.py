@@ -5,10 +5,11 @@ A row is present while absent_since IS NULL. A writer that saw a row calls mark_
 Rows are never deleted: a row seen again returns, because mark_seen clears absent_since."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Iterable, Optional
 
 from agenticops.models import CloudResource
+from agenticops.utils.timeutils import as_utc
 
 PRESENT = CloudResource.absent_since.is_(None)
 
@@ -27,7 +28,7 @@ def health_reason(*, open_issues: int, absent_since: Optional[datetime], scanned
         return "absent"
     if scanned_at is None:
         return "never_observed"
-    seen = scanned_at if scanned_at.tzinfo else scanned_at.replace(tzinfo=timezone.utc)
+    seen = as_utc(scanned_at)
     return "stale" if now - seen > stale_after else "no_open_issue"
 
 

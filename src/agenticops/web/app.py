@@ -2752,7 +2752,7 @@ def _claim_issue(agent_name: str, issue_id: int, actor: Actor):
         "detail": f"An agent is already working on issue #{issue_id}; wait for it to finish.",
         "code": "agent_run_in_flight",
         "agent": busy.agent if busy else agent_name,
-        "started_at": busy.started_at.isoformat().replace("+00:00", "Z") if busy else None,
+        "started_at": iso_z(busy.started_at) if busy else None,
         "requested_by": busy.requested_by if busy else None,
     })
 
@@ -5514,6 +5514,7 @@ _PUBLIC_PATHS = {"/api/health", "/api/auth/login"}
 _PUBLIC_PREFIXES = ("/app/", "/static/", "/docs", "/openapi.json", "/redoc")
 
 from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
+from agenticops.utils.timeutils import iso_z
 
 
 class APIAuthMiddleware(BaseHTTPMiddleware):

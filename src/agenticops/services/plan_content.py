@@ -8,10 +8,10 @@ version it approved, and get_approved_fix_plan refuses a plan whose recomputed h
 
 import hashlib
 import json
-from datetime import timezone
 from typing import Optional
 
 from agenticops.models import FIXPLAN_TERMINAL_STATUSES, ChangeRequest, FixPlan, HealthIssue
+from agenticops.utils.timeutils import iso_z
 
 # The reason an execution is aborted with when the plan changed after its approval (spec §3.D.1)
 CONTENT_CHANGED = "content changed after approval"
@@ -49,14 +49,6 @@ def previous_fix_plan(session, plan: "FixPlan"):
             .order_by(FixPlan.id.desc()).first())
 
 
-def _utc(ts) -> Optional[str]:
-    if ts is None:
-        return None
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
-    return ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
 def previous_plan_diff(session, plan: FixPlan) -> dict:
     """What this fix plan changed relative to the plan before it on the same issue (MVP-2.9.0 N14) — the newest
     OLDER fix plan of the issue, whatever became of it (sent back, failed, run and not accepted). A redone plan is
@@ -76,8 +68,8 @@ def previous_plan_diff(session, plan: FixPlan) -> dict:
         return out
     out["previous"] = {
         "id": prev.id, "status": prev.status, "plan_version": prev.plan_version or 1, "risk_level": prev.risk_level,
-        "created_at": _utc(prev.created_at),
-        "rejected_by": prev.rejected_by, "rejected_at": _utc(prev.rejected_at), "rejection_reason": prev.rejection_reason,
+        "created_at": iso_z(prev.created_at),
+        "rejected_by": prev.rejected_by, "rejected_at": iso_z(prev.rejected_at), "rejection_reason": prev.rejection_reason,
         "rejection_is_feedback": rejection_is_feedback(prev),
         "same_diagnosis": (prev.rca_result_id == plan.rca_result_id
                            if prev.rca_result_id is not None and plan.rca_result_id is not None else None),

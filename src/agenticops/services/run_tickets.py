@@ -16,6 +16,7 @@ somebody's list again. agents/run_guard.RunGuard reads ticket_state() before eve
 import logging
 from datetime import datetime, timezone
 from typing import Optional
+from agenticops.utils.timeutils import as_utc
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +207,7 @@ def close_orphans() -> tuple[list[int], list]:
         if started is None:
             age = float(limit + ORPHAN_MARGIN_SECONDS)
         else:
-            started = started if started.tzinfo else started.replace(tzinfo=timezone.utc)   # SQLite: naive UTC
+            started = as_utc(started)   # SQLite: naive UTC
             age = (now - started).total_seconds()
         left = limit + ORPHAN_MARGIN_SECONDS - age
         if left <= 0:

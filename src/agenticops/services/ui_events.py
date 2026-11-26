@@ -20,6 +20,7 @@ from sqlalchemy import or_
 
 from agenticops.models import ChangeRequest, HealthIssue, PipelineEvent, get_db_session
 from agenticops.services.plan_content import HUMAN_ACTORS
+from agenticops.utils.timeutils import iso_z
 
 HOURS_MAX = 24
 MAX_EVENTS = 500       # the newest are kept; the answer says when older ones of the window were left out
@@ -52,14 +53,6 @@ def kind_of(event_type: str, actor: Optional[str], change_request_id: Optional[i
     if change_request_id or event_type in _CHANGE:
         return "change"
     return "agent"
-
-
-def _aware(ts: datetime) -> datetime:
-    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
-
-
-def _iso(ts: datetime) -> str:
-    return _aware(ts).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _detail(raw) -> dict:
@@ -111,8 +104,8 @@ def recent_events(*, hours: int = HOURS_MAX, account_id: Optional[int] = None, n
         if kind is None:                    # cannot happen: the query left those out (kept so the two never disagree silently)
             total -= 1
             continue
-        events.append({"id": eid, "at": _iso(at), "kind": kind, "type": event_type, "status": status,
+        events.append({"id": eid, "at": iso_z(at), "kind": kind, "type": event_type, "status": status,
                        "item": f"C{change_id}" if change_id else f"I{issue_id}" if issue_id else None,
                        "actor": actor or "system", "detail": _detail(detail)})
     return {"events": events, "total": total, "cut": total > len(events), "hours": hours,
-            "from": _iso(start), "to": _iso(now), "generated_at": _iso(datetime.now(timezone.utc))}
+            "from": iso_z(start), "to": iso_z(now), "generated_at": iso_z(datetime.now(timezone.utc))}

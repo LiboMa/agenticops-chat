@@ -13,6 +13,7 @@ from typing import Optional
 
 from agenticops.config import settings
 from agenticops.models import AttentionSnooze, get_db_session
+from agenticops.utils.timeutils import as_utc, iso_z
 
 
 def situation(item: dict) -> str:
@@ -21,14 +22,6 @@ def situation(item: dict) -> str:
     e = item["entity"]
     version = e.get("content_version")
     return f"{item['reason']}|{item.get('reason_detail') or ''}|{e['entity_type']}:{e['entity_id']}|{'' if version is None else version}"
-
-
-def _aware(ts: datetime) -> datetime:
-    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
-
-
-def _iso(ts: datetime) -> str:
-    return _aware(ts).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def snooze(user_id: int, actor, item_id: str, *, now: Optional[datetime] = None) -> Optional[dict]:
@@ -44,7 +37,7 @@ def snooze(user_id: int, actor, item_id: str, *, now: Optional[datetime] = None)
         s.query(AttentionSnooze).filter(AttentionSnooze.user_id == user_id,
                                         (AttentionSnooze.item == item_id) | (AttentionSnooze.until <= now)).delete(synchronize_session=False)
         s.add(AttentionSnooze(user_id=user_id, item=item_id, situation=situation(row), until=until, created_at=now))
-    return {"item": item_id, "snoozed_until": _iso(until)}
+    return {"item": item_id, "snoozed_until": iso_z(until)}
 
 
 def unsnooze(user_id: int, item_id: str) -> bool:
@@ -65,5 +58,5 @@ def mark(items: list[dict], user_id: Optional[int], now: datetime) -> None:
                 s.query(AttentionSnooze).filter(AttentionSnooze.user_id == user_id, AttentionSnooze.until > now)}
     for i in items:
         hit = rows.get(i["id"])
-        if hit and hit[0] == situation(i) and _aware(hit[1]) > now:
-            i["snoozed_until"] = _iso(hit[1])
+        if hit and hit[0] == situation(i) and as_utc(hit[1]) > now:
+            i["snoozed_until"] = iso_z(hit[1])

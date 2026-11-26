@@ -19,6 +19,7 @@ from sqlalchemy import func
 from agenticops.config import settings
 from agenticops.models import AgentStep, PipelineEvent, get_db_session
 from agenticops.services.listing import parse_item
+from agenticops.utils.timeutils import as_utc
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +29,9 @@ _PRUNE_BATCH = 500
 _last_prune: Optional[date] = None      # process-local: one prune per process-day
 
 
-def _aware(ts: Optional[datetime]) -> Optional[datetime]:
-    return ts if ts is None or ts.tzinfo else ts.replace(tzinfo=timezone.utc)
-
-
 def _iso(ts: Optional[datetime]) -> Optional[str]:
-    ts = _aware(ts)
+    """This API answers «+00:00», not «Z»."""
+    ts = as_utc(ts)
     return ts.isoformat() if ts else None
 
 
@@ -59,7 +57,7 @@ def run_steps(item: str, agent: str, *, execution_id: Optional[int] = None, sinc
     returned, scrubbed by the display redaction — which knows some shapes of a secret, not all (round-2 review
     B-I6: a JSON env array, `requirepass …`, `mysql -p<password>` pass). A read-only account's own agent may not
     run a host command; it is not shown what other agents' commands were or returned either."""
-    since, before = _aware(since), _aware(before)
+    since, before = as_utc(since), as_utc(before)
     with get_db_session() as session:
         parsed = parse_item(item)
         if before is not None and since is None and agent == "rca" and parsed is not None and parsed[0] == "I":
@@ -69,7 +67,7 @@ def run_steps(item: str, agent: str, *, execution_id: Optional[int] = None, sinc
             began = (session.query(func.max(PipelineEvent.created_at))
                      .filter(PipelineEvent.health_issue_id == parsed[1], PipelineEvent.event_type == "rca_started",
                              PipelineEvent.created_at <= before.astimezone(timezone.utc).replace(tzinfo=None)).scalar())
-            since = _aware(began)
+            since = as_utc(began)
         runs = (session.query(AgentStep.run_key, func.min(AgentStep.id), func.min(AgentStep.started_at),
                               func.max(AgentStep.execution_id))
                 .filter(AgentStep.item == item, AgentStep.agent == agent))
@@ -77,7 +75,7 @@ def run_steps(item: str, agent: str, *, execution_id: Optional[int] = None, sinc
             runs = runs.filter(AgentStep.execution_id == execution_id)
         chosen = None
         for key, _first, started, execution in runs.group_by(AgentStep.run_key).order_by(func.min(AgentStep.id).desc()):
-            started = _aware(started)
+            started = as_utc(started)
             if (since is None or started >= since) and (before is None or started <= before):
                 chosen = {"key": key, "agent": agent, "item": item, "execution_id": execution, "started_at": _iso(started)}
                 break

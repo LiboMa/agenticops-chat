@@ -12,6 +12,7 @@ from agenticops.models import get_db_session, CloudResource
 from agenticops.galaxy.models import GalaxyBuild
 from agenticops.galaxy import builder
 from agenticops.graph.query_service import HEALTH_RANK, health_overlay, health_overlay_at
+from agenticops.utils.timeutils import as_utc, iso_z
 
 router = APIRouter(prefix="/api/galaxy", tags=["galaxy"])
 
@@ -26,14 +27,6 @@ def _absent_nodes(s) -> set:
     """Resource node ids the latest scan no longer saw. Read live, so a scan after the build shows."""
     return {f"res:{rid}" for (rid,) in
             s.query(CloudResource.id).filter(CloudResource.absent_since.isnot(None)).all()}
-
-
-def _utc(ts) -> Optional[str]:
-    """A stored time as UTC with its Z (the columns are naive UTC)."""
-    if ts is None:
-        return None
-    ts = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
-    return ts.astimezone(timezone.utc).replace(tzinfo=None).isoformat(timespec="seconds") + "Z"
 
 
 def _latest_completed(s) -> Optional[GalaxyBuild]:
@@ -199,10 +192,10 @@ async def graph():
         rule_edges = rule.get("edges", [])
         llm_edges = llm.get("edges", [])
         build_id = latest.id
-        built_at = _utc(latest.finished_at)
+        built_at = iso_z(latest.finished_at, timespec="seconds")
         health = _health_by_node(s)
         absent = _absent_nodes(s)
-        health_at = _utc(datetime.now(timezone.utc))
+        health_at = iso_z(datetime.now(timezone.utc), timespec="seconds")
 
     nodes = []
     for n in raw_nodes:
@@ -239,7 +232,7 @@ def _past_moment(text: str) -> datetime:
         raise HTTPException(status_code=422, detail="`at` must be an ISO 8601 time, e.g. 2026-11-18T02:30:00Z")
     # ONE moment, in UTC, whatever offset it was written with (the «absent» cut below drops the zone: an offset left
     # on it made health and «absent» two moments in one answer)
-    when = (when if when.tzinfo else when.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+    when = as_utc(when)
     now = datetime.now(timezone.utc)
     grace = timedelta(seconds=60)             # two clocks and a request in between: the page's «now − 24 h» is older here
     if when > now + grace:
@@ -263,12 +256,12 @@ def health_now(at: Optional[str] = Query(None, max_length=40)):
     when = _past_moment(at) if at is not None else None
     with get_db_session() as s:
         latest = _latest_completed(s)
-        now = _utc(datetime.now(timezone.utc))
+        now = iso_z(datetime.now(timezone.utc), timespec="seconds")
         if latest is None:
-            return {"build_id": None, "health": {}, "absent": [], "at": None, **({"as_of": _utc(when)} if when else {})}
+            return {"build_id": None, "health": {}, "absent": [], "at": None, **({"as_of": iso_z(when, timespec="seconds")} if when else {})}
         if when is None:
             return {"build_id": latest.id, "health": _health_by_node(s), "absent": sorted(_absent_nodes(s)), "at": now}
         cut = when.replace(tzinfo=None)
         gone = s.query(CloudResource.id).filter(CloudResource.absent_since.isnot(None), CloudResource.absent_since <= cut).all()
         return {"build_id": latest.id, "health": {f"res:{ref}": v["health"] for ref, v in health_overlay_at(s, when).items()},
-                "absent": sorted(f"res:{rid}" for (rid,) in gone), "at": now, "as_of": _utc(when)}
+                "absent": sorted(f"res:{rid}" for (rid,) in gone), "at": now, "as_of": iso_z(when, timespec="seconds")}

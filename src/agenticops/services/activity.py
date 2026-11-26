@@ -27,6 +27,7 @@ from agenticops.config import settings
 from agenticops.models import ChangeRequest, FixExecution, FixPlan, HealthIssue, PipelineEvent, RCAResult, get_db_session
 from agenticops.services import agent_runs
 from agenticops.services import work_phases as wp
+from agenticops.utils.timeutils import as_utc, iso_z
 
 RECENT_HOURS = 24
 RECENT_MAX = 20                 # the agents' work on issues: runs, diagnoses, plans
@@ -35,15 +36,6 @@ UPCOMING_MAX = 5
 GRAPH_BUILD_LIMIT_SECONDS = 1800          # a build takes minutes; one still «running» after this is stuck
 _RUN_IN_FLIGHT = ("pending", "running")
 _AGENT_KIND = {"rca": "diagnosis", "sre": "plan"}
-
-
-def _aware(ts: Optional[datetime]) -> Optional[datetime]:
-    return None if ts is None else (ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc))
-
-
-def _iso(ts: Optional[datetime]) -> Optional[str]:
-    ts = _aware(ts)
-    return None if ts is None else ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _ref(item: Optional[str]) -> Optional[str]:
@@ -59,22 +51,22 @@ def _route(item: Optional[str]) -> Optional[str]:
 def _execution(x) -> dict:
     """The run record behind a run lane (MVP-2.9.0 N9): the page can only stop a run it can name, and says so when
     a person already asked it to stop."""
-    return {"id": x.id, "status": x.status, "stop_requested_at": _iso(x.stop_requested_at),
+    return {"id": x.id, "status": x.status, "stop_requested_at": iso_z(x.stop_requested_at),
             "stop_requested_by": x.stop_requested_by}
 
 
 def _lane(lane_id: str, kind: str, agent: str, title: str, *, now: datetime, basis: str, item: Optional[str] = None,
           account_id: Optional[int] = None, since: Optional[datetime] = None, limit: Optional[float] = None,
           requested_by: Optional[str] = None, route: Optional[str] = None) -> dict:
-    since = _aware(since)
+    since = as_utc(since)
     return {"id": lane_id, "kind": kind, "agent": agent, "item": item, "ref": _ref(item), "title": title,
-            "account_id": account_id, "since": _iso(since), "basis": basis, "requested_by": requested_by,
+            "account_id": account_id, "since": iso_z(since), "basis": basis, "requested_by": requested_by,
             "overdue": bool(since is not None and limit and (now - since).total_seconds() > limit),
             "route": route if route is not None else _route(item)}
 
 
 def _newest(events, issue_id: int, event_type: str) -> Optional[datetime]:
-    times = [_aware(e.created_at) for e in events.get(issue_id, []) if e.event_type == event_type]
+    times = [as_utc(e.created_at) for e in events.get(issue_id, []) if e.event_type == event_type]
     return max((t for t in times if t is not None), default=None)
 
 
@@ -230,7 +222,7 @@ def activity(actor, *, account_id: Optional[int] = None, now: Optional[datetime]
             running.append(_lane(f"G{build_id}", "graph_build", "galaxy", f"build #{build_id} ({trigger})", now=now,
                                  basis="build", since=started_at, limit=GRAPH_BUILD_LIMIT_SECONDS, route="/app/galaxy"))
 
-        upcoming = [{"id": f"S{sc.id}", "kind": "schedule", "agent": "scheduler", "title": sc.name, "at": _iso(sc.next_run_at),
+        upcoming = [{"id": f"S{sc.id}", "kind": "schedule", "agent": "scheduler", "title": sc.name, "at": iso_z(sc.next_run_at),
                      "route": f"/app/schedules/{sc.id}"}
                     for sc in (s.query(Schedule).filter(Schedule.is_enabled.is_(True), Schedule.next_run_at > now)
                                .order_by(Schedule.next_run_at, Schedule.id).limit(UPCOMING_MAX))]
@@ -239,7 +231,7 @@ def activity(actor, *, account_id: Optional[int] = None, now: Optional[datetime]
             issue = mine(issue_id)
             if issue is not None:
                 recent.append({"id": lane_id, "kind": kind, "agent": agent, "item": f"I{issue.id}", "ref": f"I#{issue.id}",
-                               "title": issue.title, "account_id": issue.account_id, "at": _iso(at), "outcome": outcome,
+                               "title": issue.title, "account_id": issue.account_id, "at": iso_z(at), "outcome": outcome,
                                "route": f"/app/issues/{issue.id}"})
 
         for x in ended_runs:
@@ -258,10 +250,10 @@ def activity(actor, *, account_id: Optional[int] = None, now: Optional[datetime]
         schedule_total = ended_jobs.count()
         for ex, schedule in ended_jobs.order_by(ScheduleExecution.completed_at.desc()).limit(RECENT_SCHEDULES_MAX):
             recent.append({"id": f"SE{ex.id}", "kind": "schedule", "agent": "scheduler", "item": None, "ref": None,
-                           "title": schedule.name, "account_id": None, "at": _iso(ex.completed_at),
+                           "title": schedule.name, "account_id": None, "at": iso_z(ex.completed_at),
                            "outcome": "done" if ex.status == "completed" else "failed", "route": f"/app/schedules/{schedule.id}"})
 
     running.sort(key=lambda l: (l["since"] is None, l["since"] or "", l["id"]))      # the longest-running first
     recent.sort(key=newest_first, reverse=True)
     return {"running": running, "upcoming": upcoming, "recent": recent,
-            "recent_total": {"work": work_total, "schedules": schedule_total}, "generated_at": _iso(now)}
+            "recent_total": {"work": work_total, "schedules": schedule_total}, "generated_at": iso_z(now)}

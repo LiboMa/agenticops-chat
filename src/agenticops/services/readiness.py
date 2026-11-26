@@ -17,6 +17,7 @@ from typing import Optional
 from agenticops.config import get_agent_model_config, settings
 from agenticops.services import exec_switches
 from agenticops.models import CloudAccount, ReadinessCheck, get_db_session
+from agenticops.utils.timeutils import iso_z
 
 DETAIL_MAX = 500
 VERIFY_MAX_TOKENS = 16          # all a model verification may spend on output
@@ -35,17 +36,10 @@ def model_subject(model_id: str, region: str) -> str:
     return f"{model_id}@{region}"
 
 
-def _iso(ts: Optional[datetime]) -> Optional[str]:
-    if ts is None:
-        return None
-    ts = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
-    return ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
 def _view(row: Optional[ReadinessCheck]) -> Optional[dict]:
     if row is None:
         return None
-    return {"ok": bool(row.ok), "detail": row.detail or "", "checked_at": _iso(row.checked_at), "checked_by": row.checked_by or ""}
+    return {"ok": bool(row.ok), "detail": row.detail or "", "checked_at": iso_z(row.checked_at), "checked_by": row.checked_by or ""}
 
 
 def _latest(session, kind: str, subject: str) -> Optional[ReadinessCheck]:
@@ -167,7 +161,7 @@ def readiness(actor, *, can_verify: bool) -> dict:
     with get_db_session() as session:
         accounts, model = _accounts(session), _model(session)
     return {"accounts": accounts, "model": model, "execution": _execution(actor), "notifications": _notifications(),
-            "can_verify": bool(can_verify), "generated_at": _iso(datetime.now(timezone.utc))}
+            "can_verify": bool(can_verify), "generated_at": iso_z(datetime.now(timezone.utc))}
 
 
 def _model_failure(exc: BaseException, failure_reason) -> str:

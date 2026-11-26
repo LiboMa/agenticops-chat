@@ -13,6 +13,7 @@ import json
 import logging
 import threading
 from typing import Callable, Optional
+from agenticops.utils.timeutils import as_utc
 
 logger = logging.getLogger(__name__)
 
@@ -148,14 +149,13 @@ def plan_written_since(health_issue_id: int, since) -> bool:
     """Whether a fix plan of the issue was created or rewritten at or after `since` (aware UTC) — what
     save_fix_plan puts on the timeline. True when it cannot be told: a missing record must not read as a failure."""
     try:
-        from datetime import timezone
         from agenticops.models import PipelineEvent, get_db_session
 
         with get_db_session() as session:
             times = [e.created_at for e in session.query(PipelineEvent).filter(
                 PipelineEvent.health_issue_id == health_issue_id,
                 PipelineEvent.event_type.in_(("fix_plan_created", "fix_plan_updated")))]
-        return any((t if t.tzinfo else t.replace(tzinfo=timezone.utc)) >= since for t in times if t is not None)
+        return any(as_utc(t) >= since for t in times if t is not None)
     except Exception:
         logger.debug("plan_written_since(%s) failed", health_issue_id, exc_info=True)
         return True

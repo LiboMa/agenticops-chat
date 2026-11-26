@@ -25,6 +25,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Iterable, Optional
+from agenticops.utils.timeutils import iso_z
 
 
 @dataclass
@@ -40,12 +41,11 @@ class Coverage:
     def as_dict(self) -> dict:
         with self._lock:
             partial = {"truncated": self.truncated, "offloaded": self.offloaded, "failed": self.failed}
-            at = self.read_at if self.read_at.tzinfo else self.read_at.replace(tzinfo=timezone.utc)
             scope = bool(self.accounts or self.regions)
             return {"accounts": sorted(self.accounts), "regions": sorted(self.regions),
                     "completeness": "partial" if any(partial.values()) else "complete" if scope else "none",
                     "partial": partial,
-                    "read_at": at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")}
+                    "read_at": iso_z(self.read_at)}
 
 
 def begin(now: Optional[datetime] = None) -> Coverage:
