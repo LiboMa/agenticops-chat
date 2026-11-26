@@ -10,6 +10,12 @@ ANTHROPIC = "anthropic_compatible"
 KINDS = (OPENAI, ANTHROPIC)
 
 
+def default_preset(kind) -> str:
+    """The preset of a provider added without one: the «Other» preset of its protocol (OpenAI-compatible unless it
+    says Anthropic)."""
+    return "custom_anthropic" if kind == ANTHROPIC else "custom_openai"
+
+
 @dataclass(frozen=True)
 class Preset:
     kind: str

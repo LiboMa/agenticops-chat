@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from agenticops.llm.catalog import ANTHROPIC_REASONING
+from agenticops.llm.presets import ANTHROPIC
 from agenticops.llm.refs import parse_ref
 
 REASONS = ("bedrock_off", "unknown_provider", "provider_disabled", "model_disabled", "unknown_model")
@@ -85,7 +86,7 @@ def build_model(ref: str, *, max_tokens: int, thinking_budget: int = 0, bedrock_
     else:
         cfg, row = resolve(ref)
         extra: dict[str, Any] = {"context_window_limit": row.context_window} if row.context_window else {}
-        if cfg.kind == "anthropic_compatible":
+        if cfg.kind == ANTHROPIC:
             from strands.models.anthropic import AnthropicModel
             params: dict[str, Any] = {}
             if row.reasoning in ANTHROPIC_REASONING and thinking_budget > 0:      # the row's shape, never the name

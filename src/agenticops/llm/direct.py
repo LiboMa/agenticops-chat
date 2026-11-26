@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+from agenticops.llm.presets import ANTHROPIC
+
 
 @dataclass(frozen=True)
 class Reply:
@@ -28,7 +30,7 @@ def send(cfg, model_id: str, prompt: str, *, max_tokens: int, tool: Optional[tup
     args = client_args(cfg, timeout=timeout, max_retries=max_retries)
     sampling = {"temperature": temperature} if temperature is not None else {}
     messages = [{"role": "user", "content": prompt}]
-    if cfg.kind == "anthropic_compatible":
+    if cfg.kind == ANTHROPIC:
         import anthropic
         kwargs: dict = {"model": model_id, "max_tokens": max_tokens, "messages": messages, **sampling}
         if tool:

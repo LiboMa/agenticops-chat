@@ -179,7 +179,8 @@ def llm_db(tmp_path, monkeypatch, name: str = "llm.db"):
 def add_provider(name: str, base_url: str, *, kind: str = "openai_compatible", api_key: str = "",
                  timeout_seconds: int = 30, **extra) -> dict:
     from agenticops.llm import registry
-    preset = "custom_openai" if kind == "openai_compatible" else "custom_anthropic"
+    from agenticops.llm.presets import default_preset
+    preset = default_preset(kind)
     return registry.create({"name": name, "preset": preset, "kind": kind, "base_url": base_url, "api_key": api_key,
                             "timeout_seconds": timeout_seconds, **extra}, ADMIN)
 

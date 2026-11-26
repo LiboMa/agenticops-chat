@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
+from agenticops.llm.presets import ANTHROPIC
+
 logger = logging.getLogger(__name__)
 
 
@@ -77,7 +79,7 @@ def effective_tools(view: ProviderModelView) -> Optional[bool]:
 def list_request(cfg) -> tuple[str, dict]:
     """The URL and headers of a provider's model list — the key in a header, never in the URL."""
     headers = dict(cfg.extra_headers or {})
-    if cfg.kind == "anthropic_compatible":
+    if cfg.kind == ANTHROPIC:
         headers["anthropic-version"] = ANTHROPIC_VERSION
         if cfg.api_key:
             headers["x-api-key"] = cfg.api_key

@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urlparse
 
-from agenticops.llm.presets import KINDS, PRESETS
+from agenticops.llm.presets import KINDS, PRESETS, default_preset
 from agenticops.llm.refs import NAME_RE, RESERVED, parse_ref
 
 ENTITY = "model_provider"
@@ -187,23 +187,34 @@ def list_public() -> list[dict]:
     return out
 
 
-def create(data: dict, actor) -> dict:
-    from agenticops.llm.models import ModelProvider
-    from agenticops.models import get_db_session
+def _check_kind(kind) -> str:
+    if kind not in KINDS:
+        raise ProviderError(422, "invalid_kind", "the protocol is openai_compatible or anthropic_compatible")
+    return kind
+
+
+def _new_provider_fields(data: dict) -> tuple:
+    """The checked fields of a provider that does not exist yet — what `create` stores and `draft_config` tests:
+    (name, preset key, preset, kind, base URL, timeout, extra headers, key). A masked key counts as none."""
     name = _check_name(data.get("name"))
-    preset_key = data.get("preset") or ("custom_anthropic" if data.get("kind") == "anthropic_compatible" else "custom_openai")
+    preset_key = data.get("preset") or default_preset(data.get("kind"))
     preset = PRESETS.get(preset_key)
     if preset is None:
         raise ProviderError(422, "invalid_preset", f"no preset «{preset_key}»")
-    kind = data.get("kind") or preset.kind
-    if kind not in KINDS:
-        raise ProviderError(422, "invalid_kind", "the protocol is openai_compatible or anthropic_compatible")
+    kind = _check_kind(data.get("kind") or preset.kind)
     base_url = _check_base_url(data.get("base_url") if data.get("base_url") is not None else preset.base_url)
     timeout = _check_timeout(data.get("timeout_seconds", 60))
     headers = _check_headers(data.get("extra_headers"))
     api_key = _check_key((data.get("api_key") or "").strip())
     if api_key.startswith(_MASK_PREFIX):
         api_key = ""
+    return name, preset_key, preset, kind, base_url, timeout, headers, api_key
+
+
+def create(data: dict, actor) -> dict:
+    from agenticops.llm.models import ModelProvider
+    from agenticops.models import get_db_session
+    name, preset_key, preset, kind, base_url, timeout, headers, api_key = _new_provider_fields(data)
     with get_db_session() as s:
         if s.query(ModelProvider).filter_by(name=name).first() is not None:
             raise ProviderError(409, "name_taken", f"a provider named «{name}» already exists")
@@ -231,9 +242,7 @@ def update(name: str, data: dict, actor, *, clear_api_key: bool = False) -> dict
         if "display_name" in data and data["display_name"] is not None:
             row.display_name = str(data["display_name"])[:100]
         if "kind" in data and data["kind"] is not None:
-            if data["kind"] not in KINDS:
-                raise ProviderError(422, "invalid_kind", "the protocol is openai_compatible or anthropic_compatible")
-            row.kind = data["kind"]
+            row.kind = _check_kind(data["kind"])
         if "preset" in data and data["preset"] is not None:
             if data["preset"] not in PRESETS:
                 raise ProviderError(422, "invalid_preset", f"no preset «{data['preset']}»")
@@ -294,9 +303,7 @@ def draft_config(data: dict, existing: Optional[str] = None) -> ProviderConfig:
         cfg = get(existing)
         if cfg is None:
             raise ProviderError(404, "not_found", f"no provider «{existing}»")
-        kind = data.get("kind") or cfg.kind
-        if kind not in KINDS:
-            raise ProviderError(422, "invalid_kind", "the protocol is openai_compatible or anthropic_compatible")
+        kind = _check_kind(data.get("kind") or cfg.kind)
         base_url = _check_base_url(data["base_url"]) if data.get("base_url") is not None else cfg.base_url
         timeout = _check_timeout(data["timeout_seconds"]) if data.get("timeout_seconds") is not None else cfg.timeout_seconds
         headers = (_merged_headers(cfg.extra_headers, data["extra_headers"]) if data.get("extra_headers") is not None
@@ -305,20 +312,7 @@ def draft_config(data: dict, existing: Optional[str] = None) -> ProviderConfig:
                               base_url=base_url, api_key=_merged_key(cfg.api_key, data.get("api_key"),
                                                                      bool(data.get("clear_api_key"))),
                               extra_headers=headers, timeout_seconds=timeout, enabled=cfg.enabled)
-    name = _check_name(data.get("name"))
-    preset_key = data.get("preset") or ("custom_anthropic" if data.get("kind") == "anthropic_compatible" else "custom_openai")
-    preset = PRESETS.get(preset_key)
-    if preset is None:
-        raise ProviderError(422, "invalid_preset", f"no preset «{preset_key}»")
-    kind = data.get("kind") or preset.kind
-    if kind not in KINDS:
-        raise ProviderError(422, "invalid_kind", "the protocol is openai_compatible or anthropic_compatible")
-    base_url = _check_base_url(data.get("base_url") if data.get("base_url") is not None else preset.base_url)
-    timeout = _check_timeout(data.get("timeout_seconds", 60))
-    headers = _check_headers(data.get("extra_headers"))
-    api_key = _check_key((data.get("api_key") or "").strip())
-    if api_key.startswith(_MASK_PREFIX):
-        api_key = ""
+    name, preset_key, preset, kind, base_url, timeout, headers, api_key = _new_provider_fields(data)
     from agenticops.llm.models import ModelProvider
     from agenticops.models import get_db_session
     with get_db_session() as s:

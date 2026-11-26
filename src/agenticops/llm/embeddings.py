@@ -20,6 +20,7 @@ import numpy as np
 
 from agenticops.kb.embeddings import EmbeddingClient
 from agenticops.llm import registry
+from agenticops.llm.presets import OPENAI
 
 logger = logging.getLogger(__name__)
 
@@ -110,13 +111,18 @@ def _sqlite_store():
     return store if isinstance(store, SQLiteVectorStore) else None
 
 
+def serves_embeddings(cfg) -> bool:
+    """Only an OpenAI-compatible provider serves embeddings (the Messages API has no embeddings endpoint)."""
+    return cfg is not None and cfg.kind == OPENAI
+
+
 def presets() -> list[dict]:
     """The embedding models that can be chosen: enabled ones of enabled OpenAI-compatible providers."""
     from agenticops.llm import catalog
     out = []
     for p in catalog.all_presets(purpose="embedding"):
         cfg = registry.get(p["provider"])
-        if cfg is not None and cfg.kind == "openai_compatible":
+        if serves_embeddings(cfg):
             out.append(p)
     return out
 
@@ -158,7 +164,7 @@ def set_model(ref: str, actor) -> dict:
                                          extra={"reason": found[0]})
         from agenticops.llm.refs import parse_ref
         cfg = registry.get(parse_ref(ref).provider)
-        if cfg is None or cfg.kind != "openai_compatible":
+        if not serves_embeddings(cfg):
             raise registry.ProviderError(422, "unsupported_kind",
                                          f"«{ref}»: only an OpenAI-compatible provider serves embeddings")
     before = model_ref()
