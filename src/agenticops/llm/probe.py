@@ -38,31 +38,11 @@ def _step(fn, cfg):
 
 
 def _chat(cfg, model_id: str, timeout: int, *, with_tool: bool) -> dict:
-    from agenticops.llm.factory import client_args
-    args = client_args(cfg, timeout=timeout, max_retries=0)
-    if cfg.kind == "anthropic_compatible":
-        import anthropic
-        kwargs: dict = {"model": model_id, "max_tokens": _MAX_TOKENS,
-                        "messages": [{"role": "user", "content": f"Call the {TOOL_NAME} tool now." if with_tool
-                                      else "Reply with the single word: ok"}]}
-        if with_tool:
-            kwargs["tools"] = [{"name": TOOL_NAME, "description": _TOOL_DESCRIPTION,
-                                "input_schema": {"type": "object", "properties": {}}}]
-        resp = anthropic.Anthropic(**args).messages.create(**kwargs)
-        called = any(getattr(b, "type", "") == "tool_use" for b in resp.content)
-        cut = getattr(resp, "stop_reason", None) == "max_tokens"
-    else:
-        import openai
-        kwargs = {"model": model_id, "max_tokens": _MAX_TOKENS,
-                  "messages": [{"role": "user", "content": f"Call the {TOOL_NAME} tool now." if with_tool
-                                else "Reply with the single word: ok"}]}
-        if with_tool:
-            kwargs["tools"] = [{"type": "function", "function": {
-                "name": TOOL_NAME, "description": _TOOL_DESCRIPTION, "parameters": {"type": "object", "properties": {}}}}]
-            kwargs["tool_choice"] = "auto"
-        resp = openai.OpenAI(**args).chat.completions.create(**kwargs)
-        called = bool(resp.choices and resp.choices[0].message.tool_calls)
-        cut = bool(resp.choices) and resp.choices[0].finish_reason == "length"
+    from agenticops.llm.direct import send      # the one place a chat request to a provider is built
+    reply = send(cfg, model_id, f"Call the {TOOL_NAME} tool now." if with_tool else "Reply with the single word: ok",
+                 max_tokens=_MAX_TOKENS, tool=(TOOL_NAME, _TOOL_DESCRIPTION) if with_tool else None,
+                 timeout=timeout, max_retries=0)
+    called, cut = reply.tool_called, reply.truncated
     if with_tool and not called and cut:
         raise catalog.OwnMessage(f"cut at the output limit ({_MAX_TOKENS} tokens) before it called the tool — a model "
                                  "that thinks first may need more: test again, or set «calls tools» by hand")

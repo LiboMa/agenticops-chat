@@ -333,3 +333,17 @@ def test_the_model_list_route_reads_the_provider_off_the_event_loop():
     from agenticops.web.routers import model_providers
     source = inspect.getsource(model_providers.list_models)
     assert "registry.get" not in source.replace("asyncio.to_thread(registry.get", "")
+
+
+def test_a_chat_request_to_another_provider_is_built_in_one_place():
+    """Review of MVP-2.9.0, Standards 2: every direct (non-Strands) chat request to another provider — a single-turn
+    call, the connection test's chat and tool steps — is built by llm/direct.py, the one path whose contract the
+    callers rely on (temperature only where the model takes it, reasoning skipped, an empty or cut reply raised)."""
+    found = []
+    for path in sorted((ROOT / "src" / "agenticops").rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "create":
+                target = ast.unparse(node.func.value)
+                if target.endswith(".messages") or target.endswith(".chat.completions"):
+                    found.append(f"{path.relative_to(ROOT / 'src' / 'agenticops')}:{node.lineno}")
+    assert found and all(f.startswith("llm/direct.py:") for f in found), found
