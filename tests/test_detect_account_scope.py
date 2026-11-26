@@ -91,11 +91,14 @@ def test_a_list_that_fits_has_no_note(db):
     assert "\n[" not in out and len(_listed(out)) == 20
 
 
-def test_an_unbound_cut_list_reads_as_before(db):
+def test_an_unbound_cut_list_says_how_many_too(db):
+    """Unbound, it was cut mid-JSON and said nothing about the rest; since «之后» 13 it is the same whole-row list."""
     from agenticops.tools.metadata_tools import get_managed_resources
     _resources(db, 2, "gl", [("EC2", 53)])
     out = get_managed_resources()
-    assert "showing" not in out and out.endswith("(output truncated, use get_* with specific ID for full details)")
+    shown = _listed(out)
+    assert f"[showing {len(shown)} of 53 managed resources — by type: EC2 53;" in out
+    assert "of this account" not in out and "output truncated" not in out
 
 
 # ── create_health_issue ──────────────────────────────────────────────────────

@@ -130,7 +130,8 @@ def test_a_region_filter_is_the_region_it_ranged_over(db):
 
 
 def test_the_inventory_tools_cap_is_a_cut(db, monkeypatch):
-    """It hands over at most 50 rows and never says there were more: a report built on it is partial."""
+    """It hands over at most 50 rows — a report built on it is partial — and since «之后» 13 it says how many there
+    are (it used to say nothing)."""
     from agenticops.tools import metadata_tools
     from agenticops.tools.metadata_tools import get_managed_resources
     monkeypatch.setattr(metadata_tools, "MAX_LIST_RESULT_CHARS", 10**6)   # the length limit is the test above
@@ -143,7 +144,9 @@ def test_the_inventory_tools_cap_is_a_cut(db, monkeypatch):
     _resource(db, 50)
     db.commit()
     with run_context(coverage=rc.begin(NOW)):
-        assert len(json.loads(get_managed_resources())) == 50          # what the model gets is unchanged
+        out = get_managed_resources()
+        assert len(json.loads(out.split("\n[showing ")[0])) == 50     # the 50 rows, then the line that says so
+        assert "[showing 50 of 51 managed resources — by type: EC2 51;" in out
         assert rc.current().as_dict()["partial"]["truncated"] == 1
 
 
@@ -157,7 +160,8 @@ def test_the_issue_list_says_its_accounts_and_when_it_was_cut(db):
         got = rc.current().as_dict()
         assert (got["accounts"], got["regions"], got["completeness"]) == (["lab", "prod"], [], "complete")
     with run_context(coverage=rc.begin(NOW)):
-        assert len(json.loads(list_health_issues(limit=2))) == 2
+        out = list_health_issues(limit=2)
+        assert len(json.loads(out.split("\n[showing ")[0])) == 2 and "[showing 2 of 3 issues" in out
         assert rc.current().as_dict()["partial"]["truncated"] == 1
 
 
