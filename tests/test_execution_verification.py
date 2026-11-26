@@ -1060,7 +1060,8 @@ def test_the_api_takes_confirmed_checks_and_the_accept_route_is_plain_def(db, qu
     import inspect
     from agenticops.web import app as webapp
     from agenticops.web import deps
-    assert not inspect.iscoroutinefunction(webapp.api_accept_execution)
+    from agenticops.web.routers import runs
+    assert not inspect.iscoroutinefunction(runs.api_accept_execution)
     _, ex_id = _pending_with_a_check(db)
     webapp.app.dependency_overrides[deps.current_actor] = lambda: BOB
     try:
