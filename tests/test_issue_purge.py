@@ -217,10 +217,81 @@ def test_learned_knowledge_is_moved_aside_not_deleted(world):
     assert "general_rule.md" in index and "rca_feedback_issue_1" not in index
 
 
-def test_without_move_knowledge_the_files_stay(world):
+def _vectors(world, *rows):
+    """A case_vectors table (init_db makes it with raw SQL; the test database is created from the models) + rows."""
+    from sqlalchemy import text
+    from agenticops.models import get_engine
+    with get_engine().begin() as conn:
+        conn.execute(text("CREATE TABLE IF NOT EXISTS case_vectors (id INTEGER PRIMARY KEY AUTOINCREMENT, case_id TEXT "
+                          "NOT NULL, field_name TEXT NOT NULL, vector BLOB NOT NULL, resource_type TEXT DEFAULT '', "
+                          "metadata_json TEXT DEFAULT '{}', UNIQUE(case_id, field_name))"))
+        for case_id, field in rows:
+            conn.execute(text("insert into case_vectors (case_id, field_name, vector) values (:c, :f, x'00')"),
+                         {"c": case_id, "f": field})
+
+
+def _vector_ids():
+    from sqlalchemy import text
+    from agenticops.models import get_engine
+    with get_engine().connect() as conn:
+        return sorted(r[0] for r in conn.execute(text("select case_id from case_vectors")))
+
+
+def test_without_move_knowledge_only_what_came_from_an_issue_moves_aside(world):
+    """The owner, 2026-11-26 (review ④): a case or SOP written from an issue names that issue's number, and the
+    reset gives the number to a new issue — so it leaves the knowledge base with its record: its vectors go, its file
+    moves into the backup's knowledge folder. Knowledge from elsewhere and the agent memories stay."""
+    (world["kb"] / "sops" / "from-issue.md").write_text("# SOP from I#1\n")
+    (world["kb"] / "cases" / "case_sample.md").write_text("# a sample case\n")
+    _vectors(world, ("case_20261101_1", "root_cause"), ("from-issue", "root_cause"), ("case_sample", "root_cause"),
+             ("restart-nginx", "root_cause"))
+    planned = dict(issue_purge.purge(dry_run=True).planned)
+    assert planned["case_vectors (from issues)"] == 2 and planned["knowledge files from issues"] == 2
+    report = issue_purge.purge(yes=True)
+    assert _vector_ids() == ["case_sample", "restart-nginx"]
+    dest = Path(report.knowledge_moved_to)
+    assert (dest / "knowledge_base" / "cases" / "case_20261101_1.md").read_text() == "# case of I#1\n"
+    assert (dest / "knowledge_base" / "sops" / "from-issue.md").exists()
+    assert "case_20261101_1.md" in (dest / "MANIFEST.tsv").read_text()
+    assert sorted(p.name for p in (world["kb"] / "cases").iterdir()) == ["case_sample.md"]
+    assert sorted(p.name for p in (world["kb"] / "sops").iterdir()) == ["restart-nginx.md"]
+    assert (world["memory"] / "detect" / "auto_cpu_spike.md").exists()       # memories move only when asked
+    assert _count(SOPRecord, filename="hand-written.md") == 1
+
+
+def test_a_record_pointing_outside_the_knowledge_base_moves_no_file(world, tmp_path):
+    outside = tmp_path / "elsewhere.md"
+    outside.write_text("not ours\n")
+    s = get_session()
+    s.add(CaseStudyRecord(case_id="case_odd", source_issue_id=1, file_path=str(outside)))
+    s.commit(); s.close()
     issue_purge.purge(yes=True)
-    assert (world["kb"] / "cases" / "case_20261101_1.md").exists()
-    assert (world["memory"] / "detect" / "auto_cpu_spike.md").exists()
+    assert outside.exists()
+
+
+def test_a_refused_or_counted_purge_migrates_nothing(world, monkeypatch):
+    """Review ⑤: the CLI ran init_db (the startup migrations — writes) before the refusals; now only a real run does,
+    after its checks, the lock and the backup."""
+    from typer.testing import CliRunner
+    from agenticops.cli.main import app
+    calls = []
+    monkeypatch.setattr("agenticops.models.init_db", lambda: calls.append("init_db"))
+    monkeypatch.setattr("agenticops.cli.main.init_db", lambda: calls.append("cli init_db"))
+    runner = CliRunner()
+    assert runner.invoke(app, ["delete", "issues", "--all"]).exit_code == 1          # no --yes
+    assert runner.invoke(app, ["delete", "issues", "--all", "--dry-run"]).exit_code == 0
+    with pytest.raises(issue_purge.PurgeRefused):
+        issue_purge.purge(yes=False)
+    assert calls == []
+
+
+def test_a_real_purge_migrates_after_the_backup(world, monkeypatch):
+    order = []
+    real_backup = issue_purge._backup
+    monkeypatch.setattr("agenticops.models.init_db", lambda: order.append("init_db"))
+    monkeypatch.setattr(issue_purge, "_backup", lambda *a: (order.append("backup"), real_backup(*a))[1])
+    issue_purge.purge(yes=True)
+    assert order == ["backup", "init_db"]
 
 
 def test_the_cli_refuses_without_all_and_prints_the_counts(world, monkeypatch):
