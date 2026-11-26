@@ -67,7 +67,7 @@ NF.storyPhases = it => {
     const state = allDone ? "done" : i < ci ? "done" : i > ci ? "todo" : closed ? "closed" : bad ? "bad" : "now";
     let html = state === "todo" ? "" : body[id]();
     if (state === "now" && working) html += P`${esc(it.agent ? t("story.agentNow", {task: t(it.agent.taskKey)}) : t("story.handed"))}`;
-    if (state === "closed") html = P`${prov(true)}${t(it.entity === "change" ? "story.rejectedChange" : "story.closed")}` + NF.briefParts.quote(it.myReason, t("who.you") + "　" + NF.clockAt(0) + " UTC");
+    if (state === "closed") html = P`${prov(true)}${t(it.entity === "change" ? "story.rejectedChange" : "story.closed")}` + NF.briefParts.quote(it.myReason, t("who.you") + "　" + when(it.closedH || 0));   // closed just now, or (found by search) when it was
     return { id, state, time: state === "todo" ? null : time[id], who: state === "todo" ? "" : actor[id](), html };
   });
 };
@@ -89,8 +89,8 @@ function render(){
     <div class="statusline"><b>${t(`state.${it.entity}.${state}`)}</b><span class="${waits === "you" ? "wait" : ""}">${t("wait." + waits)}${it.status === "waiting" && !it.snoozed ? "　" + NF.fmtWait(it.waitMin) : ""}</span>
       <span>${acct ? esc(tx(acct.name)) : ""}　${it.region}</span></div>
     ${it.status === "waiting" ? `<p class="ask"><b>${t("ask.lead")}</b>${esc(b.ask(it))}${NF.store.canDecide() ? `　<button class="btn sm" data-do="storyDecide" style="vertical-align:middle"><span class="t">${t("story.goDecide")}</span><kbd>↵</kbd></button>` : ""}</p>` : ""}
-    ${it.status === "closed" && it.entity === "issue" && NF.store.canDecide() && !(NF.store.pending() && NF.store.pending().id === it.id)
-      ? `<p style="margin:10px 0 0"><button class="btn sm" data-do="storyReopen"><span class="t">${t("act.reopen")}</span></button></p>` : ""}
+    <p style="margin:10px 0 0;display:flex;gap:8px;flex-wrap:wrap">${it.status === "closed" && it.entity === "issue" && NF.store.canDecide() && !(NF.store.pending() && NF.store.pending().id === it.id)
+      ? `<button class="btn sm" data-do="storyReopen"><span class="t">${t("act.reopen")}</span></button>` : ""}<button class="btn sm quiet" data-do="storyAsk"><span class="t">${t("act.ask")}</span><kbd>E</kbd></button></p>
     <ol class="spine">${NF.storyPhases(it).map(p => `<li class="${p.state}"><h3>${t("phase." + p.id)}${p.time != null ? `<time>${when(p.time)}</time>` : ""}${p.who ? `<span class="who">${esc(p.who)}</span>` : ""}</h3>${p.html}</li>`).join("")}</ol>`;
   main.scrollTop = keep;
   const notes = it.notes || [];
@@ -113,10 +113,11 @@ Object.assign(NF.on, {
   storyBack: () => { const it = NF.store.get(S.story); if (it && it.status === "waiting") S.cur = it.id; NF.setLens(S.storyFrom || "decide"); },
   storyDecide: () => NF.on.storyBack(),
   storyReopen: () => NF.actions.reopen(NF.store, S.story),
+  storyAsk: () => NF.openChat({ref: S.story}),
 });
 NF.onSubmit.note = form => {
   const it = NF.store.get(S.story), i = form.querySelector("input"), v = i.value.trim(); if (!it || !v || !NF.store.canDecide()) return;
   (it.notes = it.notes || []).push({by: NF.seed.user.name, text: v}); render();
 };
-NF.screens.story = { render, refresh: render, key(e, k){ if (k === "enter"){ e.preventDefault(); NF.on.storyBack(); } } };
+NF.screens.story = { render, refresh: render, key(e, k){ if (k === "enter"){ e.preventDefault(); NF.on.storyBack(); } if (k === "e"){ e.preventDefault(); NF.on.storyAsk(); } } };
 })();

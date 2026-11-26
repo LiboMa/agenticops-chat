@@ -116,6 +116,8 @@ function panels(keepTools){ if (!keepTools) renderTools(); else { renderHits(); 
 function render(){
   const ready = S.view === "ready";
   if (S.want3d){ S.want3d = false; if (ready) setTimeout(() => setView("3d"), 0); }          // the address asked for the 3D view
+  if (S.wantSel && ready){ const n = NF.sky.data.nodes.find(x => x.name === S.wantSel); S.wantSel = null;   // …or one resource (#/world/<name>)
+    if (n){ Object.assign(F, {sel: n, focus: false, pathMode: false, a: null, b: null}); setTimeout(() => fly(n), 0); } else NF.notify(t("world.notFound")); }
   $("#wstate").hidden = ready; ["#wleft", "#legend", "#scrubCard"].forEach(s => { $(s).hidden = !ready; });
   NF.sky.view.blank = !ready; document.body.classList.toggle("view3d", ready && is3d()); NF.sky3.show(ready && is3d());
   if (!ready){
@@ -170,7 +172,7 @@ Object.assign(NF.on, {
   wStep: el => { stop(); setTime(W.stepEvent(NF.store.events, S.hoursAgo, +el.dataset.d)); },
   wPlay: () => play(),
   wNow: () => { stop(); setTime(0); },
-  wAsk: () => { const i = $("#cmd"); i.value = F.sel ? `@${F.sel.name} ` : ""; i.focus(); },
+  wAsk: () => { if (F.sel) NF.openChat({resource: F.sel.name, account: F.sel.account}); },       // a new conversation about this resource
   wView: el => setView(el.dataset.v),
   wFocus: () => { if (!F.sel) return; F.focus = !F.focus; refresh(); },
   wPath: () => pathMode(!F.pathMode),

@@ -111,7 +111,7 @@ function openReject(mode = "reject"){
   $("#rejInput").focus();
 }
 NF.closeReject = () => renderBrief(false);
-const ask = () => { const it = NF.current(), i = $("#cmd"); i.value = it ? `@${it.ref} ` : ""; i.focus(); };
+const ask = () => { const it = NF.current(); if (it) NF.openChat({ref: it.id}); };          // a new conversation about it, its first question written, not sent
 const snooze = () => { const it = NF.current(); if (!it) return; const ref = it.ref; S.cur = null; if (NF.actions.snooze(NF.store, it.id)) NF.notify(t("toast.snoozed", {ref})); };
 
 Object.assign(NF.on, {

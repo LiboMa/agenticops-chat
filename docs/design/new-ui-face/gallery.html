@@ -201,6 +201,51 @@ function render(el, name){
     <div class="toast" style="position:static;transform:none;width:100%"><span class="spark"></span><span class="msg">已撤回，什么都没有发生</span></div>
     <p class="rule">系统的回话只在指令条的位置出现。每个决定都有 5 秒的撤回期；新的决定会让上一个立即生效。</p></div>
 
+  <div class="gsec"><h3>指令条：命令按组，搜索结果带状态（D4）</h3>
+    <div class="sugg" style="position:static;transform:none;width:100%;max-height:none">
+      <div class="sgh">问</div><button role="option" aria-selected="true"><span>问 agent：web</span><kbd>回车</kbd></button>
+      <div class="sgh">问题<small>还有 2 条</small></div>
+      <button role="option"><span class="sref num">I#12</span><span class="stitle">安全组 sg_web 把 SSH（22 端口）开给了整个公网</span><small>方案已出</small></button>
+      <button role="option"><span class="sref num">I#5</span><span class="stitle">web-1 的 /tmp 使用率 95%</span><small class="past">已解决</small></button>
+      <div class="sgh">变更</div><button role="option"><span class="sref num">C#2</span><span class="stitle">给 web 集群加一个 Owner 标签</span><small class="past">已拒绝</small></button>
+      <div class="sgh">资源</div><button role="option"><span class="sref num">sg_web</span><span class="stitle">网络</span></button>
+      <div class="sgh">对 I#12</div><button role="option"><span>去批准（在简报上按住 A）</span><kbd>A</kbd></button><button role="option"><span>忽略它（要写原因）</span><kbd>D</kbd></button></div>
+    <p class="rule">一句话 = 问 agent（开一段新对话，第一句写好、不自动发）；「/」= 命令，只列这个身份能做的；其余是搜索，每组最多 5 条，每条带它现在的状态——已忽略、已解决的事也找得到；「@」只找资源，回车打开 <code>#/world/&lt;资源&gt;</code>。</p></div>
+
+  <div class="gsec"><h3>对话：上下文、工作日志、回答（D4）</h3>
+    <div class="cbar"><span class="ctx"><span class="ref">I#12</span><span>生产账户</span><span class="lock">已锁定</span></span>
+      <label class="sel"><span>模型</span><select><option>Opus 5.5</option></select></label><label class="sel"><span>投入</span><select><option>标准</option></select></label></div>
+    <p class="cnote">这段对话绑定在生产账户：agent 只查、只动这个账户。第一句发出以后不能再换。</p>
+    <div class="you" style="margin-top:10px"><p>sg_web 的 22 端口是谁、什么时候打开的？</p></div>
+    <div class="work live"><div class="wh"><i class="dotlive"></i>正在做 · 第 2 步</div><ol class="lsteps">
+      <li class="done"><div class="sh"><span class="actm">▸</span><span>读 I#12 的诊断和证据</span><small class="num">900 ms</small></div><code class="cmd mono">get_health_issue(I#12)</code></li>
+      <li class="now"><div class="sh">${prov(true)}<span>03:52 UTC deploy-role 调了 AuthorizeSecurityGroupIngress</span></div><code class="cmd mono">cloudtrail lookup-events --event-name AuthorizeSecurityGroupIngress</code></li></ol></div>
+    <details class="work"><summary>5 步 · 41 s</summary></details>
+    <div class="ans"><p>${prov(false)}是部署流水线用的角色 deploy-role 在今天 03:52 UTC 加的。时间和调用方有两条直接的记录；「为了调试」是推断。</p>
+      <figure class="chart"><figcaption>过去 24 小时 · 按级别</figcaption><svg viewBox="0 0 360 150" role="img" aria-label="严重 2，高 5，中 6，低 3"><line class="base" x1="8" x2="352" y1="124" y2="124"/>
+        <g class="col"><path d="M39,124V94Q39,90 43,90H59Q63,90 63,94V124Z"/><text class="v num" x="51" y="84" text-anchor="middle">2</text><text class="xl" x="51" y="141" text-anchor="middle">严重</text></g>
+        <g class="col"><path d="M125,124V43Q125,39 129,39H145Q149,39 149,43V124Z"/><text class="v num" x="137" y="33" text-anchor="middle">5</text><text class="xl" x="137" y="141" text-anchor="middle">高</text></g>
+        <g class="col"><path d="M211,124V26Q211,22 215,22H231Q235,22 235,26V124Z"/><text class="v num" x="223" y="16" text-anchor="middle">6</text><text class="xl" x="223" y="141" text-anchor="middle">中</text></g>
+        <g class="col"><path d="M297,124V77Q297,73 301,73H317Q321,73 321,77V124Z"/><text class="v num" x="309" y="67" text-anchor="middle">3</text><text class="xl" x="309" y="141" text-anchor="middle">低</text></g></svg></figure>
+      <div class="mact"><button class="btn sm quiet"><span class="t">复制</span></button><button class="btn sm quiet"><span class="t">重新回答</span></button><button class="btn sm quiet"><span class="t">存成报告</span></button></div></div>
+    <p class="rule">回答之前做了什么都列在上面：进行中展开，做完收成一行（几步、多久）；${prov(true)} 是代码取到的，${prov(false)} 是模型自己说的，▸ 是 agent 的动作。图只有一个系列时只用一种颜色（<code>--series1</code>，两种主题各自验证过），数值写在柱顶，同样的数字在表里还有一份。「重新回答」只在最后一条、而且那一问没有附件时出现；只读的人看不到「存成报告」。</p></div>
+
+  <div class="gsec"><h3>附件与出错（D4）</h3>
+    <div class="tray"><div class="fcard k-image"><span class="thumb"></span><span class="fmeta"><b>grafana-0603.png</b><small>412 KB · 模型读原件</small></span><button class="x">×</button></div>
+      <div class="fcard k-pdf"><span class="ficon">PDF</span><span class="fmeta"><b>runbook.pdf</b><small>1.8 MB · 模型读取出的文字</small></span><button class="x">×</button></div>
+      <div class="fcard bad k-doc"><span class="ficon">文档</span><span class="fmeta"><b>report.pages</b><small>1.2 MB · 不能附加：只收图片、PDF、Office 文档和文本</small></span><button class="x">×</button></div></div>
+    <p class="mnote">GPT-6 Astra 直接读图片；文档只读里面的文字。</p>
+    <div class="cerr"><b>超时：模型 600 秒没有发回任何东西</b><p>可以把投入调低（现在是「最高」），或者请管理员在 设置 → 模型连接 把等待时间调长。</p><button class="btn sm"><span class="t">再试一次</span></button></div>
+    <div class="cerr"><b>限流：模型这会儿请求太多</b><p>什么都没有做。等半分钟再试；一直这样就换一个模型。</p></div>
+    <p class="rule">同一个文件，换一个模型，说法跟着变：读原件、只读文字、或者不收（红卡，写明原因，留在输入框里直到你去掉）。出错时说清是什么错、该改哪里。</p></div>
+
+  <div class="gsec"><h3>通知历史（D4）</h3>
+    <div class="hist card" style="position:static;width:100%;max-height:none;animation:none"><div class="hhead"><h2>通知</h2><button class="btn sm quiet"><span class="t">关上</span><kbd>Esc</kbd></button></div>
+      <p class="note">提示消失以后还在这里：最近的通知、你做的决定和撤回过的。时间都是 UTC。</p>
+      <ol class="hlist"><li class="undo"><time class="num">06:20 UTC</time><span><b>撤回了：</b>已批准 I#12，5 秒后开始执行</span><button class="btn sm quiet"><span class="t">打开 I#12</span></button></li>
+        <li class="decision"><time class="num">06:19 UTC</time><span><b>你：</b>已批准 I#12，5 秒后开始执行</span></li>
+        <li><time class="num">06:02 UTC</time><span>I#58 做完了，等你验收</span><button class="btn sm quiet"><span class="t">打开 I#58</span></button></li></ol></div></div>
+
   <div class="gsec"><h3>动效</h3><p class="rule" style="margin:0">两档时长：0.12 秒（按下、悬停）和 0.2 秒（面板滑入、内容换页）。只用减速曲线。系统设置了「减少动态效果」时全部关闭，只保留「按住批准」的填充，因为它是确认本身，不是装饰。</p></div>`;
 }
 render(document.getElementById("g-night"), "夜间");

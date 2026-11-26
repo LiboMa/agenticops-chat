@@ -23,10 +23,12 @@
 <script src="data.js"></script>
 <script src="data-situations.js"></script>
 <script src="data-live.js"></script>
+<script src="data-chat.js"></script>
 <script src="i18n.js"></script>
 <script src="proto.js"></script>
 <script src="model-live.js"></script>
 <script src="model-world.js"></script>
+<script src="model-chat.js"></script>
 <script src="screens/briefs-core.js"></script>
 <script src="screens/briefs-recovery.js"></script>
 <script src="screens/briefs-change.js"></script>
@@ -350,6 +352,62 @@ test("事实只有一个出处：简报里说的资源、全景上的环、列�
   eq([sc.ringed.length, sc.quiet.map(i => i.ref), off.length], [8, ["I#934"], 7]);
   eq(sc.ringed.length + sc.quiet.length + off.length, store.waiting().length, "the 16 that wait = 8 with a ring + 1 whose resource is back to normal (it waits for acceptance) + 7 off the map:");
   eq(sc.rings.length - sc.ringed.length, 1, "and one ring is an item an agent is on, not one that waits on you:"); });
+
+/* ── D4: the command bar's results, conversations, the notice history ── */
+const C = NF.chat, groupsOf = r => r.map(g => g.g), rowsOf = (r, g) => (r.find(x => x.g === g) || {rows: []}).rows;
+test("搜索：已经不等你的事也找得到，并说出它现在的状态（已忽略的 I#9 能找回来再打开）", () => { const {store} = fresh();
+  const r = C.search(store, sky.nodes, "I#9", []), i9 = rowsOf(r, "issues")[0];
+  eq([i9.ref, i9.state, i9.open], ["I#9", "state.issue.dismissed", false]); eq(store.get("I9").status, "closed");
+  yes(NF.storyPhases(store.get("I9")).some(p => p.state === "closed"), "its story shows where it was closed");
+  yes(A.reopen(store, "I9")); eq(store.get("I9").status, "handed"); eq(store.counts().all, 16, "the queue is still the 16 that wait:"); });
+test("搜索：分组顺序固定；精确的编号在最前，没结的排在结了的前面", () => { const {store} = fresh();
+  const r = C.search(store, sky.nodes, "web", []); eq(groupsOf(r), C.GROUPS.filter(g => groupsOf(r).includes(g)), "groups in the fixed order:");
+  const issues = rowsOf(r, "issues"); yes(issues.some(i => i.ref === "I#5" && i.state === "state.issue.resolved"), "the resolved I#5 is found");
+  const firstClosed = issues.findIndex(i => !i.open); yes(firstClosed < 0 || issues.slice(firstClosed).every(i => !i.open), "open ones first");
+  eq(rowsOf(r, "changes").map(c => [c.ref, c.state]), [["C#3", "state.change.planned"], ["C#2", "state.change.rejected"]], "the open change before the rejected one:");
+  eq(rowsOf(C.search(store, sky.nodes, "i#12", []), "issues")[0].ref, "I#12"); });
+test("搜索：「@」只给资源；「/」是命令不是搜索；每组最多 5 条，多的说出还有几条", () => { const {store} = fresh();
+  eq(groupsOf(C.search(store, sky.nodes, "@sg", [])), ["resources"]); eq(C.search(store, sky.nodes, "/send", []), []); eq(C.search(store, sky.nodes, "  ", []), []);
+  const res = C.search(store, sky.nodes, "@i-", []).find(g => g.g === "resources"); eq(res.rows.length, 5); yes(res.more > 0, "and says how many more");
+  eq(rowsOf(C.search(store, sky.nodes, "@sg_web", []), "resources")[0].go, {resource: "sg_web"}, "the exact name first, and it opens #/world/sg_web:"); });
+test("搜索：对话也是一组（按标题和问过的话）", () => { const {store, clock} = fresh(), chats = C.createChats(NF.seed, clock);
+  eq(rowsOf(C.search(store, sky.nodes, "22 端口", chats.list), "chats").map(c => c.go.chat), ["c1"]); });
+test("命令清单只列这个身份能做的：只读的人没有决定，也没有 /send_to、/channel", () => { const {store} = fresh(), it = store.get("I12");
+  const w = C.commands("writer", it), v = C.commands("viewer", it), ids = g => g.flatMap(x => x.rows.map(r => r.id));
+  eq(groupsOf(w), ["go", "item", "chat"]); yes(ids(w).includes("primary") && ids(w).includes("close"));
+  eq(groupsOf(v), ["go", "item"]); yes(!ids(v).includes("primary") && !ids(v).includes("close") && !ids(v).some(i => i.startsWith("slash:")));
+  eq(groupsOf(C.commands("writer", null)), ["go", "chat"], "with nothing in front of you there is no «for this one» group:");
+  const done = Object.assign({}, it, {status: "fixed"}); yes(!ids(C.commands("writer", done)).includes("primary"), "nothing to decide on a finished one"); });
+test("草稿按对话各自保存；换来换去不丢；发出后清掉", () => { const {store, clock} = fresh(), chats = C.createChats(NF.seed, clock);
+  chats.setDraft("c1", "一"); chats.setDraft("c2", "二"); eq([chats.draft("c1"), chats.draft("c2"), chats.draft("c3")], ["一", "二", ""]);
+  chats.send(store, chats.get("c2"), chats.draft("c2")); eq([chats.draft("c1"), chats.draft("c2")], ["一", ""]); });
+test("关于一件事开的对话：上下文是它的账户，第一句发出之前可以去掉，发出之后锁定", () => { const {store, clock} = fresh(), chats = C.createChats(NF.seed, clock);
+  const c = chats.open(store, {ref: "I12"}); eq(c.ctx, {ref: "I#12", account: "prod"}); eq(c.turns.length, 0, "nothing is sent by opening it:");
+  yes(!chats.ctxLocked(c)); yes(chats.clearCtx(c)); eq(c.ctx, null);
+  const d = chats.open(store, {ref: "I12"}); chats.send(store, d, "现在怎么样了"); yes(chats.ctxLocked(d)); eq(chats.clearCtx(d), false); eq(d.ctx.account, "prod");
+  eq(chats.open(store, {resource: "sg_web", account: "prod"}).ctx, {resource: "sg_web", account: "prod"}); });
+test("一轮回答：步骤一步一步出来，然后是回答；回答中不能再发；停下后不再有新步骤", () => { const {store, clock} = fresh(), chats = C.createChats(NF.seed, clock);
+  const c = chats.open(store, {ref: "I12"}), tn = chats.send(store, c, "为什么"); yes(tn.running); eq(chats.send(store, c, "又一句"), null, "busy:");
+  clock.advance(NF.STEP_MS); eq(tn.work.length, 1); clock.advance(NF.STEP_MS * 3); eq(tn.running, false); yes(tn.answer && tn.answer.text.includes("I#12"));
+  eq(tn.work.map(s => s.find ? "find" : s.act ? "act" : "model"), ["act", "find", "model"], "each step says where it comes from:");
+  const t2 = chats.send(store, c, "再说一遍"); clock.advance(NF.STEP_MS); yes(chats.stop(c)); const n = t2.work.length;
+  clock.advance(NF.STEP_MS * 5); eq([t2.work.length, t2.stopped, t2.running, t2.answer], [n, true, false, undefined]); });
+test("出错：问所有账户超时；第一次重试被限流；再试才回答", () => { const {store, clock} = fresh(), chats = C.createChats(NF.seed, clock), c = chats.get("c4");
+  c.turns = []; chats.send(store, c, "把所有账户的 IAM 都审一遍"); clock.advance(NF.STEP_MS * 6); eq(c.turns[0].error, "timeout");
+  c.turns = []; chats.send(store, c, "把所有账户的 IAM 都审一遍", [], undefined, {retry: true}); clock.advance(NF.STEP_MS * 6); eq(c.turns[0].error, "throttled");
+  c.turns = []; chats.send(store, c, "把所有账户的 IAM 都审一遍", [], undefined, {retry: true}); clock.advance(NF.STEP_MS * 6); eq(c.turns[0].error, undefined); yes(c.turns[0].answer); });
+test("对话里的命令：写的人得到命令的回答；只读的人被拒绝；都不经过模型", () => { const {store, clock} = fresh(), chats = C.createChats(NF.seed, clock);
+  const a = chats.send(store, chats.open(store), "/send_to ops"); eq([a.running, a.answer.text], [false, NF.t("chat.slash.send_to")]);
+  store.role = "viewer"; const b = chats.send(store, chats.open(store), "/channel x"); eq(b.answer.text, NF.t("chat.slash.readonly")); });
+test("通知历史：提示消失后还在；最新的在最上面；打开后不再算新的", () => { const h = C.createHistory(NF.seed.notices);
+  eq(h.list().map(r => r.vars.ref), ["I#58", "I#934", "I#12", "C#3"]); eq(h.unseen(), 0);
+  h.push({key: "toast.approved", vars: {ref: "I#8"}}); h.push({key: "toast.undone", vars: {ref: "I#8"}, kind: "undo"});
+  eq(h.list().slice(0, 2).map(r => r.key), ["toast.undone", "toast.approved"]); eq(h.unseen(), 2); h.seen(); eq(h.unseen(), 0); });
+test("D4 的示例：不再等的事有自己的状态和「经过」，不进队列，也不进全景的环", () => { const {store} = fresh();
+  eq(store.past.map(i => i.ref + ":" + NF.stateOf(i)), ["I#9:dismissed", "I#5:resolved", "C#2:rejected", "I#37:investigating", "I#63:fix_planned"]);
+  store.past.forEach(i => { yes(NF.storyPhases(i).length === 6, i.ref); yes(!i.run && !i.agent && !i.next, i.ref + " has nothing in flight"); yes(NF.STR.zh[`state.${i.entity}.${NF.stateOf(i)}`], i.ref); });
+  yes(!store.waiting().some(i => store.past.includes(i))); eq(NF.live.lanes(store, NF.seed.runs.map(r => ({...r}))).filter(l => l.itemId && store.past.some(p => p.id === l.itemId)), []);
+  NF.seed.notices.forEach(n => yes(store.get(n.go), n.go + " exists")); NF.seed.chats.forEach(c => yes(!c.ctx || store.get(c.ctx.ref.replace("#", "")), c.id)); });
 
 /* contrast: every text colour on every surface, both themes (WCAG 2 formula) */
 function contrastRows(theme){

@@ -58,12 +58,17 @@
       <input type="range" id="scrub" min="0" max="240" value="240">
     </div>
   </section>
+
+  <section class="view" id="chat" hidden>
+    <aside class="chatlist" id="chatList"></aside>
+    <article class="convo card" id="convo" aria-label="对话"></article>
+  </section>
 </main>
 
 <div class="sugg" id="sugg" hidden role="listbox"></div>
-<div class="sheet" id="sheet" hidden></div>
 <aside class="peek" id="peek" hidden></aside>
 <div class="toast" id="toast" hidden role="status"></div>
+<aside class="hist card" id="hist" hidden role="dialog" aria-label="通知"></aside>
 <div id="tip" hidden></div>
 
 <div class="barwrap">
@@ -76,10 +81,12 @@
 <script src="data.js"></script>
 <script src="data-situations.js"></script>
 <script src="data-live.js"></script>
+<script src="data-chat.js"></script>
 <script src="i18n.js"></script>
 <script src="proto.js"></script>
 <script src="model-live.js"></script>
 <script src="model-world.js"></script>
+<script src="model-chat.js"></script>
 <script src="screens/sky.js"></script>
 <script src="screens/sky3d.js"></script>
 <script src="screens/briefs-core.js"></script>
@@ -89,6 +96,7 @@
 <script src="screens/story.js"></script>
 <script src="screens/live.js"></script>
 <script src="screens/world.js"></script>
+<script src="screens/chat.js"></script>
 <script src="screens/command.js"></script>
 <script>NF.start();</script>
 </body>

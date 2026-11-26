@@ -43,13 +43,15 @@ NF.GROUPS = ["approval", "acceptance", "confirm", "failed"];
 
 NF.createStore = function(seed, clock){
   const items = JSON.parse(JSON.stringify(seed.items)).map(i => Object.assign(i, {status: "waiting", rev: 0}));
+  const past = JSON.parse(JSON.stringify(seed.past || [])).map(i => Object.assign(i, {rev: 0}));   // no longer waiting: found again by search, never in the queue
   const events = seed.events.map(e => ({...e}));
   const listeners = new Set();
   let pending = null, seq = 0;                 // the one decision still inside its undo window
   let runSeq = 47;                             // the sample data's runs end at #47
   const store = {
-    items, events, role: "writer", notice(){},
-    get: id => items.find(i => i.id === id),
+    items, past, events, role: "writer", notice(){},
+    get: id => items.find(i => i.id === id) || past.find(i => i.id === id),
+    all: () => items.concat(past),
     on(fn){ listeners.add(fn); return () => listeners.delete(fn); },
     emit(){ listeners.forEach(fn => fn()); },
     canDecide: () => store.role !== "viewer",
@@ -185,17 +187,21 @@ NF.renderTop = () => {
   const c = NF.store.counts(), n = S.view === "failed" ? "—" : S.view === "loading" ? "…" : S.view === "empty" ? 0 : c.all;
   const running = S.view !== "ready" || !NF.live ? "" : NF.live.lanes(NF.store, NF.runs).filter(l => l.group === "running").length;   // how many things agents are doing now
   const from = S.lens === "story" ? (S.storyFrom || "decide") : S.lens;
-  $("#lens").innerHTML = ["decide", "live", "world"].map((l, i) =>
+  $("#lens").innerHTML = ["decide", "live", "world", "chat"].map((l, i) =>
     `<button role="tab" data-do="lens" data-lens="${l}" aria-selected="${from === l}"><span class="n">${i + 1}</span>${NF.t("lens." + l)}${l === "decide" ? `<b class="cnt num">${n}</b>` : l === "live" && running ? `<b class="cnt run num">${running}</b>` : ""}</button>`).join("");
   $("#pulse").innerHTML = `<span class="lbl">${NF.t("pulse.label")}</span>`
     + [12, 6, 3, 1].map(h => `<span class="hm" style="left:${NF.pulseX(h)}%">${h}h</span>`).join("")
     + NF.store.events.map(e => `<i class="tick ${e.k}" style="left:${NF.pulseX(e.h)}%" data-tip="${NF.clockAt(e.h)}　${NF.esc(NF.eventText(e))}"></i>`).join("")
     + `<span class="now" title="${NF.t("pulse.now", {t: NF.clockAt(0)})}"></span>`;
   $("#pulse").setAttribute("aria-label", NF.t("pulse.label"));
+  const unseen = NF.history ? NF.history.unseen() : 0;
   $("#who").innerHTML = `<button class="chip-btn scope" data-do="scope">${NF.t("scope.all")}</button>`
-    + `<button class="chip-btn" data-do="theme" aria-label="${NF.t("theme.toggle")}">${NF.t("theme." + S.theme)}</button>`
+    + `<button class="chip-btn bell" data-do="history" aria-expanded="${!!$("#hist") && !$("#hist").hidden}" aria-label="${NF.t(unseen ? "hist.openN" : "hist.open", {n: unseen})}"><span class="wide">${NF.t("hist.short")}</span><svg class="ico narrow" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.2a4 4 0 0 0-4 4v2.6L2.8 11h10.4L12 8.8V6.2a4 4 0 0 0-4-4ZM6.5 12.6a1.6 1.6 0 0 0 3 0"/></svg>${unseen ? `<b class="num">${unseen}</b>` : ""}</button>`
+    + `<button class="chip-btn" data-do="theme" aria-label="${NF.t("theme.toggle")}"><span class="wide">${NF.t("theme." + S.theme)}</span><span class="narrow" aria-hidden="true">◐</span></button>`
     + `<button class="chip-btn" data-do="help" aria-label="${NF.t("keys.open")}">?</button>`
     + `<button class="avatar" aria-label="${NF.t("account")}">${NF.seed.user.initials}</button>`;
+  if ($("#hist")) $("#hist").setAttribute("aria-label", NF.t("hist.title"));
+  if ($("#convo")) $("#convo").setAttribute("aria-label", NF.t("lens.chat"));
   $("#cmd").placeholder = NF.t("cmd.placeholder"); $("#cmd").setAttribute("aria-label", NF.t("cmd.label"));
   document.documentElement.lang = S.lang === "zh" ? "zh-CN" : "en";
 };
@@ -206,8 +212,11 @@ NF.stateBlock = (view, failKey = "state.failed.p") => view === "loading"        
   : `<div class="state failed" role="alert"><div class="big">${NF.t("state.failed")}</div><p>${NF.t(failKey, {t: NF.clockAt(S.lastOk)})}</p><p><button class="btn" data-do="retry"><span class="t">${NF.t("state.retry")}</span></button></p></div>`;
 
 NF.setLens = l => {
-  S.lens = l; NF.closePeek && NF.closePeek(); NF.closeSheet && NF.closeSheet();
-  ["decide", "live", "world", "story"].forEach(x => { $("#" + x).hidden = x !== l; });
+  /* where Esc goes back to: the lens it came from — a story too, unless that story was itself opened from the chat (no ping-pong) */
+  if (l === "chat" && S.lens !== "chat" && !(S.lens === "story" && S.storyFrom === "chat")) S.chatFrom = S.lens;
+  S.lens = l; NF.closePeek && NF.closePeek();
+  ["decide", "live", "world", "story", "chat"].forEach(x => { $("#" + x).hidden = x !== l; });
+  document.body.classList.toggle("in-chat", l === "chat");
   if (l !== "world"){ S.hoursAgo = 0; if (NF.screens.world && NF.screens.world.leave) NF.screens.world.leave(); }
   NF.render(true);
 };
@@ -218,15 +227,19 @@ NF.render = swap => {
   NF.syncHash();
 };
 NF.syncHash = () => {
-  const h = S.lens === "story" ? "#/story/" + S.story : S.lens === "decide" && S.cur ? "#/decide/" + S.cur : S.lens === "live" && S.liveSel ? "#/live/" + S.liveSel : S.lens === "world" && S.world && S.world.view === "3d" ? "#/world/3d" : "#/" + S.lens;
+  const W = S.world || {};
+  const h = S.lens === "story" ? "#/story/" + S.story : S.lens === "decide" && S.cur ? "#/decide/" + S.cur : S.lens === "live" && S.liveSel ? "#/live/" + S.liveSel
+    : S.lens === "world" && W.sel && !W.pathMode ? "#/world/" + W.sel.name : S.lens === "world" && W.view === "3d" ? "#/world/3d"
+    : S.lens === "chat" && S.chatId ? "#/chat/" + S.chatId : "#/" + S.lens;
   if (location.hash !== h) history.replaceState(null, "", h);
 };
 NF.readHash = () => {
-  const m = /^#\/(decide|live|world|story)(?:\/([\w-]+))?$/.exec(location.hash); if (!m) return;
+  const m = /^#\/(decide|live|world|story|chat)(?:\/([\w-]+))?$/.exec(location.hash); if (!m) return;
   const it = m[2] && NF.store.get(m[2]);
   if (m[1] === "story"){ if (it){ S.lens = "story"; S.story = it.id; } return; }
   S.lens = m[1]; if (m[1] === "live"){ if (m[2]){ S.liveSel = m[2]; S.liveOpen = true; } return; }
-  if (m[1] === "world"){ S.want3d = m[2] === "3d"; return; }
+  if (m[1] === "world"){ S.want3d = m[2] === "3d"; S.wantSel = m[2] && m[2] !== "3d" ? m[2] : null; return; }   // #/world/<resource name> opens on it
+  if (m[1] === "chat"){ S.chatId = m[2] && NF.chats && NF.chats.get(m[2]) ? m[2] : null; return; }
   if (it) S.cur = it.id;
 };
 
@@ -238,10 +251,27 @@ NF.syncToast = () => {
   if (p){
     if (p.seq === shownSeq) return;
     shownSeq = p.seq; clearTimeout(noticeTimer); noticeTimer = null;
+    NF.remember({label: p.label, go: p.id, kind: "decision"});
     el.className = "toast"; void el.offsetWidth; el.className = "toast count";
     el.innerHTML = `<span class="spark" aria-hidden="true"></span><span class="msg">${NF.esc(labelOf(p.label))}</span><button data-do="undo">${NF.t("undo")}<kbd>Z</kbd></button><i class="cd"></i>`;
     el.hidden = false;
   } else if (shownSeq){ shownSeq = 0; if (!noticeTimer) el.hidden = true; }
+};
+/* the notice history: what the toasts said, kept after they are gone (newest first) */
+NF.remember = entry => { if (!NF.history) return; NF.history.push(entry); NF.renderTop(); if (!$("#hist").hidden) NF.renderHistory(); };
+NF.renderHistory = () => {
+  const rows = NF.history.list();
+  $("#hist").innerHTML = `<div class="hhead"><h2>${NF.t("hist.title")}</h2><button class="btn sm quiet" data-do="history"><span class="t">${NF.t("hist.close")}</span><kbd>Esc</kbd></button></div>
+    <p class="note">${NF.t("hist.p")}</p>
+    ${rows.length ? `<ol class="hlist">${rows.map(r => { const it = r.go && NF.store.get(r.go);
+      return `<li class="${r.kind || "notice"}"><time class="num">${NF.clockAt(r.h)} UTC</time><span>${r.kind === "undo" ? `<b>${NF.t("hist.undone")}</b>` : r.kind === "decision" ? `<b>${NF.t("hist.you")}</b>` : ""}${NF.esc(r.key ? NF.t(r.key, r.vars) : labelOf(r.label))}</span>
+        ${it ? `<button class="btn sm quiet" data-do="histGo" data-go="${it.id}"><span class="t">${NF.t("hist.go", {ref: it.ref})}</span></button>` : ""}</li>`; }).join("")}</ol>`
+      : `<p class="note">${NF.t("hist.none")}</p>`}`;
+};
+NF.toggleHistory = open => {
+  const el = $("#hist"); el.hidden = open === undefined ? !el.hidden : !open;
+  if (!el.hidden){ NF.history.seen(); NF.renderHistory(); el.querySelector("button").focus(); }
+  NF.renderTop();
 };
 NF.notify = text => {
   if (NF.store.pending()) return;                      // a plain line never covers an undo window
@@ -252,15 +282,16 @@ NF.notify = text => {
 NF.undo = () => {                                 // what was taken back comes back into view
   const p = NF.store.pending(); if (!p) return;
   S.cur = p.id; NF.store.undo(); NF.notify(NF.t("toast.undone"));
+  NF.remember({label: p.label, go: p.id, kind: "undo"});
 };
 
 NF.setTheme = th => { S.theme = th; document.body.dataset.theme = th; NF.sky && NF.sky.recolor(); NF.renderTop(); };
 NF.openHelp = () => {
   const K = (...ks) => ks.map(k => `<kbd>${k}</kbd>`).join("");
   const rows = [[K("J", "K"), "help.move"], [K("A"), "help.primary"], [K("R"), "help.reject"], [K("D"), "help.close"], [K("E"), "help.ask"], [K("S"), "help.snooze"],
-                [K(NF.t("key.space")), "help.peek"], [K("X"), "help.tick"], [K("Y", "P", "N", "M"), "help.verdict"], [K("1", "2", "3"), "help.lens"],
+                [K(NF.t("key.space")), "help.peek"], [K("X"), "help.tick"], [K("Y", "P", "N", "M"), "help.verdict"], [K("1", "2", "3", "4"), "help.lens"],
                 [K("/"), "help.cmd"], [K("Z"), "help.undo"], [K("T"), "help.theme"],
-                [K("E", "A"), "help.live"], [K("F", "P", "[", "]", "0"), "help.world"], [K("V", "G", "L", "H"), "help.world2"]];
+                [K("E", "A"), "help.live"], [K("↵"), "help.chat"], [K("F", "P", "[", "]", "0"), "help.world"], [K("V", "G", "L", "H"), "help.world2"]];
   $("#help").innerHTML = `<div class="dialog" role="dialog" aria-modal="true" aria-label="${NF.t("keys.open")}"><h2>${NF.t("help.title")}</h2><p>${NF.t("help.p")}</p>
     <div class="keys">${rows.map(r => `<div>${r[0]}<span>${NF.t(r[1])}</span></div>`).join("")}</div>
     <p style="margin-top:14px">${NF.prov(true)}${NF.t("prov.code")}　${NF.prov(false)}${NF.t("prov.model")}。${NF.t("help.prov")}</p>
@@ -285,7 +316,9 @@ NF.renderDev = () => {
 NF.boot = () => {
   NF.store = NF.createStore(NF.seed, NF.realClock);
   NF.store.role = S.role;
-  NF.store.notice = (key, vars) => NF.notify(NF.t(key, vars));
+  NF.store.notice = (key, vars) => { NF.remember({key, vars, go: vars && vars.ref ? vars.ref.replace("#", "") : null}); NF.notify(NF.t(key, vars)); };
+  NF.chats = NF.chat ? NF.chat.createChats(NF.seed, NF.realClock) : null;
+  NF.history = NF.chat ? NF.chat.createHistory(NF.seed.notices) : null;
   NF.store.on(() => { NF.syncToast(); NF.renderTop(); const scr = NF.screens[S.lens]; if (scr && scr.refresh) scr.refresh(); NF.sky && NF.sky.aim(); });
   NF.runs = JSON.parse(JSON.stringify(NF.seed.runs));
 };
@@ -294,6 +327,9 @@ Object.assign(NF.on, {
   lens: el => NF.setLens(el.dataset.lens),
   theme: () => NF.setTheme(S.theme === "night" ? "day" : "night"),
   help: () => NF.openHelp(), helpClose: () => { $("#help").hidden = true; },
+  history: () => NF.toggleHistory(),
+  histGo: el => { const it = NF.store.get(el.dataset.go); NF.toggleHistory(false); if (!it) return;
+    if (it.status === "waiting"){ S.cur = it.id; S.filter = "all"; S.onlyCritical = false; NF.setLens("decide"); } else NF.openStory(it.id); },
   scope: () => NF.notify(NF.t("scope.only")),
   undo: () => NF.undo(),
   retry: () => { S.view = "ready"; NF.renderDev(); NF.render(true); },
@@ -306,7 +342,7 @@ Object.assign(NF.on, {
   },
   devMap: el => { S.mapSize = +el.dataset.v; NF.sky.rebuild(S.mapSize); if (S.world) Object.assign(S.world, {sel: null, focus: false, pathMode: false, a: null, b: null}); NF.renderDev(); NF.render(true); },
   devReset: () => {
-    NF.boot(); S.cur = null; S.curIdx = 0; S.filter = "all"; S.onlyCritical = false; S.view = "ready"; S.hoursAgo = 0; S.liveSel = null; S.liveOpen = false; S.mapSize = 0;
+    NF.boot(); S.chatId = null; S.cur = null; S.curIdx = 0; S.filter = "all"; S.onlyCritical = false; S.view = "ready"; S.hoursAgo = 0; S.liveSel = null; S.liveOpen = false; S.mapSize = 0;
     if (S.world) Object.assign(S.world, {q: "", account: "", type: "", onlyAbnormal: false, sel: null, focus: false, pathMode: false, a: null, b: null, playing: false});
     NF.sky.rebuild(); $("#toast").hidden = true; NF.renderDev(); NF.render(true);
   },
@@ -325,13 +361,14 @@ NF.start = () => {
     if (e.key === "Escape"){
       if (!$("#help").hidden){ $("#help").hidden = true; return; }
       if (!$("#devpop").hidden){ $("#devpop").hidden = true; return; }
+      if (!$("#hist").hidden){ NF.toggleHistory(false); return; }
       if (S.peek){ NF.closePeek(); return; }
-      if (!$("#sheet").hidden){ NF.closeSheet(); return; }
       if (S.rejecting){ NF.closeReject(); return; }
       if (inField){ document.activeElement.blur(); return; }
       if (S.lens === "story") NF.on.storyBack();
       else if (S.lens === "world") NF.screens.world.esc();
       else if (S.lens === "live" && S.liveOpen) NF.on.laneBack();
+      else if (S.lens === "chat") NF.screens.chat.esc();
       return;
     }
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k"){ e.preventDefault(); cmd.focus(); return; }
@@ -343,6 +380,7 @@ NF.start = () => {
     if (k === "1") return NF.setLens("decide");
     if (k === "2") return NF.setLens("live");
     if (k === "3") return NF.setLens("world");
+    if (k === "4") return NF.setLens("chat");
     if (k === "t") return NF.setTheme(S.theme === "night" ? "day" : "night");
     if (k === "z") return NF.undo();
     const scr = NF.screens[S.lens]; if (scr && scr.key) scr.key(e, k);
@@ -353,6 +391,7 @@ NF.start = () => {
   NF.screens.command && NF.screens.command.init();
   NF.screens.world && NF.screens.world.init && NF.screens.world.init();
   NF.screens.live && NF.screens.live.init && NF.screens.live.init();
+  NF.screens.chat && NF.screens.chat.init();
   NF.renderDev();
   setInterval(() => { const f = $("#devFps"); if (f && !$("#devpop").hidden) f.textContent = NF.t("dev.fps", {n: NF.sky.fps, ms: NF.sky.drawMs.toFixed(1)}); }, 1000);
   NF.setLens(S.lens);
