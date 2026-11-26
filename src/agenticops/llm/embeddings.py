@@ -76,7 +76,7 @@ def _stored() -> dict:
 
 def model_ref() -> str:
     """The embedding model reference in use ("" = Titan on Bedrock, while Bedrock is on)."""
-    return registry._raw(FIELD)
+    return registry.raw_value(FIELD)
 
 
 def current_model() -> str:

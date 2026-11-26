@@ -872,11 +872,15 @@ def _checked_model_updates(body: dict):
             found = model_settings.problem(str(cfg["model_id"]).strip())
             if found:
                 return _model_refusal(f"agent_models.{name}", *found)
-    galaxy = body.get("galaxy_model_id")
-    if galaxy:
-        found = model_settings.problem(str(galaxy).strip())
-        if found:
-            return _model_refusal("galaxy_model_id", *found)
+    # The Galaxy model by its older top-level key (the General tab's Galaxy card): the same setting, the same checks
+    # and the same write as model_settings.galaxy — and it wins when a request carries both, as it always did
+    if "galaxy_model_id" in body:
+        galaxy = str(body.get("galaxy_model_id") or "").strip()
+        if galaxy:
+            found = model_settings.problem(galaxy)
+            if found:
+                return _model_refusal("galaxy_model_id", *found)
+        updates["galaxy_model_id"] = galaxy
     return updates
 
 
@@ -893,8 +897,8 @@ async def api_update_settings(request: Request, body: dict = Body(...), current:
         await asyncio.to_thread(_audit_low_impact, before, _low_impact_values(body), current)
 
 
-def _apply_validated_settings(body: dict, current: Actor, model_updates: dict, galaxy_val: Optional[str],
-                              change_updates: dict, exec_updates: dict, keys: dict) -> None:
+def _apply_validated_settings(body: dict, current: Actor, model_updates: dict, change_updates: dict,
+                              exec_updates: dict, keys: dict) -> None:
     """The half of PATCH /api/settings that reads and writes storage — settings.yaml, the audit rows, the stored
     switches. A plain function: `_apply_settings` runs it in a worker thread, so the ONE process's event loop (every
     chat stream) never waits on a file or the database (review of MVP-2.9.0, Standards 3). The order, the
@@ -982,18 +986,12 @@ def _apply_validated_settings(body: dict, current: Actor, model_updates: dict, g
         save_to_yaml(acp_yaml)
         _chat_sessions.clear()
 
-    # The model settings beside the agents' own (N35) — checked above; in memory, then the yaml
+    # The model settings beside the agents' own (N35), the Galaxy model too — checked above; in memory, then the yaml
     if model_updates:
         for field, val in model_updates.items():
             setattr(settings, field, val)
         save_to_yaml(model_updates)
         _chat_sessions.clear()
-
-    # Galaxy build model override — persist to YAML. "" = use bedrock_model_id_cheap.
-    # A non-empty value must be a known preset (same guard as agent model_id would get).
-    if galaxy_val is not None:                       # checked above, with every other model value
-        settings.galaxy_model_id = galaxy_val
-        save_to_yaml({"galaxy_model_id": galaxy_val})
 
     # Security toggles — last. One audit row per changed value, then the ONE yaml write, inside one session: a
     # yaml failure rolls the rows back, and a commit that fails after the write puts the old values back in the
@@ -1100,9 +1098,10 @@ async def _apply_settings(request: Request, body: dict, current: Actor):
     model_updates = await asyncio.to_thread(_checked_model_updates, body)
     if isinstance(model_updates, JSONResponse):
         return model_updates
-    # … and the Galaxy model's own, stricter check (one of the listed models) too — it used to run after the other
-    # model settings had been written, so a request refused here had already changed them (review of 2.9.0, Spec ⑥)
-    galaxy_val = str(body.get("galaxy_model_id") or "") if "galaxy_model_id" in body else None
+    # … and the Galaxy model's own, stricter check (one of the listed models) too, whichever key carries it — it used
+    # to run after the other model settings had been written, so a request refused here had already changed them
+    # (review of 2.9.0, Spec ⑥), and only on the top-level key (②)
+    galaxy_val = (model_updates or {}).get("galaxy_model_id")
     if galaxy_val and galaxy_val not in await asyncio.to_thread(_allowed_model_ids):  # may list Bedrock models
         raise HTTPException(400, f"Unknown galaxy_model_id: {galaxy_val}")
     # a switch this process's environment holds at its strict value cannot be changed here (review, N27)
@@ -1111,7 +1110,7 @@ async def _apply_settings(request: Request, body: dict, current: Actor):
         return JSONResponse(status_code=409, content={
             "detail": exec_switches.held_message(held), "code": "held_by_environment", "fields": held})
 
-    await asyncio.to_thread(_apply_validated_settings, body, current, model_updates or {}, galaxy_val,
+    await asyncio.to_thread(_apply_validated_settings, body, current, model_updates or {},
                             change_updates, exec_updates,
                             {"bool": BOOL_KEYS, "report_str": REPORT_STR_KEYS, "report_int": REPORT_INT_KEYS})
     return await asyncio.to_thread(api_get_settings)  # it may list Bedrock models

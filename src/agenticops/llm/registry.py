@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from urllib.parse import urlparse
 
+from agenticops.config import AGENT_NAMES
 from agenticops.llm.presets import KINDS, PRESETS, default_preset
 from agenticops.llm.refs import NAME_RE, RESERVED, parse_ref
 
@@ -136,7 +137,7 @@ def _key_change(had: bool, has: bool, replaced: bool) -> str:
     return "kept" if had else "none"
 
 
-def _audit(session, action: str, name: str, actor, *, before=None, after=None, details=None) -> None:
+def audit(session, action: str, name: str, actor, *, before=None, after=None, details=None) -> None:
     from agenticops.audit.service import AuditService
     AuditService.log(action, ENTITY, name, entity_name=name, actor=getattr(actor, "key", None),
                      user_id=getattr(actor, "user_id", None), details=details, old_values=before,
@@ -225,7 +226,7 @@ def create(data: dict, actor) -> dict:
         s.add(row)
         s.flush()
         after = _snapshot(row)
-        _audit(s, "create", name, actor, after=after, details={"key_change": _key_change(False, bool(api_key), bool(api_key))})
+        audit(s, "create", name, actor, after=after, details={"key_change": _key_change(False, bool(api_key), bool(api_key))})
     reset_cache()
     return {**after, "has_api_key": bool(api_key)}
 
@@ -253,7 +254,7 @@ def update(name: str, data: dict, actor, *, clear_api_key: bool = False) -> dict
             row.timeout_seconds = _check_timeout(data["timeout_seconds"])
         if "enabled" in data and data["enabled"] is not None and bool(data["enabled"]) != bool(row.enabled):
             if not data["enabled"]:
-                _refuse_in_use(name)
+                refuse_in_use(name)
             row.enabled = bool(data["enabled"])
         replaced = _key_replaced(data.get("api_key"))
         secrets["api_key"] = _merged_key(secrets.get("api_key") or "", data.get("api_key"), clear_api_key)
@@ -264,7 +265,7 @@ def update(name: str, data: dict, actor, *, clear_api_key: bool = False) -> dict
         row.updated_by = getattr(actor, "key", None)
         s.flush()
         after = _snapshot(row)
-        _audit(s, "update", name, actor, before=before, after=after,
+        audit(s, "update", name, actor, before=before, after=after,
                details={"key_change": _key_change(had_key, bool(secrets.get("api_key")), replaced and not clear_api_key)})
         has_key = bool(secrets.get("api_key"))
     reset_cache()
@@ -329,29 +330,42 @@ def set_enabled(name: str, enabled: bool, actor) -> dict:
 def delete(name: str, actor) -> None:
     from agenticops.llm.models import ProviderModel
     from agenticops.models import get_db_session
-    _refuse_in_use(name)
+    refuse_in_use(name)
     with get_db_session() as s:
         row = _row(s, name)
         before = _snapshot(row)
         had_key = bool(_plain_secrets(row).get("api_key"))
         s.query(ProviderModel).filter_by(provider=name).delete(synchronize_session=False)
         s.delete(row)
-        _audit(s, "delete", name, actor, before=before, details={"key_change": "removed" if had_key else "none"})
+        audit(s, "delete", name, actor, before=before, details={"key_change": "removed" if had_key else "none"})
     reset_cache()
 
 
 # ── what uses a provider ──────────────────────────────────────────────────────
 
-# the settings that hold a model reference, in the order they are reported
-AGENT_MODEL_FIELDS = tuple(f"agent_{a}_model_id" for a in ("main", "scan", "detect", "rca", "sre", "executor", "reporter"))
-TIER_FIELDS = ("bedrock_model_id", "bedrock_model_id_cheap", "bedrock_model_id_strong")
-CHEAP_DEFAULT_FIELDS = ("galaxy_model_id", "security_model_id", "report_translation_model_id",
-                        "signal_gate_llm_model", "rca_critic_model_id")
-MODEL_SETTING_FIELDS = AGENT_MODEL_FIELDS + TIER_FIELDS + ("executor_simple_model_id",) + CHEAP_DEFAULT_FIELDS
+# The settings that hold a model reference, in the order they are checked and reported: the agents' own, then the
+# nine beside them by the name /api/settings uses (`model_settings`) — the three tiers, the executor's smart model,
+# and the five direct callers that fall back to the cheap tier. The ONE list (review of 2.9.0, ②).
+AGENT_MODEL_FIELDS = tuple(f"agent_{a}_model_id" for a in AGENT_NAMES)
+MODEL_SETTINGS = {
+    "tier_default": "bedrock_model_id",
+    "tier_cheap": "bedrock_model_id_cheap",
+    "tier_strong": "bedrock_model_id_strong",
+    "executor_simple": "executor_simple_model_id",
+    "security": "security_model_id",
+    "report_translation": "report_translation_model_id",
+    "signal_gate": "signal_gate_llm_model",
+    "rca_critic": "rca_critic_model_id",
+    "galaxy": "galaxy_model_id",
+}
+TIER_FIELDS = tuple(MODEL_SETTINGS[k] for k in ("tier_default", "tier_cheap", "tier_strong"))
+SMART_MODEL_FIELD = MODEL_SETTINGS["executor_simple"]
+CHEAP_DEFAULT_FIELDS = tuple(f for f in MODEL_SETTINGS.values() if f not in TIER_FIELDS and f != SMART_MODEL_FIELD)
+MODEL_SETTING_FIELDS = AGENT_MODEL_FIELDS + tuple(MODEL_SETTINGS.values())
 EMBEDDING_FIELD = "embedding_model_ref"
 
 
-def _raw(field_name: str) -> str:
+def raw_value(field_name: str) -> str:
     from agenticops.config import settings
     if field_name == EMBEDDING_FIELD:
         from agenticops.services import runtime_settings
@@ -361,24 +375,34 @@ def _raw(field_name: str) -> str:
     return str(getattr(settings, field_name, "") or "")
 
 
-def effective_value(field_name: str) -> str:
-    """What a model setting resolves to: its own value, or the default it falls back to when empty."""
+def fallback(field_name: str) -> Optional[str]:
+    """What an empty value of a model setting means — the one rule: an agent runs on its resolved model (its tier),
+    the smart model on the executor's own, the five direct callers on the cheap tier; None for a tier, which cannot
+    be empty."""
     from agenticops.config import get_agent_model_config, settings
-    raw = _raw(field_name)
-    if raw:
-        return raw
+    if field_name in TIER_FIELDS:
+        return None
     if field_name in AGENT_MODEL_FIELDS:
         return get_agent_model_config(field_name[len("agent_"):-len("_model_id")])[0]
-    if field_name in CHEAP_DEFAULT_FIELDS:
-        return str(settings.bedrock_model_id_cheap or "")
-    return ""
+    if field_name == SMART_MODEL_FIELD:
+        return get_agent_model_config("executor")[0]
+    return str(settings.bedrock_model_id_cheap or "")
+
+
+def effective_value(field_name: str) -> str:
+    """What a model setting resolves to: its own value, or `fallback`. An empty smart model is no model of its own
+    — the executor's own setting already counts that model, so the lists of what uses a model skip it."""
+    raw = raw_value(field_name)
+    if raw or field_name == SMART_MODEL_FIELD:
+        return raw
+    return fallback(field_name) or ""
 
 
 def references(provider: str, model_id: Optional[str] = None) -> list[str]:
     """The settings whose OWN value is a reference to this provider (and model) — the ones to change before it can go."""
     out = []
     for f in MODEL_SETTING_FIELDS + (EMBEDDING_FIELD,):
-        raw = _raw(f)
+        raw = raw_value(f)
         if not raw:
             continue
         try:
@@ -390,7 +414,7 @@ def references(provider: str, model_id: Optional[str] = None) -> list[str]:
     return out
 
 
-def _refuse_in_use(provider: str, model_id: Optional[str] = None) -> None:
+def refuse_in_use(provider: str, model_id: Optional[str] = None) -> None:
     refs = references(provider, model_id)
     if refs:
         what = f"«{provider}::{model_id}»" if model_id else f"«{provider}»"
@@ -435,6 +459,6 @@ def set_bedrock_enabled(enabled: bool, actor) -> dict:
         value = dict(stored) if isinstance(stored, dict) else {}
         value["bedrock_enabled"] = bool(enabled)
         runtime_settings.put(RUNTIME_KEY, value, getattr(actor, "key", None), session=s)
-        _audit(s, "update", "bedrock", actor, before={"bedrock_enabled": before},
+        audit(s, "update", "bedrock", actor, before={"bedrock_enabled": before},
                after={"bedrock_enabled": bool(enabled)})
     return {"enabled": bool(enabled), "references": bedrock_references()}

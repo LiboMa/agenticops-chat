@@ -418,8 +418,11 @@ def converse_text_on_main(prompt: str) -> str:
     return text
 
 
-def _effort_tier(budget: int) -> str:
-    """Map a thinking budget onto an adaptive-thinking effort tier.
+EFFORT_TIERS = ("low", "medium", "high", "xhigh", "max")
+
+
+def effort_tier(budget: int, top: str = "max") -> str:
+    """Map a thinking budget onto an effort tier, capped at `top` (the highest tier a model takes).
 
     Bedrock takes low|medium|high|xhigh|max. Aligned with
     thinking_effort_presets so each preset lands on its own tier: 2048 low,
@@ -428,18 +431,19 @@ def _effort_tier(budget: int) -> str:
     working unchanged — more tokens simply mean a higher tier.
     """
     if budget <= 2048:
-        return "low"
-    if budget <= 4096:
-        return "medium"
-    if budget <= 8192:
-        return "high"
-    if budget <= 12288:
-        return "xhigh"
-    return "max"
+        tier = "low"
+    elif budget <= 4096:
+        tier = "medium"
+    elif budget <= 8192:
+        tier = "high"
+    elif budget <= 12288:
+        tier = "xhigh"
+    else:
+        tier = "max"
+    return EFFORT_TIERS[min(EFFORT_TIERS.index(tier), EFFORT_TIERS.index(top))]
 
 
 _UNVERIFIED_REASONING_WARNED: set = set()
-_EFFORT_TIERS = ("low", "medium", "high", "xhigh", "max")
 # OpenAI on Bedrock: (model id substring, request field, highest tier the model takes). Measured live on Bedrock,
 # 2026-11-08, every tier sent to every model in the chat picker:
 # - GPT-5.6 / GPT-6.x reject `reasoning_effort` ("Unknown parameter" — the whole request fails; every chat turn with
@@ -459,7 +463,7 @@ _OPENAI_REASONING = (
 def _openai_reasoning_fields(model_id: str, budget: int) -> Optional[dict]:
     """The reasoning request field for an OpenAI model on Bedrock, or None (see `_OPENAI_REASONING`).
 
-    The budget maps to Claude's effort tiers (`_effort_tier`), capped at the model's highest tier. A model of an
+    The budget maps to Claude's effort tiers (`effort_tier`), capped at the model's highest tier. A model of an
     unverified family gets no field: a request without one is always valid, a guessed one can fail it. A budget of
     0 = no override (the model's default).
     """
@@ -468,7 +472,7 @@ def _openai_reasoning_fields(model_id: str, budget: int) -> Optional[dict]:
     mid = (model_id or "").lower()
     for needle, field, top in _OPENAI_REASONING:
         if needle in mid:
-            tier = _EFFORT_TIERS[min(_EFFORT_TIERS.index(_effort_tier(budget)), _EFFORT_TIERS.index(top))]
+            tier = effort_tier(budget, top)
             return {"reasoning_effort": tier} if field == "reasoning_effort" else {"reasoning": {"effort": tier}}
     if mid not in _UNVERIFIED_REASONING_WARNED:
         _UNVERIFIED_REASONING_WARNED.add(mid)
@@ -557,7 +561,7 @@ def thinking_fields(budget: int, max_tokens: int, *, adaptive: bool, summarized:
         thinking = {"type": "adaptive"}
         if summarized:
             thinking["display"] = "summarized"
-        return {"thinking": thinking, "output_config": {"effort": _effort_tier(budget)}}
+        return {"thinking": thinking, "output_config": {"effort": effort_tier(budget)}}
     return {"thinking": {"type": "enabled", "budget_tokens": budget}}
 
 

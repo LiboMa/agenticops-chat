@@ -57,9 +57,8 @@ def require_bedrock(ref: str) -> None:
 
 def openai_effort(budget: int) -> str:
     """The thinking budget as Chat Completions' `reasoning_effort` (the internal budget → tier rule, capped at high)."""
-    from agenticops.agents.preamble import _EFFORT_TIERS, _effort_tier
-    tier = _effort_tier(budget)
-    return tier if _EFFORT_TIERS.index(tier) <= _EFFORT_TIERS.index(_OPENAI_EFFORT_TOP) else _OPENAI_EFFORT_TOP
+    from agenticops.agents.preamble import effort_tier
+    return effort_tier(budget, _OPENAI_EFFORT_TOP)
 
 
 def client_args(cfg, *, timeout=None, max_retries: int = 2) -> dict:

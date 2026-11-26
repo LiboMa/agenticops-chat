@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from agenticops.auth.actor import Actor
 from agenticops.web.deps import current_actor
-from agenticops.web.routers.upload_settings import _can_edit
+from agenticops.web.routers.upload_settings import can_edit
 
 router = APIRouter(tags=["setup"])
 
@@ -17,12 +17,12 @@ router = APIRouter(tags=["setup"])
 @router.get("/api/setup/readiness")
 def api_setup_readiness(request: Request, actor: Actor = Depends(current_actor)):
     from agenticops.services import readiness
-    return readiness.readiness(actor, can_verify=_can_edit(request))
+    return readiness.readiness(actor, can_verify=can_edit(request))
 
 
 @router.post("/api/setup/verify-model")
 def api_setup_verify_model(request: Request, actor: Actor = Depends(current_actor)):
-    if not _can_edit(request):
+    if not can_edit(request):
         raise HTTPException(status_code=403, detail="Admin privileges required")
     from agenticops.services import readiness
     return readiness.verify_model(actor)

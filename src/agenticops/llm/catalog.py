@@ -227,7 +227,7 @@ def refresh(provider: str, actor) -> dict:
                 updated += 1
             else:
                 unchanged += 1
-        registry._audit(s, "refresh_models", provider, actor,
+        registry.audit(s, "refresh_models", provider, actor,
                         details={"added": added, "updated": updated, "unchanged": unchanged})
     return {"added": added, "updated": updated, "unchanged": unchanged, "error": None}
 
@@ -292,7 +292,7 @@ def add_manual(provider: str, data: dict, actor) -> ProviderModelView:
                             **{**defaults, **fields})
         s.add(row)
         s.flush()
-        registry._audit(s, "add_model", provider, actor, after={"model_id": model_id, **fields})
+        registry.audit(s, "add_model", provider, actor, after={"model_id": model_id, **fields})
         return view_of(row)
 
 
@@ -309,7 +309,7 @@ def patch_model(provider: str, model_id: str, data: dict, actor) -> ProviderMode
         if row is None:
             raise registry.ProviderError(404, "not_found", f"«{model_id}» is not on the list of «{provider}»")
         if enabled is False and row.enabled:
-            registry._refuse_in_use(provider, model_id)
+            registry.refuse_in_use(provider, model_id)
         before = {k: getattr(row, k) for k in fields}
         for key, value in fields.items():
             setattr(row, key, value)
@@ -319,7 +319,7 @@ def patch_model(provider: str, model_id: str, data: dict, actor) -> ProviderMode
             row.enabled = enabled
         row.updated_at = datetime.now(timezone.utc)
         s.flush()
-        registry._audit(s, "update_model", provider, actor, before={"model_id": model_id, **before},
+        registry.audit(s, "update_model", provider, actor, before={"model_id": model_id, **before},
                         after={"model_id": model_id, **fields, **({"enabled": enabled} if enabled is not None else {})})
         return view_of(row)
 

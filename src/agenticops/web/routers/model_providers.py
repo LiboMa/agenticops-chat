@@ -33,7 +33,7 @@ from agenticops.auth.viewer import can_view_settings, read_only_detail
 from agenticops.config import settings
 from agenticops.llm import catalog, embeddings, presets, probe, registry
 from agenticops.web.deps import current_actor, require_authenticated_user
-from agenticops.web.routers.upload_settings import _can_edit
+from agenticops.web.routers.upload_settings import can_edit
 
 router = APIRouter(tags=["model-providers"])
 BASE = "/api/model-providers"
@@ -94,7 +94,7 @@ def _listing(request: Request) -> dict:
     return {"bedrock": {"enabled": registry.bedrock_enabled(), "region": settings.bedrock_region,
                         "references": registry.bedrock_references()},
             "providers": registry.list_public(), "presets": presets.public(),
-            "credential_backend": get_credential_store().backend_name, "can_edit": _can_edit(request)}
+            "credential_backend": get_credential_store().backend_name, "can_edit": can_edit(request)}
 
 
 async def _write(fn):

@@ -19,7 +19,7 @@ from agenticops.auth.viewer import can_view_settings, read_only_detail
 from agenticops.config import ModelRuntimeSettings, get_trace_id, settings
 from agenticops.services import runtime_settings
 from agenticops.web.deps import current_actor, require_authenticated_user
-from agenticops.web.routers.upload_settings import _can_edit
+from agenticops.web.routers.upload_settings import can_edit
 
 router = APIRouter(tags=["settings"])
 URL = "/api/settings/model-runtime"
@@ -44,7 +44,7 @@ def _body(request: Request) -> dict:
         "ranges": _ranges(),
         "updated_by": row["updated_by"] if row else None,
         "updated_at": row["updated_at"].isoformat() if row and row["updated_at"] else None,
-        "can_edit": _can_edit(request),
+        "can_edit": can_edit(request),
     }
 
 
