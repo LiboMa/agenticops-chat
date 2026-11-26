@@ -1428,6 +1428,9 @@ export default function Settings() {
                 ))}
               </select>
               <p className="text-xs text-muted-foreground mt-2">{t("settings.acp.note")}</p>
+              {s.acp_enhanced_blocked === "bedrock_off" && (
+                <p role="status" className="text-xs text-amber-700 dark:text-amber-300 mt-2">{t("settings.acp.blockedBedrockOff")}</p>
+              )}
             </div>
           </CardBody>
         </Card>

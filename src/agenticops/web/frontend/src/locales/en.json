@@ -1926,6 +1926,7 @@
   "settings.acp.toggleDesc": "Lets the Main and SRE agents hand hard tasks (creating a skill, deep research, brainstorming) to an external coding agent",
   "settings.acp.provider": "Backend provider",
   "settings.acp.note": "claude-code and kiro-cli use their own sign-in (Bedrock / IAM Identity Center); codex needs OPENAI_API_KEY in the server's environment.",
+  "settings.acp.blockedBedrockOff": "Claude Code runs on Amazon Bedrock here, and Bedrock is turned off (Settings → Model providers): the agents are not offered the enhanced backend. Pick another backend or turn Bedrock on.",
   "settings.models.region": "Model region",
   "settings.models.regionNote": "not the regions resources are scanned in",
   "settings.models.main": "Main's model",

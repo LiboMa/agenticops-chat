@@ -685,6 +685,11 @@ def _acp_available_backends() -> list[str]:
         return []
 
 
+def _acp_blocked() -> Optional[str]:
+    from agenticops.agents.enhanced import blocked_reason
+    return blocked_reason()
+
+
 @app.get("/api/settings")
 def api_get_settings():  # plain def: model presets may list Bedrock models synchronously (one process — S1c)
     """Return all toggleable runtime settings."""
@@ -762,6 +767,8 @@ def api_get_settings():  # plain def: model presets may list Bedrock models sync
         "acp_enhanced_enabled": settings.acp_enhanced_enabled,
         "acp_enhanced_backend": settings.acp_enhanced_backend,
         "acp_available_backends": _acp_available_backends(),
+        # "bedrock_off": switched on, but its backend runs on Bedrock and Bedrock is turned off — not offered
+        "acp_enhanced_blocked": _acp_blocked(),
         # Change management (MVP-2.6.0) — the two security toggles persist to settings.yaml
         "change_management_enabled": settings.change_management_enabled,
         "change_auto_approve_standard": settings.change_auto_approve_standard,

@@ -71,7 +71,7 @@ from agenticops.agents.preamble import (
     skills_activation_block,
 )
 from agenticops.tools.memory_tools import search_agent_memory
-from agenticops.agents.enhanced import enhanced_task
+from agenticops.agents.enhanced import enhanced_available, enhanced_task
 
 logger = logging.getLogger(__name__)
 
@@ -370,7 +370,7 @@ def _create_sre_agent(cli_tool=None, cli_tools: list | None = None, *, change_re
     # Mode C review/preflight must not carry it (least privilege + the in-code change read-only guard).
     # Never in the fix-plan build either (N30): the backend is a subprocess with its own tools on this host —
     # no command it sends passes the check point that keeps a fix-plan run to reads.
-    if settings.acp_enhanced_enabled and not (change_review or fix_plan):
+    if enhanced_available() and not (change_review or fix_plan):
         _tools.append(enhanced_task)
     return Agent(
         system_prompt=build_system_prompt(SRE_SYSTEM_PROMPT if change_review else SRE_BASE_PROMPT,

@@ -1926,6 +1926,7 @@
   "settings.acp.toggleDesc": "让 Main 和 SRE agent 把难的任务（创建技能、深入调研、头脑风暴）交给外部的编码 agent",
   "settings.acp.provider": "后端提供方",
   "settings.acp.note": "claude-code 和 kiro-cli 用它们自己的登录（Bedrock / IAM Identity Center）；codex 需要服务端环境里有 OPENAI_API_KEY。",
+  "settings.acp.blockedBedrockOff": "这里的 Claude Code 跑在 Amazon Bedrock 上，而 Bedrock 已经关掉（设置 →「模型提供方」）：agent 不会拿到增强后端。换一个后端，或者打开 Bedrock。",
   "settings.models.region": "模型调用区域",
   "settings.models.regionNote": "和资源扫描区域是两回事",
   "settings.models.main": "Main 的模型",
