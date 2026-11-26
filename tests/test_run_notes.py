@@ -189,6 +189,8 @@ def test_the_route_hands_the_note_to_the_run_in_flight(db, client):
     ({"lane": "S5", "text": "hello"}, 409, "not_steerable"),                        # nor a schedule
     ({"lane": "I9:diagnosis", "text": "hello"}, 409, "not_running"),                # nothing in flight there
     ({"lane": "nonsense", "text": "hello"}, 422, None),
+    ({"lane": "I1234567890:diagnosis", "text": "hello"}, 422, None),              # the one item-id rule: ≤ 9 digits
+    ({"lane": "I1\u0663:diagnosis", "text": "hello"}, 422, None),                  # … ASCII digits only
 ])
 def test_the_route_refuses_what_it_cannot_deliver(db, client, payload, status, code):
     recorder = StepRecorder("rca", "I7")

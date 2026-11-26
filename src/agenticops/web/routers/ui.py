@@ -16,6 +16,7 @@ from agenticops.auth.actor import Actor
 from agenticops.auth.viewer import can_view_settings, is_viewer
 from agenticops.config import get_trace_id, settings
 from agenticops.services import ui_preferences as prefs
+from agenticops.services.listing import ITEM_ID, ITEM_PATTERN, parse_item
 from agenticops.web.deps import current_actor, require_authenticated_user
 
 router = APIRouter(tags=["workspace-ui"])
@@ -146,7 +147,7 @@ def api_ui_attention(account_id: Optional[int] = Query(None, ge=1), limit: int =
                      cursor: Optional[str] = Query(None, pattern=r"^\d{1,6}$"),
                      reason: Optional[str] = Query(None, max_length=200),
                      q: Optional[str] = Query(None, max_length=200),
-                     item: Optional[str] = Query(None, pattern=r"^[IC][1-9]\d{0,8}$"),
+                     item: Optional[str] = Query(None, pattern=ITEM_PATTERN),
                      sort: str = Query("waiting_longest", pattern="^(waiting_longest|newest|severity|decision)$"),
                      snoozed: Optional[str] = Query(None, pattern="^last$"),
                      actor: Actor = Depends(current_actor), user=Depends(signed_in_user)) -> dict:
@@ -168,7 +169,7 @@ def api_ui_attention(account_id: Optional[int] = Query(None, ge=1), limit: int =
 
 class SnoozeBody(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    item: str = Field(..., pattern=r"^[IC][1-9]\d{0,8}$")
+    item: str = Field(..., pattern=ITEM_PATTERN)
 
 
 @router.post("/api/ui/attention/snooze")
@@ -184,7 +185,7 @@ def api_ui_attention_snooze(data: SnoozeBody, actor: Actor = Depends(current_act
 
 
 @router.delete("/api/ui/attention/snooze", status_code=204)
-def api_ui_attention_unsnooze(item: str = Query(..., pattern=r"^[IC][1-9]\d{0,8}$"), user=Depends(signed_in_user)):
+def api_ui_attention_unsnooze(item: str = Query(..., pattern=ITEM_PATTERN), user=Depends(signed_in_user)):
     """Take my «later» back: the item returns to its place. 204 whether or not there was one."""
     from agenticops.services import attention_snooze
     attention_snooze.unsnooze(user.id, item)
@@ -212,7 +213,7 @@ def api_ui_activity(account_id: Optional[int] = Query(None, ge=1), actor: Actor 
 
 
 @router.get("/api/ui/activity/steps")
-def api_ui_activity_steps(item: str = Query(..., pattern=r"^[IC][1-9]\d*$"), agent: str = Query(..., pattern="^(rca|sre|executor)$"),
+def api_ui_activity_steps(item: str = Query(..., pattern=ITEM_PATTERN), agent: str = Query(..., pattern="^(rca|sre|executor)$"),
                           execution: Optional[int] = Query(None, ge=1), since: Optional[datetime] = Query(None),
                           before: Optional[datetime] = Query(None), after: int = Query(0, ge=0),
                           limit: int = Query(200, ge=1, le=200), actor: Actor = Depends(current_actor),
@@ -229,7 +230,7 @@ def api_ui_activity_steps(item: str = Query(..., pattern=r"^[IC][1-9]\d*$"), age
 
 
 class ActivityNote(BaseModel):
-    lane: str = Field(..., pattern=r"^([IC][1-9]\d*:[a-z_]+|[A-Z]+\d+)$", max_length=64)
+    lane: str = Field(..., pattern=rf"^({ITEM_ID}:[a-z_]+|[A-Z]+\d+)$", max_length=64)
     text: str = Field(..., min_length=1, max_length=200)
     # the run the note was written for (the key the step list carries); without it, the run in flight on the lane
     run: Optional[str] = Field(None, pattern=r"^[0-9a-f]{32}$")
@@ -274,9 +275,10 @@ def api_ui_activity_note(data: ActivityNote, actor: Actor = Depends(current_acto
         raise HTTPException(status_code=403, detail=str(e))
     # A diagnosis or a plan run a PERSON asked for takes a word from that person and from administrators only (N26:
     # it may have been asked for in a private conversation). The pipeline's own runs, and change reviews, as before.
-    if item[:1] == "I" and item[1:].isdigit():        # an issue's lane (a change review's is C<n>)
+    parsed = parse_item(item)
+    if parsed is not None and parsed[0] == "I":         # an issue's lane (a change review's is C<n>)
         from agenticops.services import agent_runs
-        if not agent_runs.may_note(agent_runs.get(int(item[1:])), actor):
+        if not agent_runs.may_note(agent_runs.get(parsed[1]), actor):
             raise HTTPException(status_code=403, detail={
                 "detail": "Only the person who asked for this run, or an administrator, can say a word to it.",
                 "code": "not_your_run"})

@@ -18,6 +18,7 @@ from sqlalchemy import func
 
 from agenticops.config import settings
 from agenticops.models import AgentStep, PipelineEvent, get_db_session
+from agenticops.services.listing import parse_item
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +61,13 @@ def run_steps(item: str, agent: str, *, execution_id: Optional[int] = None, sinc
     run a host command; it is not shown what other agents' commands were or returned either."""
     since, before = _aware(since), _aware(before)
     with get_db_session() as session:
-        if before is not None and since is None and agent == "rca" and item.startswith("I"):
+        parsed = parse_item(item)
+        if before is not None and since is None and agent == "rca" and parsed is not None and parsed[0] == "I":
             # «the newest run that began before it» — and not before the diagnosis it belongs to began: a run that
             # failed at its first model call recorded nothing, and an older run's steps are not «how far it got»
             # (round-2 review B-m4). Nothing on the timeline = no lower bound, as before.
             began = (session.query(func.max(PipelineEvent.created_at))
-                     .filter(PipelineEvent.health_issue_id == int(item[1:]), PipelineEvent.event_type == "rca_started",
+                     .filter(PipelineEvent.health_issue_id == parsed[1], PipelineEvent.event_type == "rca_started",
                              PipelineEvent.created_at <= before.astimezone(timezone.utc).replace(tzinfo=None)).scalar())
             since = _aware(began)
         runs = (session.query(AgentStep.run_key, func.min(AgentStep.id), func.min(AgentStep.started_at),
