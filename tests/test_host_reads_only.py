@@ -380,8 +380,9 @@ def test_what_is_blocked_stays_blocked(ledger, fields, _reason):
     assert _rows(ledger) == [("run_on_host", "blocked", "blocked", None)]
 
 
-def test_known_gap_outside_such_a_run_a_host_line_is_still_read_by_how_it_begins(ledger):
-    # chat and the executor are as they were — said in the release note, the owner's to decide
+def test_outside_such_a_run_reads_joined_together_are_still_reads(ledger):
+    # chat and the executor: a line of reads only is a read; one that hides a second command that is not a read
+    # asks first since «之后» 22 step 1 (tests/test_host_second_command.py)
     with patch("agenticops.skills.execution._run_auto_ladder", return_value="out") as ladder:
         assert _host("cat /etc/hosts && echo done") == "out"            # no question, no ledger row
         asked = _host("systemctl status nginx")                         # … and a query still asks first
@@ -418,11 +419,14 @@ def test_the_account_bound_host_tool_follows_the_same_rule(ledger, monkeypatch, 
     assert _rows(ledger) == [("provider_ssh", "unknown", "refused", reason)]
 
 
-def test_the_account_bound_host_tool_outside_such_a_run_is_as_it_was(ledger, monkeypatch):
+def test_the_account_bound_host_tool_outside_such_a_run_asks_first(ledger, monkeypatch):
+    # it had no confirmation and ran every write it was sent; since «之后» 22 step 1 it asks, as run_on_host does
     tool, run = _ssh_tool(monkeypatch)
-    assert tool("cat /etc/hosts && echo done") == "out\n"
-    assert tool("systemctl status nginx") == "out\n"                     # tier unknown: run and recorded, as before
-    assert run.call_count == 2 and _rows(ledger) == [("provider_ssh", "unknown", "executed", None)]
+    assert tool("cat /etc/hosts && echo done") == "out\n"                # reads only: as before
+    assert "requires confirmation" in tool("systemctl status nginx")       # tier unknown: it asks first
+    assert tool("systemctl status nginx", require_confirmation=True) == "out\n"
+    assert run.call_count == 2 and _rows(ledger) == [("provider_ssh", "unknown", "refused", "confirmation"),
+                                                     ("provider_ssh", "unknown", "executed", None)]
 
 
 def test_a_refusal_of_another_tool_carries_no_host_hint(ledger):

@@ -134,7 +134,8 @@ TOOL SELECTION (route each step to the correct backend):
   Use the provided cloud CLI tool (supports both read and write operations with security filtering).
 - Host-level commands (e.g., systemctl restart, kill, disk cleanup, log inspection):
   Use run_on_host (method="auto" climbs the SSM→SSH ladder; or force method="ssm"/"ssh").
-  Set require_confirmation=True for write commands — the plan approval serves as the confirmation.
+  Set require_confirmation=True for write commands — the plan approval serves as the confirmation. The same holds
+  for the account-bound shell tool of an SSH host (run_ssh_<account>).
 - Kubernetes operations (e.g., rollout restart, scale deployment, apply manifest):
   Use run_kubectl with the cluster_name and namespace. Set require_confirmation=True for write commands.
 - Resource verification: Use describe tools (describe_ec2, describe_rds, etc.) for targeted checks.

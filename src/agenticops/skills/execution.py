@@ -179,7 +179,8 @@ def run_on_host(
     # ledgered (command_audits), read-only ones are not.
     tier = classify_shell_command(command)
     from agenticops.services.command_audit import (approved_plan_in_context, change_context_refusal,
-                                                    change_required_refusal, read_only_context, record_command)
+                                                    change_required_refusal, confirmation_refusal, read_only_context,
+                                                    record_command)
     if tier == "blocked":
         record_command(tool="run_on_host", tier=tier, command=command, outcome="blocked",
                        account=account, region=region, target=host_id)
@@ -191,22 +192,23 @@ def run_on_host(
     # Where the run may only read, how the line BEGINS is not enough (N30): «cat x && systemctl restart y» begins
     # like a read. Every command in the line must be one the stricter rule knows — and a query it knows
     # (systemctl status …) needs no confirmation there.
+    # Elsewhere (chat, the executor) a line that begins like a read but hides a second command is a write («之后»
+    # 22, step 1): it asks first and is recorded, reason `second_command`. A single command is judged as before.
+    raised = ""
     if read_only_context():
         from agenticops.services.change_steps import read_only_host_tier
         tier = read_only_host_tier(command, tier)
+    else:
+        from agenticops.services.change_steps import host_line_tier
+        tier, raised = host_line_tier(command, tier)
     # A change review / preflight (change context, no approved plan) is read-only in code, not just prompt.
     refused = change_context_refusal(tool="run_on_host", tier=tier, command=command,
                                      account=account, region=region, target=host_id)
     if refused is not None:
         return refused
     if tier in ("write", "unknown") and not require_confirmation:
-        record_command(tool="run_on_host", tier=tier, command=command, outcome="refused", reason="confirmation",
-                       account=account, region=region, target=host_id)
-        return (
-            f"This command modifies system state and requires confirmation. "
-            f"Classification: {tier}. Command: {command}\n"
-            f"Present this to the user and call again with require_confirmation=True after approval."
-        )
+        return confirmation_refusal(tool="run_on_host", tier=tier, command=command, reason=raised,
+                                    account=account, region=region, target=host_id)
     if tier in ("write", "unknown"):
         from agenticops.services.policy_engine import get_policy_engine
         pattern = get_policy_engine().change_required_match(command)
@@ -233,7 +235,7 @@ def run_on_host(
 
     if tier in ("write", "unknown"):
         record_command(tool="run_on_host", tier=tier, command=command, outcome=_ledger_outcome(result),
-                       account=account, region=region, target=host_id, output_excerpt=result,
+                       reason=raised, account=account, region=region, target=host_id, output_excerpt=result,
                        duration_ms=int((time.monotonic() - t0) * 1000))
     return result
 

@@ -187,6 +187,19 @@ def read_only_run_refusal(*, kind: str, tool: str, tier: str, command: str, acco
             f"the tool recognises, or use a read tool.{hint} Command: {command}")
 
 
+def confirmation_refusal(*, tool: str, tier: str, command: str, reason: str = "", account: str = "", region: str = "",
+                         target: str = "") -> str:
+    """Refuse (as text, with a `refused` row — reason `confirmation`, or `second_command` for a line that begins like a
+    read but runs more) a host command that changes something and was not confirmed: run_on_host and the SSH
+    account tool («之后» 22, step 1). The agent is told to ask the person and call again — nothing waits for one."""
+    record_command(tool=tool, tier=tier, command=command, outcome="refused", reason=reason or "confirmation",
+                   account=account, region=region, target=target)
+    what = ("This line begins like a read but runs a second command that is not a read, so it"
+            if reason == "second_command" else "This command")
+    return (f"{what} modifies system state and requires confirmation. Classification: {tier}. Command: {command}\n"
+            f"Present this to the user and call again with require_confirmation=True after approval.")
+
+
 def change_required_refusal(command: str, pattern: str) -> str:
     from agenticops.config import settings
     how = (" Open a change request instead: in Chat type /change <what you want changed>, or use the Web UI "
@@ -207,6 +220,7 @@ def guarded_run(
     account: str = "",
     region: str = "",
     target: str = "",
+    reason: str = "",
 ) -> str:
     """Run a provider CLI tool's command behind the change_required gate and the ledger.
 
@@ -231,7 +245,7 @@ def guarded_run(
     text = run()
     judged = outcome_of(text)
     outcome, exit_code = judged[0], judged[1]
-    reason = judged[2] if len(judged) > 2 else ""
+    reason = (judged[2] if len(judged) > 2 else "") or reason      # a CLI fault first, else why it was raised
     record_command(tool=tool, tier=tier, command=command, outcome=outcome, account=account, region=region,
                    target=target, exit_code=exit_code, output_excerpt=text, reason=reason,
                    duration_ms=int((time.monotonic() - t0) * 1000))
