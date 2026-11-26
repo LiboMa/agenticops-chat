@@ -514,12 +514,26 @@ def bedrock_model_kwargs(model_id: str, thinking_fields: Optional[dict] = None) 
     return kwargs
 
 
-def thinking_fields_for_budget(budget: int, max_tokens: int, model_id: str):
-    """Bedrock extended-thinking request fields for a budget, or None.
+def claude_reasoning(model_id: str) -> str:
+    """The thinking request shape a Claude model id takes, as a provider model's «reasoning» value:
+    `anthropic_adaptive_summarized` (adaptive, asked for a summary — Claude ≥ 4.7, whose default streams nothing
+    while it thinks), `anthropic_adaptive` (4.6) or `anthropic_budget` (before 4.6, and every non-Claude id). For a
+    Bedrock id the id IS the model; a provider model's row says it instead (review of MVP-2.9.0) — the startup
+    migration of the old `anthropic_thinking` rows is the one other reader."""
+    if not supports_adaptive_thinking(model_id):
+        return "anthropic_budget"
+    version = _claude_version(model_id)
+    if version is not None and version >= _SUMMARIZED_DISPLAY_FROM:
+        return "anthropic_adaptive_summarized"
+    return "anthropic_adaptive"
 
-    `model_id` picks the request shape (see supports_adaptive_thinking) and is
-    required: the two shapes are mutually exclusive, and guessing wrong is a
-    400 at request time rather than a degradation.
+
+def thinking_fields(budget: int, max_tokens: int, *, adaptive: bool, summarized: bool = False):
+    """Extended-thinking request fields of the given shape for a budget, or None.
+
+    `adaptive`: `{"thinking": {"type": "adaptive"}, "output_config": {"effort": …}}` (the budget as an effort tier),
+    else the legacy `{"thinking": {"type": "enabled", "budget_tokens": …}}` — mutually exclusive, a wrong one is a
+    400. `summarized` adds `"display": "summarized"` to the adaptive shape.
 
     Bedrock requires thinking_budget_min <= budget < max_tokens. An illegal
     budget disables thinking (with a warning) rather than failing the call.
@@ -539,13 +553,23 @@ def thinking_fields_for_budget(budget: int, max_tokens: int, model_id: str):
             "thinking budget %d >= max_tokens %d — thinking disabled", budget, max_tokens,
         )
         return None
-    if supports_adaptive_thinking(model_id):
+    if adaptive:
         thinking = {"type": "adaptive"}
-        version = _claude_version(model_id)
-        if version is not None and version >= _SUMMARIZED_DISPLAY_FROM:
+        if summarized:
             thinking["display"] = "summarized"
         return {"thinking": thinking, "output_config": {"effort": _effort_tier(budget)}}
     return {"thinking": {"type": "enabled", "budget_tokens": budget}}
+
+
+def thinking_fields_for_budget(budget: int, max_tokens: int, model_id: str):
+    """Bedrock extended-thinking request fields for a budget, or None.
+
+    `model_id` picks the request shape (`claude_reasoning`) and is required: the two shapes are mutually exclusive,
+    and guessing wrong is a 400 at request time rather than a degradation.
+    """
+    shape = claude_reasoning(model_id)
+    return thinking_fields(budget, max_tokens, adaptive=shape != "anthropic_budget",
+                           summarized=shape == "anthropic_adaptive_summarized")
 
 
 def effort_to_budget(effort: Optional[str], max_tokens: int):

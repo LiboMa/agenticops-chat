@@ -71,8 +71,11 @@ def test_presets_merge_and_skip_bedrock_when_off(env):
     assert all(keys <= set(p) for p in presets)
     bedrock = [p for p in presets if p["provider"] == "bedrock"]
     assert bedrock and {p["provider_label"] for p in bedrock} == {"Amazon Bedrock"}
-    claude = next(p for p in bedrock if "anthropic.claude" in p["value"])
-    assert claude["capabilities"] == {"tools": True, "images": True, "documents": True, "reasoning": "anthropic_thinking"}
+    from agenticops.agents.preamble import claude_reasoning
+    claudes = [p for p in bedrock if "anthropic.claude" in p["value"]]
+    assert claudes and claudes[0]["capabilities"] == {"tools": True, "images": True, "documents": True,
+                                                      "reasoning": claude_reasoning(claudes[0]["value"])}
+    assert all(p["capabilities"]["reasoning"] == claude_reasoning(p["value"]) for p in claudes)  # the shape it is sent
     ours = [p for p in presets if p["provider"] == "local-llm"]
     assert [p["value"] for p in ours] == ["local-llm::fake-chat-1"]            # the embedding model is no chat model
     assert ours[0]["provider_label"] == "Local LLM" and ours[0]["capabilities"]["tools"] is True

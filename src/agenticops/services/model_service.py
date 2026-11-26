@@ -221,12 +221,12 @@ BEDROCK_LABEL = "Amazon Bedrock"
 def _bedrock_entry(p: dict[str, Any]) -> dict[str, Any]:
     """A Bedrock preset with where it comes from and what it can do (MVP-2.9.0 N35) — the same keys a provider's
     model has (llm/catalog.all_presets). Capabilities by the model id, as the request builders read it."""
-    from agenticops.agents.preamble import _OPENAI_REASONING, media_capabilities
+    from agenticops.agents.preamble import _OPENAI_REASONING, claude_reasoning, media_capabilities
     from agenticops.config import settings
     from agenticops.cost import normalize_model_key
     value = p["value"]
     caps = media_capabilities(value)
-    reasoning = ("anthropic_thinking" if "anthropic.claude" in value
+    reasoning = (claude_reasoning(value) if "anthropic.claude" in value
                  else "openai_effort" if any(needle in value for needle, _f, _t in _OPENAI_REASONING) else "none")
     return {**p, "provider": "bedrock", "provider_label": BEDROCK_LABEL, "purpose": "chat",
             "capabilities": {"tools": True, "images": bool(caps.images), "documents": bool(caps.documents),

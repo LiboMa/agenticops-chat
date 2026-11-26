@@ -1832,6 +1832,31 @@ def _run_migrate_2_7_0(engine) -> None:
     _backfill_reports_2_7_0(engine)
     _repair_plan_hashes_2_9_0(engine)
     _backfill_security_issue_accounts_2_9_0(engine)
+    _migrate_reasoning_values_2_9_0(engine)
+
+
+def _migrate_reasoning_values_2_9_0(engine) -> None:
+    """Review of MVP-2.9.0 (2026-11-26): a provider model's thinking request shape is its row's «reasoning», never
+    its name. The old value `anthropic_thinking` left the shape to the Claude version in the model id; each such row
+    gets the shape it was sent until now (`agents.preamble.claude_reasoning`), so none of its requests change — the
+    last time a provider model's name is read. Fail-soft, like the backfills: a row left on the old value is sent
+    no thinking fields."""
+    try:
+        if not inspect(engine).has_table("provider_models"):
+            return
+        with engine.begin() as conn:
+            rows = conn.execute(text("SELECT provider, model_id FROM provider_models "
+                                     "WHERE reasoning = 'anthropic_thinking'")).fetchall()
+            if not rows:
+                return
+            from agenticops.agents.preamble import claude_reasoning     # only when there is a row to move
+            for provider, model_id in rows:
+                conn.execute(text("UPDATE provider_models SET reasoning = :r WHERE provider = :p AND model_id = :m "
+                                  "AND reasoning = 'anthropic_thinking'"),
+                             {"r": claude_reasoning(model_id), "p": provider, "m": model_id})
+        logger.info("provider models: %d «anthropic_thinking» rows given their request shape", len(rows))
+    except Exception as exc:
+        logger.warning("MVP-2.9.0 reasoning value migration skipped: %s", exc)
 
 
 def _backfill_security_issue_accounts_2_9_0(engine) -> None:

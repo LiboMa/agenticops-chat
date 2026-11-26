@@ -216,7 +216,10 @@ function ModelEditor({ m, canEdit, anthropic, onSave }: {
         <select className={input} value={d.reasoning} onChange={(e) => set({ reasoning: e.target.value as Reasoning })}>
           <option value="none">{t("settings.providers.reasoning.none")}</option>
           <option value="openai_effort">{t("settings.providers.reasoning.openai_effort")}</option>
-          <option value="anthropic_thinking">{t("settings.providers.reasoning.anthropic_thinking")}</option>
+          {/* the request shape is the row's word: nothing reads it off the model's name */}
+          <option value="anthropic_adaptive_summarized">{t("settings.providers.reasoning.anthropic_adaptive_summarized")}</option>
+          <option value="anthropic_adaptive">{t("settings.providers.reasoning.anthropic_adaptive")}</option>
+          <option value="anthropic_budget">{t("settings.providers.reasoning.anthropic_budget")}</option>
         </select>
       </label>
       {/* what a request may carry: the list's word or an admin's — never read off the model's name */}

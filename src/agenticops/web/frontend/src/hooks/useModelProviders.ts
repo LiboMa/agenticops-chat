@@ -42,7 +42,7 @@ export interface ProvidersPage {
   can_edit: boolean;
 }
 
-export type Reasoning = "none" | "openai_effort" | "anthropic_thinking";
+export type Reasoning = "none" | "openai_effort" | "anthropic_adaptive_summarized" | "anthropic_adaptive" | "anthropic_budget";
 export type Purpose = "chat" | "embedding";
 
 export interface ProviderModel {

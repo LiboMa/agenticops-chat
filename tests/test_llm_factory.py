@@ -73,20 +73,27 @@ def test_a_provider_without_a_key_still_builds(db):
     assert build_model("ollama::llama3.1:8b", max_tokens=100).client_args["api_key"]     # the SDK requires one
 
 
-def test_anthropic_compatible_thinking_follows_the_claude_version(db):
+def test_anthropic_compatible_thinking_follows_the_rows_reasoning_never_the_name(db):
+    """The row's «reasoning» picks the request shape (review of 2.9.0, 2026-11-26) — the ids below say the opposite of
+    their rows on purpose: an old-looking name set to adaptive, a 5.x name set to a token budget."""
     from strands.models.anthropic import AnthropicModel
     from agenticops.llm.factory import build_model
     add_provider("relay", "https://relay.example.com/", kind="anthropic_compatible", api_key="sk-relay")
-    add_model("relay", "claude-sonnet-4-6", reasoning="anthropic_thinking")
-    add_model("relay", "claude-3-5-haiku-20241022", reasoning="anthropic_thinking")
-    add_model("relay", "plain-claude-alias", reasoning="none")
-    m = build_model("relay::claude-sonnet-4-6", max_tokens=16000, thinking_budget=8192)
+    add_model("relay", "claude-3-5-haiku-20241022", reasoning="anthropic_adaptive_summarized")
+    add_model("relay", "claude-opus-5-5", reasoning="anthropic_budget")
+    add_model("relay", "plain-claude-alias", reasoning="anthropic_adaptive")
+    add_model("relay", "claude-sonnet-4-6", reasoning="none")
+    m = build_model("relay::claude-3-5-haiku-20241022", max_tokens=16000, thinking_budget=8192)
     assert isinstance(m, AnthropicModel) and m.config["max_tokens"] == 16000
-    assert m.config["params"]["thinking"] == {"type": "adaptive"}
-    assert m.config["params"]["output_config"] == {"effort": "high"}
-    old = build_model("relay::claude-3-5-haiku-20241022", max_tokens=16000, thinking_budget=8192)
-    assert old.config["params"]["thinking"] == {"type": "enabled", "budget_tokens": 8192}
-    assert not build_model("relay::plain-claude-alias", max_tokens=16000, thinking_budget=8192).config.get("params")
+    assert m.config["params"] == {"thinking": {"type": "adaptive", "display": "summarized"},
+                                  "output_config": {"effort": "high"}}
+    assert build_model("relay::claude-opus-5-5", max_tokens=16000, thinking_budget=8192).config["params"] == \
+        {"thinking": {"type": "enabled", "budget_tokens": 8192}}
+    assert build_model("relay::plain-claude-alias", max_tokens=16000, thinking_budget=4096).config["params"] == \
+        {"thinking": {"type": "adaptive"}, "output_config": {"effort": "medium"}}
+    assert not build_model("relay::claude-sonnet-4-6", max_tokens=16000, thinking_budget=8192).config.get("params")
+    assert not build_model("relay::plain-claude-alias", max_tokens=16000, thinking_budget=0).config.get("params")
+    assert not build_model("relay::plain-claude-alias", max_tokens=4000, thinking_budget=8192).config.get("params")
 
 
 @pytest.mark.parametrize("setup,ref,reason", [

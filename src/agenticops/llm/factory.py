@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agenticops.llm.catalog import ANTHROPIC_REASONING
 from agenticops.llm.refs import parse_ref
 
 REASONS = ("bedrock_off", "unknown_provider", "provider_disabled", "model_disabled", "unknown_model")
@@ -87,9 +88,10 @@ def build_model(ref: str, *, max_tokens: int, thinking_budget: int = 0, bedrock_
         if cfg.kind == "anthropic_compatible":
             from strands.models.anthropic import AnthropicModel
             params: dict[str, Any] = {}
-            if row.reasoning == "anthropic_thinking" and thinking_budget > 0:
-                from agenticops.agents.preamble import thinking_fields_for_budget
-                params = thinking_fields_for_budget(thinking_budget, max_tokens, r.model_id) or {}
+            if row.reasoning in ANTHROPIC_REASONING and thinking_budget > 0:      # the row's shape, never the name
+                from agenticops.agents.preamble import thinking_fields
+                params = thinking_fields(thinking_budget, max_tokens, adaptive=row.reasoning != "anthropic_budget",
+                                         summarized=row.reasoning == "anthropic_adaptive_summarized") or {}
             from agenticops.config import settings
             if settings.bedrock_cache_enabled and prompt_cache_on(cfg, row):
                 from strands.models.model import CacheConfig

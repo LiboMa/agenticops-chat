@@ -23,7 +23,7 @@ class ProviderModelView:
     tools_probe_at: Optional[datetime] = None
     supports_images: bool = False
     supports_documents: bool = False
-    reasoning: str = "none"                    # none | openai_effort | anthropic_thinking
+    reasoning: str = "none"                    # one of REASONING
     accepts_temperature: Optional[bool] = None # None = not said: not sent
     prompt_cache: Optional[bool] = None        # None = the platform's default (Anthropic-compatible only)
     price_input: Optional[float] = None        # USD per 1M tokens
@@ -60,7 +60,10 @@ EDITABLE = ("label", "purpose", "context_window", "max_output_tokens", "supports
             "supports_documents", "reasoning", "accepts_temperature", "prompt_cache", "price_input", "price_output",
             "price_cache_read", "price_cache_write")
 PURPOSES = ("chat", "embedding")
-REASONING = ("none", "openai_effort", "anthropic_thinking")
+# A thinking model's request shape — the row says it, nothing reads the model's name: the OpenAI field, or one of
+# the three Anthropic shapes (adaptive + a summary while it thinks: Claude 4.7+; adaptive: 4.6; a token budget: older)
+ANTHROPIC_REASONING = ("anthropic_adaptive_summarized", "anthropic_adaptive", "anthropic_budget")
+REASONING = ("none", "openai_effort") + ANTHROPIC_REASONING
 ANTHROPIC_VERSION = "2023-06-01"
 
 

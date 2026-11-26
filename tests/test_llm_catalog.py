@@ -102,13 +102,15 @@ def test_add_and_patch_by_hand(fake):
     from agenticops.llm import catalog, registry
     add_provider("sub", fake.base, kind="anthropic_compatible", api_key="k")
     catalog.add_manual("sub", {"model_id": "claude-opus-5-5", "context_window": 200000, "supports_tools": True,
-                               "reasoning": "anthropic_thinking", "price_input": 5, "price_output": 25}, ADMIN)
+                               "reasoning": "anthropic_adaptive_summarized", "price_input": 5, "price_output": 25},
+                      ADMIN)
     row = _rows("sub")["claude-opus-5-5"]
-    assert row.source == "manual" and row.reasoning == "anthropic_thinking" and row.price_output == 25
+    assert row.source == "manual" and row.reasoning == "anthropic_adaptive_summarized" and row.price_output == 25
     with pytest.raises(registry.ProviderError) as e:
         catalog.add_manual("sub", {"model_id": "claude-opus-5-5"}, ADMIN)
     assert e.value.code == "model_exists"
-    for bad in ({"reasoning": "magic"}, {"purpose": "vision"}, {"context_window": -1}, {"price_input": -2}):
+    for bad in ({"reasoning": "magic"}, {"reasoning": "anthropic_thinking"}, {"purpose": "vision"},
+                {"context_window": -1}, {"price_input": -2}):
         with pytest.raises(registry.ProviderError) as e:
             catalog.patch_model("sub", "claude-opus-5-5", bad, ADMIN)
         assert e.value.code == "invalid_model_field"
