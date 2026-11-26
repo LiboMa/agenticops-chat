@@ -246,21 +246,10 @@ def update(name: str, data: dict, actor, *, clear_api_key: bool = False) -> dict
             if not data["enabled"]:
                 _refuse_in_use(name)
             row.enabled = bool(data["enabled"])
-        new_key = data.get("api_key")
-        replaced = isinstance(new_key, str) and bool(new_key.strip()) and not new_key.strip().startswith(_MASK_PREFIX)
-        if clear_api_key:
-            secrets["api_key"] = ""
-        elif replaced:
-            secrets["api_key"] = _check_key(new_key.strip())
+        replaced = _key_replaced(data.get("api_key"))
+        secrets["api_key"] = _merged_key(secrets.get("api_key") or "", data.get("api_key"), clear_api_key)
         if "extra_headers" in data and data["extra_headers"] is not None:
-            old_headers = secrets.get(_HEADERS) or {}
-            incoming = _check_headers(data["extra_headers"])
-            # a header value echoed as a mask keeps the stored value of that header; a NEW header needs a value
-            fresh = [k for k, v in incoming.items() if v.strip().startswith(_MASK_PREFIX) and k not in old_headers]
-            if fresh:
-                raise ProviderError(422, "invalid_headers", f"a new header needs its value: {', '.join(sorted(fresh))}")
-            secrets[_HEADERS] = {k: (old_headers[k] if v.strip().startswith(_MASK_PREFIX) else v)
-                                        for k, v in incoming.items()}
+            secrets[_HEADERS] = _merged_headers(secrets.get(_HEADERS) or {}, data["extra_headers"])
         row.secrets = _store().encrypt_credentials(secrets)
         row.updated_at = datetime.now(timezone.utc)
         row.updated_by = getattr(actor, "key", None)
@@ -271,6 +260,72 @@ def update(name: str, data: dict, actor, *, clear_api_key: bool = False) -> dict
         has_key = bool(secrets.get("api_key"))
     reset_cache()
     return {**after, "has_api_key": has_key}
+
+
+
+def _key_replaced(new_key: Any) -> bool:
+    return isinstance(new_key, str) and bool(new_key.strip()) and not new_key.strip().startswith(_MASK_PREFIX)
+
+
+def _merged_key(stored: str, new_key: Any, clear: bool) -> str:
+    """The key after an edit: removed on `clear`, replaced by a typed one, else the stored one (an empty field or the
+    mask the list shows keeps it)."""
+    if clear:
+        return ""
+    return _check_key(new_key.strip()) if _key_replaced(new_key) else stored
+
+
+def _merged_headers(old_headers: dict, value: Any) -> dict:
+    """The extra headers after an edit: a value echoed as a mask keeps the stored value of that header; a NEW header
+    needs a value."""
+    incoming = _check_headers(value)
+    fresh = [k for k, v in incoming.items() if v.strip().startswith(_MASK_PREFIX) and k not in old_headers]
+    if fresh:
+        raise ProviderError(422, "invalid_headers", f"a new header needs its value: {', '.join(sorted(fresh))}")
+    return {k: (old_headers[k] if v.strip().startswith(_MASK_PREFIX) else v) for k, v in incoming.items()}
+
+
+def draft_config(data: dict, existing: Optional[str] = None) -> ProviderConfig:
+    """The provider a form describes, checked as saving it would check it, without writing anything — for the
+    connection test before a save (MVP-2.9.0 review). `existing` = the stored provider an edit starts from: the form
+    is laid over it the way `update` lays it (an empty or masked key keeps the stored one, masked header values keep
+    theirs, `clear_api_key` removes the key)."""
+    if existing:
+        cfg = get(existing)
+        if cfg is None:
+            raise ProviderError(404, "not_found", f"no provider «{existing}»")
+        kind = data.get("kind") or cfg.kind
+        if kind not in KINDS:
+            raise ProviderError(422, "invalid_kind", "the protocol is openai_compatible or anthropic_compatible")
+        base_url = _check_base_url(data["base_url"]) if data.get("base_url") is not None else cfg.base_url
+        timeout = _check_timeout(data["timeout_seconds"]) if data.get("timeout_seconds") is not None else cfg.timeout_seconds
+        headers = (_merged_headers(cfg.extra_headers, data["extra_headers"]) if data.get("extra_headers") is not None
+                   else dict(cfg.extra_headers))
+        return ProviderConfig(name=cfg.name, display_name=cfg.display_name, kind=kind, preset=cfg.preset,
+                              base_url=base_url, api_key=_merged_key(cfg.api_key, data.get("api_key"),
+                                                                     bool(data.get("clear_api_key"))),
+                              extra_headers=headers, timeout_seconds=timeout, enabled=cfg.enabled)
+    name = _check_name(data.get("name"))
+    preset_key = data.get("preset") or ("custom_anthropic" if data.get("kind") == "anthropic_compatible" else "custom_openai")
+    preset = PRESETS.get(preset_key)
+    if preset is None:
+        raise ProviderError(422, "invalid_preset", f"no preset «{preset_key}»")
+    kind = data.get("kind") or preset.kind
+    if kind not in KINDS:
+        raise ProviderError(422, "invalid_kind", "the protocol is openai_compatible or anthropic_compatible")
+    base_url = _check_base_url(data.get("base_url") if data.get("base_url") is not None else preset.base_url)
+    timeout = _check_timeout(data.get("timeout_seconds", 60))
+    headers = _check_headers(data.get("extra_headers"))
+    api_key = _check_key((data.get("api_key") or "").strip())
+    if api_key.startswith(_MASK_PREFIX):
+        api_key = ""
+    from agenticops.llm.models import ModelProvider
+    from agenticops.models import get_db_session
+    with get_db_session() as s:
+        if s.query(ModelProvider).filter_by(name=name).first() is not None:
+            raise ProviderError(409, "name_taken", f"a provider named «{name}» already exists")
+    return ProviderConfig(name=name, display_name=data.get("display_name") or name, kind=kind, preset=preset_key,
+                          base_url=base_url, api_key=api_key, extra_headers=headers, timeout_seconds=timeout)
 
 
 def set_enabled(name: str, enabled: bool, actor) -> dict:

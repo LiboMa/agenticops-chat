@@ -146,3 +146,39 @@ export function testNotes(listError: string | null, test: { code?: string; messa
   if (test) out.push(test.code === "no_model" ? { key: "settings.providers.noModelYet" } : { text: test.message });
   return out;
 }
+
+// ── test before save (MVP-2.9.0 review, Spec ③: «保存之前可以先点「测试连接」») ─────────────────────────────────
+// A new provider, or an edit of what the connection is made of — protocol, address, key, headers —, is tested
+// first (POST /api/model-providers/test-draft writes nothing). A provider whose test failed is only stored switched
+// off; a failed tool call alone only warns (the design: «不拦，只提醒»).
+
+export type SaveMode = "needs_test" | "save" | "save_disabled" | "save_plain";
+
+/** What the connection is made of, as a string to compare: the test counts only for the form it tested. */
+export function connectionKey(form: ProviderForm, clearKey: boolean): string {
+  return JSON.stringify([form.kind, cleanUrl(form.baseUrl), form.apiKey.trim(), form.headersText.trim(), clearKey]);
+}
+
+export function connectionChanged(before: ProviderRowLike | null, form: ProviderForm, clearKey: boolean): boolean {
+  if (!before) return true;
+  return form.kind !== before.kind || cleanUrl(form.baseUrl) !== before.base_url || !!form.apiKey.trim() || clearKey
+    || form.headersText.trim() !== headersToText(before.header_names);
+}
+
+export function saveMode(o: { changed: boolean; testedKey: string | null; currentKey: string;
+                              result: { list: { ok: boolean }; chat: { ok: boolean } } | null }): SaveMode {
+  if (!o.changed) return "save_plain";
+  if (!o.result || o.testedKey !== o.currentKey) return "needs_test";
+  return o.result.list.ok && o.result.chat.ok ? "save" : "save_disabled";
+}
+
+/** The body of POST /api/model-providers/test-draft: a new provider's create body, or the stored provider's name and
+ *  what the edit changes (an empty key field keeps the stored key), and the model to try when one is typed. */
+export function draftBody(form: ProviderForm, before: ProviderRowLike | null,
+                          opts: { clearKey: boolean; modelId: string }): Record<string, unknown> {
+  const body: Record<string, unknown> = before
+    ? { provider: before.name, ...patchFromForm(before, form, { clearKey: opts.clearKey }) }
+    : createBody(form);
+  if (opts.modelId.trim()) body.model_id = opts.modelId.trim();
+  return body;
+}

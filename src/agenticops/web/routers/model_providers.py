@@ -151,6 +151,19 @@ async def delete_provider(name: str, request: Request, actor: Actor = Depends(cu
     return result if isinstance(result, JSONResponse) else Response(status_code=204)
 
 
+@router.post(f"{BASE}/test-draft")
+async def test_draft(request: Request):
+    """The connection test of what the form holds, before it is saved — nothing is written (MVP-2.9.0 review)."""
+    await _admin(request)
+    body = await _json(request)
+    if not isinstance(body, dict):
+        return _bad_body("the body is the provider form")
+    try:
+        return await asyncio.to_thread(probe.test_draft, body)
+    except registry.ProviderError as e:
+        return _refused(e)
+
+
 @router.post(f"{BASE}/{{name}}/test")
 async def test_provider(name: str, request: Request):
     await _admin(request)

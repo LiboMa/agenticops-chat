@@ -71,19 +71,9 @@ def _chat(cfg, model_id: str, timeout: int, *, with_tool: bool) -> dict:
     return {}
 
 
-def test(provider: str, model_id: Optional[str]) -> dict:
+def run(cfg, model_id: str) -> dict:
+    """The three steps on `cfg` — writes nothing."""
     from agenticops.config import settings
-    from agenticops.llm import catalog, registry
-    from agenticops.llm.models import ModelProvider, ProviderModel
-    from agenticops.models import get_db_session
-    cfg = registry.get(provider)
-    if cfg is None:
-        raise registry.ProviderError(404, "not_found", f"no provider «{provider}»")
-    if not model_id:
-        chats = catalog.list_models(provider, purpose="chat", enabled_only=True)
-        if not chats:
-            raise registry.ProviderError(422, "no_model", "name a model to test — the provider has no model on its list yet")
-        model_id = chats[0].model_id
     timeout = int(min(settings.model_providers.test_timeout_seconds, cfg.timeout_seconds))
     listed: dict = {}
 
@@ -98,6 +88,22 @@ def test(provider: str, model_id: Optional[str]) -> dict:
     result["chat"] = _step(lambda: _chat(cfg, model_id, timeout, with_tool=False), cfg)
     result["tools"] = (_step(lambda: _chat(cfg, model_id, timeout, with_tool=True), cfg) if result["chat"]["ok"]
                        else {"ok": False, "ms": 0, "error": "not tried — the chat step failed"})
+    return result
+
+
+def test(provider: str, model_id: Optional[str]) -> dict:
+    from agenticops.llm import catalog, registry
+    from agenticops.llm.models import ModelProvider, ProviderModel
+    from agenticops.models import get_db_session
+    cfg = registry.get(provider)
+    if cfg is None:
+        raise registry.ProviderError(404, "not_found", f"no provider «{provider}»")
+    if not model_id:
+        chats = catalog.list_models(provider, purpose="chat", enabled_only=True)
+        if not chats:
+            raise registry.ProviderError(422, "no_model", "name a model to test — the provider has no model on its list yet")
+        model_id = chats[0].model_id
+    result = run(cfg, model_id)
     with get_db_session() as s:
         row = s.query(ModelProvider).filter_by(name=provider).first()
         if row is not None:
@@ -109,3 +115,29 @@ def test(provider: str, model_id: Optional[str]) -> dict:
                 model.tools_probe_at = datetime.now(timezone.utc)
     registry.reset_cache()
     return result
+
+
+def test_draft(data: dict) -> dict:
+    """The test of a provider before it is saved (MVP-2.9.0 review): `data` is the form (+ `provider` = the stored
+    one an edit starts from, `model_id`), checked as saving it would check it. Nothing is written. Without a model
+    the first chat model of the provider's listing is tried; a listing with none (or that cannot be read) is 422
+    `no_model` only when nothing was typed — a typed model is always tried, so a wrong address shows as steps."""
+    from agenticops.config import settings
+    from agenticops.llm import registry
+    existing = data.get("provider") if isinstance(data.get("provider"), str) and data.get("provider") else None
+    cfg = registry.draft_config(data, existing)
+    model_id = data.get("model_id") if isinstance(data.get("model_id"), str) and data["model_id"].strip() else None
+    if model_id is None:
+        timeout = int(min(settings.model_providers.test_timeout_seconds, cfg.timeout_seconds))
+        try:
+            items = catalog.fetch_listing(cfg, timeout=timeout)
+        except Exception as e:  # noqa: BLE001 — said as the list step, the key never in it
+            return {"model_id": None, "at": datetime.now(timezone.utc).isoformat(),
+                    "list": {"ok": False, "ms": 0, "error": catalog.describe_error(e, cfg), "count": None},
+                    "chat": {"ok": False, "ms": 0, "error": "not tried — the model list could not be read"},
+                    "tools": {"ok": False, "ms": 0, "error": "not tried — the chat step failed"}}
+        chats = [str(i["id"]) for i in items if catalog.parse_listing(i)["purpose"] == "chat"]
+        if not chats:
+            raise registry.ProviderError(422, "no_model", "name a model to test — the provider lists no chat model")
+        model_id = chats[0]
+    return run(cfg, model_id.strip())

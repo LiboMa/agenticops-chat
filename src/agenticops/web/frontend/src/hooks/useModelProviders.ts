@@ -147,6 +147,14 @@ export function useTestProvider() {
   });
 }
 
+/** The connection test of what the form holds, before it is saved — the server writes nothing (MVP-2.9.0 review). */
+export function useTestDraft() {
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      apiFetch<ProbeResult>("/model-providers/test-draft", { method: "POST", body: JSON.stringify(body) }),
+  });
+}
+
 export function useProviderModels(name: string | null) {
   return useQuery({
     queryKey: modelsKey(name ?? ""),
