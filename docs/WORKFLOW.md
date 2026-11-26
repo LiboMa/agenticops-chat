@@ -811,7 +811,7 @@ EnhancedBackend abstraction + registry  (protocol-agnostic core)
 - **End-to-end streaming, no buffering.** `session/update` notifications → `AcpClient` (async generator) → `backend.run()` yields `EnhancedEvent`s → `enhanced_task` is an **async-generator `@tool`** (each yield a Strands `ToolStreamEvent`) → the web stream maps them to SSE (`tool_stream_to_sse`). Claude Code's own tool calls show as live steps, so a long task shows its progress; no chunk is held back.
 - **Three providers, pluggable**: `claude-code` (Bedrock), `kiro-cli` (`kiro-cli acp`, kiro's own login) and `codex` (`@zed-industries/codex-acp`, needs `OPENAI_API_KEY`) share the one `AcpClient` (`protocol_version` per provider). Another provider = one class + `register_backend()`.
 - **Choose in the UI**: **Settings → General → Enhanced Backend** — a toggle (`acp_enhanced_enabled`) and a provider; both persist to `settings.yaml` and rebuild the chat agents on the next message.
-- **Graceful**: if the backend is unavailable (no `npx`, not logged in, no key, launch fails, disabled), `enhanced_task` returns a clear message and the calling agent continues with normal handling — the turn never crashes.
+- **Graceful**: if the backend is unavailable (no `npx`, not logged in, no key, launch fails, disabled), `enhanced_task` returns a clear message and the calling agent continues with normal handling — the turn never crashes. With Bedrock turned off, Claude Code on Bedrock (`acp_use_bedrock`) is not offered and a call naming it is refused; the Enhanced Backend card says why.
 - **Enable**: toggle it in Settings, or set `acp_enhanced_enabled: true` in `config/settings.yaml` (config keys: `acp_enhanced_backend`, `acp_use_bedrock`, `acp_timeout_seconds`, `acp_auto_approve_permissions`, `acp_kiro_command`/`acp_kiro_args`, `acp_codex_command`/`acp_codex_args`).
 
 ---
@@ -833,11 +833,13 @@ flowchart LR
 
 **Add a provider** (Settings → Model providers, an administrator): «Add provider» → pick the platform (its usual
 address and protocol are filled in) → name (lowercase, it is how settings refer to it: `name::model`), key, optional
-extra headers → «Save and test». The dialog stores it, reads its model list and runs a three-step test (list, one
-chat, one tool call). Then give the models to the settings: Settings → General → «Agent models» and «Other places that
-use a model» (the three tiers, the executor's model for L0 / L1 plans, the security advisor, report translation, the
-Signal Gate's merge judge, the RCA critic, Galaxy). Every picker is the same: grouped by provider, searchable, arrow keys
-and Enter work, each model with what it can do.
+extra headers → «Test connection»: the form is tested as it stands — list, one chat, one tool call — and nothing is
+stored. After a pass «Save» stores it, reads its model list and runs the stored test; after a failure it can only be
+saved switched off. An edit that changes the protocol, address, key or headers is tested the same way first (an edit
+of the name or timeout is not). Then give the models to the settings: Settings → General → «Agent models» and «Other
+places that use a model» (the three tiers, the executor's model for L0 / L1 plans, the security advisor, report
+translation, the Signal Gate's merge judge, the RCA critic, Galaxy). Every picker is the same: grouped by provider,
+searchable, arrow keys and Enter work, each model with what it can do.
 
 | Platform | Address | Key | Notes |
 |---|---|---|---|
@@ -870,7 +872,7 @@ aiops providers test local-llm --model qwen3:32b  # list / chat / tool call; exi
 ```
 
 API: `GET/POST /api/model-providers`, `PATCH/DELETE /api/model-providers/{name}` (409 `in_use` names the settings that
-use it), `PUT /api/model-providers/bedrock {enabled}`, `POST …/{name}/test`, `POST …/{name}/refresh-models`,
+use it), `PUT /api/model-providers/bedrock {enabled}`, `POST /api/model-providers/test-draft` (the form, before it is saved), `POST …/{name}/test`, `POST …/{name}/refresh-models`,
 `GET/POST …/{name}/models`, `PATCH …/{name}/models/{model_id}`, `GET/PUT /api/kb/embedding`, `POST /api/kb/reembed`;
 `PATCH /api/settings` takes `model_settings`. With sign-in on, changing any model or provider needs an administrator.
 
@@ -1465,12 +1467,12 @@ aiops delete issues --all --yes --reset-poll-cursors --move-knowledge
 
 | | |
 |---|---|
-| Refused (nothing done) | without `--yes` (a dry run needs none); a database that is not SQLite; another process holding `<data_dir>/.scheduler.lock` |
+| Refused (nothing done) | without `--yes` (a dry run needs none); a database that is not SQLite; another process holding `<data_dir>/.scheduler.lock` — and no migration runs before these checks and the backup |
 | Backup first | an online backup (SQLite backup API — the database runs in WAL mode, the `.db` file alone is not a full copy) to `<data_dir>/backups/pre-delete-issues-<UTC>.db`, checked (integrity, same issue count) before anything is deleted |
-| Deleted, in ONE transaction | every row keyed by an issue number: `agent_steps` / `attention_snoozes` of `I…`, the issues' and fix plans' `itsm_links`, fix plans (`plan_kind='fix'`) and their runs, every RCA result, the issues' timeline (notes included), every signal (old ones would make re-detected signals noise), case and SOP records made from an issue, the issues |
+| Deleted, in ONE transaction | every row keyed by an issue number: `agent_steps` / `attention_snoozes` of `I…`, the issues' and fix plans' `itsm_links`, fix plans (`plan_kind='fix'`) and their runs, every RCA result, the issues' timeline (notes included), every signal (old ones would make re-detected signals noise), case and SOP records made from an issue, the issues; the vectors of the cases / SOPs from issues (their files move into `<backup>-knowledge/` with `MANIFEST.tsv`) |
 | Kept | change requests with their plans, runs and timeline; `audit_logs` and the command ledger; inventory, graph, security snapshots, reports, accounts, users, schedules, settings. A chat bound to an issue stays, unbound from it — its account binding stays |
 | `--reset-poll-cursors` | the security poll's cursors go: its next run backfills 24 hours (older GuardDuty / CloudTrail findings do not come back) |
-| `--move-knowledge` | moves what was learned from issues into `<backup>-knowledge/` (with `MANIFEST.tsv`), never deletes it: the KB case and SOP files (re-embed after putting them back) and the agent memories from an issue (`related_issue_id`, `detect/auto_*`); `--memory-dir DIR` adds another checkout's `agent-memory` |
+| `--move-knowledge` | moves everything learned into `<backup>-knowledge/` (with `MANIFEST.tsv`), never deletes it: every KB case and SOP file (re-embed after putting them back) and the agent memories from an issue (`related_issue_id`, `detect/auto_*`); `--memory-dir DIR` adds another checkout's `agent-memory` |
 
 There is no Web API, Web UI or agent tool for it — an administrator runs it in a terminal. To re-scan, hold the automatic steps off (`AIOPS_AUTO_RCA_ENABLED`, `AIOPS_AUTO_FIX_ENABLED`, `AIOPS_EXECUTOR_AUTO_APPROVE_L0_L1`, `AIOPS_EXECUTOR_ENABLED`, `AIOPS_NOTIFICATIONS_ENABLED` = `false`) and run in order `aiops run schedule resource-scan`, `aiops run schedule galaxy-auto-build` (with the model — not cheap after a fresh scan), `aiops run schedule security-posture-snapshot`, `aiops run detect`, `aiops run schedule security-incremental-poll`. Numbers from the real runs: [E2E report](MVP-2.9.0-E2E-REPORT.md) «问题清零».
 the automatic steps off while it runs (`AIOPS_AUTO_RCA_ENABLED`, `AIOPS_AUTO_FIX_ENABLED`,
