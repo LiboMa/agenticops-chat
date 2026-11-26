@@ -100,8 +100,9 @@ def test(provider: str, model_id: Optional[str]) -> dict:
 def test_draft(data: dict) -> dict:
     """The test of a provider before it is saved (MVP-2.9.0 review): `data` is the form (+ `provider` = the stored
     one an edit starts from, `model_id`), checked as saving it would check it. Nothing is written. Without a model
-    the first chat model of the provider's listing is tried; a listing with none (or that cannot be read) is 422
-    `no_model` only when nothing was typed — a typed model is always tried, so a wrong address shows as steps."""
+    the first model of the provider's listing is tried; a listing with none (or that cannot be read) is 422
+    `no_model` only when nothing was typed — a typed model is always tried, so a wrong address shows as steps.
+    The first listed model is tried (nothing is read off a model's name — review of 2.9.0)."""
     from agenticops.config import settings
     from agenticops.llm import registry
     existing = data.get("provider") if isinstance(data.get("provider"), str) and data.get("provider") else None
@@ -116,8 +117,8 @@ def test_draft(data: dict) -> dict:
                     "list": {"ok": False, "ms": 0, "error": catalog.describe_error(e, cfg), "count": None},
                     "chat": {"ok": False, "ms": 0, "error": "not tried — the model list could not be read"},
                     "tools": {"ok": False, "ms": 0, "error": "not tried — the chat step failed"}}
-        chats = [str(i["id"]) for i in items if catalog.parse_listing(i)["purpose"] == "chat"]
+        chats = [str(i["id"]) for i in items]     # a listed model is a chat model until an admin says otherwise
         if not chats:
-            raise registry.ProviderError(422, "no_model", "name a model to test — the provider lists no chat model")
+            raise registry.ProviderError(422, "no_model", "name a model to test — the provider lists no model")
         model_id = chats[0]
     return run(cfg, model_id.strip())

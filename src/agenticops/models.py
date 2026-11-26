@@ -1777,6 +1777,8 @@ _ADD_COLUMNS_2_7_0: dict[str, dict[str, Optional[str]]] = {
     "fix_executions": {"stop_requested_at": None, "stop_requested_by": None, "stop_note": None},
     # MVP-2.9.0 N20: which collection sources a snapshot could read (NULL on existing rows = not recorded)
     "security_snapshots": {"collection_health": None},
+    # review of MVP-2.9.0: what a provider's model takes, said by its list or an admin (NULL = not said)
+    "provider_models": {"accepts_temperature": None, "prompt_cache": None},
 }
 # MVP-2.9.0 N20: a snapshot of an account whose every source failed has no score — the column may be NULL.
 _NULLABLE_2_9_0: dict[str, tuple[str, ...]] = {"security_snapshots": ("overall_score",)}

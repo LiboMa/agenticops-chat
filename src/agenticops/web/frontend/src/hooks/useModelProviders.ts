@@ -58,6 +58,9 @@ export interface ProviderModel {
   supports_images: boolean;
   supports_documents: boolean;
   reasoning: Reasoning;
+  /** what a request may carry — the list's word or an admin's, never the model's name; null = not said */
+  accepts_temperature: boolean | null;
+  prompt_cache: boolean | null;   // null = the platform's default (Anthropic-compatible providers only)
   price_input: number | null;
   price_output: number | null;
   price_cache_read: number | null;

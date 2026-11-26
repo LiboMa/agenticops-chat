@@ -314,28 +314,18 @@ _TEMPERATURE_REMOVED_FROM = (4, 7)
 
 
 def accepts_temperature(model_id: str) -> bool:
-    """True when a request to this model may carry `temperature`: a Claude model before 4.7, including the ids that
-    predate the `claude-<family>-<n>` shape (Claude 3.x, claude-v2). A provider's model (MVP-2.9.0 N35): an
-    OpenAI-compatible server takes it; an Anthropic-compatible one by the same Claude rule on its own model id."""
+    """True when a request to this model may carry `temperature`: a Claude model on Bedrock before 4.7, including
+    the ids that predate the `claude-<family>-<n>` shape (Claude 3.x, claude-v2). A provider's model (MVP-2.9.0 N35):
+    only when its row says it takes it — the provider's list or an admin; never read off its name (review of
+    2.9.0, Standards 1). Not said → not sent: a request without temperature is always valid."""
     from agenticops.llm.refs import is_ref
     if is_ref(model_id or ""):
-        from agenticops.llm import registry
-        from agenticops.llm.refs import parse_ref
+        from agenticops.llm.factory import ModelProviderUnavailable, resolve
         try:
-            ref = parse_ref(model_id)
-            cfg = registry.get(ref.provider)
-        except Exception:
+            _cfg, row = resolve(model_id)
+        except (ModelProviderUnavailable, ValueError):
             return False
-        if cfg is None:
-            return False
-        if cfg.kind != "anthropic_compatible":
-            # an OpenAI-compatible server takes it — unless the model behind it is a Claude 4.7+ by its own id
-            # (OpenRouter's «anthropic/claude-opus-4.8»: dots for hyphens), which refuses it as on Bedrock
-            version = _claude_version(ref.model_id.replace(".", "-"))
-            return version is None or version < _TEMPERATURE_REMOVED_FROM
-        model_id = ref.model_id
-        if "claude" not in model_id.lower():
-            return False
+        return row.accepts_temperature is True
     if not is_anthropic_model(model_id):
         return False
     version = _claude_version(model_id)

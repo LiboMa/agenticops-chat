@@ -100,7 +100,7 @@ class FakeLLMServer:
         if self.list_shape == "openrouter":
             row.update({"name": f"Fake {model_id}", "context_length": 131072,
                         "pricing": {"prompt": "0.000003", "completion": "0.000015"},
-                        "supported_parameters": ["tools", "max_tokens"] if "chat" in model_id else ["max_tokens"],
+                        "supported_parameters": ["tools", "temperature", "max_tokens"] if "chat" in model_id else ["max_tokens"],
                         "architecture": {"input_modalities": ["text", "image"]}})
         elif self.list_shape == "vllm":
             row["max_model_len"] = 32768

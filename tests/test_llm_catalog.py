@@ -31,7 +31,10 @@ def test_refresh_parses_a_plain_listing(fake):
     add_provider("plain", f"{fake.base}/v1")
     assert catalog.refresh("plain", ADMIN) == {"added": 2, "updated": 0, "unchanged": 0, "error": None}
     rows = _rows("plain")
-    assert rows["fake-chat-1"].purpose == "chat" and rows["fake-embed-1"].purpose == "embedding"
+    # no list field says what a model is for, and the name is not read (review of 2.9.0, Standards 1): both are chat
+    # models until an admin marks the embedding one
+    assert rows["fake-chat-1"].purpose == "chat" and rows["fake-embed-1"].purpose == "chat"
+    assert rows["fake-chat-1"].accepts_temperature is None and rows["fake-chat-1"].prompt_cache is None
     assert rows["fake-chat-1"].supports_tools is None and rows["fake-chat-1"].context_window is None
     assert catalog.refresh("plain", ADMIN) == {"added": 0, "updated": 0, "unchanged": 2, "error": None}
 
@@ -45,6 +48,7 @@ def test_refresh_reads_openrouter_prices_context_and_tools(fake):
     assert chat.context_window == 131072 and chat.label == "Fake fake-chat-1"
     assert chat.price_input == pytest.approx(3.0) and chat.price_output == pytest.approx(15.0)
     assert chat.supports_tools is True and embed.supports_tools is False
+    assert chat.accepts_temperature is True and embed.accepts_temperature is False    # its supported_parameters
     assert chat.supports_images is True
     assert fake.requests[-1]["headers"]["authorization"] == "Bearer sk-or"
 
@@ -128,6 +132,7 @@ def test_all_presets_lists_enabled_models_of_enabled_providers(fake):
     fake.list_shape = "openrouter"
     add_provider("openrouter", f"{fake.base}/v1", api_key="k", display_name="OpenRouter")
     catalog.refresh("openrouter", ADMIN)
+    catalog.patch_model("openrouter", "fake-embed-1", {"purpose": "embedding"}, ADMIN)    # an admin says what it is
     add_provider("off", f"{fake.base}/v1", enabled=False)
     add_model("off", "m1")
     presets = catalog.all_presets()
@@ -255,3 +260,37 @@ def test_the_app_starts_the_refresh_in_the_background():
     source = inspect.getsource(webapp.lifespan)
     import re
     assert re.search(r"Thread\(target=refresh_enabled[^)]*daemon=True", source)
+
+
+def test_a_refresh_keeps_a_purpose_the_list_does_not_say(fake):
+    """A row marked as an embedding model (before this rule, or by hand) stays one: a refresh writes only what the
+    list carries."""
+    from agenticops.llm import catalog
+    from agenticops.llm.models import ProviderModel
+    from agenticops.models import get_db_session
+    add_provider("plain", f"{fake.base}/v1")
+    catalog.refresh("plain", ADMIN)
+    with get_db_session() as s:
+        s.query(ProviderModel).filter_by(provider="plain", model_id="fake-embed-1").one().purpose = "embedding"
+    catalog.refresh("plain", ADMIN)
+    assert _rows("plain")["fake-embed-1"].purpose == "embedding"
+
+
+def test_a_model_added_by_hand_is_a_chat_model_unless_said(fake):
+    from agenticops.llm import catalog
+    add_provider("plain", f"{fake.base}/v1")
+    assert catalog.add_manual("plain", {"model_id": "nomic-embed-text"}, ADMIN).purpose == "chat"
+    assert catalog.add_manual("plain", {"model_id": "bge-m3", "purpose": "embedding"}, ADMIN).purpose == "embedding"
+
+
+def test_temperature_and_prompt_cache_are_set_by_hand(fake):
+    from agenticops.llm import catalog
+    add_provider("plain", f"{fake.base}/v1")
+    catalog.refresh("plain", ADMIN)
+    m = catalog.patch_model("plain", "fake-chat-1", {"accepts_temperature": True, "prompt_cache": False}, ADMIN)
+    assert m.accepts_temperature is True and m.prompt_cache is False
+    assert set(m.manual_fields) >= {"accepts_temperature", "prompt_cache"}
+    back = catalog.patch_model("plain", "fake-chat-1", {"accepts_temperature": None, "prompt_cache": None}, ADMIN)
+    assert back.accepts_temperature is None and back.prompt_cache is None             # «not known» / the platform's
+    catalog.refresh("plain", ADMIN)
+    assert _rows("plain")["fake-chat-1"].accepts_temperature is None

@@ -24,6 +24,8 @@ class ProviderModelView:
     supports_images: bool = False
     supports_documents: bool = False
     reasoning: str = "none"                    # none | openai_effort | anthropic_thinking
+    accepts_temperature: Optional[bool] = None # None = not said: not sent
+    prompt_cache: Optional[bool] = None        # None = the platform's default (Anthropic-compatible only)
     price_input: Optional[float] = None        # USD per 1M tokens
     price_output: Optional[float] = None
     price_cache_read: Optional[float] = None
@@ -39,7 +41,7 @@ def view_of(row) -> ProviderModelView:
         context_window=row.context_window, max_output_tokens=row.max_output_tokens, supports_tools=row.supports_tools,
         tools_probe=row.tools_probe, tools_probe_at=row.tools_probe_at, supports_images=bool(row.supports_images),
         supports_documents=bool(row.supports_documents), reasoning=row.reasoning or "none",
-        price_input=row.price_input, price_output=row.price_output, price_cache_read=row.price_cache_read,
+        accepts_temperature=row.accepts_temperature, prompt_cache=row.prompt_cache, price_input=row.price_input, price_output=row.price_output, price_cache_read=row.price_cache_read,
         price_cache_write=row.price_cache_write, source=row.source or "discovered", enabled=bool(row.enabled),
         manual_fields=list(row.manual_fields or []))
 
@@ -55,7 +57,8 @@ def model_row(provider: str, model_id: str) -> Optional[ProviderModelView]:
 # ── reading a provider's list (task 3) ───────────────────────────────────────
 
 EDITABLE = ("label", "purpose", "context_window", "max_output_tokens", "supports_tools", "supports_images",
-            "supports_documents", "reasoning", "price_input", "price_output", "price_cache_read", "price_cache_write")
+            "supports_documents", "reasoning", "accepts_temperature", "prompt_cache", "price_input", "price_output",
+            "price_cache_read", "price_cache_write")
 PURPOSES = ("chat", "embedding")
 REASONING = ("none", "openai_effort", "anthropic_thinking")
 ANTHROPIC_VERSION = "2023-06-01"
@@ -101,10 +104,11 @@ def _per_million(value) -> Optional[float]:
 
 
 def parse_listing(item: dict) -> dict:
-    """What a list entry says about a model (only the fields it really carries)."""
+    """What a list entry says about a model (only the fields it really carries). Nothing is read off the model's
+    name (review of MVP-2.9.0, the owner: no guessing) — no list field says what a model is for, so a new row is a
+    chat model until an admin marks it an embedding one, and a refresh leaves the purpose alone."""
     model_id = str(item["id"])
-    out: dict = {"label": str(item.get("name") or item.get("display_name") or model_id)[:300],
-                 "purpose": "embedding" if "embed" in model_id.lower() else "chat"}
+    out: dict = {"label": str(item.get("name") or item.get("display_name") or model_id)[:300]}
     window = item.get("context_length") or item.get("max_model_len") or item.get("context_window")
     if isinstance(window, int) and window > 0:
         out["context_window"] = window
@@ -117,6 +121,7 @@ def parse_listing(item: dict) -> dict:
     params = item.get("supported_parameters")
     if isinstance(params, list):
         out["supports_tools"] = "tools" in params
+        out["accepts_temperature"] = "temperature" in params
     modalities = (item.get("architecture") or {}).get("input_modalities") if isinstance(item.get("architecture"), dict) else None
     if isinstance(modalities, list):
         out["supports_images"] = "image" in modalities
@@ -252,7 +257,7 @@ def _check_fields(data: dict) -> dict:
             bad = value is not None and (not isinstance(value, int) or isinstance(value, bool) or value <= 0)
         elif key.startswith("price_"):
             bad = value is not None and (not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0)
-        elif key == "supports_tools":
+        elif key in ("supports_tools", "accepts_temperature", "prompt_cache"):     # yes / no / not said
             bad = value is not None and not isinstance(value, bool)
         else:  # supports_images / supports_documents
             bad = not isinstance(value, bool)
@@ -276,7 +281,7 @@ def add_manual(provider: str, data: dict, actor) -> ProviderModelView:
     with get_db_session() as s:
         if s.query(ProviderModel).filter_by(provider=provider, model_id=model_id).first() is not None:
             raise registry.ProviderError(409, "model_exists", f"«{model_id}» is already on the list of «{provider}»")
-        defaults = {"label": model_id, "purpose": "embedding" if "embed" in model_id.lower() else "chat"}
+        defaults = {"label": model_id, "purpose": "chat"}       # an embedding model is said so, never guessed
         row = ProviderModel(provider=provider, model_id=model_id, source="manual", enabled=True,
                             manual_fields=sorted(fields), updated_at=datetime.now(timezone.utc),
                             **{**defaults, **fields})

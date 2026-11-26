@@ -84,7 +84,7 @@ def test_a_draft_is_checked_as_a_save_would_check_it(env):
 
 def test_no_model_to_try_is_said(env):
     _, tok = _user("root", "admin")
-    env.fake.models = ["fake-embed-1"]
+    env.fake.models = []                                  # a list with no model at all
     r = _draft(env, tok, **_form(env))
     assert r.status_code == 422 and r.json()["detail"]["code"] == "no_model"
 

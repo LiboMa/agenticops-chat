@@ -91,7 +91,7 @@ def build_model(ref: str, *, max_tokens: int, thinking_budget: int = 0, bedrock_
                 from agenticops.agents.preamble import thinking_fields_for_budget
                 params = thinking_fields_for_budget(thinking_budget, max_tokens, r.model_id) or {}
             from agenticops.config import settings
-            if settings.bedrock_cache_enabled and "claude" in r.model_id.lower():
+            if settings.bedrock_cache_enabled and prompt_cache_on(cfg, row):
                 from strands.models.model import CacheConfig
                 extra["cache_config"] = CacheConfig(strategy="auto", tools_ttl=True, system_prompt_ttl=False)
             model = AnthropicModel(client_args=client_args(cfg, max_retries=_AGENT_RETRIES), model_id=r.model_id, max_tokens=max_tokens,
@@ -104,6 +104,15 @@ def build_model(ref: str, *, max_tokens: int, thinking_budget: int = 0, bedrock_
             model = OpenAIModel(client_args=client_args(cfg, max_retries=_AGENT_RETRIES), model_id=r.model_id, params=params, **extra)
     model.aiops_ref = ref
     return model
+
+
+def prompt_cache_on(cfg, row) -> bool:
+    """Whether an Anthropic-compatible model gets prompt-cache points: its row's word, else its platform's
+    (`presets.PROMPT_CACHE_PRESETS`) — never its name."""
+    from agenticops.llm.presets import PROMPT_CACHE_PRESETS
+    if row.prompt_cache is not None:
+        return bool(row.prompt_cache)
+    return cfg.preset in PROMPT_CACHE_PRESETS
 
 
 def ref_of(model) -> str | None:
