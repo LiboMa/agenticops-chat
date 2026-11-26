@@ -6,6 +6,7 @@ import { policyActionLabel, policySummary, verdictLabel } from "@/lib/changeDeta
 import { formatFullDate } from "@/lib/formatDate";
 import { useReadOnly } from "@/hooks/useBootstrap";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 type T = (key: string) => string;
 
 const SHOWN_REASONS = 3;
@@ -74,7 +75,7 @@ export function ReviewBody({
           {rest.length > 0 && (
             <details>
               <summary className="cursor-pointer text-xs text-primary">
-                {t("workitem.moreReasons").replace("{n}", String(rest.length))}
+                {fillPlaceholders(t("workitem.moreReasons"), { n: String(rest.length) })}
               </summary>
               <ul className={`mt-1 list-disc list-inside ${muted}`}>
                 {rest.map((r, i) => <li key={i}>{r}</li>)}
@@ -85,12 +86,12 @@ export function ReviewBody({
       )}
       {p.escalatedFrom && p.effectiveRisk && (
         <p className="text-amber-600">
-          {t("changes.riskEscalated").replace("{from}", p.escalatedFrom).replace("{to}", p.effectiveRisk)}
+          {fillPlaceholders(t("changes.riskEscalated"), { from: p.escalatedFrom, to: p.effectiveRisk })}
         </p>
       )}
       {typeof shadowImpact === "number" && (
         <p className={muted}>
-          {t("changes.shadowImpact").replace("{n}", String(shadowImpact))}
+          {fillPlaceholders(t("changes.shadowImpact"), { n: String(shadowImpact) })}
           {/* the count is visible unfolded, so its "for reference only" goes with it, not only with the graph */}
           {impactNote && <span className="block text-xs">{impactNote}</span>}
         </p>

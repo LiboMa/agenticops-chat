@@ -23,6 +23,7 @@ import {
 } from "@/lib/sessionList";
 import type { ChatSession } from "@/api/types";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 interface Props {
   open: boolean;
   selectedId: string | null;
@@ -32,8 +33,6 @@ interface Props {
   onNone?: () => void;
 }
 
-const fill = (text: string, vars: Record<string, string | number>) =>
-  Object.entries(vars).reduce((s, [k, v]) => s.replace(`{${k}}`, String(v)), text);
 const UNDO_MS = 8000;
 
 /** The conversation list (MVP-2.9.0 N22 — the 2.8.0 spec's S5). The server filters, searches and orders: three
@@ -102,7 +101,7 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose, onNone }: P
 
   const change = (s: ChatSession, fields: Parameters<typeof updateMut.mutate>[0], after?: () => void) => {
     setProblem(null);
-    updateMut.mutate(fields, { onSuccess: after, onError: () => setProblem(fill(t("chat.actionFailed"), { name: s.name })) });
+    updateMut.mutate(fields, { onSuccess: after, onError: () => setProblem(fillPlaceholders(t("chat.actionFailed"), { name: s.name })) });
   };
 
   const act = async (s: ChatSession, action: MenuAction) => {
@@ -114,14 +113,14 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose, onNone }: P
       const archived = !s.archived;
       return change(s, { sessionId: s.session_id, archived }, () => setUndo({ sessionId: s.session_id, name: s.name, archived }));
     }
-    if (!(await confirm(fill(t("chat.deleteConfirmNamed"), { name: s.name }), { variant: "destructive", confirmText: t("common.delete") }))) return;
+    if (!(await confirm(fillPlaceholders(t("chat.deleteConfirmNamed"), { name: s.name }), { variant: "destructive", confirmText: t("common.delete") }))) return;
     const next = nextAfterDelete(rows, s.session_id);
     setProblem(null);
     try {
       await deleteMut.mutateAsync(s.session_id);
       if (selectedId === s.session_id) { if (next) onSelect(next); else onNone?.(); }
     } catch {
-      setProblem(fill(t("chat.actionFailed"), { name: s.name }));
+      setProblem(fillPlaceholders(t("chat.actionFailed"), { name: s.name }));
     }
   };
 
@@ -245,7 +244,7 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose, onNone }: P
                             <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
                               {label.text ? <span className="font-mono">{label.text}</span> : t(label.key!)}
                               {s.context?.account_name && <> · {s.context.account_name}</>}
-                              {" · "}{fill(t(ago.key), { n: ago.n })}
+                              {" · "}{fillPlaceholders(t(ago.key), { n: ago.n })}
                             </span>
                             {/* who sees it · what is going on · a draft kept */}
                             {(who || doing || kept) && (
@@ -271,7 +270,7 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose, onNone }: P
                         {actions.length > 0 && renamingId !== s.session_id && (
                           <DropdownMenu.Root>
                             <DropdownMenu.Trigger asChild>
-                              <button type="button" aria-label={fill(t("chat.menuFor"), { name: s.name })} title={t("chat.menu")}
+                              <button type="button" aria-label={fillPlaceholders(t("chat.menuFor"), { name: s.name })} title={t("chat.menu")}
                                       className="absolute right-1 top-1.5 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary max-[767px]:h-[44px] max-[767px]:w-[44px]">
                                 <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor" aria-hidden><circle cx="3.5" cy="8" r="1.2" /><circle cx="8" cy="8" r="1.2" /><circle cx="12.5" cy="8" r="1.2" /></svg>
                               </button>
@@ -311,10 +310,10 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose, onNone }: P
       {/* Archived (or restored) just now: it can be taken back */}
       {undo && (
         <div role="status" className="mx-2 mb-2 flex items-center justify-between gap-2 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs shadow-sm">
-          <span className="min-w-0 truncate">{fill(t(undo.archived ? "chat.archivedToast" : "chat.restoredToast"), { name: undo.name })}</span>
+          <span className="min-w-0 truncate">{fillPlaceholders(t(undo.archived ? "chat.archivedToast" : "chat.restoredToast"), { name: undo.name })}</span>
           <button type="button" className="flex-shrink-0 font-medium text-primary hover:underline max-[767px]:min-h-[40px]"
                   onClick={() => { const u = undo; setUndo(null); updateMut.mutate({ sessionId: u.sessionId, archived: !u.archived },
-                                     { onError: () => setProblem(fill(t("chat.actionFailed"), { name: u.name })) }); }}>
+                                     { onError: () => setProblem(fillPlaceholders(t("chat.actionFailed"), { name: u.name })) }); }}>
             {t("chat.undo")}
           </button>
         </div>
@@ -322,7 +321,7 @@ export function SessionFlyout({ open, selectedId, onSelect, onClose, onNone }: P
 
       {/* How many: of the view — and how many of them match */}
       <div className="border-t border-border px-3 py-2 text-[11px] text-muted-foreground" role="status">
-        {counts ? fill(t(counts.key), counts.vars) : " "}
+        {counts ? fillPlaceholders(t(counts.key), counts.vars) : " "}
       </div>
       {dialog}
     </div>

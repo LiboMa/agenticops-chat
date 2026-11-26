@@ -6,6 +6,7 @@ import { keyState, scopeKey, type KeyState } from "@/lib/apiKeys";
 import { RotateCcwKey, Trash2 } from "lucide-react";
 import { IconButton } from "@/components/ui/IconButton";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** A list of API keys (MVP-2.8.0) — «My API keys» (a table from 768 px, cards below) and the admin's dialog in user
  *  management (`cards`: always cards). Each key (active or expired; a deleted one is no longer listed) has two icon
  *  buttons: update (a new key under the same name) and delete. The full key is never here. */
@@ -32,10 +33,10 @@ export function KeyList({ rows, onRevoke, onRotate, busyId, cards = false, showC
   const revoke = (k: ApiKeyRow) => keyState(k, now) !== "revoked" && (
     <span className="inline-flex gap-1.5">
       {onRotate && (
-        <IconButton label={t("apiKeys.rotateNamed").replace("{name}", k.name)} icon={<RotateCcwKey className="h-4 w-4" aria-hidden="true" />}
+        <IconButton label={fillPlaceholders(t("apiKeys.rotateNamed"), { name: k.name })} icon={<RotateCcwKey className="h-4 w-4" aria-hidden="true" />}
                     disabled={busyId === k.id} onClick={() => onRotate(k)} />
       )}
-      <IconButton label={t("apiKeys.deleteNamed").replace("{name}", k.name)} icon={<Trash2 className="h-4 w-4" aria-hidden="true" />}
+      <IconButton label={fillPlaceholders(t("apiKeys.deleteNamed"), { name: k.name })} icon={<Trash2 className="h-4 w-4" aria-hidden="true" />}
                   tone="danger" disabled={busyId === k.id} onClick={() => onRevoke(k)} />
     </span>
   );

@@ -5,6 +5,7 @@ import { copyText } from "@/lib/clipboard";
 import { resetPayload, type ResetMode } from "@/lib/users";
 import { ModalFrame as Frame } from "@/components/ui/ModalFrame";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** The user management page's dialogs (MVP-2.8.0 S2 rework). Radix: slide-in, ESC, focus kept inside; mounted on
  *  open, so the element focused at the first render is the opener and gets focus back (lib/focusReturn). */
 
@@ -26,7 +27,7 @@ export function RoleDialog({ user, busy, error, onSubmit, onClose }: {
   const [settingsView, setSettingsView] = useState(user?.settings_view ?? false);
   const ready = !busy && (user !== null || email.trim().length > 0);
   return (
-    <Frame title={user ? t("users.dialog.editTitle").replace("{email}", user.email) : t("users.dialog.createTitle")} onClose={onClose}>
+    <Frame title={user ? fillPlaceholders(t("users.dialog.editTitle"), { email: user.email }) : t("users.dialog.createTitle")} onClose={onClose}>
       <form className="mt-3 space-y-3" onSubmit={(e) => {
         e.preventDefault();
         if (ready) onSubmit({ email: email.trim(), name: name.trim() || null, role, settings_view: role === "viewer" && settingsView });
@@ -80,7 +81,7 @@ export function PasswordOnceDialog({ email, password, kind, onClose, returnTo }:
   const { t } = useLocale();
   const [copied, setCopied] = useState<"yes" | "no" | null>(null);
   return (
-    <Frame title={t(kind === "created" ? "users.password.createdTitle" : "users.password.resetTitle").replace("{email}", email)} onClose={onClose}
+    <Frame title={fillPlaceholders(t(kind === "created" ? "users.password.createdTitle" : "users.password.resetTitle"), { email })} onClose={onClose}
            returnTo={returnTo} keepOnOutside>
       <p className="mt-3 text-sm text-muted-foreground">{t(kind === "created" ? "users.password.intro" : "users.password.resetIntro")}</p>
       <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-dashed border-primary/40 bg-canvas px-3 py-2.5">
@@ -112,11 +113,11 @@ export function DeleteUserDialog({ user, busy, error, returnTo, onConfirm, onClo
   const { t } = useLocale();
   const who = user.name || user.email;
   return (
-    <Frame title={t("users.delete.title").replace("{who}", who)} onClose={onClose} returnTo={returnTo}>
+    <Frame title={fillPlaceholders(t("users.delete.title"), { who })} onClose={onClose} returnTo={returnTo}>
       <ul className="mt-3 space-y-1.5 text-sm text-foreground">
         <li>{t("users.delete.goes")}</li>
         <li>{t("users.delete.stays")}</li>
-        <li>{t("users.delete.name").replace("{email}", user.email)}</li>
+        <li>{fillPlaceholders(t("users.delete.name"), { email: user.email })}</li>
       </ul>
       <p className="mt-3 text-sm font-medium text-status-danger">{t("users.delete.final")}</p>
       {error && <p role="alert" className="mt-3 rounded-md border border-status-danger/40 bg-status-danger/5 px-3 py-2 text-sm text-status-danger">{error}</p>}
@@ -155,7 +156,7 @@ export function ResetPasswordDialog({ user, own, busy, error, returnTo, onSubmit
     </label>
   );
   return (
-    <Frame title={own ? t("users.reset.titleSelf") : t("users.reset.title").replace("{email}", user.email)}
+    <Frame title={own ? t("users.reset.titleSelf") : fillPlaceholders(t("users.reset.title"), { email: user.email })}
            onClose={onClose} returnTo={returnTo}>
       <form className="mt-3 space-y-3" onSubmit={(e) => {
         e.preventDefault();

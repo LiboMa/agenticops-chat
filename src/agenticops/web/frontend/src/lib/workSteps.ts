@@ -1,5 +1,6 @@
 import type { ToolStep } from "@/api/types";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** One line of an answer's work log: the model's narration, or a tool step (2026-11-07). */
 export type TimelineItem = { kind: "text"; text: string } | { kind: "tool"; tool: ToolStep };
 
@@ -86,8 +87,8 @@ export function formatDuration(ms: number, t: (k: string) => string): string {
   const s = ms / 1000;
   if (s < 60) {
     const n = s < 10 ? (Math.round(s * 10) / 10).toString() : String(Math.round(s));
-    return t("chat.work.seconds").replace("{n}", n);
+    return fillPlaceholders(t("chat.work.seconds"), { n });
   }
   const total = Math.round(s);
-  return t("chat.work.minutes").replace("{m}", String(Math.floor(total / 60))).replace("{s}", String(total % 60));
+  return fillPlaceholders(t("chat.work.minutes"), { m: String(Math.floor(total / 60)), s: String(total % 60) });
 }

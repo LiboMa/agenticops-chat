@@ -4,6 +4,7 @@ import { resultRow, resultSummary, type ResultOutcome } from "@/lib/issueDetail"
 import { boundSummary, postCheckRows, type PostCheckRow } from "@/lib/postChecks";
 import type { FixExecution } from "@/api/types";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 const OUTCOME_CHIP: Record<ResultOutcome, string> = {
   pass: "bg-green-500/20 text-green-500",
   warning: "bg-amber-500/20 text-amber-500",
@@ -102,7 +103,7 @@ function BoundCheckLine({ row }: { row: PostCheckRow }) {
   const { t } = useLocale();
   const [open, setOpen] = useState(false);
   const problem = row.problem === "duplicate"
-    ? t("evidence.problem.duplicate").replace("{n}", String(row.count))
+    ? fillPlaceholders(t("evidence.problem.duplicate"), { n: String(row.count) })
     : row.problem ? t(`evidence.problem.${row.problem}`) : "";
   return (
     <li className="rounded border border-border/60 text-xs">

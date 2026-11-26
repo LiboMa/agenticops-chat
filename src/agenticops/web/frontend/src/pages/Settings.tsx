@@ -57,6 +57,7 @@ import type { ScanFocus, AgentModelConfig } from "@/api/types";
 import type { Account, AccountCreate, AccountUpdate, CloudProvider, McpServerConfig, CredentialSourceType } from "@/api/types";
 import { useBootstrap, useReadOnly } from "@/hooks/useBootstrap";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /* ── Scan Focus section ─────────────────────────────────────────── */
 
 const FOCUS_META: Record<ScanFocus, { services: string; icon: JSX.Element }> = {
@@ -119,7 +120,7 @@ function ModelFactsCard() {
                 <StatusText tone={view.tone} className="whitespace-normal">{t(view.stateKey)}</StatusText>
                 {check && (
                   <span className="text-xs text-muted-foreground">
-                    {t(check.ok ? "setup.check.ok" : "setup.check.failed").replace("{time}", formatFullDate(check.checked_at)).replace("{by}", check.checked_by.replace(/^user:/, ""))}
+                    {fillPlaceholders(t(check.ok ? "setup.check.ok" : "setup.check.failed"), { time: formatFullDate(check.checked_at), by: check.checked_by.replace(/^user:/, "") })}
                     {!check.ok && check.detail ? ` · ${check.detail}` : ""}
                   </span>
                 )}
@@ -752,13 +753,13 @@ function McpImportDialog({
           }`}>
             {validation.valid ? (
               <div>
-                <span className="font-medium">{t(validation.servers.length === 1 ? "settings.mcp.foundOne" : "settings.mcp.foundMany").replace("{n}", String(validation.servers.length))}</span>
+                <span className="font-medium">{fillPlaceholders(t(validation.servers.length === 1 ? "settings.mcp.foundOne" : "settings.mcp.foundMany"), { n: String(validation.servers.length) })}</span>
                 <ul className="mt-1 ml-4 list-disc text-xs">
                   {validation.servers.map((s) => <li key={s} className="font-mono">{s}</li>)}
                 </ul>
               </div>
             ) : (
-              <span>{validation.error ? t("settings.mcp.err." + validation.error).replace("{names}", validation.names ?? "") : validation.detail}</span>
+              <span>{validation.error ? fillPlaceholders(t("settings.mcp.err." + validation.error), { names: validation.names ?? "" }) : validation.detail}</span>
             )}
           </div>
         )}
@@ -766,7 +767,7 @@ function McpImportDialog({
         {/* Import success feedback */}
         {importResult?.success && (
           <div className="mt-3 p-3 rounded-lg border bg-green-50 border-green-200 text-sm text-green-700">
-            {t("settings.mcp.imported").replace("{n}", String(importResult.servers.length))}
+            {fillPlaceholders(t("settings.mcp.imported"), { n: String(importResult.servers.length) })}
           </div>
         )}
 

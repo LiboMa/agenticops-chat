@@ -5,6 +5,7 @@ import type {
 import { formatShortDate } from "@/lib/formatDate";
 import { executionStatusLabel } from "@/lib/issueDetail";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 const norm = (s: string) => s.trim().toLowerCase();
 
 /**
@@ -191,10 +192,7 @@ export function requestSummary(
   cr: Pick<ChangeRequest, "requested_by" | "requested_at" | "created_at" | "target_hints" | "target_resources">, t: T,
 ): string {
   const n = cr.target_resources.length + unresolvedHints(cr).length;
-  return t("workitem.summary.request")
-    .replace("{by}", cr.requested_by)
-    .replace("{at}", formatShortDate(cr.requested_at ?? cr.created_at))
-    .replace("{n}", String(n));
+  return fillPlaceholders(t("workitem.summary.request"), { by: cr.requested_by, at: formatShortDate(cr.requested_at ?? cr.created_at), n: String(n) });
 }
 
 /** ②'s collapsed line: verdict · risk · action — the template's "·" segments, one with no value dropped. */
@@ -212,7 +210,7 @@ export function reviewSummary(cr: Pick<ChangeRequest, "review_verdict" | "risk_l
 
 /** A run's one-line label: its number, then its verdict, else its status in words. */
 export function runLabel(ex: Pick<FixExecution, "id" | "status" | "verification_status">, t: T): string {
-  return joinDot([t("issues.executionN").replace("{n}", String(ex.id)),
+  return joinDot([fillPlaceholders(t("issues.executionN"), { n: String(ex.id) }),
     ex.verification_status ? t(`verification.${ex.verification_status}`) : executionStatusLabel(ex.status, t)]);
 }
 

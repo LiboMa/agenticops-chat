@@ -23,6 +23,7 @@ import {
 } from "@/hooks/useSecurity";
 import type { SecurityAccountScore, SecurityFindingItem } from "@/api/types";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 const SEV_TONE: Record<string, StatusTone> = { critical: "danger", high: "danger", medium: "warn", low: "info" };
 // the dataviz reference palette's first slots, one step per mode (components/chat/rich/ChartBlock)
 const SERIES = { light: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"], dark: ["#3987e5", "#d95926", "#199e70", "#c98500"] };
@@ -33,8 +34,6 @@ const FIELD = "h-9 rounded-md border border-border bg-background px-2 text-[16px
 const noItems = (d: unknown[]) => d.length === 0;
 
 type T = (key: string) => string;
-const fill = (text: string, vars: Record<string, string | number>) =>
-  Object.entries(vars).reduce((s, [k, v]) => s.replace(`{${k}}`, String(v)), text);
 
 /** A module's own word about its data, in its corner: «data fetched» or «update failed». */
 function ModuleState({ query, t }: { query: QueryLike; t: T }) {
@@ -86,9 +85,9 @@ function AccountCard({ a, t }: { a: SecurityAccountScore; t: T }) {
         )}
         <Errors errors={view.errors} t={t} />
         <div className="mt-2 text-xs text-muted-foreground">
-          {fill(t(exposure.kind === "count" ? "security.cardCounts" : `security.cardCounts.${exposure.kind}`), { reachable: exposure.n ?? "", open: a.open_findings })}
+          {fillPlaceholders(t(exposure.kind === "count" ? "security.cardCounts" : `security.cardCounts.${exposure.kind}`), { reachable: exposure.n ?? "", open: a.open_findings })}
         </div>
-        <div className="mt-0.5 text-xs text-muted-foreground">{fill(t("security.scoredAt"), { time: formatShortDate(a.created_at) })}</div>
+        <div className="mt-0.5 text-xs text-muted-foreground">{fillPlaceholders(t("security.scoredAt"), { time: formatShortDate(a.created_at) })}</div>
       </CardBody>
     </Card>
   );
@@ -140,7 +139,7 @@ function FindingRow({ f, t }: { f: SecurityFindingItem; t: T }) {
       <div className="min-w-0 flex-1 basis-56">
         <div className="[overflow-wrap:anywhere]">{f.title}</div>
         <div className="mt-0.5 text-xs text-muted-foreground [overflow-wrap:anywhere]">
-          {where || f.resource_id}{f.last_seen && <> · {fill(t("security.lastSeen"), { time: formatShortDate(f.last_seen) })}</>}
+          {where || f.resource_id}{f.last_seen && <> · {fillPlaceholders(t("security.lastSeen"), { time: formatShortDate(f.last_seen) })}</>}
         </div>
       </div>
       {reach && <StatusText tone={reach.tone} className="text-xs">{reach.key ? t(reach.key) : reach.text}</StatusText>}
@@ -207,7 +206,7 @@ export default function Security() {
         <div>
           <h1 className="text-xl font-medium">{t("nav.security")}</h1>
           <p className="mt-0.5 text-sm text-muted-foreground [overflow-wrap:anywhere]">
-            {scoped ? fill(t("security.scope.one"), { name: accountName ?? `#${accountId}` }) : t("security.scope.all")}
+            {scoped ? fillPlaceholders(t("security.scope.one"), { name: accountName ?? `#${accountId}` }) : t("security.scope.all")}
           </p>
         </div>
         <button type="button" onClick={refreshAll} disabled={refreshing}
@@ -233,7 +232,7 @@ export default function Security() {
                 {data.accounts.map((a) => <AccountCard key={a.account_name} a={a} t={t} />)}
               </div>
               {!scoped && data.unassigned_open_findings > 0 && (
-                <p className="mt-2 text-xs text-muted-foreground">{fill(t("security.unassigned"), { n: data.unassigned_open_findings })}</p>
+                <p className="mt-2 text-xs text-muted-foreground">{fillPlaceholders(t("security.unassigned"), { n: data.unassigned_open_findings })}</p>
               )}
             </>
           )}
@@ -250,7 +249,7 @@ export default function Security() {
                 {TREND_RANGES.map((n) => (
                   <button key={n} type="button" aria-pressed={n === days} onClick={() => setDays(n)}
                           className={`px-2.5 py-1 ${n === days ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}>
-                    {fill(t("security.trend.range"), { n })}
+                    {fillPlaceholders(t("security.trend.range"), { n })}
                   </button>
                 ))}
               </div>
@@ -259,7 +258,7 @@ export default function Security() {
           </CardHeader>
           <CardBody className="min-h-64">
             <QueryState query={trend} isEmpty={(d) => d.accounts.every((a) => a.points.length === 0)}
-                        emptyText={fill(t("security.noTrend"), { n: days })} onRetry={() => void trend.refetch()}>
+                        emptyText={fillPlaceholders(t("security.noTrend"), { n: days })} onRetry={() => void trend.refetch()}>
               {(data) => {
                 const chart = trendChart(data, utcDayKey(new Date()));
                 return (
@@ -267,7 +266,7 @@ export default function Security() {
                     <TrendPlot chart={chart} t={t} />
                     <p className="mt-2 text-xs text-muted-foreground">{t("security.trend.note")}</p>
                     {chart.series.filter((s) => s.points === 0).map((s) => (
-                      <p key={s.key} className="mt-1 text-xs text-status-warn [overflow-wrap:anywhere]">{fill(t("security.trend.noPoints"), { name: s.name })}</p>
+                      <p key={s.key} className="mt-1 text-xs text-status-warn [overflow-wrap:anywhere]">{fillPlaceholders(t("security.trend.noPoints"), { name: s.name })}</p>
                     ))}
                   </>
                 );
@@ -301,12 +300,12 @@ export default function Security() {
                       ) : (
                         <span className="font-medium [overflow-wrap:anywhere]">{a.account_name}</span>
                       )}
-                      <span className="text-xs text-muted-foreground">{fill(t("security.radar.updated"), { time: formatShortDate(a.created_at) })}</span>
+                      <span className="text-xs text-muted-foreground">{fillPlaceholders(t("security.radar.updated"), { time: formatShortDate(a.created_at) })}</span>
                     </div>
                     {drawable ? (
                       <div className="h-56">
                         <ResponsiveContainer width="100%" height="100%">
-                          <RadarChart outerRadius="62%" data={rows.map((r) => ({ ...r, label: r.collected ? r.category : fill(t("security.radar.notCollected"), { category: r.category }) }))}>
+                          <RadarChart outerRadius="62%" data={rows.map((r) => ({ ...r, label: r.collected ? r.category : fillPlaceholders(t("security.radar.notCollected"), { category: r.category }) }))}>
                             <PolarGrid stroke={GRID} />
                             <PolarAngleAxis dataKey="label" tick={{ fill: INK, fontSize: 12 }} />
                             <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
@@ -363,11 +362,11 @@ export default function Security() {
                     {data.items.map((f) => <FindingRow key={f.id} f={f} t={t} />)}
                   </ul>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                    <span role="status">{fill(t("security.showing"), { from: info.from, to: info.to, total: data.total })}</span>
+                    <span role="status">{fillPlaceholders(t("security.showing"), { from: info.from, to: info.to, total: data.total })}</span>
                     <div className="flex items-center gap-2">
                       <button type="button" disabled={info.page <= 1} onClick={() => setFilters({ ...query, page: info.page - 1 })}
                               className="min-h-[44px] rounded-md border border-border px-3 hover:bg-accent disabled:opacity-50 sm:min-h-8">{t("security.prev")}</button>
-                      <span>{fill(t("security.page"), { page: info.page, pages: info.pages })}</span>
+                      <span>{fillPlaceholders(t("security.page"), { page: info.page, pages: info.pages })}</span>
                       <button type="button" disabled={info.page >= info.pages} onClick={() => setFilters({ ...query, page: info.page + 1 })}
                               className="min-h-[44px] rounded-md border border-border px-3 hover:bg-accent disabled:opacity-50 sm:min-h-8">{t("security.next")}</button>
                     </div>

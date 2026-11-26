@@ -17,6 +17,7 @@ import {
 } from "@/lib/caseQueue";
 import type { HealthIssue } from "@/api/types";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 const session = {
   get: (k: string) => { try { return sessionStorage.getItem(k); } catch { return null; } },
   set: (k: string, v: string) => { try { sessionStorage.setItem(k, v); } catch { /* private mode */ } },
@@ -128,7 +129,7 @@ export function CaseQueue({ selectedId, wide }: { selectedId: number | null; wid
       </div>
 
       {issues.error && <ErrorBanner message={issues.error.message} onRetry={() => issues.refetch()} actionLabel={t("common.retry")} />}
-      {capped(data) && <p className="text-xs text-amber-600 dark:text-amber-400">{t("cases.capped").replace("{n}", String(QUEUE_CAP))}</p>}
+      {capped(data) && <p className="text-xs text-amber-600 dark:text-amber-400">{fillPlaceholders(t("cases.capped"), { n: String(QUEUE_CAP) })}</p>}
 
       <nav aria-label={t("cases.queue")} className={wide ? "relative min-h-0 flex-1 overflow-y-auto pr-1" : ""}>
         {issues.isLoading ? <Spinner label={t("common.loading")} />

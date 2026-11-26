@@ -12,6 +12,7 @@ import {
 import { draftOf, filterModels, modelPatch, priceLabel, toolsState, type ModelDraft } from "@/lib/providerModels";
 import { refusalText } from "@/lib/modelRefs";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 const control = "rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary";
 const input = `w-full ${control}`;
 const chip = "rounded px-1.5 py-0.5 text-[11px] font-medium";
@@ -38,9 +39,8 @@ export function ProviderModelsDialog({ provider, canEdit, onClose }: { provider:
     setError(null); setMessage(null);
     try {
       const r = await refresh.mutateAsync(provider.name);
-      setMessage(r.error ? t("settings.providers.listFailed").replace("{error}", r.error)
-        : t("settings.providers.refreshed").replace("{added}", String(r.added)).replace("{updated}", String(r.updated))
-            .replace("{unchanged}", String(r.unchanged)));
+      setMessage(r.error ? fillPlaceholders(t("settings.providers.listFailed"), { error: r.error })
+        : fillPlaceholders(t("settings.providers.refreshed"), { added: String(r.added), updated: String(r.updated), unchanged: String(r.unchanged) }));
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   }
 
@@ -60,7 +60,7 @@ export function ProviderModelsDialog({ provider, canEdit, onClose }: { provider:
   }
 
   return (
-    <ModalFrame title={t("settings.providers.modelsTitle").replace("{name}", provider.display_name || provider.name)}
+    <ModalFrame title={fillPlaceholders(t("settings.providers.modelsTitle"), { name: provider.display_name || provider.name })}
                 onClose={onClose} width="w-[min(860px,100%)]">
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t("settings.providers.searchModels")}
@@ -188,7 +188,7 @@ function ModelEditor({ m, canEdit, anthropic, onSave }: {
 
   async function save() {
     const body = modelPatch(m, d);
-    if ("error" in body) { setError(t("settings.providers.badField").replace("{field}", t(`settings.providers.field.${body.error}`))); return; }
+    if ("error" in body) { setError(fillPlaceholders(t("settings.providers.badField"), { field: t(`settings.providers.field.${body.error}`) })); return; }
     if (!Object.keys(body).length) return;
     setBusy(true);
     try { await onSave(body); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }

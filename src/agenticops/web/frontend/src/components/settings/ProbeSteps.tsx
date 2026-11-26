@@ -1,6 +1,7 @@
 import { useLocale } from "@/i18n/LocaleContext";
 import type { ProbeResult } from "@/hooks/useModelProviders";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 const STEPS = ["list", "chat", "tools"] as const;
 
 /** A connection test's three steps (MVP-2.9.0 N35): read the model list, one short chat, one tool call — each passed
@@ -18,7 +19,7 @@ export function ProbeSteps({ result, compact = false }: { result: ProbeResult; c
             <span className="sr-only">{s.ok ? t("settings.providers.passed") : t("settings.providers.failed")}</span>
             {s.ok && typeof s.ms === "number" && <span className="text-muted-foreground">{s.ms} ms</span>}
             {s.ok && step === "list" && typeof s.count === "number" && (
-              <span className="text-muted-foreground">{t("settings.providers.modelsListed").replace("{n}", String(s.count))}</span>
+              <span className="text-muted-foreground">{fillPlaceholders(t("settings.providers.modelsListed"), { n: String(s.count) })}</span>
             )}
             {!s.ok && s.error && <span className="basis-full text-destructive [overflow-wrap:anywhere] sm:basis-auto">{s.error}</span>}
           </li>

@@ -21,6 +21,7 @@ import { fillDailySeries, fmtRate, fmtSecs, isForbidden, mergeDecisionRows, type
 import type { Period } from "@/lib/plans";
 import type { AuditLogEntry, CommandAudit } from "@/api/types";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 const HOURS: Record<Period, number> = { "7d": 168, "30d": 720, "90d": 2160 }; // T11 raised /api/audit's cap to 2160 h
 const LEDGER_LIMIT = 500; // /api/audit's limit cap (max_list_limit)
 const COMMAND_LIMIT = 200;
@@ -108,7 +109,7 @@ export function AuditTab() {
         return (
           <span className="text-xs font-mono">
             {a.actor ?? a.user_email ?? "system"}
-            {claimed && <span className="text-muted-foreground">{` ${t("audit.claimedAs").replace("{name}", claimed)}`}</span>}
+            {claimed && <span className="text-muted-foreground">{` ${fillPlaceholders(t("audit.claimedAs"), { name: claimed })}`}</span>}
           </span>
         );
       },
@@ -142,7 +143,7 @@ export function AuditTab() {
       key: "actor", header: t("audit.col.actor"),
       render: (c) => (
         <span className="text-xs font-mono">
-          {c.actor}{c.on_behalf_of ? ` ${t("audit.onBehalfOf").replace("{name}", c.on_behalf_of)}` : ""}
+          {c.actor}{c.on_behalf_of ? ` ${fillPlaceholders(t("audit.onBehalfOf"), { name: c.on_behalf_of })}` : ""}
         </span>
       ),
     },
@@ -187,12 +188,7 @@ export function AuditTab() {
     ? Object.entries(s.breakdown.by_risk).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([name, value]) => ({ name, value }))
     : [];
   const approvalsLine = s
-    ? t("audit.approvalsLine")
-        .replace("{auto}", String(s.approvals.auto))
-        .replace("{human}", String(s.approvals.human))
-        .replace("{rejected}", String(s.approvals.rejected))
-        .replace("{denied}", String(s.approvals.authz_denied))
-        .replace("{shadow}", String(s.approvals.authz_denied_shadow))
+    ? fillPlaceholders(t("audit.approvalsLine"), { auto: String(s.approvals.auto), human: String(s.approvals.human), rejected: String(s.approvals.rejected), denied: String(s.approvals.authz_denied), shadow: String(s.approvals.authz_denied_shadow) })
     : null;
 
   return (
@@ -327,7 +323,7 @@ export function AuditTab() {
                 <>
                   <DataTable columns={dcols} data={ledger.rows} rowKey={(a) => a.id} emptyMessage={t("common.noData")} />
                   {ledger.truncated && (
-                    <p className="text-xs text-muted-foreground mt-2">{t("plans.limitNote").replace("{n}", String(LEDGER_LIMIT))}</p>
+                    <p className="text-xs text-muted-foreground mt-2">{fillPlaceholders(t("plans.limitNote"), { n: String(LEDGER_LIMIT) })}</p>
                   )}
                 </>
               )}
@@ -353,7 +349,7 @@ export function AuditTab() {
                 <>
                   <DataTable columns={ccols} data={commands.data ?? []} rowKey={(c) => c.id} emptyMessage={t("common.noData")} />
                   {(commands.data?.length ?? 0) >= COMMAND_LIMIT && (
-                    <p className="text-xs text-muted-foreground mt-2">{t("plans.limitNote").replace("{n}", String(COMMAND_LIMIT))}</p>
+                    <p className="text-xs text-muted-foreground mt-2">{fillPlaceholders(t("plans.limitNote"), { n: String(COMMAND_LIMIT) })}</p>
                   )}
                 </>
               )}

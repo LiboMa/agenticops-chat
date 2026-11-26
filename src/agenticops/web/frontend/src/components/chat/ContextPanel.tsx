@@ -33,6 +33,7 @@ import { planLabel, shortHash } from "@/lib/plans";
 import type { PipelineEvent, FixPlan } from "@/api/types";
 import { useReadOnly } from "@/hooks/useBootstrap";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 interface Props {
   subject: ContextRef | null; // an issue or a change request (spec §3.E.5)
   onClose: () => void;
@@ -168,7 +169,7 @@ function IssueBody({ issueId }: { issueId: number }) {
       setActionMsg(t("context.rca.triggered"));
       setTimeout(() => rca.refetch(), 10000);
     } catch (e: any) {
-      setActionMsg(t("context.rca.failed").replace("{msg}", e.message));
+      setActionMsg(fillPlaceholders(t("context.rca.failed"), { msg: e.message }));
     } finally {
       setRcaLoading(false);
     }
@@ -182,7 +183,7 @@ function IssueBody({ issueId }: { issueId: number }) {
       setActionMsg(t("context.plan.triggered"));
       setTimeout(() => fixPlans.refetch(), 10000);
     } catch (e: any) {
-      setActionMsg(t("context.plan.failed").replace("{msg}", e.message));
+      setActionMsg(fillPlaceholders(t("context.plan.failed"), { msg: e.message }));
     } finally {
       setFixPlanLoading(false);
     }
@@ -565,7 +566,7 @@ function PlanActionButtons({ fp, issueStatus, approveMut, rejectMut, executeMut 
 
       {dialog && (
         <ReasonDialog
-          title={dialog === "approve" ? t(approveCopy.titleKey).replace("{label}", planLabel(fp, t)) : `${t("plans.rejectTitle")} ${planLabel(fp, t)}`}
+          title={dialog === "approve" ? fillPlaceholders(t(approveCopy.titleKey), { label: planLabel(fp, t) }) : `${t("plans.rejectTitle")} ${planLabel(fp, t)}`}
           description={`${dialog === "approve" ? `${t(approveCopy.noteKey)} ` : ""}${fp.title} · ${t("plans.hash")} ${shortHash(dialog === "approve" ? pinnedHash : fp.content_hash)}`}
           confirmText={dialog === "approve" ? t(approveCopy.buttonKey) : t("issues.reject")}
           ack={dialog === "approve" ? t("approval.ack") : undefined}

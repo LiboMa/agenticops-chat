@@ -38,6 +38,7 @@ import type {
 import { useReadOnly } from "@/hooks/useBootstrap";
 import { formatFullDate } from "@/lib/formatDate";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 type Filter = "all" | "published" | "draft";
 
 function SkillStatusBadge({ isDraft }: { isDraft: boolean }) {
@@ -687,9 +688,9 @@ function triggerLabel(trigger: string, source: string, t: (key: string) => strin
   const agentMatch = source.match(/agent:(\w+)/);
   switch (trigger) {
     case "post_resolution":
-      return issueMatch ? t("skills.trigger.afterIssue").replace("{id}", issueMatch[1]) : t("skills.trigger.postResolution");
+      return issueMatch ? fillPlaceholders(t("skills.trigger.afterIssue"), { id: issueMatch[1] }) : t("skills.trigger.postResolution");
     case "agent_detected":
-      return agentMatch ? t("skills.trigger.agent").replace("{name}", agentMatch[1]) : t("skills.trigger.agentDetected");
+      return agentMatch ? fillPlaceholders(t("skills.trigger.agent"), { name: agentMatch[1] }) : t("skills.trigger.agentDetected");
     default:
       return t("skills.trigger.manual");
   }
@@ -773,7 +774,7 @@ function ImprovementQueue() {
                 disabled={batchDismiss.isPending}
                 className="px-3 py-1 text-xs font-medium text-red-700 bg-red-100 rounded-lg hover:bg-red-200 disabled:opacity-50 transition-colors"
               >
-                {batchDismiss.isPending ? t("skills.dismissing") : t("skills.dismissSelected").replace("{n}", String(selected.size))}
+                {batchDismiss.isPending ? t("skills.dismissing") : fillPlaceholders(t("skills.dismissSelected"), { n: String(selected.size) })}
               </button>
             )}
             <div className="flex gap-1 bg-secondary rounded-lg p-0.5">

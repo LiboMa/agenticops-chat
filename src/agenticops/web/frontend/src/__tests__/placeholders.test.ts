@@ -14,4 +14,8 @@ describe("fillPlaceholders", () => {
     expect(fillPlaceholders("cost {v}", { v: "$& $1" })).toBe("cost $& $1");
     expect(fillPlaceholders("{a} / {b}", { a: "{b}", b: "x" })).toBe("{b} / x");
   });
+  it("a number goes in as its text, and a placeholder written twice is filled twice (review of 2.9.0, ④)", () => {
+    expect(fillPlaceholders("{n} of {total}", { n: 3, total: 10 })).toBe("3 of 10");
+    expect(fillPlaceholders("{n} = {n}", { n: 0 })).toBe("0 = 0");
+  });
 });

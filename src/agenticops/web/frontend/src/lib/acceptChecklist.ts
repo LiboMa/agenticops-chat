@@ -1,5 +1,6 @@
 import type { RunSummary } from "@/lib/runSummary";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 export interface ChecklistItem { id: string | null; label: string }
 
 /** What a person confirms before accepting a run (MVP-2.8.0 S2): one box per declared check still to verify — no
@@ -9,7 +10,7 @@ export function checklistItems(summary: RunSummary, t: (k: string) => string): C
   return [
     ...toVerify.map((c) => ({
       id: c.id,
-      label: t(c.state === "warning" ? "accept.checklist.warning" : "accept.checklist.pending").replace("{check}", c.label),
+      label: fillPlaceholders(t(c.state === "warning" ? "accept.checklist.warning" : "accept.checklist.pending"), { check: c.label }),
     })),
     { id: null, label: t("accept.checklist.overall") },
   ];
@@ -27,5 +28,5 @@ export function acceptReason(note: string, items: ChecklistItem[], t: (k: string
   const own = note.trim().slice(0, 2000);
   if (own) return own;
   const checks = items.filter((item) => item.id !== null).length;
-  return checks > 0 ? t("accept.checklist.reason").replace("{n}", String(checks)) : t("accept.checklist.reasonOverall");
+  return checks > 0 ? fillPlaceholders(t("accept.checklist.reason"), { n: String(checks) }) : t("accept.checklist.reasonOverall");
 }

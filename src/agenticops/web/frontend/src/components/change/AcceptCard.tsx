@@ -4,6 +4,7 @@ import { formatFullDate } from "@/lib/formatDate";
 import { isBlank } from "@/lib/issueDetail";
 import { useReadOnly } from "@/hooks/useBootstrap";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 type T = (key: string) => string;
 
 /** ⑤ Accept. Waiting for a person's verdict: the run's verdict, mark completed / failed (a reason is required;
@@ -24,7 +25,7 @@ export function ChangeAcceptBody({ status, latestRun, quietReason, onCompleted, 
   const reason = latestRun && !quietReason && !isBlank(latestRun.verification_reason) ? latestRun.verification_reason : null;
   const head = latestRun && (
     <div className="flex flex-wrap items-center gap-3">
-      <h3 className="font-semibold text-foreground">{t("issues.executionN").replace("{n}", String(latestRun.id))}</h3>
+      <h3 className="font-semibold text-foreground">{fillPlaceholders(t("issues.executionN"), { n: String(latestRun.id) })}</h3>
       <VerificationChip status={latestRun.verification_status} />
     </div>
   );

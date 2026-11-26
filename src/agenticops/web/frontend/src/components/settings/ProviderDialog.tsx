@@ -13,6 +13,7 @@ import {
 } from "@/lib/providerForm";
 import { ProbeSteps } from "./ProbeSteps";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** A preset's words in the page's language; the server's English when there is no translation. */
 function presetText(t: (k: string) => string, p: PlatformPreset, what: "label" | "notes"): string {
   const key = `settings.providers.preset.${p.preset}.${what}`;
@@ -55,7 +56,7 @@ export function ProviderDialog({ presets, row, onClose }: {
   const [savedOff, setSavedOff] = useState(false);
   const refresh = useRefreshModels(row?.name ?? "");
   const busy = create.isPending || update.isPending || test.isPending || refresh.isPending || draft.isPending;
-  const title = row ? t("settings.providers.editTitle").replace("{name}", row.name) : t("settings.providers.addTitle");
+  const title = row ? fillPlaceholders(t("settings.providers.editTitle"), { name: row.name }) : t("settings.providers.addTitle");
 
   if (!form) {
     return (
@@ -141,13 +142,13 @@ export function ProviderDialog({ presets, row, onClose }: {
     return (
       <ModalFrame title={title} onClose={onClose} width="w-[min(560px,100%)]">
         <p role="status" className="mt-3 text-sm text-foreground">
-          {t(savedOff ? "settings.providers.savedDisabled" : "settings.providers.savedTesting").replace("{name}", saved)}
+          {fillPlaceholders(t(savedOff ? "settings.providers.savedDisabled" : "settings.providers.savedTesting"), { name: saved })}
         </p>
         {busy && <p className="mt-2 text-sm text-muted-foreground">{t("settings.providers.testing")}</p>}
         {result && <ProbeSteps result={result} />}
         {notes.map((n, i) => (
           <p key={i} className="mt-3 text-sm text-amber-700 dark:text-amber-300 [overflow-wrap:anywhere]">
-            {"text" in n ? n.text : t(n.key).replace("{error}", n.error ?? "")}
+            {"text" in n ? n.text : fillPlaceholders(t(n.key), { error: n.error ?? "" })}
           </p>
         ))}
         <div className="mt-5 flex justify-end gap-2">

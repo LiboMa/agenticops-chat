@@ -6,6 +6,7 @@ import { formatFullDate } from "@/lib/formatDate";
 import { isBlank } from "@/lib/issueDetail";
 import { useReadOnly } from "@/hooks/useBootstrap";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 type T = (key: string) => string;
 
 /** ④ Accept: the newest run's verdict and who accepted it. Accept / reject only for `pendingRun` (issueStatuses:
@@ -36,7 +37,7 @@ export function AcceptBody({ runs, loading, error, onRetryFetch, pendingRun, qui
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <h3 className="font-semibold text-foreground">{t("issues.executionN").replace("{n}", String(latest.id))}</h3>
+        <h3 className="font-semibold text-foreground">{fillPlaceholders(t("issues.executionN"), { n: String(latest.id) })}</h3>
         <VerificationChip status={latest.verification_status} />
         {pendingRun?.id === latest.id && !readOnly && (
           <div className="ml-auto flex items-center gap-2">

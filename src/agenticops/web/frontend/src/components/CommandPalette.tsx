@@ -6,6 +6,7 @@ import { isComposingKey } from "@/lib/composerKeys";
 import { useLocale } from "@/i18n/LocaleContext";
 import type { SearchResultItem } from "@/api/types";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
@@ -131,8 +132,8 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const showResults = !!debouncedQuery && !isLoading && !failed;
   const announce = !debouncedQuery || searching ? ""
     : failed ? t("palette.failed")
-    : flatResults.length ? t("palette.resultCount").replace("{n}", String(flatResults.length))
-    : t("palette.noResults").replace("{q}", () => debouncedQuery);
+    : flatResults.length ? fillPlaceholders(t("palette.resultCount"), { n: String(flatResults.length) })
+    : fillPlaceholders(t("palette.noResults"), { q: debouncedQuery });
 
   let runningIndex = 0;
 
@@ -240,7 +241,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
             {showResults && flatResults.length === 0 && (
               <div role="presentation" className="py-12 text-center text-sm text-muted-foreground">
-                {t("palette.noResults").replace("{q}", () => debouncedQuery)}
+                {fillPlaceholders(t("palette.noResults"), { q: debouncedQuery })}
               </div>
             )}
 

@@ -6,6 +6,7 @@ import { Spinner } from "./Spinner";
 import { ErrorBanner } from "./ErrorBanner";
 import { EmptyState } from "./EmptyState";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 interface QueryStateProps<T> {
   query: QueryLike & { data: T | undefined; error?: unknown };
   isEmpty: (data: T) => boolean;
@@ -39,7 +40,7 @@ export function StaleNotice({ asOf, onRetry }: { asOf: number | null; onRetry: (
   const { t } = useLocale();
   return (
     <div role="status" className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-status-warn/30 bg-status-warn/10 px-3 py-2 text-sm text-status-warn">
-      <span>{t("common.state.staleNotice").replace("{time}", formatUtcTime(asOf))}</span>
+      <span>{fillPlaceholders(t("common.state.staleNotice"), { time: formatUtcTime(asOf) })}</span>
       <button type="button" onClick={onRetry}
               className="rounded-md border border-status-warn/40 px-2.5 py-1 text-xs font-medium hover:bg-status-warn/10">
         {t("common.state.refetch")}

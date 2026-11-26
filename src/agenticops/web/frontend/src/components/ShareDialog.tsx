@@ -7,6 +7,7 @@ import {
 } from "@/hooks/useNotifications";
 import type { ShareContentResponse } from "@/api/types";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 interface ShareDialogProps {
   defaultSubject?: string;
   defaultBody?: string;
@@ -86,7 +87,7 @@ export default function ShareDialog({
           {/* Body preview */}
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1">
-              {t("share.contentChars").replace("{n}", body.length.toLocaleString())}
+              {fillPlaceholders(t("share.contentChars"), { n: body.length.toLocaleString() })}
             </label>
             <textarea
               value={body}

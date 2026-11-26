@@ -30,7 +30,7 @@ export function ActivityList({ entries, t, emptyKey }: { entries: ActivityEntry[
         ))}
       </ol>
       <button onClick={() => setRaw(!raw)} className="text-xs text-primary hover:underline">
-        {t("activity.raw").replace("{n}", String(total))}
+        {fillPlaceholders(t("activity.raw"), { n: String(total) })}
       </button>
       {raw && (
         <pre className="max-h-80 overflow-auto rounded bg-secondary p-2 text-[10px] leading-snug">

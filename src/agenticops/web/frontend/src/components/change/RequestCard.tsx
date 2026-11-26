@@ -5,6 +5,7 @@ import { isBlank } from "@/lib/issueDetail";
 import { formatFullDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 type T = (key: string) => string;
 
 /** ① Request: what was asked for — the description, who and when, the external ticket (linked only to an http(s)
@@ -47,7 +48,7 @@ export function RequestBody({ cr, t }: { cr: ChangeRequestDetail; t: T }) {
             <span className="font-mono">{ext.label}</span>
           )}
           {ext.requestedBy && (
-            <span className={muted}> · {t("changes.externalRequestedBy").replace("{name}", ext.requestedBy)}</span>
+            <span className={muted}> · {fillPlaceholders(t("changes.externalRequestedBy"), { name: ext.requestedBy })}</span>
           )}
         </p>
       )}

@@ -1,6 +1,7 @@
 import type { RCAResult } from "@/api/types";
 import { confidenceBreakdown } from "@/lib/rcaQuality";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 export type EvidenceTone = "ok" | "warn" | "danger" | "info" | "neutral";
 export interface EvidenceRow { key: string; tone: EvidenceTone; text: string }
 
@@ -24,7 +25,7 @@ export function diagnosisRows(
   if (rca && typeof rca.confidence === "number") {
     const { raw } = confidenceBreakdown(rca, null);
     rows.push({ key: "confidence", tone: "info",
-                text: t("workitem.evidence.confidence").replace("{pct}", String(Math.round(raw * 100))) });
+                text: fillPlaceholders(t("workitem.evidence.confidence"), { pct: String(Math.round(raw * 100)) }) });
     const v = rca.critic_verdict;
     if (v === "supported" || v === "weak" || v === "refuted") {
       rows.push({ key: "critic", tone: v === "supported" ? "ok" : v === "weak" ? "warn" : "danger",

@@ -24,6 +24,7 @@ import { formatFullDate } from "@/lib/formatDate";
 import { RunSummaryBlock } from "@/components/workitem/WorkSummary";
 import { runSummary as summarizeRun } from "@/lib/runSummary";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** /app/plans/:id — a fix plan as an approver reads it (MVP-2.7.0 S3): where it comes from, what it changes and how
  *  it is checked, then the approval and its runs. A change plan lives on its change request. */
 export default function PlanDetail() {
@@ -115,7 +116,7 @@ export default function PlanDetail() {
           <p className="text-sm text-muted-foreground">
             {t("issues.approvedBy")}: <span className="text-foreground">{plan.approved_by}</span>
             {plan.approved_at && <> · {formatFullDate(plan.approved_at)}</>}
-            {" · "}{t("plans.approvedVersion").replace("{n}", String(plan.approved_version ?? plan.plan_version))} {shortHash(plan.approved_hash)}
+            {" · "}{fillPlaceholders(t("plans.approvedVersion"), { n: String(plan.approved_version ?? plan.plan_version) })} {shortHash(plan.approved_hash)}
             {typeof approvedReason === "string" && approvedReason && <span className="block text-foreground">{approvedReason}</span>}
           </p>
         )}
@@ -140,7 +141,7 @@ export default function PlanDetail() {
 
       {open && (
         <ReasonDialog
-          title={open === "approve" ? t(copy.titleKey).replace("{label}", label) : `${t("plans.rejectTitle")} ${label}`}
+          title={open === "approve" ? fillPlaceholders(t(copy.titleKey), { label }) : `${t("plans.rejectTitle")} ${label}`}
           description={open === "approve" ? `${t(copy.noteKey)} ${t("plans.hash")} ${shortHash(pinnedHash)}` : plan.title}
           confirmText={open === "approve" ? t(copy.buttonKey) : t("issues.reject")}
           variant={open === "reject" ? "destructive" : "default"}

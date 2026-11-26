@@ -4,6 +4,7 @@ import type { PhaseState } from "@/lib/issuePhases";
 import { checksNeedingYouFirst, type RunSummary, type CheckState } from "@/lib/runSummary";
 import { diagnosisRows } from "@/lib/diagnosisEvidence";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 const CHECK_TONE: Record<CheckState, StatusTone> = { passed: "ok", failed: "danger", warning: "warn", pending: "warn" };
 
 /** The work item's first screen (MVP-2.8.0 S2), above its phase cards: where it stands on the step bar, who it
@@ -64,7 +65,7 @@ export function RunSummaryBlock({ summary, t }: { summary: RunSummary; t: (k: st
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-foreground">{t("workitem.summary.latestRun")}</h3>
         <StatusText tone={summary.stepsDone === summary.stepsTotal ? "ok" : "warn"} className="text-xs">
-          {t("workitem.summary.steps").replace("{done}", String(summary.stepsDone)).replace("{total}", String(summary.stepsTotal))}
+          {fillPlaceholders(t("workitem.summary.steps"), { done: String(summary.stepsDone), total: String(summary.stepsTotal) })}
         </StatusText>
       </div>
       {binding && (

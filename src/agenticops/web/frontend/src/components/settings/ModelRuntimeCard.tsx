@@ -9,6 +9,7 @@ import {
   ModelRuntimeError, useModelRuntimeSettings, usePatchModelRuntime, useResetModelRuntime,
 } from "@/hooks/useModelRuntimeSettings";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** Settings → General → «Model connection» (2026-11-08): how long a model may send nothing before its stream is cut.
  *  Admins change it (audited server-side); the next turn of every chat uses it. */
 export function ModelRuntimeCard() {
@@ -72,8 +73,7 @@ export function ModelRuntimeCard() {
             {error && !bad && <span className="text-xs text-red-600">{error.message}</span>}
             {s.updated_by && (
               <span className="ml-auto text-[11px] text-muted-foreground">
-                {t("settings.chatUpload.updated").replace("{who}", s.updated_by)
-                  .replace("{when}", s.updated_at ? formatFullDate(s.updated_at) : "")}
+                {fillPlaceholders(t("settings.chatUpload.updated"), { who: s.updated_by, when: s.updated_at ? formatFullDate(s.updated_at) : "" })}
               </span>
             )}
           </div>

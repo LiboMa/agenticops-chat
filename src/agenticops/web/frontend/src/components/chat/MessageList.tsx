@@ -18,6 +18,7 @@ import { nextStick } from "@/lib/stickToBottom";
 import { useLocale } from "@/i18n/LocaleContext";
 import { thinkingTail } from "@/lib/thinking";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 interface Props {
   messages: ChatMessage[];
   streamingContent?: string;
@@ -254,7 +255,7 @@ function MessageRow({ msg, isLast, streaming, regen, onSuggestionPick, onRegener
           ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
           : "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400"}`}>
           {t(statusKey)}
-          {errorDetail && <div className="mt-0.5 break-words">{t("chat.error.reason").replace("{reason}", errorDetail)}</div>}
+          {errorDetail && <div className="mt-0.5 break-words">{fillPlaceholders(t("chat.error.reason"), { reason: errorDetail })}</div>}
         </div>
       )}
       {answer.trim() && (

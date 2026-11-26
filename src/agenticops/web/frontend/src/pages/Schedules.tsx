@@ -25,6 +25,7 @@ import type { Schedule, ScheduleCreate, ScheduleUpdate } from "@/api/types";
 import { CronBuilder } from "@/components/ui/CronBuilder";
 import { useReadOnly } from "@/hooks/useBootstrap";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 const PIPELINE_OPTIONS = ["FullScan", "Monitoring", "DailyReport", "HealthPatrol", "AgentChain"] as const;
 const REPORT_TYPES = ["", "daily", "incident", "inventory"] as const;
 const SCAN_SCOPES = ["all", "computing", "networking", "databases", "storage", "security", "billing"] as const;
@@ -479,14 +480,14 @@ function scheduleColumns(t: (k: string) => string): Column<Schedule>[] {
         const running = e && !e.completed_at;
         return (
           <div className="text-xs text-muted-foreground space-y-0.5">
-            {e && running && <div>{t("schedules.time.started").replace("{at}", formatShortDate(e.started_at))}</div>}
+            {e && running && <div>{fillPlaceholders(t("schedules.time.started"), { at: formatShortDate(e.started_at) })}</div>}
             {e && !running && (
               <div>
-                {t("schedules.time.finished").replace("{at}", formatShortDate(e.completed_at))}
-                {typeof e.duration_ms === "number" && <> · {t("schedules.time.took").replace("{d}", formatElapsed(e.duration_ms))}</>}
+                {fillPlaceholders(t("schedules.time.finished"), { at: formatShortDate(e.completed_at) })}
+                {typeof e.duration_ms === "number" && <> · {fillPlaceholders(t("schedules.time.took"), { d: formatElapsed(e.duration_ms) })}</>}
               </div>
             )}
-            {r.is_enabled && r.next_run_at && <div>{t("schedules.time.next").replace("{at}", formatShortDate(r.next_run_at))}</div>}
+            {r.is_enabled && r.next_run_at && <div>{fillPlaceholders(t("schedules.time.next"), { at: formatShortDate(r.next_run_at) })}</div>}
             {!e && !(r.is_enabled && r.next_run_at) && <div>—</div>}
           </div>
         );
@@ -562,7 +563,7 @@ export default function Schedules() {
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  {tb === "all" ? t("schedules.tab.all").replace("{n}", String(schedules?.length ?? 0))
+                  {tb === "all" ? fillPlaceholders(t("schedules.tab.all"), { n: String(schedules?.length ?? 0) })
                     : t(tb === "recurring" ? "schedules.tab.recurring" : "schedules.tab.oneShot")}
                 </button>
               ))}
@@ -635,7 +636,7 @@ export default function Schedules() {
         {totalPages > 1 && (
           <div className="flex items-center justify-between px-4 py-3 border-t border-border">
             <span className="text-xs text-muted-foreground">
-              {t("schedules.pageLine").replace("{n}", String(filtered.length)).replace("{page}", String(page + 1)).replace("{pages}", String(totalPages))}
+              {fillPlaceholders(t("schedules.pageLine"), { n: String(filtered.length), page: String(page + 1), pages: String(totalPages) })}
             </span>
             <div className="flex gap-1">
               <button

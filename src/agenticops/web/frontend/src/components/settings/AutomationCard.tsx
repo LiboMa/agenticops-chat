@@ -10,6 +10,7 @@ import { useUpdateSettings, type AppSettings } from "@/hooks/useSettings";
 import { formatShortDate } from "@/lib/formatDate";
 import { HIGH_IMPACT, canEditHigh, heldVar, highKeys, pending, shown, sourceOf, stage, type HighKey, type Staged } from "@/lib/settingsPage";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 type T = (key: string) => string;
 const onOff = (t: T, on: boolean) => t(on ? "settings.high.on" : "settings.high.off");
 
@@ -66,8 +67,8 @@ export function AutomationCard({ s }: { s: AppSettings }) {
                     <StatusText tone={inForce[key] ? "ok" : "neutral"} className="text-xs">
                       {t("settings.high.inForce")}{onOff(t, inForce[key])}
                     </StatusText>
-                    <span className={held ? "text-status-warn" : "text-muted-foreground"}>{t(`settings.high.source.${source}`).replace("{var}", held ?? "")}</span>
-                    {waiting && <StatusText tone="warn" className="text-xs">{t("settings.high.staged").replace("{value}", onOff(t, staged[key] as boolean))}</StatusText>}
+                    <span className={held ? "text-status-warn" : "text-muted-foreground"}>{fillPlaceholders(t(`settings.high.source.${source}`), { var: held ?? "" })}</span>
+                    {waiting && <StatusText tone="warn" className="text-xs">{fillPlaceholders(t("settings.high.staged"), { value: onOff(t, staged[key] as boolean) })}</StatusText>}
                   </p>
                 </div>
                 <Switch checked={shown(inForce, staged, key)} onCheckedChange={(v) => click(key, v)} disabled={!canEdit || update.isPending || held !== null}
@@ -79,14 +80,14 @@ export function AutomationCard({ s }: { s: AppSettings }) {
 
         {info?.updated_at && (
           <p className="mt-3 text-xs text-muted-foreground">
-            {t("settings.high.lastChange").replace("{time}", formatShortDate(info.updated_at)).replace("{by}", (info.updated_by ?? "—").replace(/^user:/, ""))}
+            {fillPlaceholders(t("settings.high.lastChange"), { time: formatShortDate(info.updated_at), by: (info.updated_by ?? "—").replace(/^user:/, "") })}
           </p>
         )}
 
         <div className="mt-3 flex flex-wrap items-center gap-2" role="status">
           {changes.length > 0 ? (
             <>
-              <span className="text-sm text-status-warn">{t("settings.high.pending").replace("{n}", String(changes.length))}</span>
+              <span className="text-sm text-status-warn">{fillPlaceholders(t("settings.high.pending"), { n: String(changes.length) })}</span>
               <button type="button" onClick={() => setPreview(true)}
                       className="min-h-[44px] rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary-hover sm:min-h-9">
                 {t("settings.high.preview")}
@@ -123,7 +124,7 @@ export function AutomationCard({ s }: { s: AppSettings }) {
                     className="min-h-[44px] rounded-md border border-border px-3 text-sm text-foreground hover:bg-accent sm:min-h-9">{t("common.cancel")}</button>
             <button type="button" onClick={save} disabled={update.isPending || changes.length === 0}
                     className="min-h-[44px] rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary-hover disabled:opacity-60 sm:min-h-9">
-              {update.isPending ? t("settings.high.saving") : t("settings.high.confirm").replace("{n}", String(changes.length))}
+              {update.isPending ? t("settings.high.saving") : fillPlaceholders(t("settings.high.confirm"), { n: String(changes.length) })}
             </button>
           </div>
         </ModalFrame>

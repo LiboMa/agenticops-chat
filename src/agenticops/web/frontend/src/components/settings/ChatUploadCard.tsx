@@ -9,6 +9,7 @@ import {
   UploadConfigError, useChatUploadSettings, usePatchChatUpload, useResetChatUpload, type ChatUploadValues,
 } from "@/hooks/useChatUploadSettings";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 type NumberField = Exclude<keyof ChatUploadValues, "allowed_extensions">;
 
 const GROUPS: { key: string; fields: NumberField[] }[] = [
@@ -126,8 +127,7 @@ export function ChatUploadCard() {
             {error && !badField && <span className="text-xs text-red-600">{error.message}</span>}
             {s.updated_by && (
               <span className="ml-auto text-[11px] text-muted-foreground">
-                {t("settings.chatUpload.updated").replace("{who}", s.updated_by)
-                  .replace("{when}", s.updated_at ? formatFullDate(s.updated_at) : "")}
+                {fillPlaceholders(t("settings.chatUpload.updated"), { who: s.updated_by, when: s.updated_at ? formatFullDate(s.updated_at) : "" })}
               </span>
             )}
           </div>

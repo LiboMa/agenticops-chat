@@ -10,6 +10,7 @@ import { planCounts, planLabel, shortHash } from "@/lib/plans";
 import { formatShortDate } from "@/lib/formatDate";
 import { renderMarkdown } from "@/lib/renderMarkdown";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** A fix plan or a change's implementation plan, one rendering for both: name, version, hash and whether the
  *  approved hash still matches, the four counts, then the steps / checks / rollback. A change also passes its
  *  `steps_diff`; without one (a fix plan, or a request that brought no steps) there is no diff section. */
@@ -36,18 +37,14 @@ export function PlanView({ plan, stepsDiff, hideHeader = false, t }: {
           </>
         )}
         <p className="text-xs text-muted-foreground">
-          {t("plan.counts")
-            .replace("{steps}", String(n.steps))
-            .replace("{pre}", String(n.preChecks))
-            .replace("{post}", String(n.postChecks))
-            .replace("{rollback}", String(n.rollback))}
+          {fillPlaceholders(t("plan.counts"), { steps: String(n.steps), pre: String(n.preChecks), post: String(n.postChecks), rollback: String(n.rollback) })}
         </p>
         {/* The content identity an approval is bound to: approving sends this hash back (409 if it changed) */}
         <p className="text-xs text-muted-foreground">
           <span className="font-mono" title={plan.content_hash ?? undefined}>
             {t("plans.hash")} {shortHash(plan.content_hash)}
             {plan.approved_hash &&
-              ` · ${t("plans.approvedVersion").replace("{n}", String(plan.approved_version ?? plan.plan_version))} ${shortHash(plan.approved_hash)}`}
+              ` · ${fillPlaceholders(t("plans.approvedVersion"), { n: String(plan.approved_version ?? plan.plan_version) })} ${shortHash(plan.approved_hash)}`}
           </span>
           {plan.approved_hash && (plan.approved_hash === plan.content_hash
             ? <span className="ml-2 text-emerald-600 dark:text-emerald-400">{t("plan.hashMatches")}</span>
@@ -67,11 +64,7 @@ export function PlanView({ plan, stepsDiff, hideHeader = false, t }: {
           {t("changes.stepsDiff")}:{" "}
           {marks.identical
             ? t("changes.stepsDiff.identical")
-            : t("changes.stepsDiff.summary")
-                .replace("{added}", String(marks.added))
-                .replace("{modified}", String(marks.modified))
-                .replace("{removed}", String(marks.removed.length))
-                .replace("{unchanged}", String(marks.unchanged))}
+            : fillPlaceholders(t("changes.stepsDiff.summary"), { added: String(marks.added), modified: String(marks.modified), removed: String(marks.removed.length), unchanged: String(marks.unchanged) })}
         </p>
       )}
 
@@ -87,7 +80,7 @@ export function PlanView({ plan, stepsDiff, hideHeader = false, t }: {
                     <p className="mb-1 text-xs text-amber-600 dark:text-amber-400 break-all">
                       {mark.kind === "added"
                         ? t("changes.stepsDiff.added")
-                        : t("changes.stepsDiff.modified").replace("{cmd}", mark.proposed)}
+                        : fillPlaceholders(t("changes.stepsDiff.modified"), { cmd: mark.proposed })}
                     </p>
                   )}
                   <RunbookStep index={i + 1} step={st} />

@@ -6,6 +6,7 @@ import { ApiError } from "@/api/client";
 import { destinationOf } from "@/lib/publish";
 import type { NotificationChannel, ReportPublishResponse } from "@/api/types";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 const FORMATS = ["html", "pdf", "docx", "markdown"] as const;
 
 /** Publish one report version (MVP-2.7.0 S6): the real destination is shown before anything is sent, the version
@@ -38,12 +39,11 @@ export function PublishDialog({ open, onOpenChange, reportId, version, language,
           <Dialog.Content className="w-[min(520px,100%)] rounded-lg border border-border bg-card p-5 shadow-xl animate-[slideInRight_0.2s_ease-out]">
             <Dialog.Title className="text-lg font-semibold text-foreground">{t("reports.publish.title")}</Dialog.Title>
             <Dialog.Description className="mt-1 text-sm text-muted-foreground">
-              {t("reports.export.what").replace("{ref}", `R#${reportId}`).replace("{version}", String(version))
-                .replace("{language}", t(`reports.lang.${language}`))}
+              {fillPlaceholders(t("reports.export.what"), { ref: `R#${reportId}`, version: String(version), language: t(`reports.lang.${language}`) })}
             </Dialog.Description>
             {result ? (
               <div className="mt-4 rounded-md border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-800 dark:text-emerald-300">
-                <p>{t("reports.publish.done").replace("{destination}", destination)}</p>
+                <p>{fillPlaceholders(t("reports.publish.done"), { destination })}</p>
                 {Object.entries(result.download_urls).map(([f, url]) => (
                   <a key={f} href={url} target="_blank" rel="noopener noreferrer" className="block text-xs underline">{f.toUpperCase()}</a>
                 ))}

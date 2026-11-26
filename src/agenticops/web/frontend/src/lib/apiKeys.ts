@@ -2,6 +2,7 @@ import type { ApiKeyRow, UserRole } from "@/api/types";
 import { parseApiDate } from "@/lib/formatDate";
 import type { isReadOnly } from "@/lib/permissions";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** «My API keys» and the admin's view (MVP-2.8.0). The server decides scope and who may (services/api_keys);
  *  these only shape what the pages show. */
 
@@ -36,7 +37,7 @@ export const DEFAULT_EXPIRY = 90;
 export function expiryLabel(days: number | null, t: (k: string) => string): string {
   if (days === null) return t("apiKeys.expiry.never");
   if (days === 365) return t("apiKeys.expiry.year");
-  return t("apiKeys.expiry.days").replace("{n}", String(days));
+  return fillPlaceholders(t("apiKeys.expiry.days"), { n: String(days) });
 }
 
 /** How to use the key — a call to this site with it as the Bearer token. */

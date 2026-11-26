@@ -7,6 +7,7 @@ import { useLocale } from "@/i18n/LocaleContext";
 import { cleanExternalRef, cleanProposedSteps, MAX_PROPOSED_STEPS } from "@/lib/changeForm";
 import type { ChangeExternalRef, ChangeProposedStep } from "@/api/types";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 interface Props {
   onClose: () => void;
   onCreated: (id: number) => void;
@@ -59,7 +60,7 @@ export function NewChangeDialog({ onClose, onCreated, initial }: Props) {
     // The optional fields are checked here the way the API checks them, so a bad row is named instead of a 422
     const cs = cleanProposedSteps(steps);
     const ce = cleanExternalRef(ext);
-    if (!cs.ok) return setFormError(t("plans.form.error.noCommand").replace("{n}", String(cs.row)));
+    if (!cs.ok) return setFormError(fillPlaceholders(t("plans.form.error.noCommand"), { n: String(cs.row) }));
     if (!ce.ok) return setFormError(t(`plans.form.error.${ce.error}`));
     setFormError(null);
     create.mutate(

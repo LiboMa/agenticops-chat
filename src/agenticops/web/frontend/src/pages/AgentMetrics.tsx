@@ -23,6 +23,7 @@ import {
   Tooltip, Legend, PieChart, Pie, Cell,
 } from "recharts";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 type T = (key: string) => string;
 
 /** A module's title with the range its numbers are of (MVP-2.9.0 N24): the page's, or — said so — its own. */
@@ -32,7 +33,7 @@ function ModuleTitle({ title, q, module, t }: { title: string; q: MetricsQuery; 
     <h2 className="text-lg font-semibold text-foreground">
       {title}
       <span className="ml-2 text-xs font-normal text-muted-foreground">
-        {t(r.key).replace("{n}", String(r.n))}{r.own && <>（{t("metrics.range.own")}）</>}
+        {fillPlaceholders(t(r.key), { n: String(r.n) })}{r.own && <>（{t("metrics.range.own")}）</>}
       </span>
     </h2>
   );
@@ -55,7 +56,7 @@ function OwnRange<V extends string>({ value, options, label, onChange, t }: {
 function Metric({ name, def, t }: { name: string; def: string; t: T }) {
   return (
     <div className="flex items-center gap-1 text-xs text-muted-foreground">
-      {name}<InfoHint label={t("metrics.def").replace("{name}", name)} text={def} />
+      {name}<InfoHint label={fillPlaceholders(t("metrics.def"), { name })} text={def} />
     </div>
   );
 }
@@ -108,13 +109,13 @@ function LocationStatsCard({ range }: { range: MetricsQuery }) {
                     : acc.none ? <div className="text-base font-semibold text-foreground">{t("locationStats.none")}</div>
                     : (
                       <div className="text-xl font-bold text-foreground">
-                        {t("locationStats.accuracy").replace("{correct}", String(acc.correct)).replace("{judged}", String(acc.judged))}
+                        {fillPlaceholders(t("locationStats.accuracy"), { correct: String(acc.correct), judged: String(acc.judged) })}
                       </div>
                     )}
                   {acc && (
                     <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-muted-foreground">
                       {acc.small && <StatusText tone="warn" className="text-[12px]">{t("locationStats.small")}</StatusText>}
-                      <span>{t("locationStats.judgedOf").replace("{judged}", String(acc.judged)).replace("{rcas}", String(acc.rcas))}</span>
+                      <span>{fillPlaceholders(t("locationStats.judgedOf"), { judged: String(acc.judged), rcas: String(acc.rcas) })}</span>
                     </div>
                   )}
                 </div>
@@ -122,7 +123,7 @@ function LocationStatsCard({ range }: { range: MetricsQuery }) {
                   <Metric name={t("locationStats.anchoringRate")} def={t("locationStats.anchoring.def")} t={t} />
                   <div className="text-xl font-bold text-foreground">{ratePct(s.anchoring_rate)}</div>
                   <div className="text-[12px] text-muted-foreground">
-                    {t("locationStats.anchoringOf").replace("{n}", String(s.issues_with_resource_id))}
+                    {fillPlaceholders(t("locationStats.anchoringOf"), { n: String(s.issues_with_resource_id) })}
                   </div>
                 </div>
               </div>
@@ -153,7 +154,7 @@ function TokenSummary({ range, onOwn }: { range: MetricsQuery; onOwn: (v: Tokens
       <CardHeader className="flex-wrap gap-2">
         <ModuleTitle title={t("metrics.tokens.title")} q={range} module="tokens" t={t} />
         <OwnRange value={range.tokens} options={TOKENS_OWN} onChange={onOwn} t={t}
-                  label={(v) => t("metrics.range.hours").replace("{n}", v.slice(0, -1))} />
+                  label={(v) => fillPlaceholders(t("metrics.range.hours"), { n: v.slice(0, -1) })} />
       </CardHeader>
       <CardBody>
         {summaryQ.isLoading ? (
@@ -515,10 +516,10 @@ function CostDashboard({ range, onOwn }: { range: MetricsQuery; onOwn: (v: CostO
         <ModuleTitle title={t("metrics.cost.title")} q={range} module="cost" t={t} />
         <div className="flex flex-wrap gap-2">
           <OwnRange value={range.cost} options={COST_OWN} onChange={onOwn} t={t}
-                    label={(v) => t(`metrics.range.${v}`).replace("{n}", v === "month" ? "12" : "3")} />
+                    label={(v) => fillPlaceholders(t(`metrics.range.${v}`), { n: v === "month" ? "12" : "3" })} />
           <select aria-label={t("metrics.cost.groupBy")} value={groupBy} onChange={(e) => setGroupBy(e.target.value as (typeof GROUP_BY)[number])}
                   className="rounded border border-border bg-background px-2 py-1 text-[16px] sm:text-xs">
-            {GROUP_BY.map((g) => <option key={g} value={g}>{t("metrics.cost.breakdown").replace("{by}", t(`metrics.cost.by.${g}`))}</option>)}
+            {GROUP_BY.map((g) => <option key={g} value={g}>{fillPlaceholders(t("metrics.cost.breakdown"), { by: t(`metrics.cost.by.${g}`) })}</option>)}
           </select>
         </div>
       </CardHeader>
@@ -567,13 +568,13 @@ function CostDashboard({ range, onOwn }: { range: MetricsQuery; onOwn: (v: CostO
         <div className="grid gap-4 sm:grid-cols-2">
           {/* Breakdown table */}
           <div className="min-w-0">
-            <h3 className="text-sm font-medium mb-2">{t("metrics.cost.breakdown").replace("{by}", t(`metrics.cost.by.${groupBy}`))}</h3>
+            <h3 className="text-sm font-medium mb-2">{fillPlaceholders(t("metrics.cost.breakdown"), { by: t(`metrics.cost.by.${groupBy}`) })}</h3>
             <div className="space-y-1">
               {breakdown.slice(0, 8).map((b, i) => (
                 <div key={b.key} className="flex items-center gap-2 text-xs">
                   <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
                   <span className="flex-1 truncate">{b.key}</span>
-                  <span className="tabular-nums text-muted-foreground">{t("metrics.cost.nCalls").replace("{n}", String(b.calls))}</span>
+                  <span className="tabular-nums text-muted-foreground">{fillPlaceholders(t("metrics.cost.nCalls"), { n: String(b.calls) })}</span>
                   <span className="tabular-nums text-muted-foreground">{formatTokens(b.tokens)}</span>
                   <span className="tabular-nums font-medium text-green-600 dark:text-green-400" title={costExact(b.cost_usd)}>{costLabel(b.cost_usd)}</span>
                 </div>
@@ -630,7 +631,7 @@ export default function AgentMetrics() {
             {RANGE_DAYS.map((d) => (
               <button key={d} type="button" aria-pressed={range.days === d} onClick={() => change({ days: d })}
                       className={`rounded-md px-3 py-1 text-sm transition-colors max-[767px]:min-h-[44px] ${range.days === d ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
-                {t("metrics.range.days").replace("{n}", String(d))}
+                {fillPlaceholders(t("metrics.range.days"), { n: String(d) })}
               </button>
             ))}
           </div>
