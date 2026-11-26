@@ -90,6 +90,10 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+from agenticops.llm.errors import SdkErrorFilter as _SdkErrorFilter  # noqa: E402 — an SDK error can quote the key
+for _h in [*logging.getLogger().handlers, logging.lastResort]:
+    if _h is not None:
+        _h.addFilter(_SdkErrorFilter())
 logger = logging.getLogger(__name__)
 
 

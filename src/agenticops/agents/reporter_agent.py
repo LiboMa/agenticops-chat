@@ -24,6 +24,7 @@ from agenticops.tools.report_tools import save_report, list_reports
 from agenticops.tools.kb_tools import search_similar_cases, write_kb_case, distill_case_study
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.tools.memory_tools import search_agent_memory
+from agenticops.llm.errors import safe_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -202,4 +203,4 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
         return str(result)
     except Exception as e:
         logger.exception("Reporter agent failed")
-        return f"Reporter agent error: {e}"
+        return f"Reporter agent error: {safe_error_text(e)}"

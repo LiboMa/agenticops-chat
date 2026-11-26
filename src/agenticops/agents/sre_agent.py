@@ -72,6 +72,7 @@ from agenticops.agents.preamble import (
 )
 from agenticops.tools.memory_tools import search_agent_memory
 from agenticops.agents.enhanced import enhanced_available, enhanced_task
+from agenticops.llm.errors import safe_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -466,7 +467,7 @@ def sre_agent(issue_id: int) -> str:
         # this function does not raise, so its callers cannot see the failure: the timeline says it (MVP-2.9.0)
         from agenticops.services.pipeline_events import log_agent_failed
         log_agent_failed(issue_id, "sre", error=e)
-        return f"SRE agent error: {e}"
+        return f"SRE agent error: {safe_error_text(e)}"
     finally:
         _close_steps(recorder)
         if claimed_here:
@@ -619,7 +620,7 @@ def review_change(change_request_id: int) -> str:
     try:
         text = cs.start_review(change_request_id, sync=True)
     except cs.ChangeError as e:
-        return f"Change review not started: {e}"
+        return f"Change review not started: {safe_error_text(e)}"
     try:
         cr = cs.get_change(change_request_id)
     except cs.ChangeError:
@@ -668,4 +669,4 @@ def sre_query(query: str, region: str = "us-east-1") -> str:
         return str(result)
     except Exception as e:
         logger.exception("SRE query failed")
-        return f"SRE query error: {e}"
+        return f"SRE query error: {safe_error_text(e)}"

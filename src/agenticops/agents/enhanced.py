@@ -14,6 +14,7 @@ from typing import AsyncIterator, Optional
 from strands import tool
 
 from agenticops.config import settings
+from agenticops.llm.errors import safe_error_text
 
 
 def bedrock_refusal(backend: str) -> Optional[str]:
@@ -56,7 +57,7 @@ async def _enhanced_task_impl(task: str, context: str = "", backend: str = "") -
     try:
         be = get_backend(name)
     except KeyError as e:
-        yield f"Enhanced backend unavailable: {e}"
+        yield f"Enhanced backend unavailable: {safe_error_text(e)}"
         return
 
     chunks: list[str] = []
@@ -75,7 +76,7 @@ async def _enhanced_task_impl(task: str, context: str = "", backend: str = "") -
                 err = ev.error
             # plan/done are not surfaced as sub-events this round
     except Exception as e:  # never crash the calling agent's turn
-        yield f"Enhanced backend failed: {e}"
+        yield f"Enhanced backend failed: {safe_error_text(e)}"
         return
 
     # Final yield = the tool result the agent receives.

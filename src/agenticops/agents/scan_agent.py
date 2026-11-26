@@ -19,6 +19,7 @@ from agenticops.tools.metadata_tools import (
     get_enabled_accounts,
     save_resources,
 )
+from agenticops.llm.errors import safe_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -202,4 +203,4 @@ def scan_agent(services: str = "all", regions: str = "all") -> str:
         return str(result)
     except Exception as e:
         logger.exception("Scan agent failed")
-        return f"Scan agent error: {e}"
+        return f"Scan agent error: {safe_error_text(e)}"

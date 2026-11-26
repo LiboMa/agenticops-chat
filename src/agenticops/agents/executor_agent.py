@@ -48,6 +48,7 @@ from agenticops.skills.tools import activate_skill, read_skill_reference, run_sk
 from agenticops.skills.execution import run_on_host, run_kubectl
 from agenticops.agents.preamble import build_system_prompt
 from agenticops.tools.memory_tools import search_agent_memory
+from agenticops.llm.errors import safe_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -401,7 +402,7 @@ def executor_agent(fix_plan_id: int) -> str:
         return outcome
     except Exception as e:
         logger.exception("Executor agent failed for FixPlan #%d", fix_plan_id)
-        outcome = f"Executor agent error: {e}"
+        outcome = f"Executor agent error: {safe_error_text(e)}"
         return outcome
     finally:
         # A run that ends without recording its result — a refusal, a model error the agent caught, an exception —

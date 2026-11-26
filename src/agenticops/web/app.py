@@ -480,6 +480,9 @@ class TraceIdFilter(logging.Filter):
 _trace_filter = TraceIdFilter()
 
 
+from agenticops.llm.errors import SdkErrorFilter as _SdkErrorFilter  # noqa: E402
+
+_sdk_error_filter = _SdkErrorFilter()
 _SERVICE_LOG_HANDLERS: dict[str, logging.Handler] = {}   # by file: installing twice adds nothing (2026-11-08)
 
 
@@ -492,6 +495,7 @@ def _service_log_handler(path: Path, level: int, fmt: logging.Formatter) -> logg
         handler.setLevel(level)
         handler.setFormatter(fmt)
         handler.addFilter(_trace_filter)
+        handler.addFilter(_sdk_error_filter)   # an SDK error's sentence can quote the key
         _SERVICE_LOG_HANDLERS[str(path)] = handler
     return handler
 
@@ -522,6 +526,10 @@ def _setup_service_logging() -> None:
     access_logger = logging.getLogger("uvicorn.access")
     if access_handler not in access_logger.handlers:
         access_logger.addHandler(access_handler)
+    # what else prints a record — the root's handlers (the console) and the last-resort stderr handler
+    for h in [*logging.getLogger().handlers, logging.lastResort]:
+        if h is not None and _sdk_error_filter not in h.filters:
+            h.addFilter(_sdk_error_filter)
 
 
 # ============================================================================
