@@ -255,3 +255,15 @@ def test_readiness_verifies_a_ref_main(env):
     env.monkeypatch.setattr(env.settings, "agent_main_model_id", "global.anthropic.claude-opus-5-5")
     view = readiness.readiness(actor, can_verify=True)["model"]
     assert view["provider"] == "bedrock" and view["region"] == env.settings.bedrock_region and view["endpoint"] is None
+
+
+def test_a_refused_galaxy_model_leaves_the_rest_of_the_request_unapplied(env):
+    """Review of MVP-2.9.0, Spec ⑥: galaxy_model_id's own check (it must be one of the listed models) ran after the
+    other model settings of the same request had been written — a request answered 400 had already changed them."""
+    h = env.login("root", is_admin=True)
+    before = env.settings.security_model_id
+    r = env.client.patch(URL, headers=h, json={"model_settings": {"security": "local-llm::fake-chat-1"},
+                                               "galaxy_model_id": "global.anthropic.not-a-listed-model"})
+    assert r.status_code == 400 and "galaxy_model_id" in r.text
+    assert env.settings.security_model_id == before
+    assert env.written == []

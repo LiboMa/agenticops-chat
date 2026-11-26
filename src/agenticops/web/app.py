@@ -954,6 +954,11 @@ async def _apply_settings(request: Request, body: dict, current: Actor):
     model_updates = await asyncio.to_thread(_checked_model_updates, body)
     if isinstance(model_updates, JSONResponse):
         return model_updates
+    # … and the Galaxy model's own, stricter check (one of the listed models) too — it used to run after the other
+    # model settings had been written, so a request refused here had already changed them (review of 2.9.0, Spec ⑥)
+    galaxy_val = str(body.get("galaxy_model_id") or "") if "galaxy_model_id" in body else None
+    if galaxy_val and galaxy_val not in await asyncio.to_thread(_allowed_model_ids):  # may list Bedrock models
+        raise HTTPException(400, f"Unknown galaxy_model_id: {galaxy_val}")
     # a switch this process's environment holds at its strict value cannot be changed here (review, N27)
     held = exec_switches.held(exec_updates)
     if held:
@@ -1047,12 +1052,9 @@ async def _apply_settings(request: Request, body: dict, current: Actor):
 
     # Galaxy build model override — persist to YAML. "" = use bedrock_model_id_cheap.
     # A non-empty value must be a known preset (same guard as agent model_id would get).
-    if "galaxy_model_id" in body:
-        val = str(body["galaxy_model_id"] or "")
-        if val and val not in await asyncio.to_thread(_allowed_model_ids):  # may list Bedrock models
-            raise HTTPException(400, f"Unknown galaxy_model_id: {val}")
-        settings.galaxy_model_id = val
-        save_to_yaml({"galaxy_model_id": val})
+    if galaxy_val is not None:                       # checked above, with every other model value
+        settings.galaxy_model_id = galaxy_val
+        save_to_yaml({"galaxy_model_id": galaxy_val})
 
     # Security toggles — last. One audit row per changed value, then the ONE yaml write, inside one session: a
     # yaml failure rolls the rows back, and a commit that fails after the write puts the old values back in the
