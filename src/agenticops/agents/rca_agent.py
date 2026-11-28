@@ -62,6 +62,7 @@ from agenticops.tools.integration_tools import (
     query_provider_metrics,
     query_provider_logs,
 )
+from agenticops.llm.errors import safe_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -529,7 +530,7 @@ def rca_agent(issue_id: int) -> str:
         # this function does not raise, so its callers cannot see the failure: the timeline says it (MVP-2.9.0)
         from agenticops.services.pipeline_events import log_agent_failed
         log_agent_failed(issue_id, "rca", error=e)
-        return f"RCA agent error: {e}"
+        return f"RCA agent error: {safe_error_text(e)}"
     finally:
         if recorder is not None:
             recorder.close()            # the run is over: it takes no more notes

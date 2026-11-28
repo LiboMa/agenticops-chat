@@ -1,74 +1,43 @@
-import { useState } from "react";
 import { useNfT } from "../../i18n";
-import { BriefFrame } from "../BriefFrame";
-import { LiveSteps } from "../../live/LiveSteps";
 import { utcStamp } from "../../lib/time";
-import { AgentAtWork } from "../widgets/AgentAtWork";
 import { Prov } from "../widgets/Cause";
-import { CauseSection, useCause } from "../widgets/CauseSection";
-import { useBriefKeys, useDecide, type BriefProps } from "./briefContext";
-import { DismissForm, useAgentAsk, VerdictQuote } from "./shared";
+import { CauseSection } from "../widgets/CauseSection";
+import { AgentAskBrief } from "./AgentAskBrief";
+import type { BriefProps } from "./briefContext";
+import { VerdictQuote } from "./shared";
 
 /** A diagnosis a person judged wrong, an issue with no diagnosis at all, one whose diagnosis ended without a result
  *  (N11: it failed or timed out, and no agent is on it), or an issue a person reopened that nothing has diagnosed
  *  since (N26): ask the agent to diagnose it (again). */
 export function RerunBrief({ item, frame }: BriefProps) {
   const t = useNfT();
-  const { openPeek } = useDecide();
-  const agent = useAgentAsk(item);
-  const source = useCause(agent.issueId);
-  const [closing, setClosing] = useState(false);
   const missing = item.reason_detail === "rca_missing";
   const stopped = item.reason_detail === "rca_stopped";
   const reopened = item.reason_detail === "reopened";
-
-  useBriefKeys({
-    onKey: (key, _e, repeat) => {
-      if (closing) return false;
-      if (key === " " && source.cause?.evidence.length) { openPeek(source.cause.evidence, 0); return true; }
-      if (frame.readOnly) return false;
-      if (key === "a") { if (!repeat) void agent.ask("rca"); return true; }
-      if (key === "d") { agent.setError(null); setClosing(true); return true; }
-      return false;
-    },
-    onEscape: () => { if (!closing) return false; setClosing(false); return true; },
-  });
-
-  const actions = closing ? <DismissForm item={item} onCancel={() => setClosing(false)} /> : (
-    <>
-      <button type="button" className="btn primary" disabled={agent.busy} onClick={() => void agent.ask("rca")}><span className="t">{t("act.rediagnose")}</span><kbd>A</kbd></button>
-      <span className="spacer" />
-      <button type="button" className="btn quiet" onClick={() => setClosing(true)}><span className="t">{t("act.close")}</span><kbd>D</kbd></button>
-      {agent.error && <p className="note err wide" role="alert">{agent.error}</p>}
-    </>
-  );
   return (
-    <BriefFrame item={item} {...frame} ask={t(stopped ? "ask.rerun.stopped" : reopened ? "ask.rerun.reopened" : missing ? "ask.rerun.missing" : "ask.rerun")} actions={actions}>
-      <AgentAtWork lane={agent.lane} now={frame.now} />
-      {stopped && (
+    <AgentAskBrief item={item} frame={frame} spec={{
+      main: { ask: "rca", label: t("act.rediagnose") },
+      question: t(stopped ? "ask.rerun.stopped" : reopened ? "ask.rerun.reopened" : missing ? "ask.rerun.missing" : "ask.rerun"),
+      stopped: stopped ? { heading: t("sec.stoppedRca"), text: t("rerun.stopped", { t: utcStamp(item.occurred_at, frame.now) }), agent: "rca" } : undefined,
+    }}>
+      {({ issueId, source }) => (
         <>
-          <div className="sec">
-            <h2>{t("sec.stoppedRca")}</h2>
-            <p><Prov code />{t("rerun.stopped", { t: utcStamp(item.occurred_at, frame.now) })}</p>
-          </div>
-          {/* what the code recorded of that run, if it ran after steps began to be recorded */}
-          <LiveSteps of={{ item: item.id, agent: "rca", before: item.occurred_at }} live={false} now={frame.now} heading={t("steps.title.stopped")} />
+          {reopened && (
+            <div className="sec">
+              <h2>{t("sec.reopened")}</h2>
+              <p><Prov code />{t("rerun.reopened", { t: utcStamp(item.occurred_at, frame.now) })}</p>
+            </div>
+          )}
+          {!missing && !stopped && !reopened && (
+            <div className="sec">
+              <h2>{t("sec.humanVerdict")}</h2>
+              <VerdictQuote issueId={issueId} rcaId={source.rca?.id ?? null} />
+              <p className="note">{t("rerun.note")}</p>
+            </div>
+          )}
+          {!stopped && <CauseSection heading={t(reopened ? "sec.earlierRca" : "sec.rejectedRca")} source={source} />}
         </>
       )}
-      {reopened && (
-        <div className="sec">
-          <h2>{t("sec.reopened")}</h2>
-          <p><Prov code />{t("rerun.reopened", { t: utcStamp(item.occurred_at, frame.now) })}</p>
-        </div>
-      )}
-      {!missing && !stopped && !reopened && (
-        <div className="sec">
-          <h2>{t("sec.humanVerdict")}</h2>
-          <VerdictQuote issueId={agent.issueId} rcaId={source.rca?.id ?? null} />
-          <p className="note">{t("rerun.note")}</p>
-        </div>
-      )}
-      {!stopped && <CauseSection heading={t(reopened ? "sec.earlierRca" : "sec.rejectedRca")} source={source} />}
-    </BriefFrame>
+    </AgentAskBrief>
   );
 }

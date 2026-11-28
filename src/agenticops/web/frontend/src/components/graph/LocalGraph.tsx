@@ -18,6 +18,7 @@ import {
   buildLocalGraph, compactLocalGraph, type FocusSubject, type LgLink, type LgNode, type LocalGraphModel,
 } from "@/lib/localGraph";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 // Galaxy's NEBULA palette, so a resource reads the same colour on both pages
 const HEALTH_FILL: Record<GalaxyHealth, string> = {
   unknown: "#6b7280", notice: "#8fa6c4", warning: "#f5b53d", critical: "#f0555a",
@@ -134,7 +135,7 @@ export function LocalGraph({ subject, path, note, height = 360, compact = false 
   const nodeName = (id: string) => model.nodes.find((n) => n.id === id)?.label ?? id;
   const a = focus.anchor;
   const anchorLine = a.status === "anchored" ? null : t(`anchor.${a.status}`) + (a.status === "ambiguous"
-    ? ` — ${t("anchor.candidatesN").replace("{n}", String(a.candidates.length))}` : "");
+    ? ` — ${fillPlaceholders(t("anchor.candidatesN"), { n: String(a.candidates.length) })}` : "");
 
   const header = (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -151,7 +152,7 @@ export function LocalGraph({ subject, path, note, height = 360, compact = false 
       </label>
       {compact && (showAll || view.hidden > 0) && (
         <button type="button" onClick={() => setShowAll(!showAll)} className="text-primary hover:underline">
-          {showAll ? t("graph.showCompact") : t("graph.showAll").replace("{n}", String(full.nodes.length))}
+          {showAll ? t("graph.showCompact") : fillPlaceholders(t("graph.showAll"), { n: String(full.nodes.length) })}
         </button>
       )}
     </div>
@@ -333,7 +334,7 @@ function MergedLine({ m }: { m: LgNode["merged"][number] }) {
       {m.ref != null ? <Link to={`/app/resources/${m.ref}`} className="hover:underline">{m.name || m.resource_id}</Link>
         : <span>{m.resource_id}</span>}
       <span className="text-muted-foreground">
-        {" "}{t("graph.signals").replace("{n}", String(m.signals))}
+        {" "}{fillPlaceholders(t("graph.signals"), { n: String(m.signals) })}
         {m.last_at ? ` · ${m.last_at}` : ""}{m.ref == null ? ` · ${t(`anchor.${m.anchor_status}`)}` : ""}
       </span>
     </>
@@ -347,7 +348,7 @@ function CandidateLine({ c }: { c: LgNode["candidates"][number] }) {
       <Link to={`/app/issues/${c.issue_id}`} className="text-primary hover:underline">I#{c.issue_id}</Link>
       {" "}{c.title}
       <span className="text-muted-foreground">
-        {" "}({c.severity} · {t("graph.hopsN").replace("{n}", String(c.hops))} · {c.signal_at})
+        {" "}({c.severity} · {fillPlaceholders(t("graph.hopsN"), { n: String(c.hops) })} · {c.signal_at})
       </span>
     </>
   );
@@ -362,7 +363,7 @@ function NodeDetail({ node: n }: { node: LgNode }) {
       </p>
       <p className="text-muted-foreground">
         {t(`galaxy.health.${n.health}`)}
-        {n.hops != null && ` · ${t("graph.hopsN").replace("{n}", String(n.hops))}`}
+        {n.hops != null && ` · ${fillPlaceholders(t("graph.hopsN"), { n: String(n.hops) })}`}
         {n.absent && ` · ${t("galaxy.absent")}`}
       </p>
       {n.ref != null && (

@@ -15,7 +15,9 @@ from strands.models.bedrock import BedrockModel
 from agenticops.config import settings
 from agenticops.tools.metadata_tools import (
     get_active_account,
+    get_inventory_summary,
     get_managed_resources,
+    get_security_summary,
     get_health_issue,
     get_rca_result,
     list_health_issues,
@@ -24,6 +26,7 @@ from agenticops.tools.report_tools import save_report, list_reports
 from agenticops.tools.kb_tools import search_similar_cases, write_kb_case, distill_case_study
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.tools.memory_tools import search_agent_memory
+from agenticops.llm.errors import safe_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +72,14 @@ REPORT GENERATION PROTOCOL:
 2. GATHER DATA based on report_type:
    - **daily**: Call list_health_issues (all statuses) to get recent issues.
      For each issue with status 'root_cause_identified' or later, call get_rca_result.
-     Call get_managed_resources for resource inventory summary.
+     Call get_inventory_summary for the resource counts (by account, type and region).
    - **incident**: Call list_health_issues filtered by severity (critical, high).
      For each issue, call get_health_issue for full details, then get_rca_result.
      Call search_similar_cases if patterns repeat.
-   - **inventory**: Call get_managed_resources (scope filter if provided).
-     Call list_health_issues to cross-reference issues against resources.
-   - **security-review**: Latest SecuritySnapshot scores, CIS results, exposure paths, open recommendations — use the generate_report tool with report_type="security-review".
+   - **inventory**: Call get_inventory_summary for the counts; get_managed_resources lists rows (scope filter if
+     provided). Call list_health_issues to cross-reference issues against resources.
+   - **security-review**: Call get_security_summary for each account's score, category scores, open findings,
+     reachable paths and the sources that could not be read; list_health_issues for the open findings.
    - **conversation**: Use the above tools as needed to answer user queries about health issues, RCA, or inventory.
    
 3. FORMAT: Generate a well-structured markdown report with these sections:
@@ -83,7 +87,8 @@ REPORT GENERATION PROTOCOL:
    - **Executive Summary**: Key metrics (total issues, by severity, resolved vs open).
    - **Issues Detail**: For each issue, include severity, resource, title, RCA summary
      (if available), status, and recommendations.
-   - **Resource Inventory** (for daily/inventory): Total resources by type and region.
+   - **Resource Inventory** (for daily/inventory): Total resources by type and region — the numbers
+     get_inventory_summary returns, never a count of listed rows (a list says «showing N of TOTAL» when it is cut).
    - **Recommendations**: Aggregated action items prioritized by severity.
 4. SAVE: Call save_report with the full markdown content.
 5. KNOWLEDGE BASE (optional): For resolved issues with high-confidence RCA,
@@ -173,6 +178,8 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
             hooks=[CoverageRecorder(coverage)],
             tools=[
                 get_active_account,
+                get_inventory_summary,
+                get_security_summary,
                 get_managed_resources,
                 get_health_issue,
                 get_rca_result,
@@ -202,4 +209,4 @@ def reporter_agent(report_type: str = "daily", scope: str = "all") -> str:
         return str(result)
     except Exception as e:
         logger.exception("Reporter agent failed")
-        return f"Reporter agent error: {e}"
+        return f"Reporter agent error: {safe_error_text(e)}"

@@ -16,10 +16,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from agenticops.llm.catalog import ANTHROPIC_REASONING
+from agenticops.llm.presets import ANTHROPIC
 from agenticops.llm.refs import parse_ref
 
 REASONS = ("bedrock_off", "unknown_provider", "provider_disabled", "model_disabled", "unknown_model")
-_OPENAI_EFFORT_TOP = "high"     # Chat Completions' reasoning_effort: low | medium | high
+_OPENAI_EFFORT_TOP = "high"
+_AGENT_RETRIES = 1   # an agent's model: one retry — a provider that does not answer fails after two tries, not three     # Chat Completions' reasoning_effort: low | medium | high
 
 
 class ModelProviderUnavailable(RuntimeError):
@@ -54,9 +57,8 @@ def require_bedrock(ref: str) -> None:
 
 def openai_effort(budget: int) -> str:
     """The thinking budget as Chat Completions' `reasoning_effort` (the internal budget → tier rule, capped at high)."""
-    from agenticops.agents.preamble import _EFFORT_TIERS, _effort_tier
-    tier = _effort_tier(budget)
-    return tier if _EFFORT_TIERS.index(tier) <= _EFFORT_TIERS.index(_OPENAI_EFFORT_TOP) else _OPENAI_EFFORT_TOP
+    from agenticops.agents.preamble import effort_tier
+    return effort_tier(budget, _OPENAI_EFFORT_TOP)
 
 
 def client_args(cfg, *, timeout=None, max_retries: int = 2) -> dict:
@@ -83,26 +85,36 @@ def build_model(ref: str, *, max_tokens: int, thinking_budget: int = 0, bedrock_
     else:
         cfg, row = resolve(ref)
         extra: dict[str, Any] = {"context_window_limit": row.context_window} if row.context_window else {}
-        if cfg.kind == "anthropic_compatible":
+        if cfg.kind == ANTHROPIC:
             from strands.models.anthropic import AnthropicModel
             params: dict[str, Any] = {}
-            if row.reasoning == "anthropic_thinking" and thinking_budget > 0:
-                from agenticops.agents.preamble import thinking_fields_for_budget
-                params = thinking_fields_for_budget(thinking_budget, max_tokens, r.model_id) or {}
+            if row.reasoning in ANTHROPIC_REASONING and thinking_budget > 0:      # the row's shape, never the name
+                from agenticops.agents.preamble import thinking_fields
+                params = thinking_fields(thinking_budget, max_tokens, adaptive=row.reasoning != "anthropic_budget",
+                                         summarized=row.reasoning == "anthropic_adaptive_summarized") or {}
             from agenticops.config import settings
-            if settings.bedrock_cache_enabled and "claude" in r.model_id.lower():
+            if settings.bedrock_cache_enabled and prompt_cache_on(cfg, row):
                 from strands.models.model import CacheConfig
                 extra["cache_config"] = CacheConfig(strategy="auto", tools_ttl=True, system_prompt_ttl=False)
-            model = AnthropicModel(client_args=client_args(cfg), model_id=r.model_id, max_tokens=max_tokens,
+            model = AnthropicModel(client_args=client_args(cfg, max_retries=_AGENT_RETRIES), model_id=r.model_id, max_tokens=max_tokens,
                                    **({"params": params} if params else {}), **extra)
         else:
             from strands.models.openai import OpenAIModel
             params = {"max_tokens": max_tokens}
             if row.reasoning == "openai_effort" and thinking_budget > 0:
                 params["reasoning_effort"] = openai_effort(thinking_budget)
-            model = OpenAIModel(client_args=client_args(cfg), model_id=r.model_id, params=params, **extra)
+            model = OpenAIModel(client_args=client_args(cfg, max_retries=_AGENT_RETRIES), model_id=r.model_id, params=params, **extra)
     model.aiops_ref = ref
     return model
+
+
+def prompt_cache_on(cfg, row) -> bool:
+    """Whether an Anthropic-compatible model gets prompt-cache points: its row's word, else its platform's
+    (`presets.PROMPT_CACHE_PRESETS`) — never its name."""
+    from agenticops.llm.presets import PROMPT_CACHE_PRESETS
+    if row.prompt_cache is not None:
+        return bool(row.prompt_cache)
+    return cfg.preset in PROMPT_CACHE_PRESETS
 
 
 def ref_of(model) -> str | None:

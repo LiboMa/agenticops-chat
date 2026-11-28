@@ -110,25 +110,146 @@ def get_active_account() -> str:
     return get_enabled_accounts()
 
 
-_MANAGED_RESOURCES_CAP = 50     # rows get_managed_resources hands over; it does not say when there were more
+_MANAGED_RESOURCES_CAP = 50     # rows get_managed_resources hands over; the last line says how many there are
 
 
-def _bound_resource_list(query, rows: list[dict]) -> str:
-    """A bound run's list (N32): whole rows, as many as fit the list limit, and — when that is not all of them — a
-    last line saying how many there are and of which types, so the model can ask again by type or region."""
-    from sqlalchemy import func
-    total = query.count()
+def _listing(rows: list[dict], total: int, what: str, hint: str) -> str:
+    """A list tool's answer: whole rows, as many as fit the list limit, and — when that is not all of them — a last
+    line saying how many there are, so the model can ask again for the rest (N32 for a bound run; every run since
+    «之后» 13 — a list cut mid-JSON at the limit said nothing about what it left out). A cut result is counted once
+    on a reporter run's coverage record."""
     shown = rows
     while shown and len(json.dumps(shown, default=str)) > MAX_LIST_RESULT_CHARS:
         shown = shown[:-1]
     text = json.dumps(shown, default=str)
-    if len(shown) == total:
+    if len(shown) >= total:
         return text
+    from agenticops.services import report_coverage
+    report_coverage.note_truncated()
+    return f"{text}\n[showing {len(shown)} of {total} {what}; {hint}]"
+
+
+def _resource_listing(query, rows: list[dict], bound: bool) -> str:
+    """The inventory list: `_listing`, and when it is cut, the count of each type of what it left out of the whole."""
+    from sqlalchemy import func
+    total = query.count()
+    if len(rows) >= total and len(json.dumps(rows, default=str)) <= MAX_LIST_RESULT_CHARS:
+        return json.dumps(rows, default=str)
     by_type = (query.with_entities(CloudResource.resource_type, func.count(CloudResource.id))
                .group_by(CloudResource.resource_type).order_by(func.count(CloudResource.id).desc()).all())
     types = ", ".join(f"{t} {n}" for t, n in by_type)
-    return (f"{text}\n[showing {len(shown)} of {total} managed resources of this account — by type: {types}; "
-            f"call again with resource_type or region for the rest]")
+    return _listing(rows, total, f"managed resources{' of this account' if bound else ''} — by type: {types}",
+                    "call again with resource_type or region for the rest")
+
+
+def _accounts_to_read(accounts: list, account: str, bound) -> tuple[list, Optional[str]]:
+    """The enabled accounts a summary tool reads — `account` (a name) or all — and the refusal when it cannot: a run
+    bound to one account (a bound chat, a per-account detection) reads that account only."""
+    if bound is not None:
+        mine = [a for a in accounts if a.id == bound]
+        if account and (not mine or account != mine[0].name):
+            name = mine[0].name if mine else f"#{bound}"
+            return [], f"Error: this run is bound to account «{name}»; it reads that account only."
+        return mine, None
+    if not account:
+        return accounts, None
+    named = [a for a in accounts if a.name == account]
+    if not named:
+        known = ", ".join(sorted(a.name for a in accounts)) or "none"
+        return [], f"Error: no enabled account named «{account}» (enabled: {known})."
+    return named, None
+
+
+@tool
+def get_inventory_summary(account: str = "") -> str:
+    """Count the inventory: for each enabled account, how many managed resources of each type and in each region
+    there are — counted by the database, so the totals are exact. Use it for every total or breakdown in a report;
+    get_managed_resources lists individual rows (at most 50).
+
+    Args:
+        account: An account name to count only that account, or empty for every enabled account.
+
+    Returns:
+        JSON {"total": N, "accounts": [{"account", "total", "by_type": {type: n}, "by_region": {region: n}}]}.
+    """
+    from sqlalchemy import func
+    from agenticops.run_context import get_run_context
+    from agenticops.services import report_coverage
+    session = get_session()
+    try:
+        enabled = session.query(CloudAccount).filter(CloudAccount.is_enabled == True).all()  # noqa: E712
+        chosen, refusal = _accounts_to_read(enabled, account, get_run_context().bound_account_id)
+        if refusal:
+            return refusal
+        ids = [a.id for a in chosen]
+        base = session.query(CloudResource).filter(CloudResource.account_id.in_(ids),
+                                                   CloudResource.managed == True, PRESENT)  # noqa: E712
+        by_type, by_region = {}, {}
+        for acct, rtype, n in (base.with_entities(CloudResource.account_id, CloudResource.resource_type,
+                                                  func.count(CloudResource.id))
+                               .group_by(CloudResource.account_id, CloudResource.resource_type)):
+            by_type.setdefault(acct, {})[rtype] = n
+        for acct, region, n in (base.with_entities(CloudResource.account_id, CloudResource.region,
+                                                   func.count(CloudResource.id))
+                                .group_by(CloudResource.account_id, CloudResource.region)):
+            by_region.setdefault(acct, {})[region or "global"] = n
+        rows = [{"account": a.name, "total": sum(by_type.get(a.id, {}).values()),
+                 "by_type": dict(sorted(by_type.get(a.id, {}).items())),
+                 "by_region": dict(sorted(by_region.get(a.id, {}).items()))}
+                for a in sorted(chosen, key=lambda a: a.name)]
+        report_coverage.note_scope([a.name for a in chosen],
+                                   sorted({r for acct in by_region.values() for r in acct if r != "global"}))
+        return json.dumps({"total": sum(r["total"] for r in rows), "accounts": rows})
+    finally:
+        session.close()
+
+
+@tool
+def get_security_summary(account: str = "") -> str:
+    """Read the security posture: for each account, its newest security snapshot — the overall score (0-100; null
+    when nothing could be read, so there is no score), the score of each category, open security findings, reachable
+    exposure paths, and which collection sources could not be read.
+
+    Args:
+        account: An account name to read only that account, or empty for every enabled account.
+
+    Returns:
+        JSON {"accounts": [{"account", "score", "category_scores", "open_findings", "reachable_paths", "collection",
+        "sources_not_read", "snapshot_at"}], "unassigned_open_findings": N}, or a sentence when there is no snapshot.
+    """
+    from agenticops.run_context import get_run_context
+    from agenticops.services import report_coverage
+    from agenticops.services.security_service import security_summary
+    bound = get_run_context().bound_account_id
+    session = get_session()
+    try:
+        enabled = session.query(CloudAccount).filter(CloudAccount.is_enabled == True).all()  # noqa: E712
+        chosen, refusal = _accounts_to_read(enabled, account, bound)
+    finally:
+        session.close()
+    if refusal:
+        return refusal
+    ids = {a.id for a in chosen}
+    data = security_summary()
+    rows = []
+    for r in data["accounts"]:
+        if r["account_id"] not in ids:
+            continue
+        row = {"account": r["account_name"], "score": r["overall_score"], "category_scores": r["category_scores"],
+               "open_findings": r["open_findings"], "reachable_paths": r["reachable_paths"],
+               "collection": r["collection"], "sources_not_read": [e["source"] for e in r["collection_errors"]],
+               "snapshot_at": r["created_at"]}
+        if r["overall_score"] is None:
+            row["note"] = "nothing could be read in this collection, so there is no score — not a clean result"
+        rows.append(row)
+    if not rows:
+        where = f" for «{account}»" if account else ""
+        return f"No security snapshot yet{where}: the security review has not collected there."
+    report_coverage.note_scope([r["account"] for r in rows])
+    out = {"accounts": rows}
+    if not account and bound is None:              # findings no account holds: only in the all-accounts view
+        out["unassigned_open_findings"] = data["unassigned_open_findings"]
+    return json.dumps(out)
 
 
 @tool
@@ -167,10 +288,8 @@ def get_managed_resources(resource_type: str = "", region: str = "") -> str:
                 # the regions of the rows that matched — never the `region` argument itself: that is the
                 # model's text, and a filter that found nothing read no region (N27, review)
                 report_coverage.note_scope(
-                    [a.name for a in cloud_accounts],
+                    [a.name for a in cloud_accounts if a.id in account_ids],
                     [r for (r,) in query.with_entities(CloudResource.region).distinct()])
-                if len(resources) > _MANAGED_RESOURCES_CAP:
-                    report_coverage.note_truncated()
             resources = resources[:_MANAGED_RESOURCES_CAP]
             if not resources:
                 filters = []
@@ -193,9 +312,7 @@ def get_managed_resources(resource_type: str = "", region: str = "") -> str:
                     "status": r.status,
                     "managed": r.managed,
                 })
-            if bound is not None:
-                return _bound_resource_list(query, result)
-            return _truncate(json.dumps(result, default=str), MAX_LIST_RESULT_CHARS)
+            return _resource_listing(query, result, bound is not None)
 
         return json.dumps({"error": "No enabled accounts found. Add accounts via CLI or Web UI."})
     finally:
@@ -606,9 +723,14 @@ def list_health_issues(
     Returns:
         JSON array of health issues with id, resource_id, severity, source, title, status, detected_at.
     """
+    from agenticops.run_context import get_run_context
+    # A run bound to one account (a bound chat, a per-account detection) lists only that account's issues
+    bound = get_run_context().bound_account_id
     session = get_session()
     try:
         query = session.query(HealthIssue).order_by(HealthIssue.detected_at.desc())
+        if bound is not None:
+            query = query.filter(HealthIssue.account_id == bound)
 
         if severity:
             query = query.filter_by(severity=severity.lower())
@@ -617,14 +739,14 @@ def list_health_issues(
         if resource_type:
             query = query.filter(HealthIssue.resource_id.like(f"{resource_type}%"))
 
-        issues = query.limit(limit + 1).all()     # one more than asked for: is anything behind the limit?
+        total = query.count()
+        issues = query.limit(limit).all()
         from agenticops.services import report_coverage
-        if report_coverage.current() is not None:   # a reporter run: the list ranges over every enabled account
-            report_coverage.note_scope([name for (name,) in session.query(CloudAccount.name)
-                                        .filter(CloudAccount.is_enabled == True)])  # noqa: E712
-            if len(issues) > limit:
-                report_coverage.note_truncated()
-        issues = issues[:limit]
+        if report_coverage.current() is not None:   # a reporter run: the accounts the list ranged over
+            accounts = session.query(CloudAccount.name).filter(CloudAccount.is_enabled == True)  # noqa: E712
+            if bound is not None:
+                accounts = accounts.filter(CloudAccount.id == bound)
+            report_coverage.note_scope([name for (name,) in accounts])
 
         if not issues:
             return "No health issues found matching filters."
@@ -641,7 +763,7 @@ def list_health_issues(
                 "detected_at": str(i.detected_at),
             })
 
-        return _truncate(json.dumps(result, default=str), MAX_LIST_RESULT_CHARS)
+        return _listing(result, total, "issues", "call again with severity or status, or a larger limit, for the rest")
     finally:
         session.close()
 

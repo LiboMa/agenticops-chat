@@ -4,6 +4,7 @@ import type { MessageAttachment } from "@/api/types";
 import type { AttachmentDelivery } from "@/lib/chatStream";
 import { attachmentReasonText } from "@/lib/attachments";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 export const THUMB_PX = 96;
 export const GAP_PX = 8;
 export const COLS = 3;
@@ -39,7 +40,7 @@ export function deliveryLabel(a: MessageAttachment, t: (k: string) => string): s
     }
     case "notice":
     case "failed":
-      return t("chat.attach.delivery.unreadable").replace("{reason}", reason);
+      return fillPlaceholders(t("chat.attach.delivery.unreadable"), { reason });
     default:
       return null;
   }

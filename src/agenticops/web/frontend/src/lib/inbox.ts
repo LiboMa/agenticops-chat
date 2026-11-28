@@ -2,6 +2,7 @@ import { parseApiDate } from "@/lib/formatDate";
 
 import type { AttentionItem } from "@/lib/attention";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** The to-do items (MVP-2.8.0: «问题 · 在等我», the to-do workbench merged into Issues): every work item waiting on
  *  you, grouped by the decision it needs. The URL holds the state — `q`, `item`. Never `tab`: the embedded issue
  *  page reads `?tab=` as its legacy card link and would strip it. */
@@ -45,10 +46,10 @@ export function waitLabel(sinceIso: string | null | undefined, now: number, t: (
   if (!since) return null;
   const minutes = Math.floor((now - since.getTime()) / 60_000);
   if (minutes < 1) return t("inbox.wait.justNow");
-  if (minutes < 60) return t("inbox.wait.minutes").replace("{n}", String(minutes));
+  if (minutes < 60) return fillPlaceholders(t("inbox.wait.minutes"), { n: String(minutes) });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return t("inbox.wait.hours").replace("{n}", String(hours));
-  return t("inbox.wait.days").replace("{n}", String(Math.floor(hours / 24)));
+  if (hours < 24) return fillPlaceholders(t("inbox.wait.hours"), { n: String(hours) });
+  return fillPlaceholders(t("inbox.wait.days"), { n: String(Math.floor(hours / 24)) });
 }
 
 /** Who counts as a person waited on (services/work_phases.HUMAN); everyone else is a system at work. */

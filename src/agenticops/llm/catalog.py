@@ -2,9 +2,14 @@
 task 3 on, reading a provider's list, adding by hand and editing a model's attributes."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
+
+from agenticops.llm.presets import ANTHROPIC
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -20,7 +25,9 @@ class ProviderModelView:
     tools_probe_at: Optional[datetime] = None
     supports_images: bool = False
     supports_documents: bool = False
-    reasoning: str = "none"                    # none | openai_effort | anthropic_thinking
+    reasoning: str = "none"                    # one of REASONING
+    accepts_temperature: Optional[bool] = None # None = not said: not sent
+    prompt_cache: Optional[bool] = None        # None = the platform's default (Anthropic-compatible only)
     price_input: Optional[float] = None        # USD per 1M tokens
     price_output: Optional[float] = None
     price_cache_read: Optional[float] = None
@@ -36,7 +43,7 @@ def view_of(row) -> ProviderModelView:
         context_window=row.context_window, max_output_tokens=row.max_output_tokens, supports_tools=row.supports_tools,
         tools_probe=row.tools_probe, tools_probe_at=row.tools_probe_at, supports_images=bool(row.supports_images),
         supports_documents=bool(row.supports_documents), reasoning=row.reasoning or "none",
-        price_input=row.price_input, price_output=row.price_output, price_cache_read=row.price_cache_read,
+        accepts_temperature=row.accepts_temperature, prompt_cache=row.prompt_cache, price_input=row.price_input, price_output=row.price_output, price_cache_read=row.price_cache_read,
         price_cache_write=row.price_cache_write, source=row.source or "discovered", enabled=bool(row.enabled),
         manual_fields=list(row.manual_fields or []))
 
@@ -52,9 +59,13 @@ def model_row(provider: str, model_id: str) -> Optional[ProviderModelView]:
 # ── reading a provider's list (task 3) ───────────────────────────────────────
 
 EDITABLE = ("label", "purpose", "context_window", "max_output_tokens", "supports_tools", "supports_images",
-            "supports_documents", "reasoning", "price_input", "price_output", "price_cache_read", "price_cache_write")
+            "supports_documents", "reasoning", "accepts_temperature", "prompt_cache", "price_input", "price_output",
+            "price_cache_read", "price_cache_write")
 PURPOSES = ("chat", "embedding")
-REASONING = ("none", "openai_effort", "anthropic_thinking")
+# A thinking model's request shape — the row says it, nothing reads the model's name: the OpenAI field, or one of
+# the three Anthropic shapes (adaptive + a summary while it thinks: Claude 4.7+; adaptive: 4.6; a token budget: older)
+ANTHROPIC_REASONING = ("anthropic_adaptive_summarized", "anthropic_adaptive", "anthropic_budget")
+REASONING = ("none", "openai_effort") + ANTHROPIC_REASONING
 ANTHROPIC_VERSION = "2023-06-01"
 
 
@@ -68,7 +79,7 @@ def effective_tools(view: ProviderModelView) -> Optional[bool]:
 def list_request(cfg) -> tuple[str, dict]:
     """The URL and headers of a provider's model list — the key in a header, never in the URL."""
     headers = dict(cfg.extra_headers or {})
-    if cfg.kind == "anthropic_compatible":
+    if cfg.kind == ANTHROPIC:
         headers["anthropic-version"] = ANTHROPIC_VERSION
         if cfg.api_key:
             headers["x-api-key"] = cfg.api_key
@@ -98,10 +109,11 @@ def _per_million(value) -> Optional[float]:
 
 
 def parse_listing(item: dict) -> dict:
-    """What a list entry says about a model (only the fields it really carries)."""
+    """What a list entry says about a model (only the fields it really carries). Nothing is read off the model's
+    name (review of MVP-2.9.0, the owner: no guessing) — no list field says what a model is for, so a new row is a
+    chat model until an admin marks it an embedding one, and a refresh leaves the purpose alone."""
     model_id = str(item["id"])
-    out: dict = {"label": str(item.get("name") or item.get("display_name") or model_id)[:300],
-                 "purpose": "embedding" if "embed" in model_id.lower() else "chat"}
+    out: dict = {"label": str(item.get("name") or item.get("display_name") or model_id)[:300]}
     window = item.get("context_length") or item.get("max_model_len") or item.get("context_window")
     if isinstance(window, int) and window > 0:
         out["context_window"] = window
@@ -114,6 +126,7 @@ def parse_listing(item: dict) -> dict:
     params = item.get("supported_parameters")
     if isinstance(params, list):
         out["supports_tools"] = "tools" in params
+        out["accepts_temperature"] = "temperature" in params
     modalities = (item.get("architecture") or {}).get("input_modalities") if isinstance(item.get("architecture"), dict) else None
     if isinstance(modalities, list):
         out["supports_images"] = "image" in modalities
@@ -152,6 +165,29 @@ def describe_error(exc: Exception, cfg=None) -> str:
     return redact_secrets(text)
 
 
+def refresh_enabled() -> dict:
+    """Read every ENABLED provider's model list again — at startup, in a background thread (the spec: «启动时只刷新开着的
+    提供方的模型列表»). A turned-off provider is not contacted; one that cannot be read keeps its models (refresh says
+    why) and stops nothing. {name: refresh's answer}; never raises."""
+    from types import SimpleNamespace
+    from agenticops.llm import registry
+    actor = SimpleNamespace(key="system:startup", user_id=None)
+    out: dict = {}
+    try:
+        names = [p["name"] for p in registry.list_public() if p.get("enabled")]
+    except Exception:
+        logger.warning("model providers: could not list them for the startup refresh", exc_info=True)
+        return out
+    for name in names:
+        try:
+            out[name] = refresh(name, actor)
+        except Exception as e:  # noqa: BLE001 — one provider never stops the others
+            out[name] = {"error": type(e).__name__}
+        if out[name].get("error"):
+            logger.warning("model providers: «%s» model list not read at startup: %s", name, out[name]["error"])
+    return out
+
+
 def refresh(provider: str, actor) -> dict:
     from agenticops.config import settings
     from agenticops.llm import registry
@@ -168,7 +204,11 @@ def refresh(provider: str, actor) -> dict:
     now = datetime.now(timezone.utc)
     with get_db_session() as s:
         rows = {r.model_id: r for r in s.query(ProviderModel).filter_by(provider=provider)}
+        seen: set[str] = set()
         for item in listing:
+            if str(item["id"]) in seen:   # a list that names a model twice: the first one counts
+                continue
+            seen.add(str(item["id"]))
             facts = parse_listing(item)
             row = rows.get(str(item["id"]))
             if row is None:
@@ -187,7 +227,7 @@ def refresh(provider: str, actor) -> dict:
                 updated += 1
             else:
                 unchanged += 1
-        registry._audit(s, "refresh_models", provider, actor,
+        registry.audit(s, "refresh_models", provider, actor,
                         details={"added": added, "updated": updated, "unchanged": unchanged})
     return {"added": added, "updated": updated, "unchanged": unchanged, "error": None}
 
@@ -222,7 +262,7 @@ def _check_fields(data: dict) -> dict:
             bad = value is not None and (not isinstance(value, int) or isinstance(value, bool) or value <= 0)
         elif key.startswith("price_"):
             bad = value is not None and (not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0)
-        elif key == "supports_tools":
+        elif key in ("supports_tools", "accepts_temperature", "prompt_cache"):     # yes / no / not said
             bad = value is not None and not isinstance(value, bool)
         else:  # supports_images / supports_documents
             bad = not isinstance(value, bool)
@@ -246,13 +286,13 @@ def add_manual(provider: str, data: dict, actor) -> ProviderModelView:
     with get_db_session() as s:
         if s.query(ProviderModel).filter_by(provider=provider, model_id=model_id).first() is not None:
             raise registry.ProviderError(409, "model_exists", f"«{model_id}» is already on the list of «{provider}»")
-        defaults = {"label": model_id, "purpose": "embedding" if "embed" in model_id.lower() else "chat"}
+        defaults = {"label": model_id, "purpose": "chat"}       # an embedding model is said so, never guessed
         row = ProviderModel(provider=provider, model_id=model_id, source="manual", enabled=True,
                             manual_fields=sorted(fields), updated_at=datetime.now(timezone.utc),
                             **{**defaults, **fields})
         s.add(row)
         s.flush()
-        registry._audit(s, "add_model", provider, actor, after={"model_id": model_id, **fields})
+        registry.audit(s, "add_model", provider, actor, after={"model_id": model_id, **fields})
         return view_of(row)
 
 
@@ -269,7 +309,7 @@ def patch_model(provider: str, model_id: str, data: dict, actor) -> ProviderMode
         if row is None:
             raise registry.ProviderError(404, "not_found", f"«{model_id}» is not on the list of «{provider}»")
         if enabled is False and row.enabled:
-            registry._refuse_in_use(provider, model_id)
+            registry.refuse_in_use(provider, model_id)
         before = {k: getattr(row, k) for k in fields}
         for key, value in fields.items():
             setattr(row, key, value)
@@ -279,7 +319,7 @@ def patch_model(provider: str, model_id: str, data: dict, actor) -> ProviderMode
             row.enabled = enabled
         row.updated_at = datetime.now(timezone.utc)
         s.flush()
-        registry._audit(s, "update_model", provider, actor, before={"model_id": model_id, **before},
+        registry.audit(s, "update_model", provider, actor, before={"model_id": model_id, **before},
                         after={"model_id": model_id, **fields, **({"enabled": enabled} if enabled is not None else {})})
         return view_of(row)
 

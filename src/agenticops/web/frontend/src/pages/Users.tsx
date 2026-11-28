@@ -18,6 +18,7 @@ import {
   fillRefusal, filterUsers, keysLabel, lastActiveAdminId, roleKey, rowActions, type RoleFilter, type RowAction, type StatusFilter,
 } from "@/lib/users";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** User management (MVP-2.8.0 S2 rework, owner 2026-11-09): admins see every web account and create one (the
  *  password shown once), change its role, disable / enable it and reset its password. The server is the boundary
  *  (/api/users — services/user_admin); this page only words what it allows and refuses. Admins only (App.tsx). */
@@ -62,7 +63,7 @@ export default function Users() {
     const key = code ? `users.error.${code}` : "";
     const worded = key ? t(key) : key;
     return worded && worded !== key ? fillRefusal(worded, e instanceof ApiError ? e.data : undefined)
-      : t("users.error.generic").replace("{detail}", e instanceof Error ? e.message : String(e));
+      : fillPlaceholders(t("users.error.generic"), { detail: e instanceof Error ? e.message : String(e) });
   };
 
   const act = async (u: UserRow, a: RowAction) => {
@@ -72,7 +73,7 @@ export default function Users() {
     if (a === "delete") { setDeleteError(null); del.reset(); setDeleting(u); return; }
     if (a === "enable") { update.mutate({ id: u.id, is_active: true }, { onError: (e) => setError(say(e)) }); return; }
     if (a === "disable") {
-      if (!(await confirm(t("users.confirm.disable").replace("{email}", u.email),
+      if (!(await confirm(fillPlaceholders(t("users.confirm.disable"), { email: u.email }),
                           { variant: "destructive", confirmText: t("users.confirm.disableOk") }))) return;
       update.mutate({ id: u.id, is_active: false }, { onError: (e) => setError(say(e)) });
       return;
@@ -85,7 +86,7 @@ export default function Users() {
       onSuccess: (r) => {
         setResetting(null);
         if (r.password) setShown({ email: u.email, password: r.password, kind: "reset" });
-        else setNotice(t("users.reset.done").replace("{email}", u.email));
+        else setNotice(fillPlaceholders(t("users.reset.done"), { email: u.email }));
       },
       onError: (e) => setResetError(say(e)),
     });
@@ -99,7 +100,7 @@ export default function Users() {
     enable: <UserCheck className="h-4 w-4" aria-hidden="true" />, delete: <Trash2 className="h-4 w-4" aria-hidden="true" />,
   };
   const iconButton = (u: UserRow, a: RowAction) => (
-    <IconButton key={a} label={t(`users.icon.${a}`).replace("{who}", u.name || u.email)} icon={ICONS[a]}
+    <IconButton key={a} label={fillPlaceholders(t(`users.icon.${a}`), { who: u.name || u.email })} icon={ICONS[a]}
                 tone={a === "disable" || a === "delete" ? "danger" : "default"}
                 onClick={(e) => { flowOpener.current = e.currentTarget; void act(u, a); }} />
   );
@@ -125,7 +126,7 @@ export default function Users() {
   );
   // «API 密钥» (MVP-2.8.0): «N 个有效 ▸» or «无»; opens the user's keys (issue, update, delete)
   const keysButton = (u: UserRow) => (
-    <button type="button" onClick={() => setKeysOf(u)} aria-label={t("users.keys.open").replace("{who}", u.name || u.email)}
+    <button type="button" onClick={() => setKeysOf(u)} aria-label={fillPlaceholders(t("users.keys.open"), { who: u.name || u.email })}
             className="min-h-[32px] rounded-md border border-border px-2.5 text-xs text-foreground hover:bg-accent">
       {keysLabel(u.active_api_keys ?? 0, t)}
     </button>
@@ -211,7 +212,7 @@ export default function Users() {
                   </li>
                 ))}
               </ul>
-              <p className="text-xs text-muted-foreground">{t("users.count").replace("{n}", String(rows.length))} · {t("users.selfNote")}</p>
+              <p className="text-xs text-muted-foreground">{fillPlaceholders(t("users.count"), { n: String(rows.length) })} · {t("users.selfNote")}</p>
             </>
           );
         }}

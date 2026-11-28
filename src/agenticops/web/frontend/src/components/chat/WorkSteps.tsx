@@ -5,6 +5,7 @@ import { formatDuration, splitWork, stepStatus, workTotals, type StepStatus, typ
 import { StatusText, type StatusTone } from "@/components/ui/StatusText";
 import { toolLabelKey } from "@/lib/toolLabels";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 interface Props {
   tools: ToolStep[];
   /** the reply's whole text — the narration between steps is cut out of it by offset */
@@ -25,9 +26,9 @@ export function WorkSteps({ tools, content, live, thinking }: Props) {
   const open = userOpen ?? !!live;
   const { count, ms } = workTotals(tools);
   const header = live
-    ? t("chat.work.running").replace("{n}", String(count))
-    : ms === null ? t("chat.work.doneNoTime").replace("{n}", String(count))
-    : t("chat.work.done").replace("{n}", String(count)).replace("{t}", formatDuration(ms, t));
+    ? fillPlaceholders(t("chat.work.running"), { n: String(count) })
+    : ms === null ? fillPlaceholders(t("chat.work.doneNoTime"), { n: String(count) })
+    : fillPlaceholders(t("chat.work.done"), { n: String(count), t: formatDuration(ms, t) });
 
   return (
     <div className="mb-3 text-[13px]">

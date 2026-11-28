@@ -13,38 +13,17 @@ from typing import Optional
 from agenticops.llm import registry
 from agenticops.llm.refs import parse_ref
 
-SETTINGS = {
-    "tier_default": "bedrock_model_id",
-    "tier_cheap": "bedrock_model_id_cheap",
-    "tier_strong": "bedrock_model_id_strong",
-    "executor_simple": "executor_simple_model_id",
-    "security": "security_model_id",
-    "report_translation": "report_translation_model_id",
-    "signal_gate": "signal_gate_llm_model",
-    "rca_critic": "rca_critic_model_id",
-    "galaxy": "galaxy_model_id",
-}
+SETTINGS = registry.MODEL_SETTINGS                     # the one list (registry, review of 2.9.0)
 NEVER_EMPTY = set(registry.TIER_FIELDS)
 
 
-def fallback(field: str) -> Optional[str]:
-    """What an empty value of this setting means; None for a setting that cannot be empty."""
-    from agenticops.config import get_agent_model_config, settings
-    if field in NEVER_EMPTY:
-        return None
-    if field == "executor_simple_model_id":            # no smart model: the executor runs on its own
-        return get_agent_model_config("executor")[0]
-    return str(settings.bedrock_model_id_cheap or "")
-
-
 def effective(field: str) -> str:
-    raw = registry._raw(field)
-    return raw or (fallback(field) or "")
+    return registry.raw_value(field) or (registry.fallback(field) or "")
 
 
 def view() -> dict:
-    return {name: {"value": registry._raw(field), "effective": effective(field), "default": fallback(field)}
-            for name, field in SETTINGS.items()}
+    return {name: {"value": registry.raw_value(field), "effective": effective(field),
+                   "default": registry.fallback(field)} for name, field in SETTINGS.items()}
 
 
 def problem(value: str, *, purpose: str = "chat") -> Optional[tuple[str, str]]:
@@ -73,7 +52,7 @@ def issues() -> list[dict]:
     the setting is empty and its fallback is the one that cannot be used."""
     out = []
     for field in registry.MODEL_SETTING_FIELDS:
-        raw = registry._raw(field)
+        raw = registry.raw_value(field)
         value = registry.effective_value(field)         # an empty smart model is no model of its own: skipped
         if not value:
             continue

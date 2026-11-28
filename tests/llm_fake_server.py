@@ -100,7 +100,7 @@ class FakeLLMServer:
         if self.list_shape == "openrouter":
             row.update({"name": f"Fake {model_id}", "context_length": 131072,
                         "pricing": {"prompt": "0.000003", "completion": "0.000015"},
-                        "supported_parameters": ["tools", "max_tokens"] if "chat" in model_id else ["max_tokens"],
+                        "supported_parameters": ["tools", "temperature", "max_tokens"] if "chat" in model_id else ["max_tokens"],
                         "architecture": {"input_modalities": ["text", "image"]}})
         elif self.list_shape == "vllm":
             row["max_model_len"] = 32768
@@ -179,7 +179,8 @@ def llm_db(tmp_path, monkeypatch, name: str = "llm.db"):
 def add_provider(name: str, base_url: str, *, kind: str = "openai_compatible", api_key: str = "",
                  timeout_seconds: int = 30, **extra) -> dict:
     from agenticops.llm import registry
-    preset = "custom_openai" if kind == "openai_compatible" else "custom_anthropic"
+    from agenticops.llm.presets import default_preset
+    preset = default_preset(kind)
     return registry.create({"name": name, "preset": preset, "kind": kind, "base_url": base_url, "api_key": api_key,
                             "timeout_seconds": timeout_seconds, **extra}, ADMIN)
 

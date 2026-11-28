@@ -6,7 +6,7 @@ const caps = (tools: boolean | null, images = false, documents = false, reasonin
 
 const P: ModelPreset[] = [
   { label: "Opus 5.5", value: "global.anthropic.claude-opus-5-5", provider: "bedrock", provider_label: "Amazon Bedrock",
-    purpose: "chat", capabilities: caps(true, true, true, "anthropic_thinking"), priced: true },
+    purpose: "chat", capabilities: caps(true, true, true, "anthropic_adaptive_summarized"), priced: true },
   { label: "Qwen3 32B", value: "ollama::qwen3:32b", provider: "ollama", provider_label: "Ollama", purpose: "chat",
     capabilities: caps(null), priced: false },
   { label: "Llama Tiny", value: "ollama::llama-tiny", provider: "ollama", provider_label: "Ollama", purpose: "chat",

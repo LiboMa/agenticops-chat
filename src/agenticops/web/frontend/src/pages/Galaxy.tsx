@@ -15,6 +15,7 @@ import { healthCounts, isHot, normalizeHealth } from "@/lib/galaxyHealth";
 import { focusNodeId } from "@/lib/galaxy";
 import { useReadOnly } from "@/hooks/useBootstrap";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 // ── palette (Nebula Violet — the single Galaxy theme, validated via dataviz) ──
 interface Palette {
   surface: string; acct: string; group: string;
@@ -338,7 +339,7 @@ export default function Galaxy() {
         ) : <span className="text-[#9691a8]">{t("galaxy.noBuild")}</span>}
         {b?.status === "failed" && <span className="text-red-400">{b.error}</span>}
         {focusMissing && (
-          <span className="text-amber-300">{t("galaxy.focusMissing").replace("{ref}", focusRef ?? "")}</span>
+          <span className="text-amber-300">{fillPlaceholders(t("galaxy.focusMissing"), { ref: focusRef ?? "" })}</span>
         )}
 
         <span className="ml-auto text-[#9691a8]">{t("galaxy.nextCheck")}: {status.data?.next_check_minutes}m</span>

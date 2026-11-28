@@ -24,6 +24,7 @@ import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { fileDragAction, shouldSend } from "@/lib/composerKeys";
 import { humanSize } from "@/lib/attachments";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 interface Props {
   /** → whether the message was taken (S5): false gives the text and the attachments back to the composer */
   onSend: (message: string, attachmentIds: string[], attachments: UploadItem[]) => void | Promise<boolean>;
@@ -293,8 +294,7 @@ export function ChatInput({ onSend, onCancel, disabled, streaming, sessionId, pr
             </DropdownMenu.Root>
             <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
               {items.length > 0
-                ? t("chat.attach.counter").replace("{n}", String(items.length)).replace("{max}", String(rules.max))
-                    .replace("{used}", humanSize(used)).replace("{total}", humanSize(rules.maxTotalBytes))
+                ? fillPlaceholders(t("chat.attach.counter"), { n: String(items.length), max: String(rules.max), used: humanSize(used), total: humanSize(rules.maxTotalBytes) })
                 : keptText.trim() !== "" && input === keptText && t("chat.draftKept")}
             </span>
             <ModelSelector sessionId={sessionId ?? null} disabled={disabled || streaming} />

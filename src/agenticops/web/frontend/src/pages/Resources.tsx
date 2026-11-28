@@ -17,6 +17,7 @@ import { shortId } from "@/lib/workItems";
 import { PAGE_SIZES, healthView, lifecycleKey, resourceFilters, resourceHref, resourceParams, scanLine } from "@/lib/resourceTable";
 import type { PaginatedResources, Resource } from "@/api/types";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 type T = (key: string) => string;
 
 /** A row's health in words (MVP-2.9.0 N24): an open issue's level and count, else why there is none to report —
@@ -26,10 +27,10 @@ function Health({ r, t }: { r: Resource; t: T }) {
   return (
     <span className="inline-flex flex-wrap items-center gap-x-1.5 text-xs">
       <StatusText tone={view.tone} className="whitespace-normal">{t(view.key)}</StatusText>
-      {view.issues > 0 && <span className="text-muted-foreground">{t("resources.openIssues").replace("{n}", String(view.issues))}</span>}
+      {view.issues > 0 && <span className="text-muted-foreground">{fillPlaceholders(t("resources.openIssues"), { n: String(view.issues) })}</span>}
       {view.ago && (
         <span className="text-muted-foreground">
-          · {t("resources.lastObserved").replace("{ago}", t(view.ago.key).replace("{n}", String(view.ago.n)))}
+          · {fillPlaceholders(t("resources.lastObserved"), { ago: fillPlaceholders(t(view.ago.key), { n: String(view.ago.n) }) })}
         </span>
       )}
     </span>
@@ -206,8 +207,7 @@ export default function Resources() {
               </label>
               <div className="flex flex-wrap items-center gap-3">
                 <span className="text-muted-foreground">
-                  {t("resources.range").replace("{from}", String(f.offset + 1))
-                    .replace("{to}", String(Math.min(f.offset + f.size, total))).replace("{total}", String(total))}
+                  {fillPlaceholders(t("resources.range"), { from: String(f.offset + 1), to: String(Math.min(f.offset + f.size, total)), total: String(total) })}
                 </span>
                 <div className="flex items-center gap-1">
                   <button type="button" aria-label={t("resources.firstPage")} className={pageBtn} disabled={f.page <= 1} onClick={() => set("page", "1")}>&laquo;</button>

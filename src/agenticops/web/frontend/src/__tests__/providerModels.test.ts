@@ -7,7 +7,8 @@ function model(over: Partial<ProviderModel> = {}): ProviderModel {
     provider: "p", model_id: "qwen3:32b", label: "Qwen3 32B", purpose: "chat", context_window: 32768,
     max_output_tokens: null, supports_tools: null, tools_probe: null, tools_probe_at: null, supports_images: false,
     supports_documents: false, reasoning: "none", price_input: null, price_output: null, price_cache_read: null,
-    price_cache_write: null, source: "discovered", enabled: true, manual_fields: [], tools: null, ...over,
+    price_cache_write: null, source: "discovered", enabled: true, manual_fields: [], tools: null,
+    accepts_temperature: null, prompt_cache: null, ...over,
   };
 }
 
@@ -56,5 +57,24 @@ describe("modelPatch", () => {
     expect(modelPatch(m, { ...draftOf(m), maxOutput: "1.5" })).toEqual({ error: "maxOutput" });
     expect(modelPatch(m, { ...draftOf(m), priceOutput: "-1" })).toEqual({ error: "priceOutput" });
     expect(modelPatch(m, { ...draftOf(m), priceCacheRead: "abc" })).toEqual({ error: "priceCacheRead" });
+  });
+});
+
+
+// ── what a request may carry: the row's word, never the model's name (review of MVP-2.9.0, Standards 1) ─────
+describe("temperature and prompt cache", () => {
+  it("reads «not said» as its own choice", () => {
+    expect(draftOf(model())).toMatchObject({ temperature: "unknown", promptCache: "default" });
+    expect(draftOf(model({ accepts_temperature: true, prompt_cache: false })))
+      .toMatchObject({ temperature: "yes", promptCache: "off" });
+  });
+  it("sends yes / no / null, and only when changed", () => {
+    const m = model();
+    expect(modelPatch(m, { ...draftOf(m), temperature: "yes", promptCache: "on" }))
+      .toEqual({ accepts_temperature: true, prompt_cache: true });
+    const set = model({ accepts_temperature: false, prompt_cache: true });
+    expect(modelPatch(set, draftOf(set))).toEqual({});
+    expect(modelPatch(set, { ...draftOf(set), temperature: "unknown", promptCache: "default" }))
+      .toEqual({ accepts_temperature: null, prompt_cache: null });
   });
 });

@@ -6,6 +6,7 @@ import { DEFAULT_EXPIRY, EXPIRY_CHOICES, curlExample, expiryLabel } from "@/lib/
 import { Copy } from "lucide-react";
 import { IconButton } from "@/components/ui/IconButton";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** API key dialogs (MVP-2.8.0): a new key or an update of one (name, scope, expiry) and the key shown once. Used by
  *  «My API keys» and, for someone else's keys, by user management. */
 
@@ -97,7 +98,7 @@ export function KeyOnceDialog({ name, apiKey, onClose, returnTo, title }: {
   const [copied, setCopied] = useState<"yes" | "no" | null>(null);
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   return (
-    <ModalFrame title={title ?? t("apiKeys.once.title").replace("{name}", name)} onClose={onClose} returnTo={returnTo} keepOnOutside
+    <ModalFrame title={title ?? fillPlaceholders(t("apiKeys.once.title"), { name })} onClose={onClose} returnTo={returnTo} keepOnOutside
                 width="w-[min(520px,100%)]">
       <p className="mt-3 text-sm text-muted-foreground">{t("apiKeys.once.intro")}</p>
       <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-dashed border-primary/40 bg-canvas px-3 py-2.5">

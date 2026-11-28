@@ -14,9 +14,8 @@ import { draftKey, loadDraft, saveDraft } from "@/lib/chatDrafts";
 import { currentUserId } from "@/lib/home";
 import type { Readiness, ReadinessCheckView } from "@/api/types";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 type T = (key: string) => string;
-const fill = (text: string, vars: Record<string, string | number>) =>
-  Object.entries(vars).reduce((s, [k, v]) => s.replace(`{${k}}`, String(v)), text);
 const onOff = (t: T, on: boolean) => t(on ? "setup.on" : "setup.off");
 const card = "rounded-lg border border-border bg-card p-5";
 const button = "inline-flex min-h-[44px] items-center justify-center rounded-md px-4 text-sm font-medium sm:min-h-9";
@@ -27,7 +26,7 @@ function CheckLine({ check, t }: { check: ReadinessCheckView | null; t: T }) {
   if (!check) return <span className="text-status-warn">{t("setup.check.none")}</span>;
   return (
     <span className={check.ok ? "text-status-ok" : "text-status-danger"}>
-      {fill(t(check.ok ? "setup.check.ok" : "setup.check.failed"), { time: formatFullDate(check.checked_at), by: check.checked_by.replace(/^user:/, "") })}
+      {fillPlaceholders(t(check.ok ? "setup.check.ok" : "setup.check.failed"), { time: formatFullDate(check.checked_at), by: check.checked_by.replace(/^user:/, "") })}
       {!check.ok && check.detail && <span className="font-mono [overflow-wrap:anywhere]"> · {check.detail}</span>}
       {check.ok && check.detail === "cut_at_limit" && <span className="text-muted-foreground"> · {t("setup.check.cut")}</span>}
     </span>
@@ -39,7 +38,7 @@ function Facts({ id, r, t }: { id: SetupItemId; r: Readiness; t: T }) {
   if (id === "accounts") {
     return (
       <>
-        <p>{fill(t("setup.accounts.count"), { n: r.accounts.enabled, regions: r.accounts.regions })}</p>
+        <p>{fillPlaceholders(t("setup.accounts.count"), { n: r.accounts.enabled, regions: r.accounts.regions })}</p>
         <ul className="mt-1 space-y-0.5">
           {r.accounts.items.map((a) => (
             <li key={a.id} className="[overflow-wrap:anywhere]"><span className="font-medium text-foreground">{a.name}</span> · <CheckLine check={a.check} t={t} /></li>
@@ -53,8 +52,8 @@ function Facts({ id, r, t }: { id: SetupItemId; r: Readiness; t: T }) {
       <>
         <p className="[overflow-wrap:anywhere]">{t("setup.model.id")}: <span className="font-mono text-foreground">{r.model.model_id}</span></p>
         {r.model.provider && r.model.provider !== "bedrock"
-          ? <p className="[overflow-wrap:anywhere]">{fill(t("setup.model.provider"), { provider: r.model.provider, endpoint: r.model.endpoint ?? "" })}</p>
-          : <p>{fill(t("setup.model.region"), { region: r.model.region ?? "" })}</p>}
+          ? <p className="[overflow-wrap:anywhere]">{fillPlaceholders(t("setup.model.provider"), { provider: r.model.provider, endpoint: r.model.endpoint ?? "" })}</p>
+          : <p>{fillPlaceholders(t("setup.model.region"), { region: r.model.region ?? "" })}</p>}
         <p><CheckLine check={r.model.check} t={t} /></p>
       </>
     );
@@ -74,7 +73,7 @@ function Facts({ id, r, t }: { id: SetupItemId; r: Readiness; t: T }) {
       </>
     );
   }
-  return <p>{fill(t("setup.notify.count"), { n: r.notifications.channels })}</p>;
+  return <p>{fillPlaceholders(t("setup.notify.count"), { n: r.notifications.channels })}</p>;
 }
 
 /** The setup overview (MVP-2.9.0 N23 — the 2.8.0 spec's S6), open before and after signing in. Signed out: what the
@@ -192,7 +191,7 @@ export default function Setup() {
             <>
               <button type="button" onClick={() => void readiness.refetch()} disabled={readiness.isFetching} className={quiet}>{t("setup.recheck")}</button>
               <button type="button" onClick={() => navigate("/app", { state: { fromSetup: true } })} className={primary}>{t("setup.enter")}</button>
-              {readiness.data && <span className="text-xs text-muted-foreground">{fill(t("setup.readAt"), { time: formatFullDate(readiness.data.generated_at) })} · {t("setup.recheckNote")}</span>}
+              {readiness.data && <span className="text-xs text-muted-foreground">{fillPlaceholders(t("setup.readAt"), { time: formatFullDate(readiness.data.generated_at) })} · {t("setup.recheckNote")}</span>}
             </>
           )}
         </footer>

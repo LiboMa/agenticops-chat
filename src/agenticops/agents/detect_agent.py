@@ -42,6 +42,7 @@ from agenticops.tools.integration_tools import (
 )
 from agenticops.skills.tools import activate_skill, read_skill_reference
 from agenticops.tools.memory_tools import search_agent_memory
+from agenticops.llm.errors import safe_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -386,4 +387,4 @@ def detect_agent(scope: str = "all", deep: bool = False) -> str:
                 return (str(result) + "\n\n" + _DOWNGRADE_NOTE) if _downgraded else str(result)
     except Exception as e:
         logger.exception("Detect agent failed")
-        return f"Detect agent error: {e}"
+        return f"Detect agent error: {safe_error_text(e)}"

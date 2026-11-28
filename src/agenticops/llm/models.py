@@ -57,7 +57,10 @@ class ProviderModel(Base):
     tools_probe_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     supports_images: Mapped[bool] = mapped_column(Boolean, default=False)
     supports_documents: Mapped[bool] = mapped_column(Boolean, default=False)
-    reasoning: Mapped[str] = mapped_column(String(32), default="none")      # none | openai_effort | anthropic_thinking
+    reasoning: Mapped[str] = mapped_column(String(32), default="none")             # catalog.REASONING
+    # what a request may carry — the list's word or an admin's, never read off the model's name (review of 2.9.0):
+    accepts_temperature: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)   # None = not said: not sent
+    prompt_cache: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)          # None = the platform's default
     price_input: Mapped[Optional[float]] = mapped_column(Float, nullable=True)        # USD per 1M tokens
     price_output: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     price_cache_read: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

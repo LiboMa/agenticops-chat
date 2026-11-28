@@ -422,6 +422,49 @@ def host_reads_only(command: str) -> bool:
     return True
 
 
+def _runs_more_than_one(text: str) -> bool:
+    """True when a shell would run more than one command for `text`: an unquoted ; & | or line break, a subshell,
+    or a substitution (a backtick or $( — inside double quotes too). Quoted text is data and `2>&1` / `>/dev/null`
+    change nothing; a redirect or a comment alone is still one command. Bash's `&>` counts: to dash it is `&` and
+    then the next command (N30)."""
+    text = _CONTINUED.sub(" ", _HARMLESS_REDIRECT.sub(" ", text or ""))
+    quote, i = None, 0
+    while i < len(text):
+        c = text[i]
+        if quote == "'":
+            if c == "'":
+                quote = None
+        elif c == "\\":
+            i += 1                                   # the next character is literal
+        elif quote == '"':
+            if c == '"':
+                quote = None
+            elif c == "`" or text.startswith("$(", i):
+                return True
+        elif c in "'\"":
+            quote = c
+        elif c in ";&|\n()`" or text.startswith("$(", i):
+            return True
+        i += 1
+    return False
+
+
+def hides_second_command(command: str) -> bool:
+    """A host line that runs more than one command and that the N30 rule does not accept as reads only («之后» 22,
+    step 1): outside a read-only run it was judged by how it begins (gap 27) — `cat x && systemctl restart nginx`
+    ran as a read. Reads joined by a pipe or `&&` (`ps aux | grep java`) are not this."""
+    return _runs_more_than_one(command) and not host_reads_only(command)
+
+
+def host_line_tier(command: str, tier: str) -> tuple[str, str]:
+    """A host line's tier outside a read-only run, and why it was raised: a line read as `readonly` by how it begins
+    that hides a second command becomes `unknown`, reason `second_command` — the confirmation, the «needs a change»
+    check and a ledger row, as a write gets. Any other tier is left as it is (this never lowers one)."""
+    if tier == "readonly" and hides_second_command(command):
+        return "unknown", "second_command"
+    return tier, ""
+
+
 def read_only_host_tier(command: str, tier: str) -> str:
     """The tier a host tool takes for `command` while its run may only read, given the run-time classifier's `tier`
     (never called for 'blocked'): 'readonly' only for a line host_reads_only vouches for — a query it knows needs no

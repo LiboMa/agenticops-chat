@@ -130,7 +130,8 @@ def test_a_region_filter_is_the_region_it_ranged_over(db):
 
 
 def test_the_inventory_tools_cap_is_a_cut(db, monkeypatch):
-    """It hands over at most 50 rows and never says there were more: a report built on it is partial."""
+    """It hands over at most 50 rows — a report built on it is partial — and since «之后» 13 it says how many there
+    are (it used to say nothing)."""
     from agenticops.tools import metadata_tools
     from agenticops.tools.metadata_tools import get_managed_resources
     monkeypatch.setattr(metadata_tools, "MAX_LIST_RESULT_CHARS", 10**6)   # the length limit is the test above
@@ -143,7 +144,9 @@ def test_the_inventory_tools_cap_is_a_cut(db, monkeypatch):
     _resource(db, 50)
     db.commit()
     with run_context(coverage=rc.begin(NOW)):
-        assert len(json.loads(get_managed_resources())) == 50          # what the model gets is unchanged
+        out = get_managed_resources()
+        assert len(json.loads(out.split("\n[showing ")[0])) == 50     # the 50 rows, then the line that says so
+        assert "[showing 50 of 51 managed resources — by type: EC2 51;" in out
         assert rc.current().as_dict()["partial"]["truncated"] == 1
 
 
@@ -157,7 +160,8 @@ def test_the_issue_list_says_its_accounts_and_when_it_was_cut(db):
         got = rc.current().as_dict()
         assert (got["accounts"], got["regions"], got["completeness"]) == (["lab", "prod"], [], "complete")
     with run_context(coverage=rc.begin(NOW)):
-        assert len(json.loads(list_health_issues(limit=2))) == 2
+        out = list_health_issues(limit=2)
+        assert len(json.loads(out.split("\n[showing ")[0])) == 2 and "[showing 2 of 3 issues" in out
         assert rc.current().as_dict()["partial"]["truncated"] == 1
 
 
@@ -320,8 +324,8 @@ def test_an_older_database_gets_the_column_and_its_reports_have_no_coverage(tmp_
                           "report_metadata JSON, created_at DATETIME)"))
         c.execute(sa.text("INSERT INTO reports (report_type, title, summary, content_markdown, report_metadata, created_at) "
                           "VALUES ('daily', 'old', 's', 'body', '{}', '2026-09-01 00:00:00')"))
-    models._run_migrate_2_7_0(eng)
+    models._run_add_columns(eng)
     assert "coverage" in {col["name"] for col in sa.inspect(eng).get_columns("reports")}
     with eng.connect() as c:
         assert c.execute(sa.text("SELECT coverage FROM reports")).one() == (None,)
-    assert models._statements_2_7_0(sa.inspect(eng), eng.dialect) == []
+    assert models._add_column_statements(sa.inspect(eng), eng.dialect) == []

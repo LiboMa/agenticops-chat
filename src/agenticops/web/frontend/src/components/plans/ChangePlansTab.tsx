@@ -13,6 +13,7 @@ import { CHANGE_STATUSES, changeFilters, type Period } from "@/lib/plans";
 import { changeRow } from "@/lib/workItems";
 import type { ChangeStatus, RiskLevel } from "@/api/types";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 const LIST_LIMIT = 200;
 const selectClass = "border border-border bg-background text-sm rounded-lg px-3 py-1.5";
 
@@ -89,7 +90,7 @@ export function ChangePlansTab() {
             t={t}
           />
           {total > loaded.length && (
-            <p className="text-xs text-muted-foreground">{t("plans.limitNote").replace("{n}", String(LIST_LIMIT))}</p>
+            <p className="text-xs text-muted-foreground">{fillPlaceholders(t("plans.limitNote"), { n: String(LIST_LIMIT) })}</p>
           )}
         </>
       )}

@@ -73,20 +73,27 @@ def test_a_provider_without_a_key_still_builds(db):
     assert build_model("ollama::llama3.1:8b", max_tokens=100).client_args["api_key"]     # the SDK requires one
 
 
-def test_anthropic_compatible_thinking_follows_the_claude_version(db):
+def test_anthropic_compatible_thinking_follows_the_rows_reasoning_never_the_name(db):
+    """The row's «reasoning» picks the request shape (review of 2.9.0, 2026-11-26) — the ids below say the opposite of
+    their rows on purpose: an old-looking name set to adaptive, a 5.x name set to a token budget."""
     from strands.models.anthropic import AnthropicModel
     from agenticops.llm.factory import build_model
     add_provider("relay", "https://relay.example.com/", kind="anthropic_compatible", api_key="sk-relay")
-    add_model("relay", "claude-sonnet-4-6", reasoning="anthropic_thinking")
-    add_model("relay", "claude-3-5-haiku-20241022", reasoning="anthropic_thinking")
-    add_model("relay", "plain-claude-alias", reasoning="none")
-    m = build_model("relay::claude-sonnet-4-6", max_tokens=16000, thinking_budget=8192)
+    add_model("relay", "claude-3-5-haiku-20241022", reasoning="anthropic_adaptive_summarized")
+    add_model("relay", "claude-opus-5-5", reasoning="anthropic_budget")
+    add_model("relay", "plain-claude-alias", reasoning="anthropic_adaptive")
+    add_model("relay", "claude-sonnet-4-6", reasoning="none")
+    m = build_model("relay::claude-3-5-haiku-20241022", max_tokens=16000, thinking_budget=8192)
     assert isinstance(m, AnthropicModel) and m.config["max_tokens"] == 16000
-    assert m.config["params"]["thinking"] == {"type": "adaptive"}
-    assert m.config["params"]["output_config"] == {"effort": "high"}
-    old = build_model("relay::claude-3-5-haiku-20241022", max_tokens=16000, thinking_budget=8192)
-    assert old.config["params"]["thinking"] == {"type": "enabled", "budget_tokens": 8192}
-    assert not build_model("relay::plain-claude-alias", max_tokens=16000, thinking_budget=8192).config.get("params")
+    assert m.config["params"] == {"thinking": {"type": "adaptive", "display": "summarized"},
+                                  "output_config": {"effort": "high"}}
+    assert build_model("relay::claude-opus-5-5", max_tokens=16000, thinking_budget=8192).config["params"] == \
+        {"thinking": {"type": "enabled", "budget_tokens": 8192}}
+    assert build_model("relay::plain-claude-alias", max_tokens=16000, thinking_budget=4096).config["params"] == \
+        {"thinking": {"type": "adaptive"}, "output_config": {"effort": "medium"}}
+    assert not build_model("relay::claude-sonnet-4-6", max_tokens=16000, thinking_budget=8192).config.get("params")
+    assert not build_model("relay::plain-claude-alias", max_tokens=16000, thinking_budget=0).config.get("params")
+    assert not build_model("relay::plain-claude-alias", max_tokens=4000, thinking_budget=8192).config.get("params")
 
 
 @pytest.mark.parametrize("setup,ref,reason", [
@@ -165,16 +172,17 @@ def test_a_slow_server_times_out_on_time(both, ref):
     assert "timeout" in type(e.value).__name__.lower() or "timed out" in str(e.value).lower()
 
 
-def test_temperature_only_where_the_model_takes_it(both):
+def test_temperature_only_where_the_models_row_says(both):
+    """Review of MVP-2.9.0, Standards 1 (the owner: no guessing from a model's name): a direct call carries
+    temperature only to a model whose row says it takes it; a row that does not say gets none."""
     from agenticops.llm.direct import complete_text
     complete_text("oa::fake-chat-1", "x", max_tokens=5, temperature=0)
     complete_text("an::claude-sonnet-4-6", "x", max_tokens=5, temperature=0)
     sent = [r["body"] for r in both.requests if r["method"] == "POST"]
-    assert sent[0].get("temperature") == 0                # an OpenAI-compatible server takes it
-    assert sent[1].get("temperature") == 0                # Claude 4.6 still takes it
-    add_model("an", "claude-opus-5-5")
-    complete_text("an::claude-opus-5-5", "x", max_tokens=5, temperature=0)
-    assert "temperature" not in both.requests[-1]["body"]  # 4.7+ rejects it
+    assert "temperature" not in sent[0] and "temperature" not in sent[1]      # their rows do not say
+    add_model("oa", "takes-it", accepts_temperature=True)
+    complete_text("oa::takes-it", "x", max_tokens=5, temperature=0)
+    assert both.requests[-1]["body"].get("temperature") == 0
 
 
 def test_converse_text_dispatches_by_ref(both):
@@ -198,5 +206,46 @@ def test_media_capabilities_and_temperature_for_refs(db):
     assert media_capabilities("openrouter::meta/llama") == (False, False)
     assert media_capabilities("openrouter::not-listed") == (False, False)
     assert media_capabilities("global.anthropic.claude-opus-5-5") == (True, True)   # Bedrock unchanged
-    assert accepts_temperature("openrouter::meta/llama") is True
+    assert accepts_temperature("openrouter::meta/llama") is False     # the row does not say: not sent
     assert accepts_temperature("global.anthropic.claude-opus-5-5") is False
+
+
+# ── follow-ups (N35, after the review) ───────────────────────────────────────
+
+def test_an_agents_model_retries_a_stuck_provider_once(db):
+    """A provider that does not answer: the chat gives up after two tries (it was three, at 3× the timeout)."""
+    from agenticops.llm.factory import build_model
+    add_provider("p4", "http://h/v1")
+    add_model("p4", "m")
+    assert build_model("p4::m", max_tokens=10).client_args["max_retries"] == 1
+
+
+def test_temperature_is_sent_only_where_the_models_row_says(db):
+    """Review of 2.9.0, Standards 1 (the owner: no guessing from a model's name): a provider model takes temperature
+    when its row says so — from the list (OpenRouter's supported_parameters) or set by hand —, whatever its id."""
+    from agenticops.agents.preamble import accepts_temperature
+    add_provider("openrouter", "https://openrouter.ai/api/v1", api_key="k")
+    add_model("openrouter", "anthropic/claude-opus-4.8", accepts_temperature=True)
+    add_model("openrouter", "anthropic/claude-sonnet-4.5", accepts_temperature=False)
+    add_model("openrouter", "meta/llama-3")
+    add_provider("relay", "https://relay.example.com", kind="anthropic_compatible", api_key="k")
+    add_model("relay", "claude-3-5-haiku-20241022")
+    assert accepts_temperature("openrouter::anthropic/claude-opus-4.8") is True
+    assert accepts_temperature("openrouter::anthropic/claude-sonnet-4.5") is False
+    assert accepts_temperature("openrouter::meta/llama-3") is False
+    assert accepts_temperature("relay::claude-3-5-haiku-20241022") is False      # an old Claude id: still not said
+    assert accepts_temperature("openrouter::not-listed") is False
+
+
+@pytest.mark.parametrize("preset, model_id, row, cached", [
+    ("anthropic", "claude-sonnet-4-6", None, True),          # Anthropic's own API: the platform's default is on
+    ("sub2api", "any-alias", None, True),
+    ("custom_anthropic", "claude-sonnet-4-6", None, False),  # another gateway: off, «claude» in the id or not
+    ("custom_anthropic", "deepseek-chat", True, True),       # set by hand
+    ("anthropic", "claude-sonnet-4-6", False, False),
+])
+def test_prompt_cache_follows_the_row_then_the_platform(db, preset, model_id, row, cached):
+    from agenticops.llm.factory import build_model
+    add_provider("gw", "https://gw.example.com", kind="anthropic_compatible", api_key="k", preset=preset)
+    add_model("gw", model_id, prompt_cache=row)
+    assert ("cache_config" in build_model(f"gw::{model_id}", max_tokens=100).config) is cached

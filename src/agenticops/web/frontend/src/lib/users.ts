@@ -1,5 +1,6 @@
 import type { UserRole, UserRow } from "@/api/types";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** The user management page (MVP-2.8.0 S2 rework). The server decides who may and what is allowed
  *  (services/user_admin); these only shape what the page shows. */
 
@@ -41,13 +42,13 @@ export function lastActiveAdminId(rows: Pick<UserRow, "id" | "role" | "is_active
 
 /** The «API 密钥» column: «N 个有效 ▸» or «无». */
 export function keysLabel(n: number, t: (k: string) => string): string {
-  return n > 0 ? t("users.keys.label").replace("{n}", String(n)) : t("users.keys.none");
+  return n > 0 ? fillPlaceholders(t("users.keys.label"), { n: String(n) }) : t("users.keys.none");
 }
 
 /** A worded refusal that names what is in the way (has_open_requests: «C#3, C#5»). */
 export function fillRefusal(text: string, data: Record<string, unknown> | undefined): string {
   const refs = data?.refs;
-  return Array.isArray(refs) ? text.replace("{refs}", refs.map(String).join(", ")) : text;
+  return Array.isArray(refs) ? fillPlaceholders(text, { refs: refs.map(String).join(", ") }) : text;
 }
 
 /** Why a password the admin typed would be refused, or null (MVP-2.9.0 N34). The same rule as the server's

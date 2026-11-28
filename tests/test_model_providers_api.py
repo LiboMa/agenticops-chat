@@ -115,6 +115,9 @@ def test_models_and_the_test_route_use_the_fake_server(env):
     _new(env, tok)
     r = env.client.post("/api/model-providers/local-llm/refresh-models", headers=H(tok))
     assert r.json() == {"added": 2, "updated": 0, "unchanged": 0, "error": None}
+    # nothing is read off a model's name (review of 2.9.0): the embedding model is marked by an admin
+    r = env.client.patch("/api/model-providers/local-llm/models/fake-embed-1", headers=H(tok), json={"purpose": "embedding"})
+    assert r.status_code == 200 and r.json()["purpose"] == "embedding"
     models = env.client.get("/api/model-providers/local-llm/models?purpose=chat", headers=H(tok)).json()
     assert [m["model_id"] for m in models] == ["fake-chat-1"] and models[0]["tools"] is None
     r = env.client.post("/api/model-providers/local-llm/test", headers=H(tok), json={"model_id": "fake-chat-1"})

@@ -17,6 +17,7 @@ import { ProviderDialog } from "./ProviderDialog";
 import { ProviderModelsDialog } from "./ProviderModelsDialog";
 import { ProbeSteps } from "./ProbeSteps";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** Settings → «Model providers» (MVP-2.9.0 N35): Amazon Bedrock (on / off, and what still points at it), then the
  *  providers beyond it — add one from a platform's preset, test it, look through its models, turn it off, delete it.
  *  Only an administrator changes anything here; a reader sees it all and changes nothing (`can_edit`). */
@@ -44,7 +45,7 @@ export function ModelProvidersTab() {
   async function toggleBedrock(on: boolean) {
     setError(null);
     if (!on && page.bedrock.references.length
-        && !(await confirm(t("settings.providers.bedrockOffConfirm").replace("{refs}", names(page.bedrock.references)),
+        && !(await confirm(fillPlaceholders(t("settings.providers.bedrockOffConfirm"), { refs: names(page.bedrock.references) }),
                            { title: t("settings.providers.bedrockOffTitle"), variant: "destructive" }))) return;
     setBedrock.mutate(on, { onError: fail });
   }
@@ -56,7 +57,7 @@ export function ModelProvidersTab() {
 
   async function del(row: ProviderRow) {
     setError(null);
-    const ok = await confirm(t("settings.providers.deleteConfirm").replace("{name}", row.name).replace("{n}", String(row.models_count)),
+    const ok = await confirm(fillPlaceholders(t("settings.providers.deleteConfirm"), { name: row.name, n: String(row.models_count) }),
                              { title: t("settings.providers.deleteTitle"), variant: "destructive", confirmText: t("common.delete") });
     if (ok) remove.mutate(row.name, { onError: fail });
   }
@@ -80,6 +81,7 @@ export function ModelProvidersTab() {
           </div>
         </CardHeader>
         <CardBody className="space-y-4">
+          <p className="text-sm text-muted-foreground">{t("settings.providers.dataNotice")}</p>
           {!canEdit && <p className="text-sm text-muted-foreground">{t("settings.providers.adminOnly")}</p>}
           {page.credential_backend === "plaintext" && (
             <p role="note" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
@@ -93,13 +95,12 @@ export function ModelProvidersTab() {
               <p id="pv-bedrock-name" className="text-sm font-semibold text-foreground">{t("settings.providers.bedrock")}</p>
               <p id="pv-bedrock-desc" className="text-xs text-muted-foreground">
                 {page.bedrock.enabled
-                  ? t("settings.providers.bedrockOn").replace("{region}", page.bedrock.region)
+                  ? fillPlaceholders(t("settings.providers.bedrockOn"), { region: page.bedrock.region })
                   : t("settings.providers.bedrockOff")}
               </p>
               {page.bedrock.references.length > 0 && (
                 <p className={`mt-1 text-xs ${page.bedrock.enabled ? "text-muted-foreground" : "text-destructive"}`}>
-                  {(page.bedrock.enabled ? t("settings.providers.bedrockUsedBy") : t("settings.providers.bedrockStillUsedBy"))
-                    .replace("{refs}", names(page.bedrock.references))}
+                  {fillPlaceholders((page.bedrock.enabled ? t("settings.providers.bedrockUsedBy") : t("settings.providers.bedrockStillUsedBy")), { refs: names(page.bedrock.references) })}
                 </p>
               )}
             </div>
@@ -139,7 +140,7 @@ export function ModelProvidersTab() {
                         <span className="block font-mono text-xs text-muted-foreground">{row.name}</span>
                         <span className="block text-xs text-muted-foreground">{t(`settings.providers.kind.${row.kind}`)}{row.has_api_key ? ` · ${t("settings.providers.hasKey")}` : ""}</span>
                         {row.references.length > 0 && (
-                          <span className="mt-0.5 block text-xs text-muted-foreground">{t("settings.providers.usedBy").replace("{refs}", names(row.references))}</span>
+                          <span className="mt-0.5 block text-xs text-muted-foreground">{fillPlaceholders(t("settings.providers.usedBy"), { refs: names(row.references) })}</span>
                         )}
                       </td>
                       <td className="min-w-[13rem] max-w-[18rem] py-2 pr-3 font-mono text-xs text-foreground [overflow-wrap:anywhere]">{row.base_url}</td>

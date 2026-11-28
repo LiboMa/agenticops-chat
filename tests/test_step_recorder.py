@@ -339,7 +339,9 @@ def test_the_route_serves_any_signed_in_user_and_refuses_what_it_cannot_read(db,
         assert body["run"]["key"] == "r" and [s["summary"] for s in body["steps"]] == ["one", "two"]
         assert [s["summary"] for s in client.get(f"/api/ui/activity/steps?item=I7&agent=rca&after={a}").json()["steps"]] == ["two"]
         assert client.get("/api/ui/activity/steps?item=I7&agent=rca&since=2026-11-18T04:00:00Z").json()["run"] is None
-        for bad in ("item=X7&agent=rca", "item=I0&agent=rca", "item=I7&agent=main", "item=I7", "agent=rca",
+        # the one work-item id rule (services/listing.ITEM_PATTERN): 9 digits at most, ASCII only, as on every route
+        for bad in ("item=X7&agent=rca", "item=I0&agent=rca", "item=I1234567890&agent=rca", "item=I1%D9%A3&agent=rca",
+                    "item=I7&agent=main", "item=I7", "agent=rca",
                     "item=I7&agent=rca&since=yesterday", "item=I7&agent=rca&limit=0"):
             assert client.get(f"/api/ui/activity/steps?{bad}").status_code == 422, bad
     finally:

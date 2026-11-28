@@ -71,8 +71,11 @@ def test_presets_merge_and_skip_bedrock_when_off(env):
     assert all(keys <= set(p) for p in presets)
     bedrock = [p for p in presets if p["provider"] == "bedrock"]
     assert bedrock and {p["provider_label"] for p in bedrock} == {"Amazon Bedrock"}
-    claude = next(p for p in bedrock if "anthropic.claude" in p["value"])
-    assert claude["capabilities"] == {"tools": True, "images": True, "documents": True, "reasoning": "anthropic_thinking"}
+    from agenticops.agents.preamble import claude_reasoning
+    claudes = [p for p in bedrock if "anthropic.claude" in p["value"]]
+    assert claudes and claudes[0]["capabilities"] == {"tools": True, "images": True, "documents": True,
+                                                      "reasoning": claude_reasoning(claudes[0]["value"])}
+    assert all(p["capabilities"]["reasoning"] == claude_reasoning(p["value"]) for p in claudes)  # the shape it is sent
     ours = [p for p in presets if p["provider"] == "local-llm"]
     assert [p["value"] for p in ours] == ["local-llm::fake-chat-1"]            # the embedding model is no chat model
     assert ours[0]["provider_label"] == "Local LLM" and ours[0]["capabilities"]["tools"] is True
@@ -255,3 +258,15 @@ def test_readiness_verifies_a_ref_main(env):
     env.monkeypatch.setattr(env.settings, "agent_main_model_id", "global.anthropic.claude-opus-5-5")
     view = readiness.readiness(actor, can_verify=True)["model"]
     assert view["provider"] == "bedrock" and view["region"] == env.settings.bedrock_region and view["endpoint"] is None
+
+
+def test_a_refused_galaxy_model_leaves_the_rest_of_the_request_unapplied(env):
+    """Review of MVP-2.9.0, Spec ⑥: galaxy_model_id's own check (it must be one of the listed models) ran after the
+    other model settings of the same request had been written — a request answered 400 had already changed them."""
+    h = env.login("root", is_admin=True)
+    before = env.settings.security_model_id
+    r = env.client.patch(URL, headers=h, json={"model_settings": {"security": "local-llm::fake-chat-1"},
+                                               "galaxy_model_id": "global.anthropic.not-a-listed-model"})
+    assert r.status_code == 400 and "galaxy_model_id" in r.text
+    assert env.settings.security_model_id == before
+    assert env.written == []

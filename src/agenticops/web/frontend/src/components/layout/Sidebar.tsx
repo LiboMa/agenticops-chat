@@ -17,6 +17,7 @@ import { setChoice as setShell } from "@/lib/shellChoice";
 import type { Home } from "@/lib/home";
 import { ICON_PATHS, SvgIcon } from "./navIcons";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 const ORDER_V2 = "aiops-nav-order-v2";
 const NEW_UI = "/app/new/decide";
 
@@ -38,9 +39,6 @@ const BADGE: Record<BadgeTone, string> = {
   muted: "text-[12px] font-semibold text-muted-foreground",
   danger: "text-[12px] font-semibold text-status-danger",
 };
-
-const fill = (text: string, vars?: Record<string, string>) =>
-  Object.entries(vars ?? {}).reduce((s, [k, v]) => s.replace(`{${k}}`, v), text);
 
 /** The blue/white sidebar: daily work, the collapsible tools (the group holding the current page opens by itself,
  *  not saved; a group the user opens or closes is saved to their preferences), and administration at the foot.
@@ -161,7 +159,7 @@ export function Sidebar() {
                           <span className={`grid transition-[grid-template-rows] duration-150 motion-reduce:transition-none ${
                             here ? "grid-rows-[1fr]" : "grid-rows-[0fr] group-hover:grid-rows-[1fr] group-focus-visible:grid-rows-[1fr]"}`}>
                             <span id={hintId} className="block overflow-hidden truncate text-[11px] font-normal text-muted-foreground">
-                              {fill(t(b.hint.key), b.hint.vars)}
+                              {fillPlaceholders(t(b.hint.key), b.hint.vars)}
                             </span>
                           </span>
                         </span>

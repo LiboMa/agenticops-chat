@@ -138,11 +138,12 @@ class SSHProvider(CloudProvider):
         provider = self
         host = str((self.account.credentials or {}).get("host") or "")
 
-        def _run_ssh(command: str) -> str:
+        def _run_ssh(command: str, require_confirmation: bool = False) -> str:
             command = command.strip()
             if not command:
                 return "Error: empty command."
-            from agenticops.services.command_audit import cli_outcome, guarded_run, record_command
+            from agenticops.services.command_audit import (change_context_refusal, cli_outcome,
+                                                            confirmation_refusal, guarded_run, record_command)
             from agenticops.skills.security import classify_shell_command
 
             def _execute() -> str:
@@ -162,18 +163,33 @@ class SSHProvider(CloudProvider):
             # where the run may only read, every command in the line must be one the stricter rule knows (N30) —
             # how the line begins is not enough
             from agenticops.services.command_audit import read_only_context
+            raised = ""
             if read_only_context():
                 from agenticops.services.change_steps import read_only_host_tier
                 tier = read_only_host_tier(command, tier)
+            else:            # a line that begins like a read but hides a second command is a write («之后» 22)
+                from agenticops.services.change_steps import host_line_tier
+                tier, raised = host_line_tier(command, tier)
+            # as run_on_host: the run's own check first (a read-only run, a change under review), then the person's
+            # confirmation — this tool had none and ran every write it was sent («之后» 22, step 1, owner)
+            refused = change_context_refusal(tool=LEDGER_TOOL, tier=tier, command=command, account=account_name,
+                                             target=host)
+            if refused is not None:
+                return refused
+            if tier in ("write", "unknown") and not require_confirmation:
+                return confirmation_refusal(tool=LEDGER_TOOL, tier=tier, command=command, reason=raised,
+                                            account=account_name, target=host)
             return guarded_run(tool=LEDGER_TOOL, tier=tier, command=command, run=_execute,
-                               outcome_of=cli_outcome, account=account_name, target=host)
+                               outcome_of=cli_outcome, account=account_name, target=host, reason=raised)
 
         _run_ssh.__name__ = f"run_ssh_{safe_name}"
         _run_ssh.__doc__ = (
             f"Execute a shell command on IDC/on-prem host '{account_name}' via SSH. "
-            f"Destructive commands are blocked by security policy.\n\n"
+            f"Destructive commands are blocked by security policy; a command that changes something asks for "
+            f"confirmation first.\n\n"
             f"Args:\n"
-            f"    command: The shell command to run on the remote host."
+            f"    command: The shell command to run on the remote host.\n"
+            f"    require_confirmation: Set to true to acknowledge a write operation."
         )
 
         from strands import tool as strands_tool

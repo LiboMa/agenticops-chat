@@ -239,12 +239,12 @@ def test_the_2_7_0_migration_makes_every_existing_session_a_workspace_session(tm
     with engine.begin() as c:
         c.execute(text("CREATE TABLE chat_sessions (id INTEGER PRIMARY KEY, session_id VARCHAR(36), name VARCHAR(200))"))
         c.execute(text("INSERT INTO chat_sessions (session_id, name) VALUES ('old', 'old')"))
-    models_mod._run_migrate_2_7_0(engine)
+    models_mod._run_add_columns(engine)
     cols = {c["name"] for c in inspect(engine).get_columns("chat_sessions")}
     assert {"owner_user_id", "visibility"} <= cols
     with engine.connect() as c:
         assert c.execute(text("SELECT owner_user_id, visibility FROM chat_sessions")).one() == (None, "workspace")
-    assert models_mod._statements_2_7_0(inspect(engine), engine.dialect) == []  # idempotent
+    assert models_mod._add_column_statements(inspect(engine), engine.dialect) == []  # idempotent
 
 
 def test_the_2_7_0_migration_ddl_on_postgresql():
@@ -252,7 +252,7 @@ def test_the_2_7_0_migration_ddl_on_postgresql():
     import agenticops.models as models_mod
     insp = SimpleNamespace(has_table=lambda t: t == "chat_sessions",
                            get_columns=lambda t: [{"name": "id"}, {"name": "session_id"}])
-    assert models_mod._statements_2_7_0(insp, postgresql.dialect()) == [
+    assert models_mod._add_column_statements(insp, postgresql.dialect()) == [
         "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS owner_user_id INTEGER",
         "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS visibility VARCHAR(16) NOT NULL DEFAULT 'workspace'",
         # S5: the chat's context

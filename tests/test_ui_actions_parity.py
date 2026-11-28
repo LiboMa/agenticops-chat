@@ -69,13 +69,13 @@ def _actions(client, pid):
 ])
 def test_fix_plan_actions_match_the_routes(client, monkeypatch, enforce, who, decision, status, risk):
     import threading
-    import agenticops.web.app as app_mod
     from agenticops.config import settings
     from agenticops.services import agent_runs
     from agenticops.web import deps
     from agenticops.web.app import app
+    from agenticops.web.routers import issue_agents
     monkeypatch.setattr(settings, "rbac_enforce", enforce)
-    monkeypatch.setattr(app_mod, "_invoke_issue_agent", lambda agent_name, issue_id: "done")   # request_changes starts one
+    monkeypatch.setattr(issue_agents, "_invoke_issue_agent", lambda agent_name, issue_id: "done")   # request_changes starts one
     agent_runs.clear()
     app.dependency_overrides[deps.current_actor] = lambda: ACTORS[who]
     pid, h = _plan(status, risk)

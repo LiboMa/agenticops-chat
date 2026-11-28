@@ -42,7 +42,7 @@ export interface ProvidersPage {
   can_edit: boolean;
 }
 
-export type Reasoning = "none" | "openai_effort" | "anthropic_thinking";
+export type Reasoning = "none" | "openai_effort" | "anthropic_adaptive_summarized" | "anthropic_adaptive" | "anthropic_budget";
 export type Purpose = "chat" | "embedding";
 
 export interface ProviderModel {
@@ -58,6 +58,9 @@ export interface ProviderModel {
   supports_images: boolean;
   supports_documents: boolean;
   reasoning: Reasoning;
+  /** what a request may carry — the list's word or an admin's, never the model's name; null = not said */
+  accepts_temperature: boolean | null;
+  prompt_cache: boolean | null;   // null = the platform's default (Anthropic-compatible providers only)
   price_input: number | null;
   price_output: number | null;
   price_cache_read: number | null;
@@ -144,6 +147,14 @@ export function useTestProvider() {
       apiFetch<ProbeResult>(`/model-providers/${enc(name)}/test`,
         { method: "POST", body: JSON.stringify(modelId ? { model_id: modelId } : {}) }),
     onSuccess: refresh,
+  });
+}
+
+/** The connection test of what the form holds, before it is saved — the server writes nothing (MVP-2.9.0 review). */
+export function useTestDraft() {
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      apiFetch<ProbeResult>("/model-providers/test-draft", { method: "POST", body: JSON.stringify(body) }),
   });
 }
 

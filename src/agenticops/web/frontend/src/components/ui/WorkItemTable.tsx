@@ -5,6 +5,7 @@ import { formatShortDate } from "@/lib/formatDate";
 import type { PhaseState } from "@/lib/issuePhases";
 import type { RowEmphasis, WorkItemRow } from "@/lib/workItems";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 const DOT: Record<PhaseState, string> = {
   done: "bg-green-500",
   current: "bg-blue-500",
@@ -89,7 +90,7 @@ export function WorkItemTable({ rows, levelHeader, renderLevel, timeHeader, rowE
                     {row.recurrence > 1 && (
                       <span
                         className="shrink-0 inline-flex items-center px-1.5 py-0.5 text-xs font-semibold rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
-                        title={t("workitem.recurred").replace("{n}", String(row.recurrence))}
+                        title={fillPlaceholders(t("workitem.recurred"), { n: String(row.recurrence) })}
                       >
                         ×{row.recurrence}
                       </span>

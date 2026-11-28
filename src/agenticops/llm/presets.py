@@ -10,6 +10,12 @@ ANTHROPIC = "anthropic_compatible"
 KINDS = (OPENAI, ANTHROPIC)
 
 
+def default_preset(kind) -> str:
+    """The preset of a provider added without one: the «Other» preset of its protocol (OpenAI-compatible unless it
+    says Anthropic)."""
+    return "custom_anthropic" if kind == ANTHROPIC else "custom_openai"
+
+
 @dataclass(frozen=True)
 class Preset:
     kind: str
@@ -42,3 +48,8 @@ PRESETS: dict[str, Preset] = {
 
 def public() -> list[dict]:
     return [{"preset": key, **asdict(p)} for key, p in PRESETS.items()]
+
+# Anthropic-compatible platforms that speak Anthropic's own API, prompt caching included: a model of theirs gets the
+# cache unless its row says otherwise. Any other gateway gets it only when its row says so (review of MVP-2.9.0:
+# the cache used to follow «claude» in the model's name).
+PROMPT_CACHE_PRESETS = frozenset({"anthropic", "sub2api"})

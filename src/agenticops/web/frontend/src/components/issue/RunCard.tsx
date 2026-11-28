@@ -7,6 +7,7 @@ import { approvalBlockedReason, canApprovePlan } from "@/lib/issueDetail";
 import { formatFullDate } from "@/lib/formatDate";
 import { useReadOnly } from "@/hooks/useBootstrap";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 type T = (key: string) => string;
 
 /** ③ Approve & run: who approved which version, approve / reject while the plan waits (the same handlers as the
@@ -40,7 +41,7 @@ export function RunBody({
         <p className="text-sm text-muted-foreground">
           {plan.approved_by && <>{t("issues.approvedBy")}: <span className="font-medium text-foreground">{plan.approved_by}</span></>}
           {plan.approved_at && <> · {t("issues.approvedAt")}: <span className="text-foreground">{formatFullDate(plan.approved_at)}</span></>}
-          {" · "}{t("plans.approvedVersion").replace("{n}", String(plan.approved_version ?? plan.plan_version))}
+          {" · "}{fillPlaceholders(t("plans.approvedVersion"), { n: String(plan.approved_version ?? plan.plan_version) })}
         </p>
       )}
 

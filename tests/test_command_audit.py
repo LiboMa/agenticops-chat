@@ -1355,15 +1355,18 @@ class TestSshProviderLedger:
         return provider.cli_tool(), run
 
     def test_write_is_recorded(self, db, monkeypatch):
+        # it asks for confirmation first since «之后» 22 step 1 (it ran every write it was sent), then runs and records
         tool, run = self._tool(monkeypatch)
-        assert tool("systemctl reload nginx") == "ok\n" and run.called
-        (row,) = _rows(db)
-        assert (row.tool, row.tier, row.outcome, row.account, row.target, row.exit_code) == \
+        assert "requires confirmation" in tool("systemctl reload nginx") and not run.called
+        assert tool("systemctl reload nginx", require_confirmation=True) == "ok\n" and run.called
+        refused, executed = _rows(db)
+        assert (refused.outcome, refused.reason) == ("refused", "confirmation")
+        assert (executed.tool, executed.tier, executed.outcome, executed.account, executed.target, executed.exit_code) == \
                ("provider_ssh", "write", "executed", "idc-1", "10.0.0.5", 0)
 
     def test_change_required_refused(self, db, monkeypatch):
         tool, run = self._tool(monkeypatch)
-        out = tool("systemctl restart nginx")
+        out = tool("systemctl restart nginx", require_confirmation=True)
         assert "/change" in out and not run.called
         (row,) = _rows(db)
         assert (row.tool, row.outcome, row.reason) == ("provider_ssh", "refused", "change_required")

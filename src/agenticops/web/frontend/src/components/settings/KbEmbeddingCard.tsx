@@ -9,6 +9,7 @@ import { useBootstrap, useReadOnly } from "@/hooks/useBootstrap";
 import { useKbEmbedding, useReembed, useSetKbEmbedding } from "@/hooks/useModelProviders";
 import { canChangeModels } from "@/lib/permissions";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** Settings → Knowledge base → «Vector model» (MVP-2.9.0 N35): which model the case search embeds with — a
  *  provider's embedding model, or by default Titan while Bedrock is on — how many vectors are stored and by which
  *  model, and the rebuild that a new model needs (all or nothing; SQLite vector store only). */
@@ -37,10 +38,10 @@ export function KbEmbeddingCard() {
 
   async function rebuild() {
     setError(null); setMessage(null);
-    if (!(await confirm(t("kb.embedding.rebuildConfirm").replace("{model}", labelOf(e.model)),
+    if (!(await confirm(fillPlaceholders(t("kb.embedding.rebuildConfirm"), { model: labelOf(e.model) }),
                         { title: t("kb.embedding.rebuild") }))) return;
     reembed.mutate(undefined, {
-      onSuccess: (r) => setMessage(t("kb.embedding.rebuilt").replace("{cases}", String(r.cases)).replace("{vectors}", String(r.vectors))),
+      onSuccess: (r) => setMessage(fillPlaceholders(t("kb.embedding.rebuilt"), { cases: String(r.cases), vectors: String(r.vectors) })),
       onError: (err) => setError((err as Error).message),
     });
   }
@@ -58,10 +59,9 @@ export function KbEmbeddingCard() {
       <CardBody className="space-y-3">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_320px]">
           <div className="min-w-0 space-y-1 text-sm">
-            <p className="text-foreground [overflow-wrap:anywhere]">{t("kb.embedding.inUse").replace("{model}", inUse)}</p>
+            <p className="text-foreground [overflow-wrap:anywhere]">{fillPlaceholders(t("kb.embedding.inUse"), { model: inUse })}</p>
             <p className="text-xs text-muted-foreground">
-              {t("kb.embedding.stored").replace("{n}", String(e.vectors ?? "—"))
-                .replace("{dim}", e.dimension ? String(e.dimension) : "—").replace("{model}", e.vectors ? labelOf(e.indexed_with) : "—")}
+              {fillPlaceholders(t("kb.embedding.stored"), { n: String(e.vectors ?? "—"), dim: e.dimension ? String(e.dimension) : "—", model: e.vectors ? labelOf(e.indexed_with) : "—" })}
             </p>
           </div>
           <ModelPicker value={e.model_ref} presets={e.presets} purpose="embedding" onChange={change}
@@ -71,8 +71,8 @@ export function KbEmbeddingCard() {
         {e.needs_reembed && (
           <div role="status" className="flex flex-wrap items-center gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
             <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
-              {t("kb.embedding.needsRebuild").replace("{old}", labelOf(e.indexed_with)).replace("{model}", labelOf(e.model))}
-              {!e.can_reembed && ` ${t("kb.embedding.sqliteOnly").replace("{store}", e.store)}`}
+              {fillPlaceholders(t("kb.embedding.needsRebuild"), { old: labelOf(e.indexed_with), model: labelOf(e.model) })}
+              {!e.can_reembed && ` ${fillPlaceholders(t("kb.embedding.sqliteOnly"), { store: e.store })}`}
             </span>
             {editable && e.can_reembed && (
               <button type="button" onClick={() => void rebuild()} disabled={reembed.isPending}

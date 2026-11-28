@@ -14,6 +14,7 @@ import {
   type ChannelInfo,
 } from "@/hooks/useMessaging";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 const APP_PLATFORMS = ["feishu", "slack", "dingtalk", "wecom"] as const;
 
 function StatusBadge({ on, label }: { on: boolean; label: string }) {
@@ -117,7 +118,7 @@ export function MessagingTab() {
             <div className="space-y-2">
               {(channelsQ.data ?? []).map((ch: ChannelInfo) => (
                 <div key={ch.name} className="flex items-center gap-3 p-2.5 border border-border rounded-lg">
-                  <Switch checked={ch.enabled} label={t("messaging.channelSwitch").replace("{name}", ch.name)} onCheckedChange={(v) => toggleChannel.mutate({ name: ch.name, enabled: v })} />
+                  <Switch checked={ch.enabled} label={fillPlaceholders(t("messaging.channelSwitch"), { name: ch.name })} onCheckedChange={(v) => toggleChannel.mutate({ name: ch.name, enabled: v })} />
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-foreground flex items-center gap-2">{ch.name} <StatusBadge on={ch.enabled} label={ch.enabled ? "Enabled" : "Disabled"} /></div>
                     <div className="text-[11px] text-muted-foreground">{ch.type} · role: {ch.role}</div>

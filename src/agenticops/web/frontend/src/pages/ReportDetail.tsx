@@ -19,6 +19,7 @@ import { PublishDialog } from "@/components/reportview/PublishDialog";
 import type { ContentRendering, Report } from "@/api/types";
 import { useReadOnly } from "@/hooks/useBootstrap";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 const TYPE_COLORS: Record<string, string> = {
   daily: "bg-blue-100 text-blue-700",
   incident: "bg-red-100 text-red-700",
@@ -94,8 +95,8 @@ export default function ReportDetail() {
             <h1 className="text-2xl font-semibold leading-tight text-foreground">{report.title}</h1>
             <p className="mt-1 text-xs text-muted-foreground">
               <span className="font-mono">R#{report.id} · v{version}</span>
-              {" · "}{t("reports.generated").replace("{date}", formatFullDate(report.created_at))}
-              {" · "}{t("reports.sourceLanguage").replace("{language}", t(`reports.lang.${report.source_language ?? "en"}`))}
+              {" · "}{fillPlaceholders(t("reports.generated"), { date: formatFullDate(report.created_at) })}
+              {" · "}{fillPlaceholders(t("reports.sourceLanguage"), { language: t(`reports.lang.${report.source_language ?? "en"}`) })}
               {report.visibility === "private" && <> · {t("reports.private")}</>}
               {sessionId && <> · <Link className="text-primary hover:underline" to={`/app/chat/${sessionId}`}>{t("reports.fromChat")}</Link></>}
             </p>
@@ -144,11 +145,11 @@ export default function ReportDetail() {
                     <dd className="inline text-foreground [overflow-wrap:anywhere]">{coverage.accounts.join(", ") || t("reports.coverage.none")}</dd></div>
                   <div><dt className="inline">{t("reports.coverage.regions")}: </dt>
                     <dd className="inline text-foreground [overflow-wrap:anywhere]">{coverage.regions.join(", ") || t("reports.coverage.none")}</dd></div>
-                  <div>{t("reports.coverage.readAt").replace("{time}", formatFullDate(coverage.readAt))}</div>
+                  <div>{fillPlaceholders(t("reports.coverage.readAt"), { time: formatFullDate(coverage.readAt) })}</div>
                 </dl>
                 {coverage.partial.length > 0 && (
                   <ul className="mt-2 list-disc space-y-0.5 pl-4 text-xs text-status-warn">
-                    {coverage.partial.map((p) => <li key={p.key}>{t(p.key).replace("{n}", String(p.n))}</li>)}
+                    {coverage.partial.map((p) => <li key={p.key}>{fillPlaceholders(t(p.key), { n: String(p.n) })}</li>)}
                   </ul>
                 )}
                 {coverage.tone === "warn" && <p className="mt-2 text-xs text-status-warn">{t("reports.coverage.partialNote")}</p>}
@@ -241,7 +242,7 @@ function Paper({ report, lang, source, rendering, version, t, html, onReadSource
         )}
         {lang !== source && (
           <button type="button" onClick={onReadSource} className="rounded-md bg-secondary px-3 py-1.5 text-xs text-foreground hover:bg-muted">
-            {t("reports.readSource").replace("{language}", t(`reports.lang.${source}`))}
+            {fillPlaceholders(t("reports.readSource"), { language: t(`reports.lang.${source}`) })}
           </button>
         )}
       </div>

@@ -7,6 +7,7 @@ import {
   choiceAvailable, noteRequired, remainingRequests, VERDICT_CHOICES, verdictRequests, type VerdictChoice, type VerdictRequests,
 } from "@/lib/verdict";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** "Your verdict" (P9): one choice and one submit, sent over the RCA-feedback endpoint and then the issue-feedback
@@ -61,7 +62,7 @@ export function VerdictBlock({ issueId, rca, onDone }: { issueId: number; rca: R
       <div className="rounded-lg border border-border p-4 space-y-2">
         <h4 className="font-semibold text-foreground">{t("verdict.title")}</h4>
         <p className="text-sm text-foreground">
-          {t("verdict.recorded").replace("{verdict}", t(`location.verdict.${rca.human_verdict}`))}
+          {fillPlaceholders(t("verdict.recorded"), { verdict: t(`location.verdict.${rca.human_verdict}`) })}
         </p>
         {errorLine}
         {retryButton}

@@ -15,6 +15,7 @@ import { useAttention } from "@/hooks/useAttention";
 import { useAccountScope } from "@/components/layout/AccountScope";
 import { useReadOnly } from "@/hooks/useBootstrap";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** Plans & changes (MVP-2.7.0 S3): fix plans, change requests and the audit trail, one tab each (?tab=). */
 export default function PlansAndChanges() {
   const readOnly = useReadOnly();  // a viewer account: no write controls (the server refuses them)
@@ -64,7 +65,7 @@ export default function PlansAndChanges() {
                   aria-controls={`plans-panel-${x.id}`} tabIndex={tab === x.id ? 0 : -1} onClick={() => pick(x.id)}
                   className={`-mb-px flex items-center gap-2 border-b-2 px-3 py-2 text-sm ${tab === x.id ? "border-primary font-semibold text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
             {x.label}
-            {!!x.count && <span title={t("plans.tab.pending").replace("{n}", String(x.count))} className="rounded bg-selected px-1.5 text-[11px] font-semibold text-primary">{x.count}</span>}
+            {!!x.count && <span title={fillPlaceholders(t("plans.tab.pending"), { n: String(x.count) })} className="rounded bg-selected px-1.5 text-[11px] font-semibold text-primary">{x.count}</span>}
           </button>
         ))}
       </div>

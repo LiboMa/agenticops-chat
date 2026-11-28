@@ -90,6 +90,10 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+from agenticops.llm.errors import SdkErrorFilter as _SdkErrorFilter  # noqa: E402 — an SDK error can quote the key
+for _h in [*logging.getLogger().handlers, logging.lastResort]:
+    if _h is not None:
+        _h.addFilter(_SdkErrorFilter())
 logger = logging.getLogger(__name__)
 
 
@@ -938,8 +942,9 @@ def delete_issues(
     reset_poll_cursors: bool = typer.Option(False, "--reset-poll-cursors",
                                             help="Also forget the security poll's cursors (it backfills 24 hours)"),
     move_knowledge: bool = typer.Option(False, "--move-knowledge",
-                                        help="Also move what was learned from issues (KB cases and SOPs, issue-derived "
-                                             "agent memory) into the backup folder — not deleted"),
+                                        help="Also move every KB case and SOP file and the issue-derived agent memory "
+                                             "into the backup folder — not deleted (cases and SOPs written from an "
+                                             "issue move there anyway)"),
     memory_dir: Optional[List[Path]] = typer.Option(None, "--memory-dir",
                                                     help="Another agent-memory root to move entries from (repeatable); "
                                                          "this code's own is always included"),
@@ -951,7 +956,7 @@ def delete_issues(
     if not all_issues:
         console.print("[red]Pass --all: this deletes every issue, there is no partial delete.[/red]")
         raise typer.Exit(2)
-    init_db()
+    # no init_db() here: purge runs the migrations itself, and only once its refusals have passed (review ⑤)
     roots = None
     if move_knowledge:
         from agenticops.memory.agent_memory import AGENT_MEMORY_DIR

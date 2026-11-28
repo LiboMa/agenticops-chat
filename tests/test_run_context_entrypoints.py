@@ -364,7 +364,7 @@ def test_web_issue_agent_thread_sets_and_resets_context(db, agent_name, target):
     """The thread target behind POST /api/health-issues/{id}/rca and /generate-fix-plan sets this thread's trace
     (the issue's) and a Run Context — agent:<name> acting on behalf of the requesting web actor — and resets
     BOTH in finally."""
-    import agenticops.web.app as webapp
+    from agenticops.web.routers import issue_agents
     from agenticops.config import get_trace_id
     seen = {}
 
@@ -375,18 +375,18 @@ def test_web_issue_agent_thread_sets_and_resets_context(db, agent_name, target):
 
     before, before_tid = get_run_context(), get_trace_id()
     with patch(target, side_effect=fake):
-        webapp._run_issue_agent(agent_name, 1, "TRC-issue1", "web:anonymous")
+        issue_agents._run_issue_agent(agent_name, 1, "TRC-issue1", "web:anonymous")
     assert seen["actor"] == f"agent:{agent_name}" and seen["on_behalf_of"] == "web:anonymous"
     assert seen["agent_name"] == agent_name and seen["trace_id"] == "TRC-issue1" == seen["trace_var"]
     assert get_run_context() == before and get_trace_id() == before_tid, "both must be reset in finally"
 
 
 def test_web_issue_agent_thread_resets_context_when_agent_raises(db):
-    import agenticops.web.app as webapp
+    from agenticops.web.routers import issue_agents
     from agenticops.config import get_trace_id
     before, before_tid = get_run_context(), get_trace_id()
     with patch("agenticops.agents.rca_agent.rca_agent", side_effect=RuntimeError("boom")):
-        webapp._run_issue_agent("rca", 1, "TRC-issue1", "web:anonymous")  # logged, never raised out of the thread
+        issue_agents._run_issue_agent("rca", 1, "TRC-issue1", "web:anonymous")  # logged, never raised out of the thread
     assert get_run_context() == before and get_trace_id() == before_tid
 
 

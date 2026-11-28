@@ -143,7 +143,8 @@ def track_agent(
         yield tracker
     except Exception as exc:
         tracker.status = "error"
-        tracker.error = str(exc)[:500]
+        from agenticops.llm.errors import safe_error_text   # an SDK error's sentence can quote the key
+        tracker.error = safe_error_text(exc)
         raise
     finally:
         duration_ms = int((time.monotonic() - start) * 1000)

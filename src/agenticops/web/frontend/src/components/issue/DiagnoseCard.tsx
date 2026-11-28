@@ -10,6 +10,7 @@ import { renderMarkdown } from "@/lib/renderMarkdown";
 import { confidenceBreakdown, qualityBadges, unmatchedRefs, type QualityTone } from "@/lib/rcaQuality";
 import { useReadOnly } from "@/hooks/useBootstrap";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 type T = (key: string) => string;
 
 const TONE: Record<QualityTone, string> = {
@@ -67,8 +68,8 @@ export function diagnoseSummary(rca: RCAResult | null | undefined, t: T): string
   if (!rca) return null;
   const verdict = rca.human_verdict ? `${t("issues.rcaHumanVerdict")}: ${t(`location.verdict.${rca.human_verdict}`)}`
     : qualityBadges(rca).map((q) => t(q.key)).pop() ?? "";
-  const tpl = t("workitem.summary.diagnose").replace("{conf}", pct(confidenceBreakdown(rca, null).final));
-  return verdict ? tpl.replace("{verdict}", verdict) : tpl.replace(/\s*·\s*\{verdict\}/, "");
+  const tpl = fillPlaceholders(t("workitem.summary.diagnose"), { conf: pct(confidenceBreakdown(rca, null).final) });
+  return verdict ? fillPlaceholders(tpl, { verdict }) : tpl.replace(/\s*·\s*\{verdict\}/, "");
 }
 
 /* ================================================================== */
@@ -88,8 +89,7 @@ function RcaSection({ rca: r, threshold, timelineEvents, showVerdict, t }: {
     ...(b.criticPenalty ? [t("rca.confidence.stepCritic")] : []),
   ];
   const explain = [
-    ...(steps.length ? [t("rca.confidence.breakdown").replace("{raw}", pct(b.raw))
-      .replace("{steps}", steps.join(" → ")).replace("{final}", pct(b.final))] : []),
+    ...(steps.length ? [fillPlaceholders(t("rca.confidence.breakdown"), { raw: pct(b.raw), steps: steps.join(" → "), final: pct(b.final) })] : []),
     ...(r.critic_verdict === "weak" ? [t("rca.confidence.criticWeakFree")] : []),
   ];
   const refs = unmatchedRefs(timelineEvents);
@@ -136,7 +136,7 @@ function RcaSection({ rca: r, threshold, timelineEvents, showVerdict, t }: {
             <div
               className="absolute top-1/2 -translate-y-1/2 w-px h-3 bg-foreground/60"
               style={{ left: `${b.threshold * 100}%` }}
-              title={t("rca.confidence.threshold").replace("{threshold}", pct(b.threshold))}
+              title={fillPlaceholders(t("rca.confidence.threshold"), { threshold: pct(b.threshold) })}
             />
           )}
         </div>

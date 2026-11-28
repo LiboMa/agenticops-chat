@@ -32,6 +32,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from agenticops.config import settings
+from agenticops.utils.timeutils import iso_z
 
 
 @dataclass(frozen=True, eq=False)        # eq=False: a claim is itself, never «equal» to a later one for the same issue
@@ -95,7 +96,7 @@ def log_replaced(run: Optional[AgentRun], *, by: str) -> None:
     try:
         from agenticops.services.pipeline_events import log_event
         log_event(run.issue_id, "agent_run_abandoned", "rca" if old.agent == "rca" else "plan", "failed",
-                  detail={"agent": old.agent, "started_at": old.started_at.isoformat().replace("+00:00", "Z"),
+                  detail={"agent": old.agent, "started_at": iso_z(old.started_at),
                           "requested_by": old.requested_by, "replaced_by": by}, actor=by)
     except Exception:  # bookkeeping: never in the way of the run that is starting
         pass

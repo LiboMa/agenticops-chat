@@ -5,6 +5,7 @@ import { useBootstrap } from "@/hooks/useBootstrap";
 import { ApiError, apiDownload } from "@/api/client";
 import { saveBlob } from "@/lib/download";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 const FORMATS = ["html", "pdf", "docx"] as const;
 
 /** Export one report version (MVP-2.7.0 S6): the language is what the page shows; formats the server cannot make
@@ -36,8 +37,7 @@ export function ExportDialog({ open, onOpenChange, reportId, version, language }
           <Dialog.Content className="w-[min(440px,100%)] rounded-lg border border-border bg-card p-5 shadow-xl animate-[slideInRight_0.2s_ease-out]">
             <Dialog.Title className="text-lg font-semibold text-foreground">{t("reports.export.title")}</Dialog.Title>
             <Dialog.Description className="mt-1 text-sm text-muted-foreground">
-              {t("reports.export.what").replace("{ref}", `R#${reportId}`).replace("{version}", String(version))
-                .replace("{language}", t(`reports.lang.${language}`))}
+              {fillPlaceholders(t("reports.export.what"), { ref: `R#${reportId}`, version: String(version), language: t(`reports.lang.${language}`) })}
             </Dialog.Description>
             <fieldset className="mt-4 space-y-1.5">
               <legend className="mb-1 text-xs font-medium text-muted-foreground">{t("reports.export.format")}</legend>

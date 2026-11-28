@@ -13,6 +13,7 @@ import { queryView } from "@/lib/queryState";
 import { REPORTS_PAGE, countsView, isFiltered, reportsQuery, reportsSearch, type ReportsQuery } from "@/lib/reports";
 import { StaleNotice } from "@/components/ui/QueryState";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 const TYPE_COLORS: Record<string, string> = {
   daily: "bg-blue-100 text-blue-700",
   incident: "bg-red-100 text-red-700",
@@ -125,8 +126,8 @@ export default function Reports() {
               )}
             </div>
             <p className="text-xs text-muted-foreground" role="status">
-              {counts && counts.matched !== null && <><span className="font-medium text-foreground">{t("reports.matched").replace("{n}", String(counts.matched))}</span>{" · "}</>}
-              {counts && <span>{t("reports.all").replace("{n}", String(counts.all))}</span>}
+              {counts && counts.matched !== null && <><span className="font-medium text-foreground">{fillPlaceholders(t("reports.matched"), { n: String(counts.matched) })}</span>{" · "}</>}
+              {counts && <span>{fillPlaceholders(t("reports.all"), { n: String(counts.all) })}</span>}
               {counts && " · "}{t("reports.searchScope")} · {t("reports.dateHint")}
             </p>
           </div>
@@ -187,12 +188,12 @@ export default function Reports() {
                 </div>
               ))}
               <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 text-xs text-muted-foreground">
-                <span>{t("reports.listed").replace("{n}", String(loaded.length))}</span>
+                <span>{fillPlaceholders(t("reports.listed"), { n: String(loaded.length) })}</span>
                 {list.isFetchNextPageError && <span className="text-status-danger">{t("reports.more.failed")}</span>}
                 {remaining > 0 && (
                   <button type="button" onClick={() => void list.fetchNextPage()} disabled={list.isFetchingNextPage}
                           className="min-h-[44px] rounded-lg border border-border px-3 text-sm text-foreground hover:bg-accent disabled:opacity-60 sm:min-h-9">
-                    {list.isFetchingNextPage ? t("reports.more.busy") : t("reports.more").replace("{n}", String(Math.min(REPORTS_PAGE, remaining)))}
+                    {list.isFetchingNextPage ? t("reports.more.busy") : fillPlaceholders(t("reports.more"), { n: String(Math.min(REPORTS_PAGE, remaining)) })}
                   </button>
                 )}
               </div>

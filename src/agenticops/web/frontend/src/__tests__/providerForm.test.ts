@@ -163,3 +163,83 @@ describe("a writer's agent model controls (final review: they stayed enabled and
     for (const d of disabled) expect(d).toMatch(/!canChange/);
   });
 });
+
+describe("the page says where conversations go (the spec: «页面上写明数据会发给这家»)", () => {
+  it("the providers tab and the add dialog carry the notice, in both languages", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { resolve } = await import("node:path");
+    const tab = readFileSync(resolve(__dirname, "../components/settings/ModelProvidersTab.tsx"), "utf8");
+    const dialog = readFileSync(resolve(__dirname, "../components/settings/ProviderDialog.tsx"), "utf8");
+    expect(tab).toMatch(/settings\.providers\.dataNotice/);
+    expect(dialog).toMatch(/settings\.providers\.dataNotice/);
+    for (const lang of ["en", "zh"]) {
+      const words = JSON.parse(readFileSync(resolve(__dirname, `../locales/${lang}.json`), "utf8"));
+      expect(words["settings.providers.dataNotice"]).toBeTruthy();
+    }
+  });
+});
+
+// ── test before save (MVP-2.9.0 review, Spec ③) ──────────────────────────────────────────────────────────────
+import { connectionChanged, connectionKey, draftBody, saveMode } from "@/lib/providerForm";
+
+const stored: ProviderRowLike = {
+  name: "local-llm", display_name: "Local", kind: "openai_compatible", preset: "litellm_proxy",
+  base_url: "http://localhost:4000/v1", timeout_seconds: 60, header_names: ["X-Org"], has_api_key: true,
+};
+const step = (ok: boolean) => ({ ok, ms: 1, error: ok ? null : "refused" });
+const result = (list: boolean, chat: boolean, tools: boolean) =>
+  ({ model_id: "m", at: "2026-11-26T00:00:00Z", list: step(list), chat: step(chat), tools: step(tools) });
+
+describe("connectionChanged", () => {
+  it("a new provider is always a new connection", () => {
+    expect(connectionChanged(null, form(), false)).toBe(true);
+  });
+  it("an edit of the display name or the timeout is not", () => {
+    expect(connectionChanged(stored, { ...formFromRow(stored), displayName: "Other", timeout: "90" }, false)).toBe(false);
+  });
+  it("an edit of the address, the protocol, the key or the headers is", () => {
+    const base = formFromRow(stored);
+    expect(connectionChanged(stored, { ...base, baseUrl: "http://other:4000/v1" }, false)).toBe(true);
+    expect(connectionChanged(stored, { ...base, kind: "anthropic_compatible" }, false)).toBe(true);
+    expect(connectionChanged(stored, { ...base, apiKey: "sk-new" }, false)).toBe(true);
+    expect(connectionChanged(stored, { ...base, headersText: `X-Org: ${MASK}\nX-Team: ops` }, false)).toBe(true);
+    expect(connectionChanged(stored, base, true)).toBe(true);                    // removing the stored key
+  });
+  it("a trailing slash or spaces are no change", () => {
+    expect(connectionChanged(stored, { ...formFromRow(stored), baseUrl: " http://localhost:4000/v1/ " }, false)).toBe(false);
+  });
+});
+
+describe("saveMode", () => {
+  const f = form();
+  const key = connectionKey(f, false);
+  it("an edit that leaves the connection alone saves without a test", () => {
+    expect(saveMode({ changed: false, testedKey: null, currentKey: key, result: null })).toBe("save_plain");
+  });
+  it("a new connection is tested first", () => {
+    expect(saveMode({ changed: true, testedKey: null, currentKey: key, result: null })).toBe("needs_test");
+  });
+  it("list and chat passed: save — a failed tool call only warns", () => {
+    expect(saveMode({ changed: true, testedKey: key, currentKey: key, result: result(true, true, true) })).toBe("save");
+    expect(saveMode({ changed: true, testedKey: key, currentKey: key, result: result(true, true, false) })).toBe("save");
+  });
+  it("the test failed: it can only be stored switched off", () => {
+    expect(saveMode({ changed: true, testedKey: key, currentKey: key, result: result(false, false, false) })).toBe("save_disabled");
+    expect(saveMode({ changed: true, testedKey: key, currentKey: key, result: result(true, false, false) })).toBe("save_disabled");
+  });
+  it("a test of an earlier form does not count", () => {
+    const later = connectionKey(form({ apiKey: "sk-2" }), false);
+    expect(saveMode({ changed: true, testedKey: key, currentKey: later, result: result(true, true, true) })).toBe("needs_test");
+  });
+});
+
+describe("draftBody", () => {
+  it("a new provider: the create body and the model to try", () => {
+    expect(draftBody(form(), null, { clearKey: false, modelId: "qwen3:32b" })).toEqual({ ...createBody(form()), model_id: "qwen3:32b" });
+  });
+  it("an edit: the stored provider and what changed — an empty key field keeps the stored key", () => {
+    const f = { ...formFromRow(stored), baseUrl: "http://other:4000/v1" };
+    expect(draftBody(f, stored, { clearKey: false, modelId: "" }))
+      .toEqual({ provider: "local-llm", base_url: "http://other:4000/v1" });
+  });
+});

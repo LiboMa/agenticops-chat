@@ -9,6 +9,7 @@ import { useSettings, useUpdateSettings } from "@/hooks/useSettings";
 import { canChangeModels } from "@/lib/permissions";
 import { settingName } from "@/lib/modelRefs";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** The nine model settings beside the agents' own (`model_settings` of GET /api/settings) and the settings field each
  *  writes — the server's llm/model_settings.SETTINGS. */
 export const MODEL_SETTING_FIELDS: Record<string, string> = {
@@ -69,7 +70,7 @@ export function OtherModelsCard() {
                   <p className="text-xs text-muted-foreground">{t(`settings.models.other.${key}`)}</p>
                   {!v.value && v.effective && (
                     <p className="mt-0.5 text-xs text-muted-foreground [overflow-wrap:anywhere]">
-                      {t("settings.models.inForce").replace("{model}", labelOf(v.effective))}
+                      {fillPlaceholders(t("settings.models.inForce"), { model: labelOf(v.effective) })}
                     </p>
                   )}
                 </div>

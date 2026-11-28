@@ -1758,8 +1758,10 @@ def _backfill_plan_hashes_2_6_1(engine) -> None:
         logger.warning("MVP-2.6.1 plan hash backfill skipped: %s", exc)
 
 
-# MVP-2.7.0: chat session ownership. Existing rows become workspace sessions with no owner (unchanged reach).
-_ADD_COLUMNS_2_7_0: dict[str, dict[str, Optional[str]]] = {
+# The columns added since MVP-2.7.0, each with the version that added it (`_migrate_columns` adds the missing ones at
+# startup, then runs the data repairs). 2.7.0: chat session ownership — existing rows become workspace sessions with no
+# owner (unchanged reach).
+_ADD_COLUMNS: dict[str, dict[str, Optional[str]]] = {
     "chat_sessions": {"owner_user_id": None, "visibility": "NOT NULL DEFAULT 'workspace'",
                       # S5: the chat's context — all NULL on existing rows (independent, unbound)
                       "context_entity_type": None, "context_entity_id": None, "context_account_id": None,
@@ -1777,18 +1779,20 @@ _ADD_COLUMNS_2_7_0: dict[str, dict[str, Optional[str]]] = {
     "fix_executions": {"stop_requested_at": None, "stop_requested_by": None, "stop_note": None},
     # MVP-2.9.0 N20: which collection sources a snapshot could read (NULL on existing rows = not recorded)
     "security_snapshots": {"collection_health": None},
+    # review of MVP-2.9.0: what a provider's model takes, said by its list or an admin (NULL = not said)
+    "provider_models": {"accepts_temperature": None, "prompt_cache": None},
 }
 # MVP-2.9.0 N20: a snapshot of an account whose every source failed has no score — the column may be NULL.
 _NULLABLE_2_9_0: dict[str, tuple[str, ...]] = {"security_snapshots": ("overall_score",)}
-_migrated_2_7_0_urls: set[str] = set()
-_migrate_2_7_0_lock = threading.Lock()
+_migrated_urls: set[str] = set()
+_migrate_lock = threading.Lock()
 
 
-def _statements_2_7_0(insp, dialect) -> list[str]:
-    """DDL still needed for the 2.7.0 shape; pure like _statements_2_6_1, empty once migrated."""
+def _add_column_statements(insp, dialect) -> list[str]:
+    """DDL still needed for the columns in _ADD_COLUMNS; pure like _statements_2_6_1, empty once migrated."""
     guard = " IF NOT EXISTS" if dialect.name == "postgresql" else ""
     stmts: list[str] = []
-    for tbl, cols in _ADD_COLUMNS_2_7_0.items():
+    for tbl, cols in _ADD_COLUMNS.items():
         if not insp.has_table(tbl):
             continue
         existing = {c["name"] for c in insp.get_columns(tbl)}
@@ -1820,16 +1824,41 @@ def _relax_not_null_2_9_0(engine) -> None:
             _sqlite_rebuild_table(engine, Base.metadata.tables[tbl])
 
 
-def _run_migrate_2_7_0(engine) -> None:
-    stmts = _statements_2_7_0(inspect(engine), engine.dialect)
+def _run_add_columns(engine) -> None:
+    stmts = _add_column_statements(inspect(engine), engine.dialect)
     if stmts:
         with engine.begin() as conn:
             for stmt in stmts:
                 conn.execute(text(stmt))
     _relax_not_null_2_9_0(engine)
-    _backfill_reports_2_7_0(engine)
+    _backfill_reports(engine)
     _repair_plan_hashes_2_9_0(engine)
     _backfill_security_issue_accounts_2_9_0(engine)
+    _migrate_reasoning_values_2_9_0(engine)
+
+
+def _migrate_reasoning_values_2_9_0(engine) -> None:
+    """Review of MVP-2.9.0 (2026-11-26): a provider model's thinking request shape is its row's «reasoning», never
+    its name. The old value `anthropic_thinking` left the shape to the Claude version in the model id; each such row
+    gets the shape it was sent until now (`agents.preamble.claude_reasoning`), so none of its requests change — the
+    last time a provider model's name is read. Fail-soft, like the backfills: a row left on the old value is sent
+    no thinking fields."""
+    try:
+        if not inspect(engine).has_table("provider_models"):
+            return
+        with engine.begin() as conn:
+            rows = conn.execute(text("SELECT provider, model_id FROM provider_models "
+                                     "WHERE reasoning = 'anthropic_thinking'")).fetchall()
+            if not rows:
+                return
+            from agenticops.agents.preamble import claude_reasoning     # only when there is a row to move
+            for provider, model_id in rows:
+                conn.execute(text("UPDATE provider_models SET reasoning = :r WHERE provider = :p AND model_id = :m "
+                                  "AND reasoning = 'anthropic_thinking'"),
+                             {"r": claude_reasoning(model_id), "p": provider, "m": model_id})
+        logger.info("provider models: %d «anthropic_thinking» rows given their request shape", len(rows))
+    except Exception as exc:
+        logger.warning("MVP-2.9.0 reasoning value migration skipped: %s", exc)
 
 
 def _backfill_security_issue_accounts_2_9_0(engine) -> None:
@@ -1912,7 +1941,7 @@ def _repair_plan_hashes_2_9_0(engine) -> None:
         logger.warning("MVP-2.9.0 plan hash repair skipped: %s", exc)
 
 
-def _backfill_reports_2_7_0(engine) -> None:
+def _backfill_reports(engine) -> None:
     """S6: give every older report its content hash and source language (fail-soft, like the 2.6.1 backfills)."""
     try:
         from agenticops.services.report_content import content_hash, detect_language
@@ -1927,14 +1956,15 @@ def _backfill_reports_2_7_0(engine) -> None:
         logger.warning("MVP-2.7.0 report backfill skipped: %s", exc)
 
 
-def _migrate_2_7_0(engine) -> None:
-    """Idempotent MVP-2.7.0 migration — once per process per database URL; a DDL failure raises."""
+def _migrate_columns(engine) -> None:
+    """Idempotent migration of the columns added since MVP-2.7.0 and the repairs after them — once per process per
+    database URL; a DDL failure raises."""
     key = str(engine.url)
-    with _migrate_2_7_0_lock:
-        if key in _migrated_2_7_0_urls:
+    with _migrate_lock:
+        if key in _migrated_urls:
             return
-        _run_migrate_2_7_0(engine)
-        _migrated_2_7_0_urls.add(key)
+        _run_add_columns(engine)
+        _migrated_urls.add(key)
 
 
 def _run_migrate_2_6_1(engine) -> None:
@@ -2453,8 +2483,8 @@ def init_db(engine=None):
 
     # MVP-2.6.1: graph anchoring columns + relation-build marker; runs last so every legacy column it reads exists.
     _migrate_2_6_1(engine)
-    # MVP-2.7.0: chat session owner + visibility; this installation's id.
-    _migrate_2_7_0(engine)
+    # Since MVP-2.7.0: the added columns (chat ownership, dispatch, reports, …) and their repairs; this installation's id.
+    _migrate_columns(engine)
     _ensure_installation(engine)
 
     return engine

@@ -16,6 +16,7 @@ import { groupItems, parseItem, selectionState } from "@/lib/inbox";
 import { resolveIssueScope } from "@/lib/issueScope";
 import type { AttentionItem } from "@/lib/attention";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** «问题 · 在等我» (MVP-2.8.0, owner 2026-11-10: the to-do workbench merged into Issues): everything waiting on you —
  *  issues and changes — grouped by the decision it needs, the longest wait first in each group. At ≥ 1280 px the
  *  list sits beside the selected item's own page (an issue's or a change's); below that the two take turns and back
@@ -131,7 +132,7 @@ export function WaitingView() {
               {pages.hasNextPage && (
                 <button type="button" onClick={() => void pages.fetchNextPage()} disabled={pages.isFetchingNextPage}
                         className="mt-3 w-full rounded-lg border border-border bg-card py-2 text-sm font-medium hover:bg-accent disabled:opacity-60">
-                  {t("inbox.more").replace("{n}", String((first?.total ?? 0) - items.length))}
+                  {fillPlaceholders(t("inbox.more"), { n: String((first?.total ?? 0) - items.length) })}
                 </button>
               )}
             </>

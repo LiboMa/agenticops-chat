@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAddIssueNote } from "@/hooks/useIssueTimeline";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 export const NOTE_MAX = 8000;
 
 /** Add a note to the issue's activity (MVP-2.7.0 S4): append-only, as you, kept exactly as written. */
@@ -26,7 +27,7 @@ export function NoteBox({ issueId, t }: { issueId: number; t: (k: string) => str
           {add.isPending ? t("notes.saving") : t("notes.save")}
         </button>
       </div>
-      {add.error && <p role="alert" className="text-xs text-red-600 dark:text-red-400">{t("notes.failed").replace("{error}", add.error.message)}</p>}
+      {add.error && <p role="alert" className="text-xs text-red-600 dark:text-red-400">{fillPlaceholders(t("notes.failed"), { error: add.error.message })}</p>}
     </div>
   );
 }

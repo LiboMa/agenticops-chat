@@ -3,15 +3,17 @@ import { ModalFrame } from "@/components/ui/ModalFrame";
 import { useLocale } from "@/i18n/LocaleContext";
 import { ApiError } from "@/api/client";
 import {
-  useCreateProvider, useRefreshModels, useTestProvider, useUpdateProvider,
+  useCreateProvider, useRefreshModels, useTestDraft, useTestProvider, useUpdateProvider,
   type PlatformPreset, type ProbeResult, type ProviderRow,
 } from "@/hooks/useModelProviders";
 import {
-  createBody, emptyForm, formFromRow, patchFromForm, testNotes, validateProviderForm,
+  connectionChanged, connectionKey, createBody, draftBody, emptyForm, formFromRow, patchFromForm, saveMode, testNotes,
+  validateProviderForm,
   type FormProblem, type ProviderForm, type ProviderKind, type TestNote,
 } from "@/lib/providerForm";
 import { ProbeSteps } from "./ProbeSteps";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** A preset's words in the page's language; the server's English when there is no translation. */
 function presetText(t: (k: string) => string, p: PlatformPreset, what: "label" | "notes"): string {
   const key = `settings.providers.preset.${p.preset}.${what}`;
@@ -24,9 +26,10 @@ const label = "mb-1 block text-sm font-medium text-foreground";
 const hint = "mt-1 text-xs text-muted-foreground";
 
 /** Settings → Model providers → add or edit one (MVP-2.9.0 N35). Adding: pick the platform (its address and
- *  protocol are filled in), then the form; «Save and test» stores it, reads its model list and runs the connection
- *  test, all in this dialog — a key is only ever sent once, so the test runs on what was stored. Editing: the key
- *  field is empty and an empty field keeps the stored key. */
+ *  protocol are filled in), then the form. «Test connection» tests what the form holds before anything is stored
+ *  (review of 2.9.0: the design's «保存之前可以先点「测试连接」»): a new provider, or an edit of its protocol / address /
+ *  key / headers, is saved only after a test — switched off when the test failed. Saving a new one then reads its
+ *  model list and runs the stored test. Editing: the key field is empty and an empty field keeps the stored key. */
 export function ProviderDialog({ presets, row, onClose }: {
   presets: PlatformPreset[];
   /** the provider being edited; none = a new one */
@@ -47,14 +50,19 @@ export function ProviderDialog({ presets, row, onClose }: {
   const create = useCreateProvider();
   const update = useUpdateProvider();
   const test = useTestProvider();
+  const draft = useTestDraft();
+  const [draftResult, setDraftResult] = useState<ProbeResult | null>(null);
+  const [testedKey, setTestedKey] = useState<string | null>(null);
+  const [savedOff, setSavedOff] = useState(false);
   const refresh = useRefreshModels(row?.name ?? "");
-  const busy = create.isPending || update.isPending || test.isPending || refresh.isPending;
-  const title = row ? t("settings.providers.editTitle").replace("{name}", row.name) : t("settings.providers.addTitle");
+  const busy = create.isPending || update.isPending || test.isPending || refresh.isPending || draft.isPending;
+  const title = row ? fillPlaceholders(t("settings.providers.editTitle"), { name: row.name }) : t("settings.providers.addTitle");
 
   if (!form) {
     return (
       <ModalFrame title={title} onClose={onClose} width="w-[min(720px,100%)]">
         <p className="mt-2 text-sm text-muted-foreground">{t("settings.providers.pickPlatform")}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{t("settings.providers.dataNotice")}</p>
         <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {presets.map((p) => (
             <li key={p.preset}>
@@ -78,21 +86,41 @@ export function ProviderDialog({ presets, row, onClose }: {
   const fieldError = (field: FormProblem["field"]) =>
     problem?.field === field ? <p role="alert" className="mt-1 text-xs text-destructive">{t(`settings.providers.problem.${problem.reason}`)}</p> : null;
 
-  async function save() {
+  const currentKey = connectionKey(form, clearKey);
+  const mode = saveMode({ changed: connectionChanged(row ?? null, form, clearKey), testedKey, currentKey,
+                          result: draftResult });
+
+  async function testDraft() {
     if (!form) return;
     const found = validateProviderForm(form, { isNew: !row, needsKey, hasStoredKey: !!row?.has_api_key && !clearKey });
     if (found) { setProblem(found); return; }
+    setError(null); setDraftResult(null);
+    try {
+      setDraftResult(await draft.mutateAsync(draftBody(form, row ?? null, { clearKey, modelId: testModel })));
+      setTestedKey(currentKey);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : String(e));
+    }
+  }
+
+  async function save() {
+    if (!form || mode === "needs_test") return;
+    const found = validateProviderForm(form, { isNew: !row, needsKey, hasStoredKey: !!row?.has_api_key && !clearKey });
+    if (found) { setProblem(found); return; }
     setError(null); setNotes([]); setResult(null);
+    const off = mode === "save_disabled";      // a provider whose test failed is never stored switched on
     try {
       if (row) {
         const body = patchFromForm(row, form, { clearKey });
+        if (off) body.enabled = false;
         if (Object.keys(body).length) await update.mutateAsync({ name: row.name, body });
         onClose();
         return;
       }
-      await create.mutateAsync(createBody(form));
+      await create.mutateAsync({ ...createBody(form), enabled: !off });
       setSaved(form.name);
-      await runTest(form.name);
+      setSavedOff(off);
+      if (!off) await runTest(form.name);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     }
@@ -113,19 +141,21 @@ export function ProviderDialog({ presets, row, onClose }: {
   if (saved) {
     return (
       <ModalFrame title={title} onClose={onClose} width="w-[min(560px,100%)]">
-        <p role="status" className="mt-3 text-sm text-foreground">{t("settings.providers.savedTesting").replace("{name}", saved)}</p>
+        <p role="status" className="mt-3 text-sm text-foreground">
+          {fillPlaceholders(t(savedOff ? "settings.providers.savedDisabled" : "settings.providers.savedTesting"), { name: saved })}
+        </p>
         {busy && <p className="mt-2 text-sm text-muted-foreground">{t("settings.providers.testing")}</p>}
         {result && <ProbeSteps result={result} />}
         {notes.map((n, i) => (
           <p key={i} className="mt-3 text-sm text-amber-700 dark:text-amber-300 [overflow-wrap:anywhere]">
-            {"text" in n ? n.text : t(n.key).replace("{error}", n.error ?? "")}
+            {"text" in n ? n.text : fillPlaceholders(t(n.key), { error: n.error ?? "" })}
           </p>
         ))}
         <div className="mt-5 flex justify-end gap-2">
-          <button type="button" disabled={busy} onClick={() => { setResult(null); setNotes([]); void runTest(saved); }}
+          {!savedOff && <button type="button" disabled={busy} onClick={() => { setResult(null); setNotes([]); void runTest(saved); }}
                   className="rounded-md border border-border px-3 py-2 text-sm hover:bg-muted disabled:opacity-50">
             {t("settings.providers.testAgain")}
-          </button>
+          </button>}
           <button type="button" onClick={onClose} className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
             {t("settings.providers.done")}
           </button>
@@ -136,7 +166,7 @@ export function ProviderDialog({ presets, row, onClose }: {
 
   return (
     <ModalFrame title={title} onClose={onClose} width="w-[min(600px,100%)]" keepOnOutside>
-      <form className="mt-4 space-y-4" onSubmit={(e) => { e.preventDefault(); void save(); }} noValidate>
+      <form className="mt-4 space-y-4" onSubmit={(e) => { e.preventDefault(); void (mode === "needs_test" ? testDraft() : save()); }} noValidate>
         {!row && preset && (
           <p className="text-sm text-muted-foreground">
             {presetText(t, preset, "label")}
@@ -204,7 +234,7 @@ export function ProviderDialog({ presets, row, onClose }: {
           <p className={hint}>{t("settings.providers.headersHint")}</p>
           {fieldError("headers")}
         </div>
-        {!row && (
+        {(!row || mode !== "save_plain") && (
           <div>
             <label htmlFor="pv-test-model" className={label}>
               {t("settings.providers.field.testModel")}<span className="ml-1 font-normal text-muted-foreground">{t("settings.providers.optional")}</span>
@@ -214,14 +244,27 @@ export function ProviderDialog({ presets, row, onClose }: {
             <p className={hint}>{t("settings.providers.testModelHint")}</p>
           </div>
         )}
-        {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-        <div className="flex justify-end gap-2 pt-1">
+        {draftResult && testedKey === currentKey && <ProbeSteps result={draftResult} />}
+        {mode === "needs_test" && <p className="text-sm text-muted-foreground">{t("settings.providers.testFirst")}</p>}
+        {mode === "save_disabled" && (
+          <p role="status" className="text-sm text-amber-700 dark:text-amber-300">{t("settings.providers.testFailedSaveOff")}</p>
+        )}
+        {error && <p role="alert" className="text-sm text-destructive [overflow-wrap:anywhere]">{error}</p>}
+        <div className="flex flex-wrap justify-end gap-2 pt-1">
           <button type="button" onClick={onClose} className="rounded-md border border-border px-3 py-2 text-sm hover:bg-muted">
             {t("common.cancel")}
           </button>
+          {(mode === "save" || mode === "save_disabled") && (
+            <button type="button" disabled={busy} onClick={() => void testDraft()}
+                    className="rounded-md border border-border px-3 py-2 text-sm hover:bg-muted disabled:opacity-50">
+              {t("settings.providers.testAgain")}
+            </button>
+          )}
           <button type="submit" disabled={busy}
                   className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
-            {row ? t("common.save") : t("settings.providers.saveAndTest")}
+            {draft.isPending ? t("settings.providers.testing")
+              : mode === "needs_test" ? t("settings.providers.testConnection")
+              : mode === "save_disabled" ? t("settings.providers.saveDisabled") : t("common.save")}
           </button>
         </div>
       </form>

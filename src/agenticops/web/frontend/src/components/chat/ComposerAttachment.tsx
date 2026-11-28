@@ -3,6 +3,7 @@ import { attachmentReasonText, humanSize, pagesLabel } from "@/lib/attachments";
 import type { UploadItem } from "@/lib/attachmentUpload";
 import { BADGE_CLASS, attachmentBadge } from "@/lib/attachmentBadge";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** A file the composer refused (type, size, count or total): shown in the box with the reason until removed. */
 export interface RejectedFile { key: string; name: string; text: string }
 
@@ -80,7 +81,7 @@ export function ComposerAttachment({ item, rejected, thumbUrl, onRemove, onRetry
   }
 
   const pages = typeof item.meta?.pages === "number" ? (item.meta.pages as number) : null;
-  const status = item.state === "uploading" ? t("chat.attach.uploading").replace("{p}", String(item.progress))
+  const status = item.state === "uploading" ? fillPlaceholders(t("chat.attach.uploading"), { p: String(item.progress) })
     : item.state === "queued" ? t("chat.attach.queued")
     : item.state === "processing" ? t("chat.attach.processing")
     : failed ? reason

@@ -17,9 +17,17 @@ Refused: without `yes` (a dry run needs none), on anything but SQLite, and while
 the database runs in WAL mode, so the file alone is not a full copy) is taken and checked before anything is
 deleted; the deletes run in ONE transaction.
 
-`move_knowledge` also moves what was learned from issues out of the way — not deleted: the knowledge base's case and
-SOP files (their records and vectors go from the database) and the agent-memory entries written from an issue
+A case or SOP record written from an issue goes in any case, and so does what would keep it findable (the owner,
+2026-11-26 — review ④: its text names the old issue number, which the reset gives to a new issue): its vectors are
+deleted in the same transaction and its file moves into `<backup>-knowledge/` (`MANIFEST.tsv` says where from) —
+only a file inside the knowledge base's case / SOP folders is moved.
+
+`move_knowledge` moves everything learned out of the way instead — not deleted: every case and SOP file of the
+knowledge base (their records and vectors go from the database) and the agent-memory entries written from an issue
 (`related_issue_id` in their front matter) or by the detect agent from a dismissed one (`detect/auto_*.md`).
+
+The startup migrations (`init_db`) run only on a real run, after the refusals, the lock and the backup — a refused or
+counted run changes nothing (review ⑤).
 """
 
 from __future__ import annotations
@@ -155,6 +163,62 @@ def _from_an_issue(path: Path) -> bool:
     return head.startswith("---") and "\nrelated_issue_id:" in head
 
 
+VECTORS_FROM_ISSUES = "case_vectors (from issues)"
+FILES_FROM_ISSUES = "knowledge files from issues"
+
+
+def _inside(path, root: Path) -> Optional[Path]:
+    try:
+        resolved = Path(path).resolve()
+    except (OSError, TypeError, ValueError):
+        return None
+    return resolved if root in resolved.parents else None
+
+
+def _issue_knowledge(conn) -> tuple[list[str], list[tuple[str, Path]]]:
+    """The vector ids and the files of the case / SOP records written from an issue — the records the reset deletes.
+    A case's vectors carry its `case_id`, an SOP's its file stem (pipeline/rag_pipeline.sop_vector_records); a file is
+    the record's `file_path`, else where the knowledge base writes it, and only one inside its folder counts."""
+    from agenticops.config import settings
+    tables = set(inspect(conn).get_table_names())
+    cases_dir, sops_dir = Path(settings.cases_dir).resolve(), Path(settings.sops_dir).resolve()
+    ids: set[str] = set()
+    files: list[tuple[str, Path]] = []
+    if "case_study_records" in tables:
+        for case_id, file_path in conn.execute(text(
+                "select case_id, file_path from case_study_records where source_issue_id is not null")):
+            ids.add(case_id)
+            files.append(("cases", _inside(file_path or cases_dir / f"{case_id}.md", cases_dir)))
+    if "sop_records" in tables:
+        for filename, file_path in conn.execute(text(
+                "select filename, file_path from sop_records where source_issue_id is not null")):
+            ids.add(Path(filename).stem)
+            files.append(("sops", _inside(file_path or sops_dir / filename, sops_dir)))
+    return sorted(ids), [(kind, f) for kind, f in files if f is not None and f.is_file()]
+
+
+def _vectors_of(conn, ids: list[str], *, delete: bool) -> int:
+    if not ids or "case_vectors" not in set(inspect(conn).get_table_names()):
+        return 0
+    marks = ", ".join(f":v{n}" for n in range(len(ids)))
+    params = {f"v{n}": v for n, v in enumerate(ids)}
+    if delete:
+        return conn.execute(text(f"delete from case_vectors where case_id in ({marks})"), params).rowcount or 0
+    return conn.execute(text(f"select count(*) from case_vectors where case_id in ({marks})"), params).scalar() or 0
+
+
+def _move_files(files: list[tuple[str, Path]], dest: Path) -> list[str]:
+    moved, manifest = [], []
+    for kind, path in files:
+        target = dest / "knowledge_base" / kind / path.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(path), str(target))
+        moved.append(str(target)); manifest.append(f"{path}\t{target}")
+    if manifest:
+        (dest / "MANIFEST.tsv").write_text("original\tmoved to\n" + "\n".join(manifest) + "\n", encoding="utf-8")
+    return moved
+
+
 def _move_knowledge(dest: Path, memory_dirs: list[Path]) -> list[str]:
     from agenticops.config import settings
     from agenticops.memory.agent_memory import update_memory_index
@@ -204,6 +268,9 @@ def purge(*, yes: bool = False, dry_run: bool = False, reset_poll_cursors: bool 
     with engine.connect() as conn:
         steps = _present(conn, steps)
         planned = [(label, _count(conn, table, where)) for label, table, where in steps]
+        if not move_knowledge:
+            ids, files = _issue_knowledge(conn)
+            planned += [(VECTORS_FROM_ISSUES, _vectors_of(conn, ids, delete=False)), (FILES_FROM_ISSUES, len(files))]
     report = PurgeReport(planned=planned)
     if dry_run:
         return report
@@ -213,10 +280,24 @@ def purge(*, yes: bool = False, dry_run: bool = False, reset_poll_cursors: bool 
     try:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         report.backup = str(_backup(db_path, data_dir, stamp))
+        from agenticops.models import init_db
+        init_db()                                        # this version's migrations — only now, after the backup
+        files: list[tuple[str, Path]] = []
         with engine.begin() as conn:                     # one transaction: an error rolls every delete back
             if "chat_sessions" in inspect(conn).get_table_names():
                 report.chats_unbound = conn.execute(text(UNBIND_CHATS)).rowcount or 0
+            if not move_knowledge:
+                ids, files = _issue_knowledge(conn)      # read before their records go
+                vectors = _vectors_of(conn, ids, delete=True)
             report.deleted = _delete_steps(conn, steps)
+            if not move_knowledge:
+                report.deleted.append((VECTORS_FROM_ISSUES, vectors))
+        if files:
+            dest = data_dir / "backups" / f"pre-delete-issues-{stamp}-knowledge"
+            report.moved_files = _move_files(files, dest)
+            report.knowledge_moved_to = str(dest)
+        if not move_knowledge:
+            report.deleted.append((FILES_FROM_ISSUES, len(report.moved_files)))    # moved aside, never deleted
         if move_knowledge:
             from agenticops.memory.agent_memory import AGENT_MEMORY_DIR
             dest = data_dir / "backups" / f"pre-delete-issues-{stamp}-knowledge"

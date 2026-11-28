@@ -33,7 +33,7 @@ from agenticops.auth.viewer import can_view_settings, read_only_detail
 from agenticops.config import settings
 from agenticops.llm import catalog, embeddings, presets, probe, registry
 from agenticops.web.deps import current_actor, require_authenticated_user
-from agenticops.web.routers.upload_settings import _can_edit
+from agenticops.web.routers.upload_settings import can_edit
 
 router = APIRouter(tags=["model-providers"])
 BASE = "/api/model-providers"
@@ -94,7 +94,7 @@ def _listing(request: Request) -> dict:
     return {"bedrock": {"enabled": registry.bedrock_enabled(), "region": settings.bedrock_region,
                         "references": registry.bedrock_references()},
             "providers": registry.list_public(), "presets": presets.public(),
-            "credential_backend": get_credential_store().backend_name, "can_edit": _can_edit(request)}
+            "credential_backend": get_credential_store().backend_name, "can_edit": can_edit(request)}
 
 
 async def _write(fn):
@@ -151,6 +151,19 @@ async def delete_provider(name: str, request: Request, actor: Actor = Depends(cu
     return result if isinstance(result, JSONResponse) else Response(status_code=204)
 
 
+@router.post(f"{BASE}/test-draft")
+async def test_draft(request: Request):
+    """The connection test of what the form holds, before it is saved — nothing is written (MVP-2.9.0 review)."""
+    await _admin(request)
+    body = await _json(request)
+    if not isinstance(body, dict):
+        return _bad_body("the body is the provider form")
+    try:
+        return await asyncio.to_thread(probe.test_draft, body)
+    except registry.ProviderError as e:
+        return _refused(e)
+
+
 @router.post(f"{BASE}/{{name}}/test")
 async def test_provider(name: str, request: Request):
     await _admin(request)
@@ -173,7 +186,7 @@ async def list_models(name: str, request: Request, purpose: Optional[str] = None
     refused = await _reader(request)
     if refused is not None:
         return refused
-    if registry.get(name) is None:
+    if await asyncio.to_thread(registry.get, name) is None:   # a KMS decrypt is a network call: off the event loop
         return _refused(registry.ProviderError(404, "not_found", f"no provider «{name}»"))
     views = await asyncio.to_thread(catalog.list_models, name, purpose=purpose)
     return [_view(v) for v in views]

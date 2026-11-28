@@ -12,6 +12,7 @@ import {
 import { draftOf, filterModels, modelPatch, priceLabel, toolsState, type ModelDraft } from "@/lib/providerModels";
 import { refusalText } from "@/lib/modelRefs";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 const control = "rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary";
 const input = `w-full ${control}`;
 const chip = "rounded px-1.5 py-0.5 text-[11px] font-medium";
@@ -38,9 +39,8 @@ export function ProviderModelsDialog({ provider, canEdit, onClose }: { provider:
     setError(null); setMessage(null);
     try {
       const r = await refresh.mutateAsync(provider.name);
-      setMessage(r.error ? t("settings.providers.listFailed").replace("{error}", r.error)
-        : t("settings.providers.refreshed").replace("{added}", String(r.added)).replace("{updated}", String(r.updated))
-            .replace("{unchanged}", String(r.unchanged)));
+      setMessage(r.error ? fillPlaceholders(t("settings.providers.listFailed"), { error: r.error })
+        : fillPlaceholders(t("settings.providers.refreshed"), { added: String(r.added), updated: String(r.updated), unchanged: String(r.unchanged) }));
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   }
 
@@ -60,7 +60,7 @@ export function ProviderModelsDialog({ provider, canEdit, onClose }: { provider:
   }
 
   return (
-    <ModalFrame title={t("settings.providers.modelsTitle").replace("{name}", provider.display_name || provider.name)}
+    <ModalFrame title={fillPlaceholders(t("settings.providers.modelsTitle"), { name: provider.display_name || provider.name })}
                 onClose={onClose} width="w-[min(860px,100%)]">
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t("settings.providers.searchModels")}
@@ -106,7 +106,7 @@ export function ProviderModelsDialog({ provider, canEdit, onClose }: { provider:
             <ul className="divide-y divide-border">
               {shown.map((m) => (
                 <li key={m.model_id}>
-                  <ModelRow m={m} canEdit={canEdit} open={open === m.model_id}
+                  <ModelRow m={m} canEdit={canEdit} anthropic={provider.kind === "anthropic_compatible"} open={open === m.model_id}
                             onToggleOpen={() => setOpen(open === m.model_id ? null : m.model_id)}
                             onEnabled={(v) => void toggle(m, v)}
                             onSave={async (body) => { await patch.mutateAsync({ modelId: m.model_id, body }); setOpen(null); }} />
@@ -140,8 +140,8 @@ function Badges({ m }: { m: ProviderModel }) {
   );
 }
 
-function ModelRow({ m, canEdit, open, onToggleOpen, onEnabled, onSave }: {
-  m: ProviderModel; canEdit: boolean; open: boolean; onToggleOpen: () => void; onEnabled: (v: boolean) => void;
+function ModelRow({ m, canEdit, anthropic, open, onToggleOpen, onEnabled, onSave }: {
+  m: ProviderModel; canEdit: boolean; anthropic: boolean; open: boolean; onToggleOpen: () => void; onEnabled: (v: boolean) => void;
   onSave: (body: Record<string, unknown>) => Promise<void>;
 }) {
   const { t } = useLocale();
@@ -160,7 +160,7 @@ function ModelRow({ m, canEdit, open, onToggleOpen, onEnabled, onSave }: {
           <span className="mt-1 block"><Badges m={m} /></span>
         </button>
       </div>
-      {open && <div id={id}><ModelEditor m={m} canEdit={canEdit} onSave={onSave} /></div>}
+      {open && <div id={id}><ModelEditor m={m} canEdit={canEdit} anthropic={anthropic} onSave={onSave} /></div>}
     </div>
   );
 }
@@ -169,9 +169,12 @@ const FIELD_KEY: Record<keyof ModelDraft, string> = {
   label: "label", purpose: "purpose", contextWindow: "context_window", maxOutput: "max_output_tokens", tools: "supports_tools",
   images: "supports_images", documents: "supports_documents", reasoning: "reasoning", priceInput: "price_input",
   priceOutput: "price_output", priceCacheRead: "price_cache_read", priceCacheWrite: "price_cache_write",
+  temperature: "accepts_temperature", promptCache: "prompt_cache",
 };
 
-function ModelEditor({ m, canEdit, onSave }: { m: ProviderModel; canEdit: boolean; onSave: (body: Record<string, unknown>) => Promise<void> }) {
+function ModelEditor({ m, canEdit, anthropic, onSave }: {
+  m: ProviderModel; canEdit: boolean; anthropic: boolean; onSave: (body: Record<string, unknown>) => Promise<void>;
+}) {
   const { t } = useLocale();
   const [d, setD] = useState<ModelDraft>(() => draftOf(m));
   const [error, setError] = useState<string | null>(null);
@@ -185,7 +188,7 @@ function ModelEditor({ m, canEdit, onSave }: { m: ProviderModel; canEdit: boolea
 
   async function save() {
     const body = modelPatch(m, d);
-    if ("error" in body) { setError(t("settings.providers.badField").replace("{field}", t(`settings.providers.field.${body.error}`))); return; }
+    if ("error" in body) { setError(fillPlaceholders(t("settings.providers.badField"), { field: t(`settings.providers.field.${body.error}`) })); return; }
     if (!Object.keys(body).length) return;
     setBusy(true);
     try { await onSave(body); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
@@ -213,9 +216,29 @@ function ModelEditor({ m, canEdit, onSave }: { m: ProviderModel; canEdit: boolea
         <select className={input} value={d.reasoning} onChange={(e) => set({ reasoning: e.target.value as Reasoning })}>
           <option value="none">{t("settings.providers.reasoning.none")}</option>
           <option value="openai_effort">{t("settings.providers.reasoning.openai_effort")}</option>
-          <option value="anthropic_thinking">{t("settings.providers.reasoning.anthropic_thinking")}</option>
+          {/* the request shape is the row's word: nothing reads it off the model's name */}
+          <option value="anthropic_adaptive_summarized">{t("settings.providers.reasoning.anthropic_adaptive_summarized")}</option>
+          <option value="anthropic_adaptive">{t("settings.providers.reasoning.anthropic_adaptive")}</option>
+          <option value="anthropic_budget">{t("settings.providers.reasoning.anthropic_budget")}</option>
         </select>
       </label>
+      {/* what a request may carry: the list's word or an admin's — never read off the model's name */}
+      <label>{lbl("temperature", "temperature")}
+        <select className={input} value={d.temperature} onChange={(e) => set({ temperature: e.target.value as ModelDraft["temperature"] })}>
+          <option value="unknown">{t("settings.providers.temperatureChoice.unknown")}</option>
+          <option value="yes">{t("settings.providers.temperatureChoice.yes")}</option>
+          <option value="no">{t("settings.providers.temperatureChoice.no")}</option>
+        </select>
+      </label>
+      {anthropic && (
+        <label>{lbl("promptCache", "promptCache")}
+          <select className={input} value={d.promptCache} onChange={(e) => set({ promptCache: e.target.value as ModelDraft["promptCache"] })}>
+            <option value="default">{t("settings.providers.promptCacheChoice.default")}</option>
+            <option value="on">{t("settings.providers.promptCacheChoice.on")}</option>
+            <option value="off">{t("settings.providers.promptCacheChoice.off")}</option>
+          </select>
+        </label>
+      )}
       <label>{lbl("priceInput", "priceInput")}<input className={input} inputMode="decimal" value={d.priceInput} onChange={(e) => set({ priceInput: e.target.value })} /></label>
       <label>{lbl("priceOutput", "priceOutput")}<input className={input} inputMode="decimal" value={d.priceOutput} onChange={(e) => set({ priceOutput: e.target.value })} /></label>
       <label>{lbl("priceCacheRead", "priceCacheRead")}<input className={input} inputMode="decimal" value={d.priceCacheRead} onChange={(e) => set({ priceCacheRead: e.target.value })} /></label>

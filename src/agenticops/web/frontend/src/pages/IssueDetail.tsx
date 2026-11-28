@@ -259,7 +259,7 @@ export default function IssueDetail({ embedded = false, back, issueId: givenId }
   /* -- Status line ------------------------------------------------- */
   const fill = (r: Reason) => ("text" in r ? r.text : fillPlaceholders(t(r.key), r.params));
   const reason = closed
-    ? (a.status === "resolved" && a.resolved_at ? t("workitem.reason.resolvedAt").replace("{at}", formatFullDate(a.resolved_at)) : null)
+    ? (a.status === "resolved" && a.resolved_at ? fillPlaceholders(t("workitem.reason.resolvedAt"), { at: formatFullDate(a.resolved_at) }) : null)
     : m.reason && fill(m.reason);
 
   // queue the approved plan again; while its auto-run looks under way (⋯ only) the confirm says so — the server
@@ -315,7 +315,7 @@ export default function IssueDetail({ embedded = false, back, issueId: givenId }
 
   /* -- Phase cards ------------------------------------------------- */
   const state = (id: IssuePhaseId) => m.phase.phases.find((x) => x.id === id)!.state;
-  const runSummary = latestRun && [t("issues.executionN").replace("{n}", String(latestRun.id)),
+  const runSummary = latestRun && [fillPlaceholders(t("issues.executionN"), { n: String(latestRun.id) }),
     latestRun.verification_status ? t(`verification.${latestRun.verification_status}`) : executionStatusLabel(latestRun.status, t)]
     .join(" · ");
   const badge = anchorBadge(a, anchorRes.data?.resource_name);
@@ -402,7 +402,7 @@ export default function IssueDetail({ embedded = false, back, issueId: givenId }
               {m.otherPlans.length > 0 && (
                 <details className="border-t border-border pt-3">
                   <summary className="cursor-pointer text-sm font-semibold text-foreground">
-                    {t("workitem.otherPlans").replace("{n}", String(m.otherPlans.length))}
+                    {fillPlaceholders(t("workitem.otherPlans"), { n: String(m.otherPlans.length) })}
                   </summary>
                   <ul className="mt-2 space-y-2">
                     {m.otherPlans.map((op) => (
@@ -454,13 +454,13 @@ export default function IssueDetail({ embedded = false, back, issueId: givenId }
               {badge && badge.kind !== "resource" && (
                 <span className="inline-block text-xs px-2 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400">
                   {t(`anchor.${badge.kind}`)}
-                  {badge.kind === "ambiguous" && ` (${t("anchor.candidatesN").replace("{n}", String(badge.candidates))})`}
+                  {badge.kind === "ambiguous" && ` (${fillPlaceholders(t("anchor.candidatesN"), { n: String(badge.candidates) })})`}
                 </span>
               )}
               {(a.merged_alerts ?? []).length > 0 && (
                 <button onClick={() => setShowMerged(!showMerged)} aria-expanded={showMerged}
                         className="block text-left text-primary hover:underline">
-                  {t("workitem.mergedSignals").replace("{n}", String(a.merged_alerts.length))}
+                  {fillPlaceholders(t("workitem.mergedSignals"), { n: String(a.merged_alerts.length) })}
                 </button>
               )}
               <Link to="/app/signals" className="block text-primary hover:underline">{t("workitem.rawSignals")}</Link>
@@ -500,7 +500,7 @@ export default function IssueDetail({ embedded = false, back, issueId: givenId }
       {plan && approvalDialog && (canApprove || blocked) && (
         <ReasonDialog
           title={approvalDialog === "approve"
-            ? t(approveCopy.titleKey).replace("{label}", planLabel(plan, t))
+            ? fillPlaceholders(t(approveCopy.titleKey), { label: planLabel(plan, t) })
             : `${t("plans.rejectTitle")} ${planLabel(plan, t)}`}
           description={approvalDialog === "approve"
             ? `${t(approveCopy.noteKey)} ${plan.title} · ${t("plans.hash")} ${shortHash(pinnedHash)}`

@@ -42,6 +42,7 @@ import { runSummary as summarizeRun } from "@/lib/runSummary";
 import { waitFact } from "@/lib/inbox";
 import { StatusText } from "@/components/ui/StatusText";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 // The dialog-driven actions; `useChanges` exports the discriminated `ChangeActionArgs`, not a `ChangeAction` alias,
 // so `action` is kept to this subset and branched on below to build a well-typed mutate() argument.
 type PendingAction = "approve" | "reject" | "cancel" | "resolve-review";
@@ -183,7 +184,7 @@ export function ChangeDetailView({ crId, embedded = false, back }: {
   const openApprove = () =>
     openDialog({
       action: "approve",
-      title: t(approveCopy.titleKey).replace("{label}", plan ? planLabel(plan, t) : `C#${cr.id}`),
+      title: fillPlaceholders(t(approveCopy.titleKey), { label: plan ? planLabel(plan, t) : `C#${cr.id}` }),
       description: plan
         ? `${t(approveCopy.noteKey)} ${t("plans.hash")} ${shortHash(plan.content_hash)}`
         : t(approveCopy.noteKey),
@@ -250,9 +251,7 @@ export function ChangeDetailView({ crId, embedded = false, back }: {
     open: cards.isOpen(id), onToggle: (o: boolean) => cards.toggleCard(id, o),
   });
   const counts = plan && planCounts(plan);
-  const planSummary = plan && counts && `${planLabel(plan, t)} · ${t("plan.counts")
-    .replace("{steps}", String(counts.steps)).replace("{pre}", String(counts.preChecks))
-    .replace("{post}", String(counts.postChecks)).replace("{rollback}", String(counts.rollback))}`;
+  const planSummary = plan && counts && `${planLabel(plan, t)} · ${fillPlaceholders(t("plan.counts"), { steps: String(counts.steps), pre: String(counts.preChecks), post: String(counts.postChecks), rollback: String(counts.rollback) })}`;
   const latestRun = m.latestRun;
   // a cancel before any review / approval ends the list at ① / ②: who cancelled is said in that card
   const closedHere = (id: ChangePhaseId) => cr.status === "cancelled" && state(id) === "failed" && <ClosedRecord cr={cr} t={t} />;

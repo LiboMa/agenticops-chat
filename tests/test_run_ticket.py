@@ -345,8 +345,8 @@ def test_a_cancelled_run_names_who_cancelled_it_on_the_timeline(db, client):
 def test_the_cancel_route_does_not_run_on_the_event_loop():
     """It closes the record, fails the plan, moves the issue and writes the timeline: blocking writes (A-M7)."""
     import inspect
-    from agenticops.web import app as app_mod
-    assert not inspect.iscoroutinefunction(app_mod.api_cancel_execution)
+    from agenticops.web.routers import runs
+    assert not inspect.iscoroutinefunction(runs.api_cancel_execution)
 
 
 # A-I3. The timer that times a run out, and the reconcile that closes one that recorded nothing, live in the process

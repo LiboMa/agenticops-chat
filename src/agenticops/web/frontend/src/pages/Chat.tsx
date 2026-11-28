@@ -238,7 +238,7 @@ export default function Chat() {
 
   const welcomeError = createError ? (
     <div role="alert" className="mx-4 mb-2 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-      {t("chat.createFailed").replace("{error}", createError)}
+      {fillPlaceholders(t("chat.createFailed"), { error: createError })}
     </div>
   ) : null;
   // MVP-2.9.0 N19: a link that asks for a new conversation may bring a sentence in its draft (NewUI's command bar).
@@ -362,7 +362,7 @@ export default function Chat() {
                     </button>
                   ))}
                 </div>
-                <p className="mt-3 text-xs text-muted-foreground">{t("chat.attach.count").replace("{limit}", String(maxFiles))}</p>
+                <p className="mt-3 text-xs text-muted-foreground">{fillPlaceholders(t("chat.attach.count"), { limit: String(maxFiles) })}</p>
               </div>
             </div>
 
@@ -418,7 +418,7 @@ export default function Chat() {
                           {" · "}
                           <Link className="text-primary hover:underline"
                                 to={about.entity_type === "health_issue" ? `/app/issues/${about.entity_id}` : `/app/changes/${about.entity_id}`}>
-                            {t("chat.openRef").replace("{ref}", about.ref)}
+                            {fillPlaceholders(t("chat.openRef"), { ref: about.ref })}
                           </Link>
                         </>
                       )}
@@ -469,7 +469,7 @@ export default function Chat() {
             {error && (
               <div role="alert" className="mx-6 mb-2 px-3 py-2 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
                 {t(`chat.error.${error.code}`)}
-                {error.detail && <div className="mt-0.5 break-words text-xs">{t("chat.error.reason").replace("{reason}", error.detail)}</div>}
+                {error.detail && <div className="mt-0.5 break-words text-xs">{fillPlaceholders(t("chat.error.reason"), { reason: error.detail })}</div>}
               </div>
             )}
 
@@ -507,7 +507,7 @@ export default function Chat() {
               onClose={() => setContextRef(null)}
               onAgentCheck={() => {
                 const key = contextRef.kind === "issue" ? "chat.contextPanel.checkPrompt" : "chat.contextPanel.checkChangePrompt";
-                const prompt = t(key).replace("{id}", String(contextRef.id));
+                const prompt = fillPlaceholders(t(key), { id: String(contextRef.id) });
                 // no session yet (welcome): create one, and keep the panel open across the new session's page
                 if (selectedId) sendMessage(prompt);
                 else void sendFirstMessage(prompt, [], [], contextRefQuery(contextRef), contextForNewChat(contextRef, null));

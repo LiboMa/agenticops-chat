@@ -96,3 +96,9 @@ export function modelAvailability(modelId: string, presets: { value: string }[] 
 export function shownTab<T extends string>(requested: T, auditOn: boolean): T | "general" {
   return requested === "audit" && !auditOn ? "general" : requested;
 }
+
+/** The model list a picker offers (MVP-2.9.0 N35): the server's — an empty one too (Bedrock off and no provider model
+ *  yet: there is nothing to choose) — and the built-in fallback only for an older server that sends no list. */
+export function modelListOrFallback<T>(presets: T[] | undefined, fallback: T[]): T[] {
+  return presets === undefined ? fallback : presets;
+}

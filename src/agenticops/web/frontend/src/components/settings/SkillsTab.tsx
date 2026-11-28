@@ -4,6 +4,7 @@ import { Card, CardBody } from "@/components/ui/Card";
 import { Spinner } from "@/components/ui/Spinner";
 import { Link } from "react-router-dom";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 export function SkillsTab() {
   const { t } = useLocale();
   const { data: skills, isLoading } = useSkills();
@@ -19,7 +20,7 @@ export function SkillsTab() {
           <div>
             <h3 className="text-sm font-medium text-foreground">{t("skillsTab.title")}</h3>
             <p className="text-sm text-muted-foreground mt-1">
-              {t("skillsTab.count").replace("{total}", String(total)).replace("{drafts}", String(drafts))}
+              {fillPlaceholders(t("skillsTab.count"), { total: String(total), drafts: String(drafts) })}
             </p>
           </div>
           <Link

@@ -314,25 +314,18 @@ _TEMPERATURE_REMOVED_FROM = (4, 7)
 
 
 def accepts_temperature(model_id: str) -> bool:
-    """True when a request to this model may carry `temperature`: a Claude model before 4.7, including the ids that
-    predate the `claude-<family>-<n>` shape (Claude 3.x, claude-v2). A provider's model (MVP-2.9.0 N35): an
-    OpenAI-compatible server takes it; an Anthropic-compatible one by the same Claude rule on its own model id."""
+    """True when a request to this model may carry `temperature`: a Claude model on Bedrock before 4.7, including
+    the ids that predate the `claude-<family>-<n>` shape (Claude 3.x, claude-v2). A provider's model (MVP-2.9.0 N35):
+    only when its row says it takes it — the provider's list or an admin; never read off its name (review of
+    2.9.0, Standards 1). Not said → not sent: a request without temperature is always valid."""
     from agenticops.llm.refs import is_ref
     if is_ref(model_id or ""):
-        from agenticops.llm import registry
-        from agenticops.llm.refs import parse_ref
+        from agenticops.llm.factory import ModelProviderUnavailable, resolve
         try:
-            ref = parse_ref(model_id)
-            cfg = registry.get(ref.provider)
-        except Exception:
+            _cfg, row = resolve(model_id)
+        except (ModelProviderUnavailable, ValueError):
             return False
-        if cfg is None:
-            return False
-        if cfg.kind != "anthropic_compatible":
-            return True
-        model_id = ref.model_id
-        if "claude" not in model_id.lower():
-            return False
+        return row.accepts_temperature is True
     if not is_anthropic_model(model_id):
         return False
     version = _claude_version(model_id)
@@ -425,8 +418,11 @@ def converse_text_on_main(prompt: str) -> str:
     return text
 
 
-def _effort_tier(budget: int) -> str:
-    """Map a thinking budget onto an adaptive-thinking effort tier.
+EFFORT_TIERS = ("low", "medium", "high", "xhigh", "max")
+
+
+def effort_tier(budget: int, top: str = "max") -> str:
+    """Map a thinking budget onto an effort tier, capped at `top` (the highest tier a model takes).
 
     Bedrock takes low|medium|high|xhigh|max. Aligned with
     thinking_effort_presets so each preset lands on its own tier: 2048 low,
@@ -435,18 +431,19 @@ def _effort_tier(budget: int) -> str:
     working unchanged — more tokens simply mean a higher tier.
     """
     if budget <= 2048:
-        return "low"
-    if budget <= 4096:
-        return "medium"
-    if budget <= 8192:
-        return "high"
-    if budget <= 12288:
-        return "xhigh"
-    return "max"
+        tier = "low"
+    elif budget <= 4096:
+        tier = "medium"
+    elif budget <= 8192:
+        tier = "high"
+    elif budget <= 12288:
+        tier = "xhigh"
+    else:
+        tier = "max"
+    return EFFORT_TIERS[min(EFFORT_TIERS.index(tier), EFFORT_TIERS.index(top))]
 
 
 _UNVERIFIED_REASONING_WARNED: set = set()
-_EFFORT_TIERS = ("low", "medium", "high", "xhigh", "max")
 # OpenAI on Bedrock: (model id substring, request field, highest tier the model takes). Measured live on Bedrock,
 # 2026-11-08, every tier sent to every model in the chat picker:
 # - GPT-5.6 / GPT-6.x reject `reasoning_effort` ("Unknown parameter" — the whole request fails; every chat turn with
@@ -466,7 +463,7 @@ _OPENAI_REASONING = (
 def _openai_reasoning_fields(model_id: str, budget: int) -> Optional[dict]:
     """The reasoning request field for an OpenAI model on Bedrock, or None (see `_OPENAI_REASONING`).
 
-    The budget maps to Claude's effort tiers (`_effort_tier`), capped at the model's highest tier. A model of an
+    The budget maps to Claude's effort tiers (`effort_tier`), capped at the model's highest tier. A model of an
     unverified family gets no field: a request without one is always valid, a guessed one can fail it. A budget of
     0 = no override (the model's default).
     """
@@ -475,7 +472,7 @@ def _openai_reasoning_fields(model_id: str, budget: int) -> Optional[dict]:
     mid = (model_id or "").lower()
     for needle, field, top in _OPENAI_REASONING:
         if needle in mid:
-            tier = _EFFORT_TIERS[min(_EFFORT_TIERS.index(_effort_tier(budget)), _EFFORT_TIERS.index(top))]
+            tier = effort_tier(budget, top)
             return {"reasoning_effort": tier} if field == "reasoning_effort" else {"reasoning": {"effort": tier}}
     if mid not in _UNVERIFIED_REASONING_WARNED:
         _UNVERIFIED_REASONING_WARNED.add(mid)
@@ -521,12 +518,26 @@ def bedrock_model_kwargs(model_id: str, thinking_fields: Optional[dict] = None) 
     return kwargs
 
 
-def thinking_fields_for_budget(budget: int, max_tokens: int, model_id: str):
-    """Bedrock extended-thinking request fields for a budget, or None.
+def claude_reasoning(model_id: str) -> str:
+    """The thinking request shape a Claude model id takes, as a provider model's «reasoning» value:
+    `anthropic_adaptive_summarized` (adaptive, asked for a summary — Claude ≥ 4.7, whose default streams nothing
+    while it thinks), `anthropic_adaptive` (4.6) or `anthropic_budget` (before 4.6, and every non-Claude id). For a
+    Bedrock id the id IS the model; a provider model's row says it instead (review of MVP-2.9.0) — the startup
+    migration of the old `anthropic_thinking` rows is the one other reader."""
+    if not supports_adaptive_thinking(model_id):
+        return "anthropic_budget"
+    version = _claude_version(model_id)
+    if version is not None and version >= _SUMMARIZED_DISPLAY_FROM:
+        return "anthropic_adaptive_summarized"
+    return "anthropic_adaptive"
 
-    `model_id` picks the request shape (see supports_adaptive_thinking) and is
-    required: the two shapes are mutually exclusive, and guessing wrong is a
-    400 at request time rather than a degradation.
+
+def thinking_fields(budget: int, max_tokens: int, *, adaptive: bool, summarized: bool = False):
+    """Extended-thinking request fields of the given shape for a budget, or None.
+
+    `adaptive`: `{"thinking": {"type": "adaptive"}, "output_config": {"effort": …}}` (the budget as an effort tier),
+    else the legacy `{"thinking": {"type": "enabled", "budget_tokens": …}}` — mutually exclusive, a wrong one is a
+    400. `summarized` adds `"display": "summarized"` to the adaptive shape.
 
     Bedrock requires thinking_budget_min <= budget < max_tokens. An illegal
     budget disables thinking (with a warning) rather than failing the call.
@@ -546,13 +557,23 @@ def thinking_fields_for_budget(budget: int, max_tokens: int, model_id: str):
             "thinking budget %d >= max_tokens %d — thinking disabled", budget, max_tokens,
         )
         return None
-    if supports_adaptive_thinking(model_id):
+    if adaptive:
         thinking = {"type": "adaptive"}
-        version = _claude_version(model_id)
-        if version is not None and version >= _SUMMARIZED_DISPLAY_FROM:
+        if summarized:
             thinking["display"] = "summarized"
-        return {"thinking": thinking, "output_config": {"effort": _effort_tier(budget)}}
+        return {"thinking": thinking, "output_config": {"effort": effort_tier(budget)}}
     return {"thinking": {"type": "enabled", "budget_tokens": budget}}
+
+
+def thinking_fields_for_budget(budget: int, max_tokens: int, model_id: str):
+    """Bedrock extended-thinking request fields for a budget, or None.
+
+    `model_id` picks the request shape (`claude_reasoning`) and is required: the two shapes are mutually exclusive,
+    and guessing wrong is a 400 at request time rather than a degradation.
+    """
+    shape = claude_reasoning(model_id)
+    return thinking_fields(budget, max_tokens, adaptive=shape != "anthropic_budget",
+                           summarized=shape == "anthropic_adaptive_summarized")
 
 
 def effort_to_budget(effort: Optional[str], max_tokens: int):

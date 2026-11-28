@@ -59,7 +59,7 @@ export function ChangeRunBody({
             cr.approved_by,
             cr.approved_at && formatFullDate(cr.approved_at),
             plan?.approved_hash &&
-              `${t("plans.approvedVersion").replace("{n}", String(plan.approved_version ?? plan.plan_version))} ${shortHash(plan.approved_hash)}`,
+              `${fillPlaceholders(t("plans.approvedVersion"), { n: String(plan.approved_version ?? plan.plan_version) })} ${shortHash(plan.approved_hash)}`,
           ])}
           {cr.approval_reason && <span className={`block ${muted}`}>{cr.approval_reason}</span>}
         </p>

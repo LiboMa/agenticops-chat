@@ -143,9 +143,9 @@ def _events(issue_id):
 class _Agent:
     """Stands in for the agent call: blocks until released, so a test can look at the world while it «runs»."""
     def __init__(self, monkeypatch, fail=False):
-        import agenticops.web.app as app_mod
+        from agenticops.web.routers import issue_agents
         self.started, self.release, self.calls, self.fail = threading.Event(), threading.Event(), [], fail
-        monkeypatch.setattr(app_mod, "_invoke_issue_agent", self)
+        monkeypatch.setattr(issue_agents, "_invoke_issue_agent", self)
 
     def __call__(self, agent_name, issue_id):
         self.calls.append((agent_name, issue_id))

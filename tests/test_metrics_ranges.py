@@ -60,7 +60,6 @@ def test_the_token_summary_reaches_ninety_days(client):
 
 def test_the_metric_handlers_are_plain_functions():
     """One process: a blocking database read never runs inside an `async def` handler."""
-    from agenticops.web import app as app_mod
-    from agenticops.web.routers import agent_logs, cost
-    for fn in (cost.api_cost_summary, agent_logs.api_agent_log_summary, app_mod.api_rca_location_stats):
+    from agenticops.web.routers import agent_logs, cost, rca_feedback
+    for fn in (cost.api_cost_summary, agent_logs.api_agent_log_summary, rca_feedback.api_rca_location_stats):
         assert not inspect.iscoroutinefunction(fn), fn.__name__

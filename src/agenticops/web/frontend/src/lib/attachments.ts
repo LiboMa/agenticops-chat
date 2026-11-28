@@ -1,3 +1,4 @@
+import { fillPlaceholders } from "@/lib/placeholders";
 // Chat attachment rules (2026-11-07): they come from the server — GET /api/ui/bootstrap `upload_policy`, the upload
 // limits in force (settings.yaml defaults + the admins' overrides, chat/upload_config) — so the composer and the
 // server never disagree. FALLBACK_POLICY mirrors the defaults for the moment before bootstrap loads.
@@ -71,18 +72,18 @@ export type AttachmentError = { kind: "type"; name: string } | { kind: "size"; n
 export function attachmentErrorText(e: AttachmentError, t: (k: string) => string): string {
   const name = "name" in e ? e.name : "";
   const limit = e.kind === "size" || e.kind === "total" ? humanSize(e.limit) : e.kind === "count" ? String(e.limit) : "";
-  return t(`chat.attach.${e.kind}`).replace("{name}", name).replace("{limit}", limit);
+  return fillPlaceholders(t(`chat.attach.${e.kind}`), { name, limit });
 }
 
 /** The reason alone, for a card that already shows the file's name (2026-11-07 composer). */
 export function attachmentErrorReason(e: AttachmentError, t: (k: string) => string): string {
   const limit = e.kind === "size" || e.kind === "total" ? humanSize(e.limit) : e.kind === "count" ? String(e.limit) : "";
-  return t(`chat.attach.${e.kind}`).replace("{name}", "").replace("{limit}", limit).replace(/^[\s:：]+/, "");
+  return fillPlaceholders(t(`chat.attach.${e.kind}`), { name: "", limit }).replace(/^[\s:：]+/, "");
 }
 
 /** "1 page" / "12 pages" in the user's language. */
 export function pagesLabel(n: number, t: (k: string) => string): string {
-  return n === 1 ? t("chat.attach.page") : t("chat.attach.pages").replace("{n}", String(n));
+  return n === 1 ? t("chat.attach.page") : fillPlaceholders(t("chat.attach.pages"), { n: String(n) });
 }
 
 // Minimal structural shapes (NOT the DOM DataTransfer/ClipboardEvent, which are undefined in the node test env).

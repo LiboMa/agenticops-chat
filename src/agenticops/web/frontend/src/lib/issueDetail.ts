@@ -8,6 +8,7 @@ import type {
 } from "@/api/types";
 import { parseApiDate } from "@/lib/formatDate";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 export interface IssueFacts {
   resourceType: string | null;
   region: string | null;
@@ -88,7 +89,7 @@ export const ISSUE_SOURCES: readonly string[] = [
 export function issueSourceLabel(source: string, t: (key: string) => string): string {
   if (ISSUE_SOURCES.includes(source)) return t(`issues.source.${source}`);
   const family = /^(webhook|im)_(.+)$/.exec(source);
-  return family ? t(`issues.source.${family[1]}`).replace("{name}", family[2]) : source;
+  return family ? fillPlaceholders(t(`issues.source.${family[1]}`), { name: family[2] }) : source;
 }
 
 /** A run still queued (pending) or claimed (running); every other status is finished. */

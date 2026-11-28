@@ -7,6 +7,7 @@ import { useLocale } from "@/i18n/LocaleContext";
 import { adoptAccountParam, scopeKey, scopeMode, validScope, type ScopeMode } from "@/lib/accountScope";
 import { SPLIT_MEDIA } from "@/lib/caseQueue";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 interface AccountScopeValue {
   accountId: number | null;          // null = All accounts — the user's own choice, whatever a page shows
   setAccountId: (id: number | null) => void;
@@ -103,7 +104,7 @@ export function ScopeNotice() {
                                  { replace: true, state: { ...(location.state as object), scopeNotice: false } });
   return (
     <div role="status" className="fixed left-1/2 top-[calc(var(--topbar-h)+12px)] z-40 flex w-[min(560px,calc(100vw-30px))] -translate-x-1/2 items-start justify-between gap-3 rounded-md border border-primary/30 bg-card px-3 py-2 text-sm text-foreground shadow-lg">
-      <span>{t("scope.adopted").replace("{name}", accountName ?? "—")}</span>
+      <span>{fillPlaceholders(t("scope.adopted"), { name: accountName ?? "—" })}</span>
       <button type="button" onClick={dismiss} className="text-xs underline">{t("home.dismiss")}</button>
     </div>
   );

@@ -43,7 +43,7 @@ def _supported() -> dict[str, list[str]]:
     return groups
 
 
-def _can_edit(request: Request) -> bool:
+def can_edit(request: Request) -> bool:
     if not settings.api_auth_enabled:
         return True
     user = getattr(request.state, "user", None)
@@ -62,7 +62,7 @@ def _body(request: Request) -> dict:
         "ranges": _ranges(),
         "updated_by": row["updated_by"] if row else None,
         "updated_at": row["updated_at"].isoformat() if row and row["updated_at"] else None,
-        "can_edit": _can_edit(request),
+        "can_edit": can_edit(request),
     }
 
 

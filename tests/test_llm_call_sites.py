@@ -314,3 +314,36 @@ def test_a_stored_model_error_never_carries_the_providers_sentence():
     from agenticops.llm.factory import ModelProviderUnavailable
     gone = ModelProviderUnavailable("p1::m", "provider_disabled", "the provider «p1» is turned off")
     assert "turned off" in safe_error_text(gone)
+
+
+def test_claude_code_never_gets_a_provider_reference(db, monkeypatch):
+    """The enhanced backend runs Claude Code on Bedrock: a provider's model, «claude» in its name or not, is no model
+    name it can use — it keeps its own choice."""
+    from agenticops.acp.backends.claude_code import ClaudeCodeBackend
+    from agenticops.config import settings
+    monkeypatch.setattr(settings, "acp_use_bedrock", True)
+    monkeypatch.setattr(settings, "agent_main_model_id", "relay::claude-sonnet-4-6")
+    assert "ANTHROPIC_MODEL" not in ClaudeCodeBackend()._client._env
+    monkeypatch.setattr(settings, "agent_main_model_id", "global.anthropic.claude-opus-5-5")
+    assert ClaudeCodeBackend()._client._env["ANTHROPIC_MODEL"] == "global.anthropic.claude-opus-5-5"
+
+
+def test_the_model_list_route_reads_the_provider_off_the_event_loop():
+    import inspect
+    from agenticops.web.routers import model_providers
+    source = inspect.getsource(model_providers.list_models)
+    assert "registry.get" not in source.replace("asyncio.to_thread(registry.get", "")
+
+
+def test_a_chat_request_to_another_provider_is_built_in_one_place():
+    """Review of MVP-2.9.0, Standards 2: every direct (non-Strands) chat request to another provider — a single-turn
+    call, the connection test's chat and tool steps — is built by llm/direct.py, the one path whose contract the
+    callers rely on (temperature only where the model takes it, reasoning skipped, an empty or cut reply raised)."""
+    found = []
+    for path in sorted((ROOT / "src" / "agenticops").rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "create":
+                target = ast.unparse(node.func.value)
+                if target.endswith(".messages") or target.endswith(".chat.completions"):
+                    found.append(f"{path.relative_to(ROOT / 'src' / 'agenticops')}:{node.lineno}")
+    assert found and all(f.startswith("llm/direct.py:") for f in found), found

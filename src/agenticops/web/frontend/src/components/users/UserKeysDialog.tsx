@@ -12,6 +12,7 @@ import { KeyPlusIcon } from "@/components/apikeys/KeyPlusIcon";
 import { CreateKeyDialog, KeyOnceDialog } from "@/components/apikeys/ApiKeyDialogs";
 import { rotateDefaults, writeAllowedForRole } from "@/lib/apiKeys";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** An admin manages one user's API keys (MVP-2.8.0, owner 2026-11-10: «用户可以像修改密码一样，生成Key、更新Key，以及删除
  *  key»): issue one (never above their role), update one (a new key under the same name, the old one dead at once) or
  *  delete one. A new key is shown to the admin once, like a reset password; a listed key never shows in full. */
@@ -23,7 +24,7 @@ function useSayKeyError() {
     const key = code ? `apiKeys.error.${code}` : "";
     const worded = key ? t(key) : key;
     return worded && worded !== key ? worded
-      : t("apiKeys.error.generic").replace("{detail}", e instanceof Error ? e.message : String(e));
+      : fillPlaceholders(t("apiKeys.error.generic"), { detail: e instanceof Error ? e.message : String(e) });
   };
 }
 
@@ -48,15 +49,15 @@ export function IssueKeyFlow({ user, rotateKey = null, returnTo, onClose }: {
 
   if (shown) {
     return <KeyOnceDialog name={shown.name} apiKey={shown.key} returnTo={returnTo} onClose={close}
-                          title={t("users.keys.onceTitle").replace("{who}", who).replace("{name}", shown.name)} />;
+                          title={fillPlaceholders(t("users.keys.onceTitle"), { who, name: shown.name })} />;
   }
   return (
     <CreateKeyDialog canWrite={canWrite} busy={busy.isPending} error={busy.isError ? say(busy.error) : null}
-                     title={rotateKey ? t("users.keys.rotateTitle").replace("{who}", who).replace("{name}", rotateKey.name)
-                       : t("users.keys.createTitle").replace("{who}", who)}
+                     title={rotateKey ? fillPlaceholders(t("users.keys.rotateTitle"), { who, name: rotateKey.name })
+                       : fillPlaceholders(t("users.keys.createTitle"), { who })}
                      rotate={rotateKey ? { name: rotateKey.name } : undefined}
                      initial={rotateKey ? rotateDefaults(rotateKey, canWrite) : undefined}
-                     blockedHint={t("users.keys.viewerHint").replace("{who}", who)}
+                     blockedHint={fillPlaceholders(t("users.keys.viewerHint"), { who })}
                      onClose={close}
                      onSubmit={(v) => {
                        const done = { onSuccess: (r: ApiKeyRow & { key: string }) => setShown({ name: r.name, key: r.key }) };
@@ -81,7 +82,7 @@ export function UserKeysDialog({ user, onClose }: { user: UserRow; onClose: () =
 
   const onRevoke = async (k: ApiKeyRow) => {
     setError(null);
-    if (!(await confirm(t("users.keys.confirm").replace("{who}", who).replace("{name}", k.name),
+    if (!(await confirm(fillPlaceholders(t("users.keys.confirm"), { who, name: k.name }),
                         { variant: "destructive", confirmText: t("apiKeys.confirm.revokeOk") }))) return;
     setBusy(k.id);
     revoke.mutate({ userId: user.id, keyId: k.id }, {
@@ -92,9 +93,9 @@ export function UserKeysDialog({ user, onClose }: { user: UserRow; onClose: () =
   };
 
   return (
-    <ModalFrame title={t("users.keys.title").replace("{who}", who)} onClose={onClose} width="w-[min(560px,100%)]">
+    <ModalFrame title={fillPlaceholders(t("users.keys.title"), { who })} onClose={onClose} width="w-[min(560px,100%)]">
       <div className="mt-2 flex justify-end">
-        <IconButton ref={issueButton} label={t("users.keys.createTitle").replace("{who}", who)} icon={<KeyPlusIcon />}
+        <IconButton ref={issueButton} label={fillPlaceholders(t("users.keys.createTitle"), { who })} icon={<KeyPlusIcon />}
                     onClick={() => { setError(null); setFlow({ rotate: null }); }} />
       </div>
       <div className="mt-2 max-h-[60vh] space-y-3 overflow-y-auto">

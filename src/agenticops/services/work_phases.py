@@ -11,6 +11,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping, Optional
+from agenticops.utils.timeutils import as_utc
 
 AUTO_RUN_START_GRACE_SECONDS = 30   # lib/issueDetail.AUTO_RUN_START_GRACE_MS
 HUMAN = frozenset({"you", "approver", "requester", "acceptor"})
@@ -138,7 +139,7 @@ def rca_stopped_at(status: str, events: Iterable, *, now: Optional[datetime] = N
         stopped = ended
     elif started is not None and now is not None and limit_seconds and limit_seconds > 0:
         due = started + timedelta(seconds=limit_seconds)
-        if (now if now.tzinfo else now.replace(tzinfo=timezone.utc)) >= due:
+        if as_utc(now) >= due:
             stopped = due
     moved = _ts(moved_at)
     return None if stopped is not None and moved is not None and moved > stopped else stopped
@@ -209,7 +210,7 @@ def plan_stopped_at(status: str, events: Iterable, *, now: Optional[datetime] = 
         stopped = failed
     elif started is not None and now is not None and limit_seconds and limit_seconds > 0:
         due = started + timedelta(seconds=limit_seconds)
-        if (now if now.tzinfo else now.replace(tzinfo=timezone.utc)) >= due and (written is None or written < started):
+        if as_utc(now) >= due and (written is None or written < started):
             stopped = due
     if stopped is None or (written is not None and written >= stopped):
         return None

@@ -48,6 +48,7 @@ from agenticops.skills.tools import activate_skill, read_skill_reference, run_sk
 from agenticops.skills.execution import run_on_host, run_kubectl
 from agenticops.agents.preamble import build_system_prompt
 from agenticops.tools.memory_tools import search_agent_memory
+from agenticops.llm.errors import safe_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +134,8 @@ TOOL SELECTION (route each step to the correct backend):
   Use the provided cloud CLI tool (supports both read and write operations with security filtering).
 - Host-level commands (e.g., systemctl restart, kill, disk cleanup, log inspection):
   Use run_on_host (method="auto" climbs the SSM→SSH ladder; or force method="ssm"/"ssh").
-  Set require_confirmation=True for write commands — the plan approval serves as the confirmation.
+  Set require_confirmation=True for write commands — the plan approval serves as the confirmation. The same holds
+  for the account-bound shell tool of an SSH host (run_ssh_<account>).
 - Kubernetes operations (e.g., rollout restart, scale deployment, apply manifest):
   Use run_kubectl with the cluster_name and namespace. Set require_confirmation=True for write commands.
 - Resource verification: Use describe tools (describe_ec2, describe_rds, etc.) for targeted checks.
@@ -386,8 +388,10 @@ def executor_agent(fix_plan_id: int) -> str:
         from agenticops.services.agent_log_service import track_agent
         # save_execution_result measures the run's duration from here — never the agent's own figure (E2E obs. 5).
         # A run acts on an approved plan: it is never a read-only run (N30), whatever context called it — nothing
-        # calls it from inside a diagnosis or a plan run today (a new thread starts with a fresh context).
-        with run_context(run_started_at=datetime.now(timezone.utc), read_only_run=None,
+        # calls it from inside a diagnosis or a plan run today (a new thread starts with a fresh context). It names
+        # its plan itself: a run Main starts from a chat had none in its context (the queue and the approval thread
+        # set one around the call), so the plan's own `systemctl restart` was refused as «needs a change».
+        with run_context(run_started_at=datetime.now(timezone.utc), read_only_run=None, fix_plan_id=fix_plan_id,
                          **({"execution_id": opened} if opened else {})), \
                 track_agent("executor", "execute_fix", f"fix_plan_id={fix_plan_id}", parent_agent=infer_parent_agent(),
                             model_id=model_id) as tracker:   # the smart model for L0/L1 — what the run is priced at
@@ -401,7 +405,7 @@ def executor_agent(fix_plan_id: int) -> str:
         return outcome
     except Exception as e:
         logger.exception("Executor agent failed for FixPlan #%d", fix_plan_id)
-        outcome = f"Executor agent error: {e}"
+        outcome = f"Executor agent error: {safe_error_text(e)}"
         return outcome
     finally:
         # A run that ends without recording its result — a refusal, a model error the agent caught, an exception —

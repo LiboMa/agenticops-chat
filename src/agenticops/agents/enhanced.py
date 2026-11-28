@@ -9,11 +9,35 @@ SSE via ToolStreamEvent), and the FINAL `yield` is the accumulated result string
 """
 from __future__ import annotations
 
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 from strands import tool
 
 from agenticops.config import settings
+from agenticops.llm.errors import safe_error_text
+
+
+def bedrock_refusal(backend: str) -> Optional[str]:
+    """Why `backend` may not run now, else None: Claude Code with `acp_use_bedrock` runs on Bedrock with this host's
+    AWS credentials, and Bedrock may be turned off (Settings → Model providers — MVP-2.9.0 review): then it would
+    spend on Bedrock and send it the task. Kiro, Codex and Claude Code on its own login use no Bedrock."""
+    from agenticops.llm import registry
+    if backend == "claude-code" and settings.acp_use_bedrock and not registry.bedrock_enabled():
+        return ("Enhanced backend «claude-code» runs on Amazon Bedrock, and Bedrock is turned off (Settings → Model "
+                "providers) — not started. Continue with your own tools.")
+    return None
+
+
+def blocked_reason() -> Optional[str]:
+    """`bedrock_off` when the configured backend is switched on but may not run, else None (GET /api/settings)."""
+    if settings.acp_enhanced_enabled and bedrock_refusal(settings.acp_enhanced_backend):
+        return "bedrock_off"
+    return None
+
+
+def enhanced_available() -> bool:
+    """Whether Main / the SRE agent are given `enhanced_task`: switched on and its backend may run."""
+    return bool(settings.acp_enhanced_enabled) and bedrock_refusal(settings.acp_enhanced_backend) is None
 
 
 async def _enhanced_task_impl(task: str, context: str = "", backend: str = "") -> AsyncIterator:
@@ -25,10 +49,15 @@ async def _enhanced_task_impl(task: str, context: str = "", backend: str = "") -
 
     from agenticops.acp.registry import get_backend
 
+    name = backend or settings.acp_enhanced_backend
+    refused = bedrock_refusal(name)     # the backend the call resolves to, which the model may name itself
+    if refused:
+        yield refused
+        return
     try:
-        be = get_backend(backend or settings.acp_enhanced_backend)
+        be = get_backend(name)
     except KeyError as e:
-        yield f"Enhanced backend unavailable: {e}"
+        yield f"Enhanced backend unavailable: {safe_error_text(e)}"
         return
 
     chunks: list[str] = []
@@ -47,7 +76,7 @@ async def _enhanced_task_impl(task: str, context: str = "", backend: str = "") -
                 err = ev.error
             # plan/done are not surfaced as sub-events this round
     except Exception as e:  # never crash the calling agent's turn
-        yield f"Enhanced backend failed: {e}"
+        yield f"Enhanced backend failed: {safe_error_text(e)}"
         return
 
     # Final yield = the tool result the agent receives.

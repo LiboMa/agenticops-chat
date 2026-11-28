@@ -29,7 +29,7 @@ def _old_db(tmp_path):
 
 def test_the_old_table_gets_the_column_and_may_hold_no_score(tmp_path):
     eng = _old_db(tmp_path)
-    models._run_migrate_2_7_0(eng)
+    models._run_add_columns(eng)
     cols = {c["name"]: c for c in inspect(eng).get_columns("security_snapshots")}
     assert "collection_health" in cols and cols["overall_score"]["nullable"]
     with Session(eng) as s:
@@ -46,11 +46,11 @@ def test_the_old_table_gets_the_column_and_may_hold_no_score(tmp_path):
 
 def test_the_migration_runs_once(tmp_path, caplog):
     eng = _old_db(tmp_path)
-    models._run_migrate_2_7_0(eng)
-    assert models._statements_2_7_0(inspect(eng), eng.dialect) == []
+    models._run_add_columns(eng)
+    assert models._add_column_statements(inspect(eng), eng.dialect) == []
     caplog.clear()      # the first run's own «Rebuilt table» line, when the logger's level lets it through
     with caplog.at_level(logging.INFO, logger="agenticops.models"):
-        models._run_migrate_2_7_0(eng)
+        models._run_add_columns(eng)
     assert not [r for r in caplog.records if "Rebuilt table" in r.getMessage()]      # nothing left to relax
 
 
@@ -66,7 +66,7 @@ def test_postgresql_drops_the_constraint_in_place():
 
         def get_indexes(self, name):
             return []
-    assert models._statements_2_7_0(_Insp(), postgresql.dialect()) == [
+    assert models._add_column_statements(_Insp(), postgresql.dialect()) == [
         "ALTER TABLE security_snapshots ALTER COLUMN overall_score DROP NOT NULL"]
 
 
@@ -155,7 +155,7 @@ def test_it_is_part_of_the_startup_migration_and_fail_soft(tmp_path, monkeypatch
         issue = _issue(s)
         _signal(s, issue, "lab")
         s.commit()
-    models._run_migrate_2_7_0(eng)
+    models._run_add_columns(eng)
     with Session(eng) as s:
         assert s.get(models.HealthIssue, issue).account_id == 2
     import agenticops.services.identity_resolver as resolver
@@ -164,7 +164,7 @@ def test_it_is_part_of_the_startup_migration_and_fail_soft(tmp_path, monkeypatch
         again = _issue(s)
         _signal(s, again, "lab")
         s.commit()
-    models._run_migrate_2_7_0(eng)                                      # logs, never raises
+    models._run_add_columns(eng)                                      # logs, never raises
     with Session(eng) as s:
         assert s.get(models.HealthIssue, again).account_id is None
 

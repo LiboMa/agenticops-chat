@@ -4,6 +4,7 @@
 import type { ProviderModel, Purpose, Reasoning } from "@/hooks/useModelProviders";
 
 export type ToolsChoice = "unknown" | "yes" | "no";
+export type CacheChoice = "default" | "on" | "off";
 
 export interface ModelDraft {
   label: string;
@@ -14,6 +15,8 @@ export interface ModelDraft {
   images: boolean;
   documents: boolean;
   reasoning: Reasoning;
+  temperature: ToolsChoice;
+  promptCache: CacheChoice;
   priceInput: string;
   priceOutput: string;
   priceCacheRead: string;
@@ -27,6 +30,8 @@ export function draftOf(m: ProviderModel): ModelDraft {
     label: m.label, purpose: m.purpose, contextWindow: num(m.context_window), maxOutput: num(m.max_output_tokens),
     tools: m.supports_tools === null ? "unknown" : m.supports_tools ? "yes" : "no",
     images: m.supports_images, documents: m.supports_documents, reasoning: m.reasoning,
+    temperature: m.accepts_temperature == null ? "unknown" : m.accepts_temperature ? "yes" : "no",
+    promptCache: m.prompt_cache == null ? "default" : m.prompt_cache ? "on" : "off",
     priceInput: num(m.price_input), priceOutput: num(m.price_output), priceCacheRead: num(m.price_cache_read),
     priceCacheWrite: num(m.price_cache_write),
   };
@@ -88,5 +93,9 @@ export function modelPatch(m: ProviderModel, d: ModelDraft): Record<string, unkn
   if (d.images !== m.supports_images) out.supports_images = d.images;
   if (d.documents !== m.supports_documents) out.supports_documents = d.documents;
   if (d.reasoning !== m.reasoning) out.reasoning = d.reasoning;
+  const temperature = d.temperature === "unknown" ? null : d.temperature === "yes";
+  if (temperature !== (m.accepts_temperature ?? null)) out.accepts_temperature = temperature;
+  const cache = d.promptCache === "default" ? null : d.promptCache === "on";
+  if (cache !== (m.prompt_cache ?? null)) out.prompt_cache = cache;
   return out;
 }

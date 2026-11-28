@@ -10,6 +10,7 @@ import { CreateKeyDialog, KeyOnceDialog } from "@/components/apikeys/ApiKeyDialo
 import { KeyList } from "@/components/apikeys/KeyList";
 import { canChooseWrite, rotateDefaults } from "@/lib/apiKeys";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 /** «My API keys» (MVP-2.8.0, owner 2026-11-10; from the avatar menu, every signed-in person). A key calls
  *  AgenticOps as its owner for a third-party app or a coding agent — never more than the owner's role, never a human
  *  decision (approve / run / accept), never managing keys. The server is the boundary (services/api_keys). */
@@ -35,12 +36,12 @@ export default function ApiKeys() {
     const key = code ? `apiKeys.error.${code}` : "";
     const worded = key ? t(key) : key;
     return worded && worded !== key ? worded
-      : t("apiKeys.error.generic").replace("{detail}", e instanceof Error ? e.message : String(e));
+      : fillPlaceholders(t("apiKeys.error.generic"), { detail: e instanceof Error ? e.message : String(e) });
   };
 
   const onRevoke = async (k: ApiKeyRow) => {
     setError(null);
-    if (!(await confirm(t("apiKeys.confirm.revoke").replace("{name}", k.name),
+    if (!(await confirm(fillPlaceholders(t("apiKeys.confirm.revoke"), { name: k.name }),
                         { variant: "destructive", confirmText: t("apiKeys.confirm.revokeOk") }))) return;
     setRevoking(k.id);
     revoke.mutate(k.id, {
@@ -89,7 +90,7 @@ export default function ApiKeys() {
       {rotating && (
         <CreateKeyDialog canWrite={canChooseWrite(boot.data)} busy={rotate.isPending}
                          error={rotate.isError ? say(rotate.error) : null}
-                         title={t("apiKeys.dialog.rotateTitle").replace("{name}", rotating.name)}
+                         title={fillPlaceholders(t("apiKeys.dialog.rotateTitle"), { name: rotating.name })}
                          rotate={{ name: rotating.name }} initial={rotateDefaults(rotating, canChooseWrite(boot.data))}
                          onClose={() => { setRotating(null); rotate.reset(); }}
                          onSubmit={(v) => rotate.mutate({ id: rotating.id, permissions: v.permissions, expires_days: v.expires_days }, {
@@ -98,7 +99,7 @@ export default function ApiKeys() {
       )}
       {/* closing forgets the key: the dialog's state and the mutations' cached results */}
       {shown && <KeyOnceDialog name={shown.name} apiKey={shown.key} returnTo={newButton.current}
-                               title={shown.rotated ? t("apiKeys.once.rotatedTitle").replace("{name}", shown.name) : undefined}
+                               title={shown.rotated ? fillPlaceholders(t("apiKeys.once.rotatedTitle"), { name: shown.name }) : undefined}
                                onClose={() => { setShown(null); create.reset(); rotate.reset(); }} />}
       {dialog}
     </div>

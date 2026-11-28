@@ -5,6 +5,7 @@
  *  picker every model setting uses (components/models/ModelPicker). */
 import { ApiError } from "@/api/client";
 
+import { fillPlaceholders } from "@/lib/placeholders";
 type T = (key: string) => string;
 
 export const REF_SEP = "::";
@@ -116,7 +117,7 @@ export function settingName(t: T, field: string): string {
 export function refusalText(t: T, e: ApiError): string {
   const refs = e.data?.refs;
   if (e.code === "in_use" && Array.isArray(refs)) {
-    return t("settings.providers.inUse").replace("{refs}", refs.map((r) => settingName(t, String(r))).join(", "));
+    return fillPlaceholders(t("settings.providers.inUse"), { refs: refs.map((r) => settingName(t, String(r))).join(", ") });
   }
   return e.message;
 }

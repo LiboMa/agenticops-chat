@@ -23,6 +23,7 @@ from agenticops.models import (
 )
 from agenticops.services.listing import like_pattern, ref_number
 from agenticops.services.signal_gate import OPEN_ISSUE_STATUSES, SECURITY_DETECTORS
+from agenticops.utils.timeutils import as_utc, iso_z
 
 _SECURITY_DETECTORS = SECURITY_DETECTORS
 
@@ -30,13 +31,6 @@ SEVERITIES = ("critical", "high", "medium", "low")              # the list's ord
 REACHABILITY = ("reachable", "undetermined", "not_reachable")
 FINDING_STATUSES = ("open", "all")
 TREND_DAYS = (7, 30, 90)
-
-
-def _iso(ts: Optional[datetime]) -> Optional[str]:
-    if ts is None:
-        return None
-    ts = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
-    return ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def partition_of(regions, credentials) -> str:
@@ -135,7 +129,7 @@ def security_summary(account_id: Optional[int] = None) -> dict:
                 "partition": accounts.partition(snap.account_id),
                 "overall_score": snap.overall_score,
                 "category_scores": snap.category_scores or {},
-                "created_at": _iso(snap.created_at),
+                "created_at": iso_z(snap.created_at),
                 "reachable_paths": None if exposure_read is False and reachable == 0 else reachable,
                 "exposure_read": exposure_read,
                 "open_findings": open_by.get(pk, 0) if pk is not None else 0,
@@ -145,7 +139,7 @@ def security_summary(account_id: Optional[int] = None) -> dict:
         rows.sort(key=lambda r: r["account_name"])
         return {"accounts": rows,
                 "unassigned_open_findings": open_by.get(None, 0),
-                "generated_at": _iso(datetime.now(timezone.utc))}
+                "generated_at": iso_z(datetime.now(timezone.utc))}
 
 
 def security_trend(days: int = 30, account_id: Optional[int] = None) -> dict:
@@ -170,8 +164,7 @@ def security_trend(days: int = 30, account_id: Optional[int] = None) -> dict:
             points = series.setdefault(name, {})
             if value is None or at is None:
                 continue
-            at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
-            day = at.astimezone(timezone.utc).strftime("%Y-%m-%d")
+            day = as_utc(at).strftime("%Y-%m-%d")
             partial = isinstance(health, dict) and health.get("status") == "partial"
             points[day] = {"day": day, "score": value, "partial": partial}      # a later one that day overwrites
         return {"days": days,
@@ -243,7 +236,7 @@ def security_findings(account_id: Optional[int] = None, severity: Optional[list[
             where = placed.get(row.resource_ref)
             return {"id": row.id, "issue_ref": f"I#{row.id}", "title": row.title, "severity": row.severity,
                     "status": row.status, "resource_id": row.resource_id, "issue_type": row.issue_type,
-                    "detected_by": row.detected_by, "last_seen": _iso(row.last_seen),
+                    "detected_by": row.detected_by, "last_seen": iso_z(row.last_seen),
                     "reachability": _reach(row.metric_data),
                     "account_id": row.account_id, "account_name": accounts.name_of(row.account_id),
                     "region": where.region if where else None,
@@ -266,7 +259,7 @@ def security_recommendations(status: str | None = None, limit: int = 100, accoun
                  "title": r.title, "detail": r.detail, "severity": r.severity,
                  "critic_verdict": r.critic_verdict, "confidence": r.confidence,
                  "status": r.status,
-                 "created_at": _iso(r.created_at)}
+                 "created_at": iso_z(r.created_at)}
                 for r in q]
 
 
